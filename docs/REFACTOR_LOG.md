@@ -1,5 +1,25 @@
 # FacetWrite Refactor Log
 
+## 2026-05-15: AI Dashboard And DeerFlow Control Plane Plan
+Scope: Saved the AI Dashboard plan before implementation.
+
+Findings:
+- Agent settings and AI Dashboard have different jobs: Agent settings grants user control over concrete Agent configuration; AI Dashboard exposes runtime status and integration maturity.
+- FacetWrite should be described as workspace/control plane, while DeerFlow is the AI execution/runtime plane.
+- CanvasWrite and similar capabilities should be described as progressively bridged to DeerFlow ToolUse while preserving FacetWrite approval and data boundaries.
+
+Completed:
+- Added `docs/plans/AI_DASHBOARD_DEERFLOW_CONTROL_PLANE_PLAN.md`.
+- Captured the planned navigation entry, dashboard API, read-only UI, terminology shift, tests, and documentation updates.
+
+Open TODO:
+- Implement `/api/deerflow/dashboard`.
+- Add the AI Dashboard frontend view and sidebar entry.
+- Update technical docs after implementation.
+
+Next Priority Check:
+- Build the backend dashboard aggregation first so the UI can stay thin and read-only.
+
 ## 2026-05-15: DeerFlow Auth Session Run
 Scope: Implemented backend-managed DeerFlow local-session auth and validated one real sidecar generation.
 
