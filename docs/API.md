@@ -54,18 +54,28 @@ The implementation lives in `server/utils/http.ts`.
   - For the validated Docker sidecar path, use DeerFlow nginx: `http://127.0.0.1:2026`.
 - `DEERFLOW_ASSISTANT_ID`
   - DeerFlow assistant ID. Defaults to `lead_agent`.
+- `DEERFLOW_AUTH_EMAIL`
+  - Local DeerFlow account email used by the FacetWrite backend session helper. Never returned by status APIs.
+- `DEERFLOW_AUTH_PASSWORD`
+  - Local DeerFlow account password used by the FacetWrite backend session helper. Never returned by status APIs.
+- `DEERFLOW_AUTO_SETUP`
+  - Enables first-boot admin initialization through DeerFlow `/api/v1/auth/initialize` when set to `true` or `1`. Defaults to `false`.
+- `DEERFLOW_AUTH_TIMEOUT_MS`
+  - Timeout for DeerFlow auth/setup/login requests. Defaults to `5000`.
 - `GET /api/deerflow/status`
-  - Returns DeerFlow runtime status: enabled, baseUrl, assistantId, reachable, runtimeProvider, and lastError.
-  - Docker validation on 2026-05-15 confirmed this endpoint reports `reachable:true` against `http://127.0.0.1:2026` when DeerFlow nginx/gateway are running.
+  - Returns DeerFlow runtime status: enabled, baseUrl, assistantId, reachable, runtimeProvider, authState, and lastError.
+  - `authState` is one of `not_configured`, `setup_required`, `authenticated`, or `auth_failed`.
+  - Docker validation on 2026-05-15 confirmed this endpoint reports `reachable:true` and `authState:"authenticated"` against `http://127.0.0.1:2026` after local session setup.
 - `GET /api/deerflow/config`
   - Returns read-only DeerFlow skills and MCP server overview.
   - Secret-like MCP values such as keys, tokens, passwords, authorization headers, and OAuth client secrets are redacted.
-  - If DeerFlow protected config endpoints require auth, the route returns safe overview defaults plus `lastError`; it must not expose DeerFlow secrets or MCP environment values.
+  - Uses the backend DeerFlow auth session for protected DeerFlow APIs. If auth fails, the route returns safe overview defaults plus `lastError`; it must not expose DeerFlow secrets or MCP environment values.
 
 ## DeerFlow Auth Status
 - DeerFlow Docker sidecar health is reachable without auth at `/health`.
 - DeerFlow `/api/skills`, `/api/mcp/config`, and `/api/runs/stream` are protected in the validated Docker runtime.
-- FacetWrite should not bypass this protection. The next integration slice should add an explicit setup/login or service-to-service auth path before claiming full DeerFlow generation support.
+- FacetWrite does not bypass this protection. The backend performs DeerFlow setup/login, caches session cookie plus CSRF token in process memory, and retries once after 401/403.
+- Session cookies, CSRF tokens, auth email/password, and MCP secret-like values are not exposed through FacetWrite APIs.
 
 ## Threads
 - `GET /api/threads/recent`

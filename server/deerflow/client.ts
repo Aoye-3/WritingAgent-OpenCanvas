@@ -2,6 +2,7 @@ import type { AgentCard, AgentSettings } from "../agentCards.js";
 import type { ChatMessage } from "../providerRuntime.js";
 import type { ToolEventRecord } from "../toolRuntime.js";
 import { getDeerFlowRuntimeConfig, type DeerFlowRuntimeConfig } from "./config.js";
+import { authenticatedDeerFlowFetch } from "./auth.js";
 import { buildDeerFlowRuntimeMetadata } from "./taskAgentMapping.js";
 import { parseSseChunk } from "./sse.js";
 
@@ -29,11 +30,15 @@ export async function runDeerFlowAgent(input: DeerFlowRunInput): Promise<DeerFlo
     throw new Error("DeerFlow runtime is disabled");
   }
 
-  const fetcher = input.fetchImpl ?? fetch;
-  const response = await fetcher(`${config.baseUrl}/api/runs/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(buildRunRequest(input, config))
+  const response = await authenticatedDeerFlowFetch({
+    config,
+    path: "/api/runs/stream",
+    fetchImpl: input.fetchImpl,
+    init: {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildRunRequest(input, config))
+    }
   });
 
   if (!response.ok) {

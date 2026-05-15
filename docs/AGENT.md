@@ -45,7 +45,7 @@ DeerFlow is the primary Agent runtime integration foundation when `DEERFLOW_ENAB
 - The current TypeScript run loop remains available when DeerFlow is disabled or unavailable.
 - Runtime status is exposed through `/api/deerflow/status`.
 - DeerFlow skills and MCP server overview are read through `/api/deerflow/config`; MCP environment and secret-like values are redacted before reaching the frontend.
-- Current Docker sidecar status: `/health` and `/api/deerflow/status` pass, but `/api/runs/stream` returns DeerFlow HTTP 403 until first-boot setup/login or service-to-service auth is wired.
+- Current Docker sidecar status: `/health`, backend auth, `/api/deerflow/config`, and one Summary Task-card generation pass against DeerFlow nginx.
 
 ## Tool Catalog
 `server/tools/catalog.ts` is the Tool metadata source of truth. Each ToolDefinition includes:
@@ -86,9 +86,9 @@ build messages
 
 Tool events are recorded as `tool_call_requested`, `tool_call_completed`, `tool_call_failed`, and `tool_loop_stopped`.
 
-When DeerFlow is enabled, `server/deerflow/client.ts` calls `/api/runs/stream`, maps token/message stream output into the FacetWrite response, and maps DeerFlow custom task events into `deerflow_*` tool events for the run history.
+When DeerFlow is enabled, `server/deerflow/client.ts` calls `/api/runs/stream` through the backend DeerFlow auth session, maps token/message stream output into the FacetWrite response, and maps DeerFlow custom task events into `deerflow_*` tool events for the run history.
 
-Until the protected DeerFlow run endpoint accepts authenticated FacetWrite requests, the TypeScript run loop remains the reliable fallback for actual content generation.
+The TypeScript run loop remains the fallback when DeerFlow is disabled or unavailable.
 
 ## Provider Boundary
 Provider-specific request normalization belongs in `server/providerRuntime.ts`. UI and product code should use provider IDs and capabilities rather than inferring provider behavior from base URLs or model strings.

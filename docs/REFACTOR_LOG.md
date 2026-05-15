@@ -1,5 +1,30 @@
 # FacetWrite Refactor Log
 
+## 2026-05-15: DeerFlow Auth Session Run
+Scope: Implemented backend-managed DeerFlow local-session auth and validated one real sidecar generation.
+
+Findings:
+- DeerFlow protected APIs require a session cookie and CSRF token for state-changing requests.
+- DeerFlow first-boot setup can return 422 if the configured email fails DeerFlow validation; `facetwrite-local@example.com` works for local setup.
+- DeerFlow `/api/v1/auth/setup-status` is rate-limited, so manual validation may need to wait for its cooldown after repeated checks.
+
+Completed:
+- Added `server/deerflow/auth.ts` for setup-status, optional initialize, login, session-cookie/CSRF extraction, in-memory cache, and one retry after 401/403.
+- Routed `/api/skills`, `/api/mcp/config`, and `/api/runs/stream` through authenticated DeerFlow fetch.
+- Extended `/api/deerflow/status` with `authState`.
+- Updated Project Settings DeerFlow runtime display for authenticated, setup-required, auth-required, auth-failed, unreachable, and fallback states.
+- Added `.env.local.example` DeerFlow auth fields.
+- Added unit coverage for setup-required, auto-setup, login, safe auth errors, 401/403 retry, config proxy auth, and run stream auth headers.
+- Validated Docker sidecar health, `authState:"authenticated"`, config overview, and one Summary Task-card generation returning provider `deerflow`.
+
+Open TODO:
+- Add a more user-friendly setup/reset note for DeerFlow local credentials in docs if this becomes part of regular onboarding.
+- Consider exposing recent DeerFlow auth/runtime errors near generation results instead of only in Project Settings.
+- Decide later whether FacetWrite needs per-user DeerFlow identity mapping.
+
+Next Priority Check:
+- Review DeerFlow stream wire shape and event semantics from several built-in Task cards before expanding ToolUse bridging.
+
 ## 2026-05-15: DeerFlow Auth Session Run Plan
 Scope: Saved the automatic DeerFlow local-session auth plan before implementation.
 

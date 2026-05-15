@@ -1,10 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { clearDeerFlowSession } from "./auth.js";
 import { getDeerFlowConfigOverview } from "./proxy.js";
 
 test("reads DeerFlow skills and sanitizes MCP secrets", async () => {
+  clearDeerFlowSession();
   const fetchImpl = async (url: string | URL | Request) => {
     const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) {
+      return Response.json({ needs_setup: false });
+    }
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, {
+        headers
+      });
+    }
     if (textUrl.endsWith("/api/skills")) {
       return Response.json({ skills: [{ name: "research", enabled: true }] });
     }
@@ -25,7 +38,7 @@ test("reads DeerFlow skills and sanitizes MCP secrets", async () => {
   };
 
   const overview = await getDeerFlowConfigOverview({
-    config: { enabled: true, baseUrl: "http://deerflow.local", assistantId: "lead_agent" },
+    config: authConfig(),
     fetchImpl
   });
 
@@ -44,8 +57,9 @@ test("reads DeerFlow skills and sanitizes MCP secrets", async () => {
 });
 
 test("returns safe error shape when DeerFlow config is unreachable", async () => {
+  clearDeerFlowSession();
   const overview = await getDeerFlowConfigOverview({
-    config: { enabled: true, baseUrl: "http://deerflow.local", assistantId: "lead_agent" },
+    config: authConfig(),
     fetchImpl: async () => new Response("unavailable", { status: 503 }) as Response
   });
 
@@ -54,3 +68,17 @@ test("returns safe error shape when DeerFlow config is unreachable", async () =>
   assert.deepEqual(overview.mcpServers, {});
   assert.match(overview.lastError ?? "", /HTTP 503/);
 });
+
+function authConfig() {
+  return {
+    enabled: true,
+    baseUrl: "http://deerflow.local",
+    assistantId: "lead_agent",
+    auth: {
+      email: "admin@example.com",
+      password: "strong-password",
+      autoSetup: false,
+      timeoutMs: 5000
+    }
+  };
+}

@@ -1,4 +1,5 @@
 import { getDeerFlowRuntimeConfig, type DeerFlowRuntimeConfig } from "./config.js";
+import { authenticatedDeerFlowFetch } from "./auth.js";
 
 export type DeerFlowConfigOverview = {
   enabled: boolean;
@@ -20,10 +21,9 @@ export async function getDeerFlowConfigOverview(input: {
   }
 
   try {
-    const fetcher = input.fetchImpl ?? fetch;
     const [skills, mcpConfig] = await Promise.all([
-      readJson(fetcher, `${config.baseUrl}/api/skills`),
-      readJson(fetcher, `${config.baseUrl}/api/mcp/config`)
+      readJson(config, "/api/skills", input.fetchImpl),
+      readJson(config, "/api/mcp/config", input.fetchImpl)
     ]);
 
     return {
@@ -43,8 +43,8 @@ export async function getDeerFlowConfigOverview(input: {
   }
 }
 
-async function readJson(fetcher: typeof fetch, url: string) {
-  const response = await fetcher(url, { method: "GET" });
+async function readJson(config: DeerFlowRuntimeConfig, path: string, fetchImpl?: typeof fetch) {
+  const response = await authenticatedDeerFlowFetch({ config, path, init: { method: "GET" }, fetchImpl });
   if (!response.ok) {
     throw new Error(`DeerFlow config request failed with HTTP ${response.status}`);
   }

@@ -1,11 +1,19 @@
 # DeerFlow Auth Session Run Plan
 
 Date: 2026-05-15
-Status: Planned, not yet implemented
+Status: Implemented and validated against Docker sidecar
 
 ## Summary
 
 FacetWrite should access DeerFlow protected APIs through a legitimate backend-managed DeerFlow session. The session uses DeerFlow local auth, remains in FacetWrite server memory, and is never exposed to the frontend.
+
+## Run Result
+
+- Added backend DeerFlow auth/session handling.
+- Confirmed `/api/deerflow/status` returns `reachable:true` and `authState:"authenticated"` against `http://127.0.0.1:2026`.
+- Confirmed `/api/deerflow/config` reads DeerFlow skills/MCP overview without leaking secret-like values.
+- Confirmed one Summary Task-card generation returns provider `deerflow`, `usedMock:false`, and finish reason `deerflow_completed`.
+- Confirmed `npm.cmd run typecheck` and `npm.cmd test` pass.
 
 ## Key Changes
 

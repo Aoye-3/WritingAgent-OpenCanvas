@@ -39,7 +39,8 @@ const fallbackDeerFlowStatus: DeerFlowRuntimeStatus = {
   baseUrl: "http://127.0.0.1:8000",
   assistantId: "lead_agent",
   reachable: false,
-  runtimeProvider: "typescript"
+  runtimeProvider: "typescript",
+  authState: "not_configured"
 };
 
 const fallbackDeerFlowConfig: DeerFlowConfigOverview = {
@@ -104,6 +105,7 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
   ];
   const deerFlowRows = [
     ["Runtime", deerFlowRuntimeLabel(deerFlowStatus)],
+    ["Auth", deerFlowAuthLabel(deerFlowStatus)],
     ["Base URL", deerFlowStatus.baseUrl],
     ["Assistant", deerFlowStatus.assistantId],
     ["Skills", String(deerFlowConfig.skills.length)],
@@ -186,7 +188,7 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
               <p className="eyebrow">Agent runtime</p>
               <h3>DeerFlow</h3>
             </div>
-            <span className={deerFlowStatus.enabled && deerFlowStatus.reachable ? "runtime-pill is-online" : "runtime-pill"}>
+            <span className={deerFlowStatus.enabled && deerFlowStatus.reachable && deerFlowStatus.authState === "authenticated" ? "runtime-pill is-online" : "runtime-pill"}>
               {deerFlowRuntimeLabel(deerFlowStatus)}
             </span>
           </div>
@@ -287,6 +289,19 @@ function resolvePreset(providerId: SettingsStatus["providerId"], baseURL: string
 
 function deerFlowRuntimeLabel(status: DeerFlowRuntimeStatus) {
   if (!status.enabled) return "TypeScript fallback";
-  if (status.reachable) return "DeerFlow online";
-  return "DeerFlow unreachable";
+  if (!status.reachable) return "DeerFlow unreachable";
+  if (status.authState === "authenticated") return "DeerFlow online, authenticated";
+  if (status.authState === "setup_required") return "DeerFlow online, setup required";
+  if (status.authState === "auth_failed") return "DeerFlow online, auth failed";
+  if (status.authState === "not_configured") return "DeerFlow online, auth required";
+  return "DeerFlow online";
+}
+
+function deerFlowAuthLabel(status: DeerFlowRuntimeStatus) {
+  if (!status.enabled) return "Not used";
+  if (!status.reachable) return "Unavailable";
+  if (status.authState === "authenticated") return "Authenticated";
+  if (status.authState === "setup_required") return "First-boot setup required";
+  if (status.authState === "auth_failed") return "Authentication failed";
+  return "Credentials not configured";
 }

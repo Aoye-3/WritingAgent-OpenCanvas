@@ -39,6 +39,7 @@ export type DeerFlowRuntimeStatus = {
   assistantId: string;
   reachable: boolean;
   runtimeProvider: "deerflow" | "typescript";
+  authState: "not_configured" | "setup_required" | "authenticated" | "auth_failed";
   lastError?: string;
 };
 

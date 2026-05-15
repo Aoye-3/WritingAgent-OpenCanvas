@@ -27,7 +27,7 @@ User input
 - `server/app.ts` wires Express middleware, storage, Agent runtime, generation service, and route modules.
 - `server/routes/*` defines API endpoints for health, catalog, agents, threads, projects, Canvas, settings, and generation.
 - `server/services/*` contains Agent definition/catalog behavior, generation orchestration, and settings persistence/validation.
-- `server/deerflow/*` contains the DeerFlow sidecar runtime adapter, SSE parsing, runtime status, read-only config proxy, and AgentCard-to-subagent mapping.
+- `server/deerflow/*` contains the DeerFlow sidecar runtime adapter, backend-only auth session handling, SSE parsing, runtime status, read-only config proxy, and AgentCard-to-subagent mapping.
 - `server/providerRuntime.ts` normalizes provider request behavior for supported provider IDs.
 - `server/agentRunLoop.ts` runs Chat Completions, executes returned tool calls, records tool events, and stops when final content or `maxToolCalls` is reached.
 
@@ -42,11 +42,12 @@ User input
 - DeerFlow is now an integration foundation for Agent runtime work, not only reference source.
 - FacetWrite calls DeerFlow as a Python sidecar over HTTP/SSE when `DEERFLOW_ENABLED=true`.
 - The validated local sidecar path is Docker Compose through DeerFlow nginx at `http://127.0.0.1:2026`.
+- FacetWrite authenticates to protected DeerFlow APIs with a backend-managed local session cookie and CSRF token; these credentials are never returned to the frontend.
 - DeerFlow `lead_agent` is the default main-agent entrypoint.
 - FacetWrite Task cards are mapped to DeerFlow subagent metadata with skills, tools, model inheritance, timeout, and max-turn defaults.
 - FacetWrite exposes read-only DeerFlow status and config overview endpoints for UI observability.
 - FacetWrite remains responsible for product data, SQLite persistence, frontend state, Canvas approval, and local fallback behavior.
-- Current validation status: sidecar health and FacetWrite runtime status are online; DeerFlow protected endpoints such as `/api/runs/stream`, `/api/skills`, and `/api/mcp/config` require auth setup before full generation/config sync can complete.
+- Current validation status: sidecar health, backend auth, config overview, and one Task-card generation are online against the Docker sidecar.
 
 ## Storage
 - `server/storage.ts` owns SQLite initialization, migrations, repositories, and local thread data directories.

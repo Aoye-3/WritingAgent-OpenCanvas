@@ -36,10 +36,36 @@ test("reads DeerFlow stream text and task events", async () => {
     }
   });
   const events: unknown[] = [];
-  const fetchImpl = async () => new Response(stream, { status: 200 }) as Response;
+  let runHeaders = new Headers();
+  const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) {
+      return Response.json({ needs_setup: false });
+    }
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, {
+        headers
+      });
+    }
+    runHeaders = new Headers(init?.headers);
+    return new Response(stream, { status: 200 }) as Response;
+  };
 
   const result = await runDeerFlowAgent({
-    config: { enabled: true, baseUrl: "http://deerflow.local", assistantId: "lead_agent" },
+    config: {
+      enabled: true,
+      baseUrl: "http://deerflow.local",
+      assistantId: "lead_agent",
+      auth: {
+        email: "admin@example.com",
+        password: "strong-password",
+        autoSetup: false,
+        timeoutMs: 5000
+      }
+    },
     threadId: "thread_1",
     agentCard: getAgentCard("summary"),
     messages: [{ role: "user", content: "Summarise this" }],
@@ -51,4 +77,6 @@ test("reads DeerFlow stream text and task events", async () => {
   assert.equal(result.text, "Hello world");
   assert.equal(result.events[0]?.eventType, "deerflow_task_started");
   assert.equal(events.length, 1);
+  assert.equal(runHeaders.get("Cookie"), "access_token=session; csrf_token=csrf");
+  assert.equal(runHeaders.get("X-CSRF-Token"), "csrf");
 });

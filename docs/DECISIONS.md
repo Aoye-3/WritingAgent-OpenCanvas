@@ -12,7 +12,14 @@ Decision: Treat DeerFlow protected endpoints as an integration contract instead 
 
 Reason: Docker validation confirmed `/health` is public, but `/api/skills`, `/api/mcp/config`, and `/api/runs/stream` require DeerFlow auth. Disabling or bypassing that boundary would hide the real production contract and weaken the runtime split.
 
-Impact: Current health/status validation can be considered complete, but full generation remains blocked until first-boot setup/login or service-to-service auth is implemented.
+Impact: FacetWrite now uses a backend-managed DeerFlow local session for protected APIs. Session cookies and CSRF tokens stay server-side, and the frontend only sees `authState`.
+
+## 2026-05-15: FacetWrite Uses One Local DeerFlow Service Session
+Decision: Use one backend-managed local DeerFlow session for the current sidecar integration instead of per-user DeerFlow account mapping.
+
+Reason: FacetWrite is still local-first and owns product users, Canvas approvals, and SQLite data. A single local DeerFlow session is enough to validate runtime orchestration without prematurely designing cross-system identity mapping.
+
+Impact: `DEERFLOW_AUTH_EMAIL` and `DEERFLOW_AUTH_PASSWORD` configure the local session. Multi-user DeerFlow identity mapping remains out of scope until the runtime path is stable.
 
 ## 2026-05-15: DeerFlow Is The Primary Agent Runtime Foundation
 Decision: Integrate DeerFlow as a sidecar Agent runtime and use its Lead Agent as the main orchestration Agent when `DEERFLOW_ENABLED=true`.
