@@ -1,13 +1,11 @@
-﻿import { useEffect, useMemo, useState } from "react";
-import { createThread, fetchThreadState, hardDeleteThread, moveThreadToTrash, restoreThreadFromTrash } from "../features/agents/agentClient";
+import { useEffect, useMemo, useState } from "react";
+import { fetchThreadState } from "../features/agents/agentClient";
 import { AgentSettingsView } from "../features/agents/AgentSettingsView";
 import { useAgentCards } from "../features/agents/hooks/useAgentCards";
-import type { AgentCard, AgentValues, CanvasNode, CanvasWriteRequest, StoredOutputVersion, StoredThread, StoredToolEvent, ThreadStateResponse } from "../features/agents/types";
+import type { AgentCard, AgentValues, StoredThread, ThreadStateResponse } from "../features/agents/types";
 import { AiDashboardView } from "../features/ai-dashboard/AiDashboardView";
-import { approveCanvasWriteRequest, createCanvasNode, deleteCanvasNode, fetchCanvas, rejectCanvasWriteRequest, updateCanvasNode, type CanvasNodeDraft, type CanvasNodePatch } from "../features/canvas/canvasClient";
 import { useAppNavigation } from "../features/app/useAppNavigation";
-import { generateText, generateTextStream } from "../features/generation/generationClient";
-import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../features/generation/types";
+import type { GenerateRequest } from "../features/generation/types";
 import { I18nProvider, useI18n } from "../features/i18n/I18nProvider";
 import { ProjectSettingsPanel } from "../features/settings/ProjectSettingsPanel";
 import { StartView } from "../features/start/StartView";
@@ -16,6 +14,10 @@ import { KnowledgeSettingsView } from "../features/knowledge/KnowledgeSettingsVi
 import { ProjectsView } from "../features/projects/ProjectsView";
 import { useProjects } from "../features/projects/hooks/useProjects";
 import { WorkspaceView } from "../features/workspace/WorkspaceView";
+import { useCanvasState } from "./hooks/useCanvasState";
+import { useGenerationRun } from "./hooks/useGenerationRun";
+import { useProjectTrash } from "./hooks/useProjectTrash";
+import { useThreadSession } from "./hooks/useThreadSession";
 
 export type AppView = "start" | "home" | "workspace" | "projects" | "agentSettings" | "aiDashboard" | "knowledgeSettings";
 
@@ -45,23 +47,100 @@ function AppContent() {
   const { locale } = useI18n();
   const { view, setView } = useAppNavigation("start");
   const { agentCards, updateAgentCard } = useAgentCards(fallbackAgentCards);
+  const { projects, recentThreads, refreshProjectSurfaces, refreshProjects, refreshRecentThreads, trashProjects } = useProjects();
   const [activeAgent, setActiveAgent] = useState<AgentCard>(fallbackAgentCards[0]);
-  const [threadId, setThreadId] = useState<string>("");
   const [agentValues, setAgentValues] = useState<AgentValues>(() => getInitialValues(fallbackAgentCards[0]));
   const [toolState, setToolState] = useState<GenerateRequest["toolState"]>({ knowledge_base: true, canvas_write: true });
-  const [generation, setGeneration] = useState<GenerateResponse | null>(null);
-  const [editableOutput, setEditableOutput] = useState("");
-  const [collaborationMessages, setCollaborationMessages] = useState<CollaborationMessage[]>([]);
-  const [canvasNodes, setCanvasNodes] = useState<CanvasNode[]>([]);
-  const [canvasWriteRequests, setCanvasWriteRequests] = useState<CanvasWriteRequest[]>([]);
-  const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | undefined>();
-  const [outputVersions, setOutputVersions] = useState<StoredOutputVersion[]>([]);
-  const [toolEvents, setToolEvents] = useState<StoredToolEvent[]>([]);
-  const { projects, recentThreads, refreshProjectSurfaces, refreshProjects, refreshRecentThreads, trashProjects } = useProjects();
-  const [activeVersionId, setActiveVersionId] = useState<string | undefined>();
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isChatSending, setIsChatSending] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const applyThreadState = (state: ThreadStateResponse) => {
+    const agentCard = agentCards.find((card) => card.id === state.thread.agentCardId) ?? fallbackAgentCards[0];
+    setActiveAgent(agentCard);
+    setAgentValues(getInitialValues(agentCard));
+    threadSession.setThreadId(state.thread.id);
+    generationRun.setOutputVersions(state.outputVersions);
+    generationRun.setToolEvents(state.toolEvents);
+    canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? []);
+    const latestVersion = state.outputVersions[0];
+    generationRun.setActiveVersionId(latestVersion?.id);
+    generationRun.setEditableOutput(latestVersion?.content ?? "");
+    generationRun.setCollaborationMessages(state.messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      text: message.text,
+      usedMock: message.usedMock
+    })));
+    generationRun.setGeneration(latestVersion ? {
+      text: latestVersion.content,
+      prompt: "",
+      provider: latestVersion.provider,
+      usedMock: latestVersion.usedMock,
+      threadId: state.thread.id,
+      runId: latestVersion.runId
+    } : null);
+  };
+
+  const threadSession = useThreadSession({
+    onApplyThreadState: applyThreadState,
+    onRefreshProjectSurfaces: refreshProjectSurfaces,
+    onNavigate: setView
+  });
+
+  const canvasState = useCanvasState({
+    ensureThreadId: () => threadSession.ensureThreadForAgent(activeAgent.id),
+    onRefreshProjectSurfaces: refreshProjectSurfaces
+  });
+
+  const selectedCanvasNode = canvasState.canvasNodes.find((node) => node.id === canvasState.selectedCanvasNodeId);
+  const getContextValues = () => ({
+    writingStyle: locale === "zh" ? "清晰、友好、适合学生" : "Friendly, clear, and suitable for students",
+    knowledgeSource: locale === "zh" ? "课程笔记：气候与环境" : "Course Notes: Climate and Environment",
+    currentDraft: generationRun.editableOutput,
+    canvas: {
+      nodes: canvasState.canvasNodes.map((node) => ({
+        id: node.id,
+        kind: node.kind,
+        title: node.title,
+        preview: node.content.slice(0, 600)
+      })),
+      selectedNode: selectedCanvasNode ? {
+        id: selectedCanvasNode.id,
+        kind: selectedCanvasNode.kind,
+        title: selectedCanvasNode.title,
+        content: selectedCanvasNode.content
+      } : null
+    }
+  });
+
+  const refreshThreadState = async (threadId: string) => {
+    const state = await fetchThreadState(threadId);
+    generationRun.setOutputVersions(state.outputVersions);
+    generationRun.setToolEvents(state.toolEvents);
+    generationRun.setActiveVersionId(state.outputVersions[0]?.id);
+    canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? []);
+    await refreshProjectSurfaces();
+  };
+
+  const generationRun = useGenerationRun({
+    activeAgent,
+    agentValues,
+    locale,
+    toolState,
+    selectedCanvasNodeId: canvasState.selectedCanvasNodeId,
+    getContextValues,
+    currentThreadId: threadSession.threadId,
+    ensureThreadId: () => threadSession.ensureThreadForAgent(activeAgent.id),
+    onPersistThreadId: threadSession.persistThreadId,
+    onRefreshThreadState: refreshThreadState,
+    onFetchAndApplyThreadState: fetchThreadState,
+    onApplyThreadState: applyThreadState,
+    onRefreshProjectSurfaces: refreshProjectSurfaces
+  });
+
+  const projectTrash = useProjectTrash({
+    onClearPersistedThreadId: threadSession.clearPersistedThreadId,
+    onRefreshProjectSurfaces: refreshProjectSurfaces
+  });
 
   useEffect(() => {
     refreshRecentThreads();
@@ -95,112 +174,18 @@ function AppContent() {
     ].filter(Boolean).join("\n");
   }, [activeAgent, agentValues, locale, toolState]);
 
-  const startApp = () => {
-    setView("home");
-  };
-
   const openWorkspace = async (agentCard: AgentCard) => {
     setActiveAgent(agentCard);
     setAgentValues(getInitialValues(agentCard));
-    setGeneration(null);
-    setEditableOutput("");
-    setCollaborationMessages([]);
-    setOutputVersions([]);
-    setToolEvents([]);
-    setCanvasNodes([]);
-    setCanvasWriteRequests([]);
-    setSelectedCanvasNodeId(undefined);
-    setActiveVersionId(undefined);
+    generationRun.resetGeneration();
+    canvasState.resetCanvas();
     setToolState({ knowledge_base: true, canvas_write: true });
     setView("workspace");
-    try {
-      const thread = await createThread(agentCard.id);
-      setThreadId(thread.threadId);
-      window.localStorage.setItem("facetwrite:lastThreadId", thread.threadId);
-      await refreshProjectSurfaces();
-    } catch {
-      const nextThreadId = `thread_${crypto.randomUUID()}`;
-      setThreadId(nextThreadId);
-      window.localStorage.setItem("facetwrite:lastThreadId", nextThreadId);
-    }
+    await threadSession.createThreadForAgent(agentCard.id);
   };
 
   const openRecentThread = async (thread: StoredThread) => {
-    await restoreThread(thread.id);
-  };
-
-  const restoreThread = async (nextThreadId: string) => {
-    try {
-      const state = await fetchThreadState(nextThreadId);
-      applyThreadState(state);
-      setView("workspace");
-      window.localStorage.setItem("facetwrite:lastThreadId", nextThreadId);
-      return true;
-    } catch {
-      window.localStorage.removeItem("facetwrite:lastThreadId");
-      return false;
-    }
-  };
-
-  const applyThreadState = (state: ThreadStateResponse) => {
-    const agentCard = agentCards.find((card) => card.id === state.thread.agentCardId) ?? fallbackAgentCards[0];
-    setActiveAgent(agentCard);
-    setAgentValues(getInitialValues(agentCard));
-    setThreadId(state.thread.id);
-    setOutputVersions(state.outputVersions);
-    setToolEvents(state.toolEvents);
-    setCanvasNodes(state.canvasNodes ?? []);
-    setCanvasWriteRequests(state.canvasWriteRequests ?? []);
-    setSelectedCanvasNodeId((state.canvasNodes ?? [])[0]?.id);
-    const latestVersion = state.outputVersions[0];
-    setActiveVersionId(latestVersion?.id);
-    setEditableOutput(latestVersion?.content ?? "");
-    setCollaborationMessages(state.messages.map((message) => ({
-      id: message.id,
-      role: message.role,
-      text: message.text,
-      usedMock: message.usedMock
-    })));
-    setGeneration(latestVersion ? {
-      text: latestVersion.content,
-      prompt: "",
-      provider: latestVersion.provider,
-      usedMock: latestVersion.usedMock,
-      threadId: state.thread.id,
-      runId: latestVersion.runId
-    } : null);
-  };
-
-  const refreshThreadState = async (nextThreadId: string) => {
-    const state = await fetchThreadState(nextThreadId);
-    setOutputVersions(state.outputVersions);
-    setToolEvents(state.toolEvents);
-    setActiveVersionId(state.outputVersions[0]?.id);
-    setCanvasNodes(state.canvasNodes ?? []);
-    setCanvasWriteRequests(state.canvasWriteRequests ?? []);
-    await refreshProjectSurfaces();
-  };
-
-  const handleMoveToTrash = async (thread: StoredThread | string) => {
-    const nextThreadId = typeof thread === "string" ? thread : thread.id;
-    await moveThreadToTrash(nextThreadId);
-    if (window.localStorage.getItem("facetwrite:lastThreadId") === nextThreadId) {
-      window.localStorage.removeItem("facetwrite:lastThreadId");
-    }
-    await refreshProjectSurfaces();
-  };
-
-  const handleRestoreThread = async (nextThreadId: string) => {
-    await restoreThreadFromTrash(nextThreadId);
-    await refreshProjectSurfaces();
-  };
-
-  const handleHardDeleteThread = async (nextThreadId: string) => {
-    await hardDeleteThread(nextThreadId);
-    if (window.localStorage.getItem("facetwrite:lastThreadId") === nextThreadId) {
-      window.localStorage.removeItem("facetwrite:lastThreadId");
-    }
-    await refreshProjectSurfaces();
+    await threadSession.restoreThread(thread.id);
   };
 
   const handleAgentSaved = (agentCard: AgentCard) => {
@@ -210,174 +195,9 @@ function AppContent() {
     }
   };
 
-  const ensureThreadId = () => {
-    if (threadId) return threadId;
-    const nextThreadId = `thread_${crypto.randomUUID()}`;
-    setThreadId(nextThreadId);
-    return nextThreadId;
-  };
-
-  const selectedCanvasNode = canvasNodes.find((node) => node.id === selectedCanvasNodeId);
-
-  const canvasContext = {
-    nodes: canvasNodes.map((node) => ({
-      id: node.id,
-      kind: node.kind,
-      title: node.title,
-      preview: node.content.slice(0, 600)
-    })),
-    selectedNode: selectedCanvasNode ? {
-      id: selectedCanvasNode.id,
-      kind: selectedCanvasNode.kind,
-      title: selectedCanvasNode.title,
-      content: selectedCanvasNode.content
-    } : null
-  };
-
-  const contextValues = {
-    writingStyle: locale === "zh" ? "清晰、友好、适合学生" : "Friendly, clear, and suitable for students",
-    knowledgeSource: locale === "zh" ? "课程笔记：气候与环境" : "Course Notes: Climate and Environment",
-    currentDraft: editableOutput,
-    canvas: canvasContext
-  };
-
-  const refreshCanvas = async (nextThreadId = threadId) => {
-    if (!nextThreadId) return;
-    const canvas = await fetchCanvas(nextThreadId);
-    setCanvasNodes(canvas.nodes);
-    setCanvasWriteRequests(canvas.writeRequests);
-    setSelectedCanvasNodeId((current) => current && canvas.nodes.some((node) => node.id === current) ? current : canvas.nodes[0]?.id);
-  };
-
-  const handleCreateCanvasNode = async (draft: CanvasNodeDraft) => {
-    const nextThreadId = ensureThreadId();
-    const node = await createCanvasNode(nextThreadId, draft);
-    setCanvasNodes((current) => [...current, node]);
-    setSelectedCanvasNodeId(node.id);
-    await refreshProjectSurfaces();
-  };
-
-  const handleUpdateCanvasNode = async (nodeId: string, patch: CanvasNodePatch) => {
-    const nextThreadId = ensureThreadId();
-    const node = await updateCanvasNode(nextThreadId, nodeId, patch);
-    setCanvasNodes((current) => current.map((item) => item.id === node.id ? node : item));
-    await refreshProjectSurfaces();
-  };
-
-  const handleDeleteCanvasNode = async (nodeId: string) => {
-    const nextThreadId = ensureThreadId();
-    await deleteCanvasNode(nextThreadId, nodeId);
-    setCanvasNodes((current) => current.filter((node) => node.id !== nodeId));
-    setSelectedCanvasNodeId((current) => current === nodeId ? undefined : current);
-    await refreshProjectSurfaces();
-  };
-
-  const handleApproveCanvasWriteRequest = async (requestId: string) => {
-    const nextThreadId = ensureThreadId();
-    await approveCanvasWriteRequest(nextThreadId, requestId);
-    await refreshCanvas(nextThreadId);
-    await refreshProjectSurfaces();
-  };
-
-  const handleRejectCanvasWriteRequest = async (requestId: string) => {
-    const nextThreadId = ensureThreadId();
-    await rejectCanvasWriteRequest(nextThreadId, requestId);
-    await refreshCanvas(nextThreadId);
-    await refreshProjectSurfaces();
-  };
-
-  const handleGenerate = async () => {
-    setIsGenerating(true);
-    try {
-      const payload: GenerateRequest = {
-        mode: "structured",
-        agentCardId: activeAgent.id,
-        threadId: ensureThreadId(),
-        locale,
-        structuredValues: agentValues,
-        contextValues,
-        toolState,
-        selectedCanvasNodeId
-      };
-      setEditableOutput("");
-      const result = activeAgent.settings?.model.streaming
-        ? await generateTextStream(payload, {
-            onToken: (token) => setEditableOutput((current) => current + token),
-            onToolEvent: (event) => setToolEvents((current) => [{
-              id: crypto.randomUUID(),
-              threadId: threadId || payload.threadId || "",
-              runId: "pending",
-              eventType: String((event as { eventType?: unknown }).eventType ?? "tool_event"),
-              payload: (event as { payload?: unknown }).payload ?? event,
-              createdAt: new Date().toISOString()
-            }, ...current])
-          })
-        : await generateText(payload);
-      setGeneration(result);
-      setThreadId(result.threadId);
-      window.localStorage.setItem("facetwrite:lastThreadId", result.threadId);
-      setEditableOutput(result.text);
-      await refreshThreadState(result.threadId);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleChatSend = async (text: string) => {
-    setIsChatSending(true);
-
-    try {
-      const payload: GenerateRequest = {
-        mode: "chat",
-        agentCardId: activeAgent.id,
-        threadId: ensureThreadId(),
-        locale,
-        structuredValues: agentValues,
-        contextValues,
-        chatInstruction: text,
-        toolState: { ...toolState, quick_messages: true, canvas_write: true },
-        selectedCanvasNodeId
-      };
-      const result = activeAgent.settings?.model.streaming
-        ? await generateTextStream(payload, {
-            onToken: (token) => setEditableOutput((current) => current || token ? current + token : token),
-            onToolEvent: (event) => setToolEvents((current) => [{
-              id: crypto.randomUUID(),
-              threadId: threadId || payload.threadId || "",
-              runId: "pending",
-              eventType: String((event as { eventType?: unknown }).eventType ?? "tool_event"),
-              payload: (event as { payload?: unknown }).payload ?? event,
-              createdAt: new Date().toISOString()
-            }, ...current])
-          })
-        : await generateText(payload);
-      setThreadId(result.threadId);
-      setGeneration(result);
-      window.localStorage.setItem("facetwrite:lastThreadId", result.threadId);
-      const state = await fetchThreadState(result.threadId);
-      applyThreadState(state);
-      await refreshProjectSurfaces();
-    } finally {
-      setIsChatSending(false);
-    }
-  };
-
-  const restoreVersion = (version: StoredOutputVersion) => {
-    setEditableOutput(version.content);
-    setActiveVersionId(version.id);
-    setGeneration({
-      text: version.content,
-      prompt: generation?.prompt ?? "",
-      provider: version.provider,
-      usedMock: version.usedMock,
-      threadId: version.threadId,
-      runId: version.runId
-    });
-  };
-
   return (
     <div className="app-shell" data-view={view}>
-      <StartView active={view === "start"} onStart={startApp} onOpenSettings={() => setSettingsOpen(true)} />
+      <StartView active={view === "start"} onStart={() => setView("home")} onOpenSettings={() => setSettingsOpen(true)} />
       <HomeView
         activeView={view}
         agentCards={agentCards}
@@ -386,18 +206,18 @@ function AppContent() {
         onOpenAgent={openWorkspace}
         onOpenThread={openRecentThread}
         onNavigate={setView}
-        onDeleteThread={handleMoveToTrash}
+        onDeleteThread={projectTrash.handleMoveToTrash}
       />
       <ProjectsView
         activeView={view}
         agentCards={agentCards}
         projects={projects}
         trashProjects={trashProjects}
-        onHardDelete={handleHardDeleteThread}
-        onMoveToTrash={handleMoveToTrash}
+        onHardDelete={projectTrash.handleHardDeleteThread}
+        onMoveToTrash={projectTrash.handleMoveToTrash}
         onNavigate={setView}
         onOpenThread={openRecentThread}
-        onRestore={handleRestoreThread}
+        onRestore={projectTrash.handleRestoreThread}
       />
       <AgentSettingsView
         activeView={view}
@@ -412,31 +232,31 @@ function AppContent() {
         activeAgent={activeAgent}
         activeView={view}
         agentValues={agentValues}
-        collaborationMessages={collaborationMessages}
-        editableOutput={editableOutput}
-        generation={generation}
-        isChatSending={isChatSending}
-        isGenerating={isGenerating}
-        outputVersions={outputVersions}
-        activeVersionId={activeVersionId}
-        canvasNodes={canvasNodes}
-        canvasWriteRequests={canvasWriteRequests}
-        selectedCanvasNodeId={selectedCanvasNodeId}
-        toolEvents={toolEvents}
+        collaborationMessages={generationRun.collaborationMessages}
+        editableOutput={generationRun.editableOutput}
+        generation={generationRun.generation}
+        isChatSending={generationRun.isChatSending}
+        isGenerating={generationRun.isGenerating}
+        outputVersions={generationRun.outputVersions}
+        activeVersionId={generationRun.activeVersionId}
+        canvasNodes={canvasState.canvasNodes}
+        canvasWriteRequests={canvasState.canvasWriteRequests}
+        selectedCanvasNodeId={canvasState.selectedCanvasNodeId}
+        toolEvents={generationRun.toolEvents}
         onAgentValuesChange={setAgentValues}
-        onApproveCanvasWriteRequest={handleApproveCanvasWriteRequest}
-        onChatSend={handleChatSend}
-        onCreateCanvasNode={handleCreateCanvasNode}
-        onDeleteCanvasNode={handleDeleteCanvasNode}
-        onEditableOutputChange={setEditableOutput}
-        onGenerate={handleGenerate}
+        onApproveCanvasWriteRequest={canvasState.handleApproveCanvasWriteRequest}
+        onChatSend={generationRun.handleChatSend}
+        onCreateCanvasNode={canvasState.handleCreateCanvasNode}
+        onDeleteCanvasNode={canvasState.handleDeleteCanvasNode}
+        onEditableOutputChange={generationRun.setEditableOutput}
+        onGenerate={generationRun.handleGenerate}
         onGoHome={() => setView("home")}
         onOpenSettings={() => setSettingsOpen(true)}
-        onRejectCanvasWriteRequest={handleRejectCanvasWriteRequest}
-        onRestoreVersion={restoreVersion}
-        onSelectCanvasNode={setSelectedCanvasNodeId}
+        onRejectCanvasWriteRequest={canvasState.handleRejectCanvasWriteRequest}
+        onRestoreVersion={generationRun.restoreVersion}
+        onSelectCanvasNode={canvasState.setSelectedCanvasNodeId}
         onToolStateChange={setToolState}
-        onUpdateCanvasNode={handleUpdateCanvasNode}
+        onUpdateCanvasNode={canvasState.handleUpdateCanvasNode}
         promptPreview={promptPreview}
         toolState={toolState}
       />

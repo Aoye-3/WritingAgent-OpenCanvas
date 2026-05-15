@@ -15,6 +15,8 @@ Successful responses return the route payload directly. Errors use:
 
 The implementation lives in `server/utils/http.ts`.
 
+Request contract validation errors should return HTTP 400 with `code:"bad_request"`. Unexpected runtime failures should return HTTP 500 with `code:"internal_error"`. Streaming generation reports the same code in its SSE `error` event payload.
+
 ## Health
 - `GET /api/health`
   - Returns server health.
@@ -44,6 +46,7 @@ The implementation lives in `server/utils/http.ts`.
 - `POST /api/generate/stream`
   - SSE endpoint.
   - Emits `tool_event`, `token`, `final`, and `error` events.
+  - `error` payloads include `code` and `message`.
   - DeerFlow custom subagent events are emitted as `tool_event` records with `eventType` prefixed by `deerflow_`.
 
 ## DeerFlow Runtime Configuration

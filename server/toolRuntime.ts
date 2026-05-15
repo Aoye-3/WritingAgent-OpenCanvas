@@ -1,9 +1,12 @@
 import type { ChatCompletionTool, ChatToolCall } from "./providerRuntime.js";
 import type { CanvasWriteRequestInput } from "./storage.js";
-import { allowedToolDefinitions, toChatCompletionTool, toolCatalog, type ToolRef, type ToolState } from "./tools/catalog.js";
+import { allowedToolDefinitions, toChatCompletionTool, toolCatalog, type ToolState } from "./tools/catalog.js";
+import { evaluateToolExecutionPolicy, isToolRef } from "./tools/toolPolicyGuard.js";
 
 export type ToolExecutionContext = {
   threadId?: string;
+  allowedToolRefs?: string[];
+  toolState?: ToolState;
   selectedCanvasNodeId?: string | null;
   contextValues?: Record<string, unknown>;
   chatInstruction?: string;
@@ -42,8 +45,27 @@ export function getEnabledToolDefinitions(toolRefs: string[], toolState: ToolSta
 }
 
 export async function executeToolCall(call: ChatToolCall, context: ToolExecutionContext): Promise<ToolExecutionResult> {
-  const name = call.function.name as ToolRef;
+  const name = call.function.name;
   const args = parseToolArguments(call.function.arguments);
+  const decision = evaluateToolExecutionPolicy({
+    toolName: name,
+    allowedToolRefs: context.allowedToolRefs,
+    toolState: context.toolState
+  });
+  if (!decision.allowed) {
+    return {
+      ok: false,
+      content: decision.reason ?? `Tool is not allowed: ${name}`,
+      payload: { tool: name, reason: "policy_denied" }
+    };
+  }
+  if (!isToolRef(name)) {
+    return {
+      ok: false,
+      content: `Unknown tool: ${call.function.name}`,
+      payload: { tool: call.function.name }
+    };
+  }
 
   if (name === "knowledge_base") {
     const entries = Object.entries(context.contextValues ?? {})

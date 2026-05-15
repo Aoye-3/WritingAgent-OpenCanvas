@@ -1,12 +1,15 @@
 import { mkdir, rm } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import type { AgentCard, AgentSettings } from "./agentCards.js";
+import { createFacetWriteDatabase, runSqliteTransaction } from "./db/sqlite.js";
+import { AgentSettingsRepository } from "./repositories/agentSettingsRepository.js";
+import { cleanText, defaultCanvasTitle, nowIso, parseJson, randomId, readFiniteNumber, validateId, validateNodeKind, validateWriteOperation } from "./repositories/storageRepositoryUtils.js";
+import { ThreadRepository } from "./repositories/threadRepository.js";
 import type { Provider } from "./types.js";
 import type { ToolEventRecord } from "./toolRuntime.js";
 
-type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
+export type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
 export type RunRecordInput = {
   threadId: string;
@@ -130,12 +133,13 @@ const dbPath = path.join(dbDir, "facetwrite.db");
 
 export class SQLiteStorageRepository {
   private db: DatabaseSync;
+  private threads: ThreadRepository;
+  private agentSettings: AgentSettingsRepository;
 
   constructor() {
-    this.db = new DatabaseSync(dbPath);
-    this.db.exec("PRAGMA journal_mode = WAL;");
-    this.db.exec("PRAGMA foreign_keys = ON;");
-    this.migrate();
+    this.db = createFacetWriteDatabase(dbPath);
+    this.threads = new ThreadRepository(this.db);
+    this.agentSettings = new AgentSettingsRepository(this.db, (work) => this.withTransaction(work));
   }
 
   async ensureThread(threadId: string, agentCardId: string) {
@@ -223,59 +227,23 @@ export class SQLiteStorageRepository {
   }
 
   getThread(threadId: string) {
-    return this.db
-      .prepare(`SELECT id, agent_card_id as agentCardId, title, updated_at as updatedAt, deleted_at as deletedAt FROM threads WHERE id = ? AND deleted_at IS NULL`)
-      .get(threadId) as StoredThread | undefined;
+    return this.threads.getThread(threadId);
   }
 
   listRecentThreads(limit = 8) {
-    return this.db
-      .prepare(`SELECT id, agent_card_id as agentCardId, title, updated_at as updatedAt, deleted_at as deletedAt FROM threads WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?`)
-      .all(limit) as StoredThread[];
+    return this.threads.listRecentThreads(limit);
   }
 
   listProjects(cards: AgentCard[], includeDeleted = false) {
-    const where = includeDeleted ? `threads.deleted_at IS NOT NULL` : `threads.deleted_at IS NULL`;
-    type ProjectRow = ProjectSummary & { assetCount: number; provider: string | null };
-    const rows = this.db
-      .prepare(
-        `SELECT threads.id,
-                threads.agent_card_id as agentCardId,
-                threads.title,
-                threads.updated_at as updatedAt,
-                threads.deleted_at as deletedAt,
-                COUNT(DISTINCT output_versions.id) as assetCount,
-                MAX(runs.provider) as provider
-         FROM threads
-         LEFT JOIN output_versions ON output_versions.thread_id = threads.id
-         LEFT JOIN runs ON runs.thread_id = threads.id
-         WHERE ${where}
-         GROUP BY threads.id
-         ORDER BY threads.updated_at DESC`
-      )
-      .all() as ProjectRow[];
-
-    return rows.map((row) => {
-      const card = cards.find((agentCard) => agentCard.id === row.agentCardId);
-      return {
-        ...row,
-        assetCount: Number(row.assetCount),
-        provider: row.provider ?? undefined,
-        agentTitle: card?.title.en ?? row.agentCardId
-      };
-    });
+    return this.threads.listProjects(cards, includeDeleted);
   }
 
   moveThreadToTrash(threadId: string) {
-    const now = nowIso();
-    const result = this.db.prepare(`UPDATE threads SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`).run(now, now, threadId);
-    return result.changes > 0;
+    return this.threads.moveThreadToTrash(threadId);
   }
 
   restoreThread(threadId: string) {
-    const now = nowIso();
-    const result = this.db.prepare(`UPDATE threads SET deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL`).run(now, threadId);
-    return result.changes > 0;
+    return this.threads.restoreThread(threadId);
   }
 
   async hardDeleteThread(threadId: string) {
@@ -505,28 +473,11 @@ export class SQLiteStorageRepository {
   }
 
   getAgentSettings(agentCardId: string) {
-    const row = this.db.prepare(`SELECT payload_json as payloadJson FROM agent_settings WHERE agent_card_id = ?`).get(agentCardId) as { payloadJson: string } | undefined;
-    return row ? parseJson(row.payloadJson) as Partial<AgentSettings> : undefined;
+    return this.agentSettings.getAgentSettings(agentCardId);
   }
 
   saveAgentSettings(agentCardId: string, settings: AgentSettings) {
-    const now = nowIso();
-    this.withTransaction(() => {
-      this.db
-        .prepare(
-          `INSERT INTO agent_settings (agent_card_id, payload_json, updated_at)
-           VALUES (?, ?, ?)
-           ON CONFLICT(agent_card_id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at`
-        )
-        .run(agentCardId, JSON.stringify(settings), now);
-
-      this.db.prepare(`DELETE FROM quick_messages WHERE agent_card_id = ?`).run(agentCardId);
-      const statement = this.db.prepare(`INSERT INTO quick_messages (id, agent_card_id, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`);
-      for (const text of settings.quickMessages) {
-        const trimmed = text.trim();
-        if (trimmed) statement.run(randomId("quick"), agentCardId, trimmed, now, now);
-      }
-    });
+    this.agentSettings.saveAgentSettings(agentCardId, settings);
   }
 
   listOutputVersions(threadId: string) {
@@ -590,164 +541,7 @@ export class SQLiteStorageRepository {
   }
 
   private withTransaction<T>(work: () => T) {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const result = work();
-      this.db.exec("COMMIT");
-      return result;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
-  }
-
-  private migrate() {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS schema_version (
-        version INTEGER PRIMARY KEY,
-        applied_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS projects (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS threads (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        agent_card_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        deleted_at TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS messages (
-        id TEXT PRIMARY KEY,
-        thread_id TEXT NOT NULL,
-        role TEXT NOT NULL,
-        text TEXT NOT NULL,
-        used_mock INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS runs (
-        id TEXT PRIMARY KEY,
-        thread_id TEXT NOT NULL,
-        agent_card_id TEXT NOT NULL,
-        mode TEXT NOT NULL,
-        provider TEXT NOT NULL,
-        used_mock INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL,
-        error_message TEXT,
-        created_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS agent_cards (
-        id TEXT PRIMARY KEY,
-        payload_json TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS skills (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS prompt_versions (
-        id TEXT PRIMARY KEY,
-        thread_id TEXT NOT NULL,
-        run_id TEXT NOT NULL,
-        prompt TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS output_versions (
-        id TEXT PRIMARY KEY,
-        thread_id TEXT NOT NULL,
-        run_id TEXT NOT NULL,
-        content TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS tool_events (
-        id TEXT PRIMARY KEY,
-        thread_id TEXT NOT NULL,
-        run_id TEXT NOT NULL,
-        event_type TEXT NOT NULL,
-        payload_json TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS agent_settings (
-        agent_card_id TEXT PRIMARY KEY,
-        payload_json TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS quick_messages (
-        id TEXT PRIMARY KEY,
-        agent_card_id TEXT NOT NULL,
-        text TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS canvas_nodes (
-        id TEXT PRIMARY KEY,
-        thread_id TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        title TEXT NOT NULL,
-        content TEXT NOT NULL,
-        x REAL NOT NULL,
-        y REAL NOT NULL,
-        width REAL NOT NULL,
-        height REAL NOT NULL,
-        metadata_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS canvas_write_requests (
-        id TEXT PRIMARY KEY,
-        thread_id TEXT NOT NULL,
-        operation TEXT NOT NULL,
-        target_node_id TEXT,
-        node_kind TEXT NOT NULL,
-        title TEXT NOT NULL,
-        content TEXT NOT NULL,
-        rationale TEXT NOT NULL,
-        status TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      INSERT OR IGNORE INTO projects (id, title, created_at, updated_at)
-      VALUES ('local-project', 'Local Workspace', datetime('now'), datetime('now'));
-
-      INSERT OR IGNORE INTO schema_version (version, applied_at)
-      VALUES (1, datetime('now'));
-    `);
-
-    if (!this.columnExists("threads", "deleted_at")) {
-      this.db.exec(`ALTER TABLE threads ADD COLUMN deleted_at TEXT`);
-    }
-  }
-
-  private columnExists(table: string, column: string) {
-    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-    return rows.some((row) => row.name === column);
+    return runSqliteTransaction(this.db, work);
   }
 
   private getCanvasNode(threadId: string, nodeId: string) {
@@ -768,7 +562,7 @@ export class SQLiteStorageRepository {
   }
 
   private touchThread(threadId: string, updatedAt = nowIso()) {
-    this.db.prepare(`UPDATE threads SET updated_at = ? WHERE id = ?`).run(updatedAt, threadId);
+    this.threads.touchThread(threadId, updatedAt);
   }
 }
 
@@ -800,50 +594,4 @@ function threadDataRoot(threadId: string) {
     throw new Error("Thread data must stay inside the local app workspace");
   }
   return resolved;
-}
-
-function validateId(value: string, label: string) {
-  if (!/^[A-Za-z0-9_-]+$/.test(value)) {
-    throw new Error(`Invalid ${label}`);
-  }
-}
-
-function randomId(prefix: string) {
-  return `${prefix}_${randomUUID()}`;
-}
-
-function validateNodeKind(value: string): CanvasNodeKind {
-  if (value === "document" || value === "note" || value === "reference") return value;
-  throw new Error("Invalid canvas node kind");
-}
-
-function validateWriteOperation(value: string): CanvasWriteOperation {
-  if (value === "create" || value === "replace" || value === "append") return value;
-  throw new Error("Invalid canvas write operation");
-}
-
-function readFiniteNumber(value: unknown, fallback: number) {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function cleanText(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function defaultCanvasTitle(kind: CanvasNodeKind) {
-  if (kind === "note") return "Untitled note";
-  if (kind === "reference") return "Untitled reference";
-  return "Untitled document";
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function parseJson(value: string): JsonValue {
-  try {
-    return JSON.parse(value) as JsonValue;
-  } catch {
-    return { raw: value };
-  }
 }

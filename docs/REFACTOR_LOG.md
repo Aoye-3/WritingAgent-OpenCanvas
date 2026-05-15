@@ -1,5 +1,57 @@
 # FacetWrite Refactor Log
 
+## 2026-05-15: Maintainability Boundary Refactor
+Scope: Implemented the first maintainability pass from the control-plane/execution-plane review.
+
+Findings:
+- The current code already reflects several earlier refactors: route/service split, shared frontend API client, Tool catalog/policy, runtime config, DeerFlow auth, and AI Dashboard.
+- Remaining high-risk areas were App-level workflow concentration, Agent definition concentration, runtime tool policy enforcement, provider type drift, and local settings write safety.
+
+Completed:
+- Fixed frontend generation provider typing so DeerFlow responses are accepted as first-class generation results.
+- Added `server/security/policies/settingsWritePolicy.ts` and tests so production runtime does not write `.env.local` unless explicitly enabled.
+- Changed generation route validation failures to report `bad_request` instead of always `internal_error`.
+- Split Agent definitions into `server/agents/types.ts`, `server/agents/cards/builtInCards.ts`, `server/agents/prompts.ts`, `server/agents/defaultSettings.ts`, and `server/agents/loader.ts`, with `server/agentCards.ts` kept as the compatibility export.
+- Repaired built-in AgentCard Chinese copy while moving card definitions.
+- Added `server/tools/toolPolicyGuard.ts` and tests for disabled or Agent-disallowed tool calls.
+- Extracted `src/app/hooks/useThreadSession.ts`, `useCanvasState.ts`, `useGenerationRun.ts`, and `useProjectTrash.ts`; `App.tsx` now composes these control-plane hooks instead of owning every workflow directly.
+- Preserved current API success response shape, SQLite schema, TypeScript fallback runtime, and read-only DeerFlow Dashboard boundary.
+
+Open TODO:
+- Split `ProjectSettingsPanel` and `AgentSettingsView` into smaller UI tab/form components.
+- Split `server/storage.ts` only after adding facade-level regression tests.
+- Split `server/services/generationService.ts` into DeerFlow runner, provider runner, mock fallback, prompt builder, and recorder modules.
+- Continue DeerFlow ToolUse/MCP bridge validation for CanvasWrite, KnowledgeBase, and WebSearch.
+
+Next Priority Check:
+- Verify the new hooks with browser smoke tests around opening a new Agent, restoring a thread, generating, and approving/rejecting Canvas write requests.
+
+## 2026-05-15: Architecture Stabilization Second Pass
+Scope: Continued maintainability stabilization on the `codex/maintainability-refactor` branch.
+
+Findings:
+- `docs/plans/*` and `开发日志` still contain pre-existing or parallel edits and should stay separate from architecture-stabilization commits.
+- `storage.ts` and `generationService.ts` needed facade-level tests before further splits.
+- Settings pages were still carrying data loading, save logic, and tab rendering in the same components.
+
+Completed:
+- Added `docs/REFACTOR_BRANCH_INVENTORY.md` to classify in-scope architecture changes versus unrelated planning/log changes.
+- Added storage facade tests covering thread directories, runs, messages, output versions, tool events, project summaries, trash/restore/delete, Canvas nodes, Canvas write approval/rejection, and Agent settings.
+- Added generation facade tests covering DeerFlow, provider, mock fallback, tool context, and clear-context behavior.
+- Split generation orchestration into `server/services/generation/` modules for prompt/run context, DeerFlow runner, provider runner, mock fallback, and run recording.
+- Extracted SQLite initialization and schema migration to `server/db/sqlite.ts` and `server/db/schema.ts`.
+- Introduced repository boundaries under `server/repositories/`, with thread and Agent settings behavior delegated behind the existing storage facade.
+- Split `ProjectSettingsPanel` into `useProjectSettings`, `ProviderSettingsForm`, and `DeerFlowRuntimePanel`.
+- Split `AgentSettingsView` into `useAgentRuntimeConfig` and `AgentSettingsTabs`, with clean Chinese labels for the settings UI.
+
+Open TODO:
+- Continue migrating Canvas and run persistence from the storage facade into the new repository classes.
+- Add browser-level smoke coverage when Playwright or an equivalent browser test dependency is available.
+- Decide whether `clear_context` should remain enabled by default for all built-in Agent cards or become an explicit per-run control.
+
+Next Priority Check:
+- Before MVP feature work, manually verify workspace generation, chat, Canvas write approval, Project Settings, Agent Settings, and AI Dashboard in the browser.
+
 ## 2026-05-15: Technical Documentation Maintenance
 Scope: Refreshed maintained docs after the AI Dashboard and DeerFlow runtime control-plane implementation.
 

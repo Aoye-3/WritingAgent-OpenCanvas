@@ -19,7 +19,7 @@ export type GenerateRequest = {
 export type GenerateResponse = {
   text: string;
   prompt: string;
-  provider: "deepseek" | "openai" | "openai-compatible" | "mock";
+  provider: "deepseek" | "openai" | "openai-compatible" | "deerflow" | "mock";
   usedMock: boolean;
   threadId: string;
   runId?: string;

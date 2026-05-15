@@ -12,6 +12,8 @@ FacetWrite is a local-first development app. Treat local provider keys as produc
 
 The local settings panel can write provider settings to `.env.local`. Saving a new API key requires an explicit `confirmLocalKeyWrite=true` request field so accidental writes are rejected by the API.
 
+Settings writes are also guarded by `server/security/policies/settingsWritePolicy.ts`. Production runtime disables local `.env.local` writes by default; local development can explicitly opt in with `LOCAL_SETTINGS_WRITE_ENABLED=true` or `LOCAL_SETTINGS_WRITE_ENABLED=1`.
+
 The API status response reports whether a key is configured, but it must never return the key value.
 
 ## Tool permissions
@@ -21,6 +23,8 @@ Agent tools are configured through the tool catalog and policy layer:
 - Low-risk local context tools may run automatically when enabled.
 - `canvas_write` can only create a pending write request. The user must approve the request before Canvas content changes.
 - External tools such as web search must report when they are not configured.
+
+Runtime tool calls pass through `server/tools/toolPolicyGuard.ts` before executor logic runs. The guard rejects unknown tools, tools outside the active Agent's refs, tools disabled for the current run, and tools missing required external configuration.
 
 ## DeerFlow runtime auth
 

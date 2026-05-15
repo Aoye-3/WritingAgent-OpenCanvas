@@ -1,7 +1,15 @@
 # FacetWrite Agent And Tool Architecture
 
 ## AgentCard
-Agent cards are defined in `server/agentCards.ts`. An AgentCard includes:
+Agent cards are exposed through `server/agentCards.ts` for compatibility, but the maintained implementation is split across `server/agents/`:
+
+- `server/agents/types.ts`: AgentCard and AgentSettings types.
+- `server/agents/cards/builtInCards.ts`: built-in Agent cards and localized field metadata.
+- `server/agents/prompts.ts`: built-in identity prompts.
+- `server/agents/defaultSettings.ts`: default Agent settings.
+- `server/agents/loader.ts`: card lookup and saved-settings application.
+
+An AgentCard includes:
 
 - Stable `id`
 - Category, accent, and icon metadata
@@ -81,6 +89,8 @@ Current tools:
 
 A tool can auto-run only when it is enabled, does not require approval, and does not require missing external configuration.
 
+`server/tools/toolPolicyGuard.ts` is the execution-time gate. It rejects unknown tools, tools not allowed by the active Agent, tools disabled for the current run, and tools that require missing external configuration before the executor branch runs.
+
 `canvas_write` must never directly mutate Canvas content from model output. It can only create a pending request that the user approves or rejects.
 
 ## Run Loop
@@ -99,6 +109,8 @@ Tool events are recorded as `tool_call_requested`, `tool_call_completed`, `tool_
 When DeerFlow is enabled, `server/deerflow/client.ts` calls `/api/runs/stream` through the backend DeerFlow auth session, maps token/message stream output into the FacetWrite response, and maps DeerFlow custom task events into `deerflow_*` tool events for the run history.
 
 The TypeScript run loop remains the fallback when DeerFlow is disabled or unavailable.
+
+`server/services/generationService.ts` is now a compatibility export. The implementation is split under `server/services/generation/`: prompt/message/model preparation, DeerFlow runner, provider runner, mock fallback, and run recording are separate modules while preserving the existing `/api/generate` contract.
 
 ## Provider Boundary
 Provider-specific request normalization belongs in `server/providerRuntime.ts`. UI and product code should use provider IDs and capabilities rather than inferring provider behavior from base URLs or model strings.

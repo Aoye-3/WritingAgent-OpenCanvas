@@ -3,6 +3,7 @@ import path from "node:path";
 import type { SettingsPayload, SettingsStatus } from "../contracts/settings.js";
 import { getBaseURL, getModel, getProviderId, getSystemPrompt } from "../config/providerConfig.js";
 import { createOpenAIChatClient, getProviderProfile } from "../providerRuntime.js";
+import { evaluateSettingsWritePolicy } from "../security/policies/settingsWritePolicy.js";
 import type { ProviderId } from "../types.js";
 
 type ValidationState = {
@@ -69,6 +70,11 @@ export async function validateSettings(payload: SettingsPayload) {
 }
 
 export async function saveSettings(payload: SettingsPayload) {
+  const policy = evaluateSettingsWritePolicy();
+  if (!policy.allowed) {
+    throw new Error(policy.reason ?? "Local settings writes are disabled");
+  }
+
   const providerId = payload.providerId;
   const apiKey = payload.apiKey?.trim();
   const baseURL = payload.baseURL?.trim();

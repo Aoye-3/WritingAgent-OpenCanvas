@@ -13,7 +13,10 @@ export function registerGenerationRoutes(app: Express, { generationService }: Ge
       const payload = parseGenerateRequest(request.body);
       sendOk(response, await generationService.generateAndRecord(payload));
     } catch (error) {
-      sendError(response, 500, "internal_error", errorMessage(error, "Generation failed"));
+      const status = error instanceof Error && error.message.startsWith("Request body") || error instanceof Error && error.message.startsWith("mode ") || error instanceof Error && error.message.startsWith("locale ")
+        ? 400
+        : 500;
+      sendError(response, status, status === 400 ? "bad_request" : "internal_error", errorMessage(error, "Generation failed"));
     }
   });
 
@@ -34,7 +37,10 @@ export function registerGenerationRoutes(app: Express, { generationService }: Ge
       }
       writeSse(response, "final", result);
     } catch (error) {
-      writeSse(response, "error", { message: errorMessage(error, "Generation failed") });
+      writeSse(response, "error", {
+        code: error instanceof Error && (error.message.startsWith("Request body") || error.message.startsWith("mode ") || error.message.startsWith("locale ")) ? "bad_request" : "internal_error",
+        message: errorMessage(error, "Generation failed")
+      });
     } finally {
       response.end();
     }

@@ -4,6 +4,10 @@
 画布：用户与Ai的信息协作区域
 下方的CanvasBar实现与画布的交互逻辑与未来的扩展功能。【新增卡片，选择外部知识库，webSearch】
 
+Agent状态;
+Skill触发
+ToolUse
+
 
 ## 日程记录
 完成了初版架构

@@ -1,160 +1,32 @@
-import { FormEvent, useEffect, useState } from "react";
 import { useI18n } from "../i18n/I18nProvider";
-import { getDeerFlowConfigOverview, getDeerFlowRuntimeStatus, getSettingsStatus, saveSettings, validateSettings } from "./settingsClient";
-import type { DeerFlowConfigOverview, DeerFlowRuntimeStatus, SettingsStatus } from "./types";
+import { DeerFlowRuntimePanel } from "./components/DeerFlowRuntimePanel";
+import { ProviderSettingsForm } from "./components/ProviderSettingsForm";
+import { useProjectSettings } from "./hooks/useProjectSettings";
 
 type ProjectSettingsPanelProps = {
   open: boolean;
   onClose: () => void;
 };
 
-const fallbackStatus: SettingsStatus = {
-  keyConfigured: false,
-  providerId: "deepseek",
-  providerLabel: "DeepSeek",
-  baseURL: "https://api.deepseek.com",
-  model: "deepseek-v4-flash",
-  systemPrompt: "You are FacetWrite's writing assistant. Generate clear, usable text from the user's prompt.",
-  apiHealth: "offline",
-  provider: "mock",
-  capabilities: {
-    chatCompletions: true,
-    streaming: true,
-    toolCalls: true,
-    thinking: true,
-    jsonOutput: true
-  }
-};
-
-const modelPresets = [
-  { id: "deepseek-v4-flash", providerId: "deepseek", label: "DeepSeek V4 Flash", baseURL: "https://api.deepseek.com", model: "deepseek-v4-flash" },
-  { id: "deepseek-v4-pro", providerId: "deepseek", label: "DeepSeek V4 Pro", baseURL: "https://api.deepseek.com", model: "deepseek-v4-pro" },
-  { id: "gpt-4.1-mini", providerId: "openai", label: "OpenAI GPT-4.1 mini", baseURL: "https://api.openai.com/v1", model: "gpt-4.1-mini" },
-  { id: "compatible", providerId: "openai-compatible", label: "OpenAI-compatible", baseURL: "https://api.openai.com/v1", model: "gpt-4.1-mini" },
-  { id: "custom", providerId: "openai-compatible", label: "Custom", baseURL: "", model: "" }
-] as const;
-
-const fallbackDeerFlowStatus: DeerFlowRuntimeStatus = {
-  enabled: false,
-  baseUrl: "http://127.0.0.1:8000",
-  assistantId: "lead_agent",
-  reachable: false,
-  runtimeProvider: "typescript",
-  authState: "not_configured"
-};
-
-const fallbackDeerFlowConfig: DeerFlowConfigOverview = {
-  enabled: false,
-  baseUrl: "http://127.0.0.1:8000",
-  skills: [],
-  mcpServers: {}
-};
-
 export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProps) {
   const { t } = useI18n();
-  const [status, setStatus] = useState<SettingsStatus>(fallbackStatus);
-  const [providerId, setProviderId] = useState<SettingsStatus["providerId"]>("deepseek");
-  const [apiKey, setApiKey] = useState("");
-  const [baseURL, setBaseURL] = useState("https://api.deepseek.com");
-  const [model, setModel] = useState("deepseek-v4-flash");
-  const [modelPreset, setModelPreset] = useState("deepseek-v4-flash");
-  const [systemPrompt, setSystemPrompt] = useState(fallbackStatus.systemPrompt);
-  const [deerFlowStatus, setDeerFlowStatus] = useState<DeerFlowRuntimeStatus>(fallbackDeerFlowStatus);
-  const [deerFlowConfig, setDeerFlowConfig] = useState<DeerFlowConfigOverview>(fallbackDeerFlowConfig);
-  const [message, setMessage] = useState("");
-  const [busyState, setBusyState] = useState<"idle" | "saving" | "validating">("idle");
-
-  useEffect(() => {
-    if (!open) return;
-
-    getSettingsStatus()
-      .then((nextStatus) => {
-        setStatus(nextStatus);
-        setProviderId(nextStatus.providerId);
-        setBaseURL(nextStatus.baseURL);
-        setModel(nextStatus.model);
-        setModelPreset(resolvePreset(nextStatus.providerId, nextStatus.baseURL, nextStatus.model));
-        setSystemPrompt(nextStatus.systemPrompt);
-        setMessage("");
-      })
-      .catch((error: unknown) => {
-        setStatus({ ...fallbackStatus, lastError: error instanceof Error ? error.message : "Unable to load settings" });
-      });
-    Promise.all([getDeerFlowRuntimeStatus(), getDeerFlowConfigOverview()])
-      .then(([nextStatus, nextConfig]) => {
-        setDeerFlowStatus(nextStatus);
-        setDeerFlowConfig(nextConfig);
-      })
-      .catch((error: unknown) => {
-        const messageText = error instanceof Error ? error.message : "Unable to load DeerFlow status";
-        setDeerFlowStatus({ ...fallbackDeerFlowStatus, lastError: messageText });
-        setDeerFlowConfig({ ...fallbackDeerFlowConfig, lastError: messageText });
-      });
-  }, [open]);
+  const settings = useProjectSettings(open, {
+    validateSuccess: t("settings.validateSuccess"),
+    validateFailed: t("settings.validateFailed"),
+    saveSuccess: t("settings.saveSuccess")
+  });
 
   if (!open) return null;
 
   const statusRows = [
-    [t("settings.keyStatus"), status.keyConfigured ? t("settings.configured") : t("settings.notConfigured")],
-    [t("settings.provider"), status.providerLabel],
-    [t("settings.baseURL"), status.baseURL],
-    [t("settings.model"), status.model],
-    [t("settings.apiHealth"), status.apiHealth],
-    [t("settings.provider"), status.provider === "mock" ? t("settings.mockFallback") : `${status.provider} ${t("settings.providerReady")}`],
-    [t("settings.lastValidated"), status.lastValidated ? new Date(status.lastValidated).toLocaleString() : t("settings.never")]
+    [t("settings.keyStatus"), settings.status.keyConfigured ? t("settings.configured") : t("settings.notConfigured")],
+    [t("settings.provider"), settings.status.providerLabel],
+    [t("settings.baseURL"), settings.status.baseURL],
+    [t("settings.model"), settings.status.model],
+    [t("settings.apiHealth"), settings.status.apiHealth],
+    [t("settings.provider"), settings.status.provider === "mock" ? t("settings.mockFallback") : `${settings.status.provider} ${t("settings.providerReady")}`],
+    [t("settings.lastValidated"), settings.status.lastValidated ? new Date(settings.status.lastValidated).toLocaleString() : t("settings.never")]
   ];
-  const deerFlowRows = [
-    ["Runtime", deerFlowRuntimeLabel(deerFlowStatus)],
-    ["Auth", deerFlowAuthLabel(deerFlowStatus)],
-    ["Base URL", deerFlowStatus.baseUrl],
-    ["Assistant", deerFlowStatus.assistantId],
-    ["Skills", String(deerFlowConfig.skills.length)],
-    ["MCP servers", Object.keys(deerFlowConfig.mcpServers).join(", ") || "None"]
-  ];
-
-  const handleValidate = async () => {
-    setBusyState("validating");
-    setMessage("");
-    try {
-      const result = await validateSettings({
-        providerId,
-        apiKey: apiKey.trim() || undefined,
-        baseURL: baseURL.trim() || undefined,
-        model: model.trim() || undefined,
-        systemPrompt: systemPrompt.trim() || undefined
-      });
-      setStatus(result);
-      setMessage(result.ok ? t("settings.validateSuccess") : `${t("settings.validateFailed")} ${result.message}`);
-    } finally {
-      setBusyState("idle");
-    }
-  };
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setBusyState("saving");
-    setMessage("");
-    try {
-      const result = await saveSettings({
-        providerId,
-        apiKey: apiKey.trim() || undefined,
-        baseURL: baseURL.trim() || undefined,
-        model: model.trim() || undefined,
-        systemPrompt: systemPrompt.trim() || undefined,
-        confirmLocalKeyWrite: Boolean(apiKey.trim())
-      });
-      setStatus(result);
-      setProviderId(result.providerId);
-      setBaseURL(result.baseURL);
-      setModel(result.model);
-      setModelPreset(resolvePreset(result.providerId, result.baseURL, result.model));
-      setSystemPrompt(result.systemPrompt);
-      setApiKey("");
-      setMessage(t("settings.saveSuccess"));
-    } finally {
-      setBusyState("idle");
-    }
-  };
 
   return (
     <div className="settings-backdrop" role="presentation">
@@ -182,126 +54,42 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
           ))}
         </dl>
 
-        <section className="settings-runtime-section" aria-label="DeerFlow runtime status">
-          <div className="settings-runtime-heading">
-            <div>
-              <p className="eyebrow">Agent runtime</p>
-              <h3>DeerFlow</h3>
-            </div>
-            <span className={deerFlowStatus.enabled && deerFlowStatus.reachable && deerFlowStatus.authState === "authenticated" ? "runtime-pill is-online" : "runtime-pill"}>
-              {deerFlowRuntimeLabel(deerFlowStatus)}
-            </span>
-          </div>
-          <dl className="settings-status-list">
-            {deerFlowRows.map(([label, value]) => (
-              <div className="settings-status-row" key={label}>
-                <dt>{label}</dt>
-                <dd>{value}</dd>
-              </div>
-            ))}
-          </dl>
-          {deerFlowStatus.lastError || deerFlowConfig.lastError ? (
-            <p className="settings-message is-error">{deerFlowStatus.lastError || deerFlowConfig.lastError}</p>
-          ) : null}
-        </section>
+        <DeerFlowRuntimePanel config={settings.deerFlowConfig} status={settings.deerFlowStatus} />
 
-        <form className="settings-form" onSubmit={handleSubmit}>
-          <label className="field">
-            <span>{t("settings.apiKey")}</span>
-            <input
-              autoComplete="off"
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder={t("settings.apiKeyPlaceholder")}
-              type="password"
-              value={apiKey}
-            />
-          </label>
-          <label className="field">
-            <span>{t("settings.modelPreset")}</span>
-            <select
-              onChange={(event) => {
-                const selected = modelPresets.find((preset) => preset.id === event.target.value);
-                setModelPreset(event.target.value);
-                if (selected && selected.id !== "custom") {
-                  setProviderId(selected.providerId);
-                  setBaseURL(selected.baseURL);
-                  setModel(selected.model);
-                }
-              }}
-              value={modelPreset}
-            >
-              {modelPresets.map((preset) => (
-                <option key={preset.id} value={preset.id}>{preset.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>{t("settings.model")}</span>
-            <input
-              onChange={(event) => {
-                setModelPreset("custom");
-                setModel(event.target.value);
-              }}
-              value={model}
-            />
-          </label>
-          <label className="field">
-            <span>{t("settings.baseURL")}</span>
-            <input
-              onChange={(event) => {
-                setModelPreset("custom");
-                setBaseURL(event.target.value);
-              }}
-              value={baseURL}
-            />
-          </label>
-          <label className="field">
-            <span>{t("settings.systemPrompt")}</span>
-            <textarea
-              className="settings-system-prompt"
-              onChange={(event) => setSystemPrompt(event.target.value)}
-              value={systemPrompt}
-            />
-            <small>{t("settings.systemPromptHelp")}</small>
-          </label>
-
-          <p className="settings-safe-note">{t("settings.safeNote")}</p>
-          {status.lastError ? <p className="settings-message is-error">{status.lastError}</p> : null}
-          {message ? <p className="settings-message">{message}</p> : null}
-
-          <div className="settings-actions">
-            <button className="button button-secondary" disabled={busyState !== "idle"} onClick={handleValidate} type="button">
-              {busyState === "validating" ? t("settings.validating") : t("settings.validate")}
-            </button>
-            <button className="button button-primary" disabled={busyState !== "idle"} type="submit">
-              {busyState === "saving" ? t("settings.saving") : t("settings.save")}
-            </button>
-          </div>
-        </form>
+        <ProviderSettingsForm
+          apiKey={settings.apiKey}
+          baseURL={settings.baseURL}
+          busyState={settings.busyState}
+          labels={{
+            apiKey: t("settings.apiKey"),
+            apiKeyPlaceholder: t("settings.apiKeyPlaceholder"),
+            baseURL: t("settings.baseURL"),
+            model: t("settings.model"),
+            modelPreset: t("settings.modelPreset"),
+            safeNote: t("settings.safeNote"),
+            save: t("settings.save"),
+            saving: t("settings.saving"),
+            systemPrompt: t("settings.systemPrompt"),
+            systemPromptHelp: t("settings.systemPromptHelp"),
+            validate: t("settings.validate"),
+            validating: t("settings.validating")
+          }}
+          message={settings.message}
+          model={settings.model}
+          modelPreset={settings.modelPreset}
+          onApiKeyChange={settings.setApiKey}
+          onBaseURLChange={settings.setBaseURL}
+          onModelChange={settings.setModel}
+          onModelPresetChange={settings.setModelPreset}
+          onProviderIdChange={settings.setProviderId}
+          onSubmit={settings.handleSubmit}
+          onSystemPromptChange={settings.setSystemPrompt}
+          onValidate={settings.handleValidate}
+          providerId={settings.providerId}
+          status={settings.status}
+          systemPrompt={settings.systemPrompt}
+        />
       </section>
     </div>
   );
-}
-
-function resolvePreset(providerId: SettingsStatus["providerId"], baseURL: string, model: string) {
-  return modelPresets.find((preset) => preset.providerId === providerId && preset.baseURL === baseURL && preset.model === model)?.id ?? "custom";
-}
-
-function deerFlowRuntimeLabel(status: DeerFlowRuntimeStatus) {
-  if (!status.enabled) return "TypeScript fallback";
-  if (!status.reachable) return "DeerFlow unreachable";
-  if (status.authState === "authenticated") return "DeerFlow online, authenticated";
-  if (status.authState === "setup_required") return "DeerFlow online, setup required";
-  if (status.authState === "auth_failed") return "DeerFlow online, auth failed";
-  if (status.authState === "not_configured") return "DeerFlow online, auth required";
-  return "DeerFlow online";
-}
-
-function deerFlowAuthLabel(status: DeerFlowRuntimeStatus) {
-  if (!status.enabled) return "Not used";
-  if (!status.reachable) return "Unavailable";
-  if (status.authState === "authenticated") return "Authenticated";
-  if (status.authState === "setup_required") return "First-boot setup required";
-  if (status.authState === "auth_failed") return "Authentication failed";
-  return "Credentials not configured";
 }

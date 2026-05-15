@@ -63,7 +63,8 @@ Thread IDs and node/request IDs are validated before filesystem operations so da
 - `rejected` requests are not applied.
 
 ## Migration Notes
-Schema creation and migration currently live in `SQLiteStorageRepository.migrate()`. The migration is idempotent and currently ensures `threads.deleted_at` exists for trash/restore behavior.
+Schema creation and migration live in `server/db/schema.ts`. The migration is idempotent and currently ensures `threads.deleted_at` exists for trash/restore behavior.
+
+`server/storage.ts` remains the public storage facade. `server/db/sqlite.ts` owns SQLite initialization, and repository classes under `server/repositories/` are being introduced behind the facade without changing table names or local paths.
 
 Future storage refactors should preserve existing table names and local paths unless a migration plan is documented here first.
-

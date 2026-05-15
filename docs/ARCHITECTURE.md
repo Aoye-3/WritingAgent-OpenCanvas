@@ -17,7 +17,13 @@ User input
 ```
 
 ## Frontend
-- `src/app/App.tsx` coordinates app-level state, navigation, active Agent, thread state, generation, Canvas state, and settings panel visibility.
+- `src/app/App.tsx` is the control-plane composition layer. It owns navigation, active Agent selection, and view wiring, while thread, generation, Canvas, and trash workflows live in focused hooks under `src/app/hooks/`.
+- `src/app/hooks/useThreadSession.ts` owns thread creation, thread restore, and last-thread persistence.
+- `src/app/hooks/useCanvasState.ts` owns Canvas nodes, pending write requests, selected node state, and approve/reject handlers.
+- `src/app/hooks/useGenerationRun.ts` owns structured generation, chat generation, streaming token/tool-event updates, versions, and collaboration messages.
+- `src/app/hooks/useProjectTrash.ts` owns trash, restore, and hard-delete flows.
+- `src/features/settings/hooks/useProjectSettings.ts` owns provider settings state, validation/save actions, and DeerFlow status loading. `ProjectSettingsPanel` only renders the dialog shell and composes the provider form with the read-only DeerFlow runtime panel.
+- `src/features/agents/hooks/useAgentRuntimeConfig.ts` owns Agent runtime-config loading and settings save. `AgentSettingsView` owns gallery/filter/tab navigation, while tab UI lives in `src/features/agents/components/AgentSettingsTabs.tsx`.
 - `src/features/*` groups product areas: agents, canvas, generation, home, i18n, knowledge, projects, settings, start, tasks, and workspace.
 - `src/features/workspace/WorkspaceView.tsx` renders the main writing workspace: structured Agent inputs, document Canvas, collaboration drawer, tool events, version history, and context/prompt preview surfaces.
 - `src/features/ai-dashboard/AiDashboardView.tsx` renders the AI runtime dashboard for DeerFlow status, Skills/MCP visibility, Agent mapping, and ToolUse bridge progress.
@@ -33,10 +39,16 @@ User input
 - `server/agentRunLoop.ts` runs Chat Completions, executes returned tool calls, records tool events, and stops when final content or `maxToolCalls` is reached.
 
 ## Agent And Tool Layers
-- `server/agentCards.ts` defines AgentCard types, default cards, default settings, and setting application behavior.
+- `server/agentCards.ts` is a compatibility export for the Agent modules under `server/agents/`.
+- `server/agents/types.ts` defines AgentCard and AgentSettings types.
+- `server/agents/cards/builtInCards.ts` defines built-in Agent cards and localized field metadata.
+- `server/agents/prompts.ts` stores built-in identity prompts.
+- `server/agents/defaultSettings.ts` defines default model, prompt, tool, knowledge, memory, and quick-message settings.
+- `server/agents/loader.ts` exposes built-in cards and applies saved settings to cards.
 - `server/agentRuntimeAdapter.ts` resolves Agent cards, merged settings, runtime config, tool policies, and available skills/tools.
 - `server/tools/catalog.ts` is the Tool metadata source of truth.
 - `server/tools/policies.ts` derives whether each tool is enabled, auto-runnable, externally configured, or approval-gated.
+- `server/tools/toolPolicyGuard.ts` performs runtime checks before a tool call can execute.
 - `server/toolRuntime.ts` executes local ToolUse behavior and creates Canvas write requests when `canvas_write` is called.
 
 ## DeerFlow Runtime Boundary
@@ -52,7 +64,10 @@ User input
 - Current validation status: sidecar health, backend auth, config overview, and one Task-card generation are online against the Docker sidecar.
 
 ## Storage
-- `server/storage.ts` owns SQLite initialization, migrations, repositories, and local thread data directories.
+- `server/storage.ts` is the compatibility facade for local persistence. It preserves the public storage API used by routes and services.
+- `server/db/sqlite.ts` initializes SQLite, enables WAL and foreign keys, and calls schema migration.
+- `server/db/schema.ts` owns schema creation and idempotent migration checks.
+- `server/repositories/*` contains focused repository boundaries introduced behind the facade. Thread listing/trash and Agent settings already delegate through repository classes; run and Canvas behavior remain facade-covered while their repository boundaries continue to mature.
 - Runtime database path: `.facetwrite/data/facetwrite.db`.
 - Thread file workspace path: `.facetwrite/threads/<threadId>/user-data/`.
 

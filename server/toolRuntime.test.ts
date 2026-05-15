@@ -27,6 +27,43 @@ test("executes local knowledge tool from current context", async () => {
   assert.match(result.content, /Draft text/);
 });
 
+test("rejects a tool call disabled by runtime policy", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_disabled",
+      type: "function",
+      function: { name: "knowledge_base", arguments: JSON.stringify({ query: "draft", limit: 2 }) }
+    },
+    {
+      allowedToolRefs: ["knowledge_base"],
+      toolState: { knowledge_base: false },
+      contextValues: { currentDraft: "Draft text" }
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.payload.reason, "policy_denied");
+  assert.match(result.content, /disabled/i);
+});
+
+test("rejects a tool call not allowed by the active Agent", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_not_allowed",
+      type: "function",
+      function: { name: "canvas_write", arguments: JSON.stringify({ operation: "create", content: "Nope" }) }
+    },
+    {
+      allowedToolRefs: ["knowledge_base"],
+      toolState: { canvas_write: true }
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.payload.reason, "policy_denied");
+  assert.match(result.content, /not allowed/i);
+});
+
 test("returns structured unavailable result for web search", async () => {
   const result = await executeToolCall(
     {
