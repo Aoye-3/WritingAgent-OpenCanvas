@@ -1,7 +1,7 @@
 # DeerFlow Runtime Live Validation Plan
 
 Date: 2026-05-15
-Status: Planned, not yet implemented
+Status: Runtime observability implemented; real sidecar validation blocked by local uv cache permission error
 
 ## Summary
 

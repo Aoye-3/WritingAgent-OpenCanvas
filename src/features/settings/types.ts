@@ -32,3 +32,20 @@ export type SettingsSaveRequest = {
   systemPrompt?: string;
   confirmLocalKeyWrite?: boolean;
 };
+
+export type DeerFlowRuntimeStatus = {
+  enabled: boolean;
+  baseUrl: string;
+  assistantId: string;
+  reachable: boolean;
+  runtimeProvider: "deerflow" | "typescript";
+  lastError?: string;
+};
+
+export type DeerFlowConfigOverview = {
+  enabled: boolean;
+  baseUrl: string;
+  skills: unknown[];
+  mcpServers: Record<string, unknown>;
+  lastError?: string;
+};

@@ -1,4 +1,4 @@
-import type { SettingsSaveRequest, SettingsStatus, SettingsValidationResponse } from "./types";
+import type { DeerFlowConfigOverview, DeerFlowRuntimeStatus, SettingsSaveRequest, SettingsStatus, SettingsValidationResponse } from "./types";
 import { apiGet, apiPost } from "../../shared/apiClient";
 
 export async function getSettingsStatus(): Promise<SettingsStatus> {
@@ -11,4 +11,12 @@ export async function validateSettings(payload: SettingsSaveRequest): Promise<Se
 
 export async function saveSettings(payload: SettingsSaveRequest): Promise<SettingsStatus> {
   return apiPost<SettingsStatus>("/api/settings/save", payload);
+}
+
+export async function getDeerFlowRuntimeStatus(): Promise<DeerFlowRuntimeStatus> {
+  return apiGet<DeerFlowRuntimeStatus>("/api/deerflow/status");
+}
+
+export async function getDeerFlowConfigOverview(): Promise<DeerFlowConfigOverview> {
+  return apiGet<DeerFlowConfigOverview>("/api/deerflow/config");
 }

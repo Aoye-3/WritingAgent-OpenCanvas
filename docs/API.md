@@ -53,6 +53,11 @@ The implementation lives in `server/utils/http.ts`.
   - DeerFlow Gateway base URL. Defaults to `http://127.0.0.1:8000`.
 - `DEERFLOW_ASSISTANT_ID`
   - DeerFlow assistant ID. Defaults to `lead_agent`.
+- `GET /api/deerflow/status`
+  - Returns DeerFlow runtime status: enabled, baseUrl, assistantId, reachable, runtimeProvider, and lastError.
+- `GET /api/deerflow/config`
+  - Returns read-only DeerFlow skills and MCP server overview.
+  - Secret-like MCP values such as keys, tokens, passwords, authorization headers, and OAuth client secrets are redacted.
 
 ## Threads
 - `GET /api/threads/recent`

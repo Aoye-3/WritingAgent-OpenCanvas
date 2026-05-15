@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useI18n } from "../i18n/I18nProvider";
-import { getSettingsStatus, saveSettings, validateSettings } from "./settingsClient";
-import type { SettingsStatus } from "./types";
+import { getDeerFlowConfigOverview, getDeerFlowRuntimeStatus, getSettingsStatus, saveSettings, validateSettings } from "./settingsClient";
+import type { DeerFlowConfigOverview, DeerFlowRuntimeStatus, SettingsStatus } from "./types";
 
 type ProjectSettingsPanelProps = {
   open: boolean;
@@ -34,6 +34,21 @@ const modelPresets = [
   { id: "custom", providerId: "openai-compatible", label: "Custom", baseURL: "", model: "" }
 ] as const;
 
+const fallbackDeerFlowStatus: DeerFlowRuntimeStatus = {
+  enabled: false,
+  baseUrl: "http://127.0.0.1:8000",
+  assistantId: "lead_agent",
+  reachable: false,
+  runtimeProvider: "typescript"
+};
+
+const fallbackDeerFlowConfig: DeerFlowConfigOverview = {
+  enabled: false,
+  baseUrl: "http://127.0.0.1:8000",
+  skills: [],
+  mcpServers: {}
+};
+
 export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProps) {
   const { t } = useI18n();
   const [status, setStatus] = useState<SettingsStatus>(fallbackStatus);
@@ -43,6 +58,8 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
   const [model, setModel] = useState("deepseek-v4-flash");
   const [modelPreset, setModelPreset] = useState("deepseek-v4-flash");
   const [systemPrompt, setSystemPrompt] = useState(fallbackStatus.systemPrompt);
+  const [deerFlowStatus, setDeerFlowStatus] = useState<DeerFlowRuntimeStatus>(fallbackDeerFlowStatus);
+  const [deerFlowConfig, setDeerFlowConfig] = useState<DeerFlowConfigOverview>(fallbackDeerFlowConfig);
   const [message, setMessage] = useState("");
   const [busyState, setBusyState] = useState<"idle" | "saving" | "validating">("idle");
 
@@ -62,6 +79,16 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
       .catch((error: unknown) => {
         setStatus({ ...fallbackStatus, lastError: error instanceof Error ? error.message : "Unable to load settings" });
       });
+    Promise.all([getDeerFlowRuntimeStatus(), getDeerFlowConfigOverview()])
+      .then(([nextStatus, nextConfig]) => {
+        setDeerFlowStatus(nextStatus);
+        setDeerFlowConfig(nextConfig);
+      })
+      .catch((error: unknown) => {
+        const messageText = error instanceof Error ? error.message : "Unable to load DeerFlow status";
+        setDeerFlowStatus({ ...fallbackDeerFlowStatus, lastError: messageText });
+        setDeerFlowConfig({ ...fallbackDeerFlowConfig, lastError: messageText });
+      });
   }, [open]);
 
   if (!open) return null;
@@ -74,6 +101,13 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
     [t("settings.apiHealth"), status.apiHealth],
     [t("settings.provider"), status.provider === "mock" ? t("settings.mockFallback") : `${status.provider} ${t("settings.providerReady")}`],
     [t("settings.lastValidated"), status.lastValidated ? new Date(status.lastValidated).toLocaleString() : t("settings.never")]
+  ];
+  const deerFlowRows = [
+    ["Runtime", deerFlowRuntimeLabel(deerFlowStatus)],
+    ["Base URL", deerFlowStatus.baseUrl],
+    ["Assistant", deerFlowStatus.assistantId],
+    ["Skills", String(deerFlowConfig.skills.length)],
+    ["MCP servers", Object.keys(deerFlowConfig.mcpServers).join(", ") || "None"]
   ];
 
   const handleValidate = async () => {
@@ -145,6 +179,29 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
             </div>
           ))}
         </dl>
+
+        <section className="settings-runtime-section" aria-label="DeerFlow runtime status">
+          <div className="settings-runtime-heading">
+            <div>
+              <p className="eyebrow">Agent runtime</p>
+              <h3>DeerFlow</h3>
+            </div>
+            <span className={deerFlowStatus.enabled && deerFlowStatus.reachable ? "runtime-pill is-online" : "runtime-pill"}>
+              {deerFlowRuntimeLabel(deerFlowStatus)}
+            </span>
+          </div>
+          <dl className="settings-status-list">
+            {deerFlowRows.map(([label, value]) => (
+              <div className="settings-status-row" key={label}>
+                <dt>{label}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
+          {deerFlowStatus.lastError || deerFlowConfig.lastError ? (
+            <p className="settings-message is-error">{deerFlowStatus.lastError || deerFlowConfig.lastError}</p>
+          ) : null}
+        </section>
 
         <form className="settings-form" onSubmit={handleSubmit}>
           <label className="field">
@@ -226,4 +283,10 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
 
 function resolvePreset(providerId: SettingsStatus["providerId"], baseURL: string, model: string) {
   return modelPresets.find((preset) => preset.providerId === providerId && preset.baseURL === baseURL && preset.model === model)?.id ?? "custom";
+}
+
+function deerFlowRuntimeLabel(status: DeerFlowRuntimeStatus) {
+  if (!status.enabled) return "TypeScript fallback";
+  if (status.reachable) return "DeerFlow online";
+  return "DeerFlow unreachable";
 }

@@ -42,6 +42,8 @@ DeerFlow is the primary Agent runtime integration foundation when `DEERFLOW_ENAB
 - Subagent metadata includes name, description, system prompt, skills, tools, model inheritance, timeout, and max turns.
 - FacetWrite records DeerFlow runs as provider `deerflow`.
 - The current TypeScript run loop remains available when DeerFlow is disabled or unavailable.
+- Runtime status is exposed through `/api/deerflow/status`.
+- DeerFlow skills and MCP server overview are read through `/api/deerflow/config`; MCP environment and secret-like values are redacted before reaching the frontend.
 
 ## Tool Catalog
 `server/tools/catalog.ts` is the Tool metadata source of truth. Each ToolDefinition includes:

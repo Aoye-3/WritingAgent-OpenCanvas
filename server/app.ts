@@ -7,6 +7,7 @@ import { createStorage } from "./storage.js";
 import { registerAgentRoutes } from "./routes/agentRoutes.js";
 import { registerCatalogRoutes } from "./routes/catalogRoutes.js";
 import { registerCanvasRoutes } from "./routes/canvasRoutes.js";
+import { registerDeerFlowRoutes } from "./routes/deerflowRoutes.js";
 import { registerGenerationRoutes } from "./routes/generationRoutes.js";
 import { registerHealthRoutes } from "./routes/healthRoutes.js";
 import { registerProjectRoutes } from "./routes/projectRoutes.js";
@@ -25,6 +26,7 @@ export async function createApp() {
   app.use(express.json({ limit: "1mb" }));
 
   registerHealthRoutes(app);
+  registerDeerFlowRoutes(app);
   registerCatalogRoutes(app);
   registerAgentRoutes(app, { agentRuntime });
   registerThreadRoutes(app, { storage, agentRuntime });

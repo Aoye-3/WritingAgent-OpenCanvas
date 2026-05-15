@@ -1,5 +1,29 @@
 # FacetWrite Refactor Log
 
+## 2026-05-15: DeerFlow Runtime Observability And Live Validation
+Scope: Implemented DeerFlow runtime status/config visibility and attempted real sidecar validation.
+
+Findings:
+- FacetWrite can safely expose DeerFlow runtime status through a dedicated backend route without mixing it into provider settings validation.
+- DeerFlow Skill/MCP visibility should remain read-only for now, with secret-like MCP fields redacted before reaching the UI.
+- Real sidecar validation could not complete in this environment: `uv` found CPython 3.12.12 and started dependency setup, but failed while downloading/caching `langfuse==4.5.1` due to Windows cache rename permission errors (`os error 5`, access denied).
+
+Completed:
+- Added `/api/deerflow/status`.
+- Added `/api/deerflow/config`.
+- Added backend tests for disabled, reachable, unreachable, skills read, MCP redaction, and safe unreachable config behavior.
+- Added Project Settings DeerFlow runtime visibility with status, base URL, assistant ID, skill count, and MCP server overview.
+- Confirmed `npm.cmd run typecheck` and `npm.cmd test` pass before documentation review.
+- Cleaned temporary `.venv` and `.uv-cache` artifacts created by the failed sidecar setup attempt.
+
+Open TODO:
+- Retry live sidecar validation in an environment where `uv` can complete dependency installation and cache writes.
+- Confirm `/api/runs/stream` wire shape against a running DeerFlow backend.
+- Add UI affordance for showing recent DeerFlow runtime errors near generation results if live validation reveals user-facing failure cases.
+
+Next Priority Check:
+- Fix the local DeerFlow Python/uv environment or run the sidecar in a clean container, then perform one Task-card end-to-end generation with `DEERFLOW_ENABLED=true`.
+
 ## 2026-05-15: DeerFlow Runtime Live Validation Plan
 Scope: Saved the next DeerFlow runtime plan before implementation.
 

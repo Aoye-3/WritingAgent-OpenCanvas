@@ -7,6 +7,13 @@ Reason: FacetWrite needs mature Agent runtime capability without rebuilding Lang
 
 Impact: FacetWrite keeps ownership of product data, frontend interaction, SQLite persistence, Canvas writes, and approval flows. DeerFlow runtime events are adapted into FacetWrite run records, and the TypeScript run loop remains as a fallback during migration.
 
+## 2026-05-15: DeerFlow Config Visibility Is Read-only First
+Decision: Expose DeerFlow runtime status, skills, and MCP server overview through FacetWrite as read-only observability before adding write controls.
+
+Reason: FacetWrite needs to show whether DeerFlow is active and what intelligent-runtime capabilities are visible, while avoiding premature MCP/Skill mutation paths.
+
+Impact: `/api/deerflow/config` redacts secret-like values and the frontend displays only overview information. Writing DeerFlow skills/MCP settings remains out of scope for this phase.
+
 ## 2026-05-15: Maintain Seven Project Fact Documents
 Decision: Use `PROJECT_BRIEF.md`, `ARCHITECTURE.md`, `API.md`, `DATABASE.md`, `AGENT.md`, `DECISIONS.md`, and `REFACTOR_LOG.md` as the maintained technical documentation set.
 
