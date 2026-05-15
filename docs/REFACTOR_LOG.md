@@ -1,5 +1,24 @@
 # FacetWrite Refactor Log
 
+## 2026-05-15: DeerFlow Runtime Live Validation Plan
+Scope: Saved the next DeerFlow runtime plan before implementation.
+
+Findings:
+- The first DeerFlow backend adapter slice is implemented and committed.
+- The next priority is real sidecar validation, runtime observability, and read-only shared Skill/MCP configuration visibility.
+
+Completed:
+- Added `docs/plans/DEERFLOW_RUNTIME_LIVE_VALIDATION_PLAN.md`.
+- Captured the required execution order: save plan, commit baseline, implement and validate, review, update docs, and commit implementation.
+
+Open TODO:
+- Add DeerFlow runtime status API and frontend visibility.
+- Add read-only DeerFlow Skill/MCP config proxy behavior.
+- Attempt real DeerFlow sidecar validation and record the result.
+
+Next Priority Check:
+- Start by implementing runtime status and safe read-only config proxy tests.
+
 ## 2026-05-15: DeerFlow Runtime Adapter First Slice
 Scope: Implemented the first backend slice of the DeerFlow Agent runtime integration.
 
