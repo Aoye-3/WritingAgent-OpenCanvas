@@ -1,11 +1,28 @@
 # DeerFlow Docker Sidecar Run Plan
 
 Date: 2026-05-15
-Status: Planned, not yet implemented
+Status: Partially validated. Docker sidecar health/status are online; protected DeerFlow run/config endpoints require auth setup before generation can complete.
 
 ## Summary
 
 This phase moves FacetWrite + DeerFlow from an implemented adapter to a real Docker sidecar runtime. FacetWrite currently falls back to the TypeScript runtime. DeerFlow already provides Docker Compose files, but Docker reads the user-level config file with a permission warning, so execution should use a workspace-local `DOCKER_CONFIG`.
+
+## Run Result
+
+- Created a workspace-local Docker config at `.docker-codex/` and ignored it in git.
+- Generated local ignored DeerFlow runtime files from examples where needed: `Deerflow/config.yaml`, `Deerflow/extensions_config.json`, `Deerflow/.env`, and `Deerflow/frontend/.env`.
+- Started DeerFlow through `Deerflow/docker/docker-compose-dev.yaml` with project name `deer-flow-dev`.
+- Used DeerFlow nginx as the sidecar entrypoint: `http://127.0.0.1:2026`.
+- Confirmed `GET http://127.0.0.1:2026/health` returns `{"status":"healthy","service":"deer-flow-gateway"}`.
+- Confirmed FacetWrite `/api/deerflow/status` returns `enabled:true`, `reachable:true`, and `runtimeProvider:"deerflow"` when local env points to the Docker sidecar.
+- Confirmed `/api/deerflow/config` does not leak secrets, but currently reports DeerFlow HTTP 401 for protected config endpoints.
+- Confirmed generation attempts reach DeerFlow, but `/api/runs/stream` currently returns HTTP 403 until DeerFlow setup/login or service-to-service auth is implemented.
+
+## Follow-up Required
+
+- Complete DeerFlow first-boot setup or add a FacetWrite-to-DeerFlow authenticated service path.
+- Re-run one Task-card generation and confirm provider `deerflow` only after `/api/runs/stream` accepts the request.
+- Keep TypeScript fallback enabled while DeerFlow auth and generation contract validation remain incomplete.
 
 ## Key Changes
 

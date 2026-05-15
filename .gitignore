@@ -16,3 +16,4 @@ pnpm-debug.log*
 .devserver.pid
 .superpowers/
 .facetwrite/
+.docker-codex/

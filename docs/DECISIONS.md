@@ -1,5 +1,19 @@
 # FacetWrite Technical Decisions
 
+## 2026-05-15: Docker Is The Preferred Local DeerFlow Runtime
+Decision: Run DeerFlow as a Docker sidecar through its Compose nginx entrypoint at `http://127.0.0.1:2026` for local FacetWrite integration work.
+
+Reason: DeerFlow is a Python/LangGraph runtime with its own dependency and service boundary. Docker avoids the Windows-native `uv` cache permission failure previously seen during local setup and matches the intended sidecar architecture.
+
+Impact: FacetWrite uses `DEERFLOW_ENABLED=true`, `DEERFLOW_BASE_URL=http://127.0.0.1:2026`, and `DEERFLOW_ASSISTANT_ID=lead_agent` for local sidecar validation. Docker config is kept in workspace-local `.docker-codex/` and ignored by git.
+
+## 2026-05-15: Do Not Bypass DeerFlow Auth
+Decision: Treat DeerFlow protected endpoints as an integration contract instead of bypassing auth in FacetWrite.
+
+Reason: Docker validation confirmed `/health` is public, but `/api/skills`, `/api/mcp/config`, and `/api/runs/stream` require DeerFlow auth. Disabling or bypassing that boundary would hide the real production contract and weaken the runtime split.
+
+Impact: Current health/status validation can be considered complete, but full generation remains blocked until first-boot setup/login or service-to-service auth is implemented.
+
 ## 2026-05-15: DeerFlow Is The Primary Agent Runtime Foundation
 Decision: Integrate DeerFlow as a sidecar Agent runtime and use its Lead Agent as the main orchestration Agent when `DEERFLOW_ENABLED=true`.
 

@@ -51,13 +51,21 @@ The implementation lives in `server/utils/http.ts`.
   - Enables the DeerFlow runtime path when set to `true` or `1`.
 - `DEERFLOW_BASE_URL`
   - DeerFlow Gateway base URL. Defaults to `http://127.0.0.1:8000`.
+  - For the validated Docker sidecar path, use DeerFlow nginx: `http://127.0.0.1:2026`.
 - `DEERFLOW_ASSISTANT_ID`
   - DeerFlow assistant ID. Defaults to `lead_agent`.
 - `GET /api/deerflow/status`
   - Returns DeerFlow runtime status: enabled, baseUrl, assistantId, reachable, runtimeProvider, and lastError.
+  - Docker validation on 2026-05-15 confirmed this endpoint reports `reachable:true` against `http://127.0.0.1:2026` when DeerFlow nginx/gateway are running.
 - `GET /api/deerflow/config`
   - Returns read-only DeerFlow skills and MCP server overview.
   - Secret-like MCP values such as keys, tokens, passwords, authorization headers, and OAuth client secrets are redacted.
+  - If DeerFlow protected config endpoints require auth, the route returns safe overview defaults plus `lastError`; it must not expose DeerFlow secrets or MCP environment values.
+
+## DeerFlow Auth Status
+- DeerFlow Docker sidecar health is reachable without auth at `/health`.
+- DeerFlow `/api/skills`, `/api/mcp/config`, and `/api/runs/stream` are protected in the validated Docker runtime.
+- FacetWrite should not bypass this protection. The next integration slice should add an explicit setup/login or service-to-service auth path before claiming full DeerFlow generation support.
 
 ## Threads
 - `GET /api/threads/recent`

@@ -1,5 +1,33 @@
 # FacetWrite Refactor Log
 
+## 2026-05-15: DeerFlow Docker Sidecar Run
+Scope: Ran the Docker sidecar path and validated the first real FacetWrite-to-DeerFlow runtime checks.
+
+Findings:
+- Workspace-local `DOCKER_CONFIG` avoids the user-level Docker config access-denied warning.
+- DeerFlow Compose can start nginx/gateway/frontend through `Deerflow/docker/docker-compose-dev.yaml` with project name `deer-flow-dev`.
+- A copied example `Deerflow/config.yaml` needs at least one concrete model entry; an empty/comment-only `models:` block causes gateway startup validation to fail.
+- DeerFlow `/health` is public and returns healthy through nginx at `http://127.0.0.1:2026`.
+- FacetWrite `/api/deerflow/status` reports `enabled:true`, `reachable:true`, and `runtimeProvider:"deerflow"` when pointed at the Docker sidecar.
+- DeerFlow `/api/skills`, `/api/mcp/config`, and `/api/runs/stream` are protected in the Docker runtime. FacetWrite config proxy reports safe errors for 401, and generation reaches DeerFlow but receives HTTP 403 until auth is wired.
+
+Completed:
+- Added `.docker-codex/` to `.gitignore`.
+- Generated ignored local DeerFlow config/env files needed for Docker startup without printing secrets.
+- Started Docker Desktop and DeerFlow Compose services.
+- Confirmed sidecar health and FacetWrite runtime status are online.
+- Confirmed config proxy does not leak secrets when DeerFlow protected endpoints return auth errors.
+- Attempted one Task-card generation and recorded the auth blocker instead of expanding ToolUse or bypassing DeerFlow auth.
+
+Open TODO:
+- Complete DeerFlow first-boot setup or implement a FacetWrite service-to-service auth flow for protected DeerFlow endpoints.
+- Re-run `/api/deerflow/config` after auth and confirm skills/MCP overview is populated.
+- Re-run one Task-card generation and confirm provider `deerflow` only after `/api/runs/stream` accepts authenticated requests.
+- Add user-facing error affordance near generation results if DeerFlow is enabled but protected endpoints reject requests.
+
+Next Priority Check:
+- Decide the DeerFlow auth strategy: automated setup/login cookie/token handling in the FacetWrite adapter, or a documented DeerFlow development auth mode if the project supports one.
+
 ## 2026-05-15: DeerFlow Docker Sidecar Run Plan
 Scope: Saved the Docker sidecar execution plan before implementation.
 

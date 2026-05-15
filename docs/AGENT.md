@@ -37,6 +37,7 @@ Runtime config includes the resolved card/settings, available tools, tool polici
 DeerFlow is the primary Agent runtime integration foundation when `DEERFLOW_ENABLED=true`.
 
 - DeerFlow `lead_agent` acts as the main orchestration Agent.
+- Local Docker validation uses DeerFlow nginx at `http://127.0.0.1:2026`.
 - Each FacetWrite Task card maps to a DeerFlow subagent configuration.
 - The mapping lives in `server/deerflow/taskAgentMapping.ts`.
 - Subagent metadata includes name, description, system prompt, skills, tools, model inheritance, timeout, and max turns.
@@ -44,6 +45,7 @@ DeerFlow is the primary Agent runtime integration foundation when `DEERFLOW_ENAB
 - The current TypeScript run loop remains available when DeerFlow is disabled or unavailable.
 - Runtime status is exposed through `/api/deerflow/status`.
 - DeerFlow skills and MCP server overview are read through `/api/deerflow/config`; MCP environment and secret-like values are redacted before reaching the frontend.
+- Current Docker sidecar status: `/health` and `/api/deerflow/status` pass, but `/api/runs/stream` returns DeerFlow HTTP 403 until first-boot setup/login or service-to-service auth is wired.
 
 ## Tool Catalog
 `server/tools/catalog.ts` is the Tool metadata source of truth. Each ToolDefinition includes:
@@ -85,6 +87,8 @@ build messages
 Tool events are recorded as `tool_call_requested`, `tool_call_completed`, `tool_call_failed`, and `tool_loop_stopped`.
 
 When DeerFlow is enabled, `server/deerflow/client.ts` calls `/api/runs/stream`, maps token/message stream output into the FacetWrite response, and maps DeerFlow custom task events into `deerflow_*` tool events for the run history.
+
+Until the protected DeerFlow run endpoint accepts authenticated FacetWrite requests, the TypeScript run loop remains the reliable fallback for actual content generation.
 
 ## Provider Boundary
 Provider-specific request normalization belongs in `server/providerRuntime.ts`. UI and product code should use provider IDs and capabilities rather than inferring provider behavior from base URLs or model strings.

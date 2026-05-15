@@ -41,10 +41,12 @@ User input
 ## DeerFlow Runtime Boundary
 - DeerFlow is now an integration foundation for Agent runtime work, not only reference source.
 - FacetWrite calls DeerFlow as a Python sidecar over HTTP/SSE when `DEERFLOW_ENABLED=true`.
+- The validated local sidecar path is Docker Compose through DeerFlow nginx at `http://127.0.0.1:2026`.
 - DeerFlow `lead_agent` is the default main-agent entrypoint.
 - FacetWrite Task cards are mapped to DeerFlow subagent metadata with skills, tools, model inheritance, timeout, and max-turn defaults.
 - FacetWrite exposes read-only DeerFlow status and config overview endpoints for UI observability.
 - FacetWrite remains responsible for product data, SQLite persistence, frontend state, Canvas approval, and local fallback behavior.
+- Current validation status: sidecar health and FacetWrite runtime status are online; DeerFlow protected endpoints such as `/api/runs/stream`, `/api/skills`, and `/api/mcp/config` require auth setup before full generation/config sync can complete.
 
 ## Storage
 - `server/storage.ts` owns SQLite initialization, migrations, repositories, and local thread data directories.
