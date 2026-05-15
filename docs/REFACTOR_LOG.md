@@ -1,5 +1,26 @@
 # FacetWrite Refactor Log
 
+## 2026-05-15: Technical Documentation Maintenance
+Scope: Refreshed maintained docs after the AI Dashboard and DeerFlow runtime control-plane implementation.
+
+Findings:
+- Core architecture, Agent, API, and decision docs already described the DeerFlow execution-plane direction.
+- `PROJECT_BRIEF.md` still under-described AI Dashboard and DeerFlow as current runtime capabilities.
+- `SECURITY.md` needed explicit backend-only DeerFlow session and MCP redaction rules.
+- The docs set needed a lightweight entry map so future AI-assisted reviews know which file to update.
+
+Completed:
+- Added `docs/README.md` as the technical documentation map and update-rule guide.
+- Updated `PROJECT_BRIEF.md` with AI Dashboard, DeerFlow runtime sidecar, and progressive ToolUse/MCP bridge status.
+- Updated `SECURITY.md` with DeerFlow auth/session, protected endpoint, redaction, and approval-boundary notes.
+
+Open TODO:
+- Keep updating docs whenever CanvasWrite, KnowledgeBase, or WebSearch become verified DeerFlow Tool/MCP executions.
+- Add recent run/event history documentation if the AI Dashboard begins showing persisted runtime events.
+
+Next Priority Check:
+- Before the next Agent runtime bridge, compare `AGENT.md`, `API.md`, and `SECURITY.md` against the code path being changed.
+
 ## 2026-05-15: AI Dashboard And DeerFlow Control Plane
 Scope: Added a read-only AI Dashboard and DeerFlow dashboard aggregation API.
 

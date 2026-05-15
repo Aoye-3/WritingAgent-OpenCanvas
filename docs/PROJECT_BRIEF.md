@@ -11,23 +11,25 @@ The app is currently an MVP focused on Agent-assisted writing workflows rather t
 - Local-first builders testing Agent, Tool, and Canvas workflows before introducing cloud collaboration.
 
 ## Current Capabilities
-- Start, Home, Projects, Agent Settings, Knowledge Settings, and Workspace views.
+- Start, Home, Projects, Agent Settings, AI Dashboard, Knowledge Settings, and Workspace views.
+- AI Dashboard view for DeerFlow runtime status, authenticated sidecar visibility, Skills/MCP overview, Agent mapping, and ToolUse bridge progress.
 - Predefined Agent cards for blog posts, summaries, emails, lesson plans, report outlines, and rewrite/polish.
 - Agent settings for model, prompt, tools, knowledge, memory, and quick messages.
 - Provider support through DeepSeek, OpenAI, OpenAI-compatible, and mock fallback paths.
+- DeerFlow Docker sidecar integration as the preferred AI execution/runtime plane when enabled, with the TypeScript provider runtime kept as fallback.
 - SQLite-backed threads, messages, runs, prompt versions, output versions, tool events, Agent settings, Canvas nodes, and Canvas write requests.
 - Canvas write workflow where the Agent can request writes, but user approval is required before Canvas content changes.
 
 ## MVP Boundaries
 - The app is local-first and stores runtime data under `.facetwrite/`.
 - Agent cards are predefined in code; the current UI edits settings for existing cards.
-- `web_search` is cataloged as an external tool, but live external search is not assumed to be configured.
+- `web_search`, `knowledge_base`, and `canvas_write` are in progressive DeerFlow ToolUse/MCP bridging; not every configured capability is proven consumed by DeerFlow yet.
 - Canvas write requests are internal ToolUse operations, not direct model-side mutations.
 - Knowledge settings exist as a product surface, but full knowledge ingestion is outside the current documented MVP.
 
 ## Do Not Do Yet
 - Do not expose high-risk tools that mutate user data without explicit approval.
+- Do not describe FacetWrite as a competing main Agent runtime when DeerFlow is enabled; FacetWrite is the workspace/control plane.
 - Do not treat archived research or historical plans as current implementation truth.
 - Do not replace SQLite or introduce a large ORM before storage boundaries are intentionally refactored.
 - Do not turn `README.md` into the main architecture document.
-

@@ -21,3 +21,12 @@ Agent tools are configured through the tool catalog and policy layer:
 - Low-risk local context tools may run automatically when enabled.
 - `canvas_write` can only create a pending write request. The user must approve the request before Canvas content changes.
 - External tools such as web search must report when they are not configured.
+
+## DeerFlow runtime auth
+
+When DeerFlow is enabled, FacetWrite accesses protected DeerFlow APIs through a backend-managed local session. The frontend must never receive DeerFlow cookies, CSRF tokens, auth email/password, provider keys, or MCP secret-like values.
+
+- DeerFlow health may be checked through `/health`.
+- Protected calls such as `/api/skills`, `/api/mcp/config`, and `/api/runs/stream` must use the backend auth helper.
+- `GET /api/deerflow/status`, `GET /api/deerflow/config`, and `GET /api/deerflow/dashboard` are read-only FacetWrite surfaces and must redact secret-like values.
+- DeerFlow-proposed writes or external side effects must still pass through FacetWrite Human-in-the-loop approval before changing product data.
