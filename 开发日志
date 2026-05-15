@@ -1,0 +1,29 @@
+## 核心观点
+左侧边栏：结构化信息上下文锁定，右侧Agent的上下文锁定来源
+右侧边栏：Agent交流与ToolUse
+画布：用户与Ai的信息协作区域
+下方的CanvasBar实现与画布的交互逻辑与未来的扩展功能。【新增卡片，选择外部知识库，webSearch】
+
+
+## 日程记录
+完成了初版架构
+开始适配Deepseek和Deerflow架构
+对Agent设置进行了隔离操作，从原本的prompt hint转向真实的ToolCall，Function Calling
+定位：左侧边栏：结构化信息上下文锁定，右侧边栏Agent交流与ToolUse，画布：用户与Ai的信息协作区域。
+后端数据存储：SQLite
+Agent工作逻辑：基于Deepseek的接口文档，和Deerflow。意图识别--聊天--ToolUse--写入前申请
+
+* 最小MVP：实现画板写入的Function Calling
+* 开始延续开发，下方CanvasBar与画布的交互逻辑
+* 延续开发，强化右键，实现可以快捷发送选中内容
+
+
+
+## 代办
+对布局进行Canvas增强。画布内容与左侧边栏结构化输入+右侧边栏Agent协作聊天，这之间的关系与信息处理结构。
+
+对于Agent交互输入逻辑的增强，增加一个确认环节，再写入画板。
+给出选项和Plan
+
+- 基于Deepseek的接口文档，和Deerflow，对Agent工作逻辑更了解。
+- 关于

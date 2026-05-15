@@ -1,0 +1,97 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { executeToolCall, getEnabledToolDefinitions } from "./toolRuntime.js";
+
+test("exposes only enabled tools with chat-completion schemas", () => {
+  const tools = getEnabledToolDefinitions(["knowledge_base", "web_search"], { knowledge_base: true, web_search: false });
+
+  assert.deepEqual(tools.map((tool) => tool.function.name), ["knowledge_base"]);
+  assert.equal(tools[0].type, "function");
+  assert.equal(tools[0].function.parameters.additionalProperties, false);
+});
+
+test("executes local knowledge tool from current context", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_1",
+      type: "function",
+      function: { name: "knowledge_base", arguments: JSON.stringify({ query: "draft", limit: 2 }) }
+    },
+    {
+      contextValues: { currentDraft: "Draft text", knowledgeSource: "Course Notes" },
+      chatInstruction: "Use the draft"
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.match(result.content, /Draft text/);
+});
+
+test("returns structured unavailable result for web search", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_2",
+      type: "function",
+      function: { name: "web_search", arguments: JSON.stringify({ query: "latest" }) }
+    },
+    { contextValues: {}, chatInstruction: "search" }
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.content, /not configured/i);
+});
+
+test("canvas_write creates a pending request instead of writing directly", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_3",
+      type: "function",
+      function: {
+        name: "canvas_write",
+        arguments: JSON.stringify({
+          operation: "create",
+          nodeKind: "document",
+          title: "Draft",
+          content: "Pending draft",
+          rationale: "The user asked for a first version."
+        })
+      }
+    },
+    {
+      createCanvasWriteRequest(input) {
+        assert.equal(input.operation, "create");
+        assert.equal(input.content, "Pending draft");
+        return {
+          id: "write_1",
+          operation: input.operation,
+          nodeKind: input.nodeKind ?? "document",
+          title: input.title ?? "",
+          status: "pending"
+        };
+      }
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.requestId, "write_1");
+  assert.equal(result.payload.status, "pending");
+  assert.match(result.content, /pending user approval/i);
+});
+
+test("canvas_write rejects malformed write arguments", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_4",
+      type: "function",
+      function: { name: "canvas_write", arguments: JSON.stringify({ operation: "delete", content: "Nope" }) }
+    },
+    {
+      createCanvasWriteRequest() {
+        throw new Error("should not be called");
+      }
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.payload.reason, "invalid_operation");
+});

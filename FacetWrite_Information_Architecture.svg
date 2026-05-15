@@ -1,0 +1,91 @@
+<svg width="1200" height="760" viewBox="0 0 1200 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="760" fill="#F6F7F9"/>
+  <style>
+    .title { font: 700 30px Inter, Arial, sans-serif; fill: #172033; }
+    .subtitle { font: 500 14px Inter, Arial, sans-serif; fill: #667085; }
+    .box-title { font: 700 17px Inter, Arial, sans-serif; fill: #172033; }
+    .box-text { font: 500 14px Inter, Arial, sans-serif; fill: #667085; }
+    .small { font: 600 13px Inter, Arial, sans-serif; fill: #42526B; }
+    .node { fill: #FFFFFF; stroke: #D8DEE8; stroke-width: 1.2; rx: 10; }
+    .primary { fill: #DBEAFE; stroke: #9DBCFB; }
+    .workspace { fill: #FFFFFF; stroke: #2563EB; stroke-width: 1.6; }
+    .context { fill: #F1F4F8; stroke: #D8DEE8; stroke-width: 1.2; rx: 8; }
+    .line { stroke: #98A2B3; stroke-width: 1.6; marker-end: url(#arrow); }
+    .strong-line { stroke: #2563EB; stroke-width: 2; marker-end: url(#arrowBlue); }
+  </style>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#98A2B3"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563EB"/>
+    </marker>
+  </defs>
+
+  <text x="64" y="64" class="title">FacetWrite Information Architecture</text>
+  <text x="64" y="92" class="subtitle">Simplified structure: task entry, faceted workspace, context configuration, output preview, and free-text comparison.</text>
+
+  <!-- Home -->
+  <rect x="64" y="150" width="250" height="126" class="node primary"/>
+  <text x="88" y="188" class="box-title">Home / Task Cards</text>
+  <text x="88" y="218" class="box-text">Choose a text generation task</text>
+  <text x="88" y="244" class="small">Search · Categories · Cards</text>
+
+  <!-- Workspace -->
+  <rect x="450" y="118" width="640" height="392" class="workspace" rx="14"/>
+  <text x="482" y="160" class="box-title">Canvas Workspace</text>
+  <text x="482" y="188" class="box-text">Layered editing interface after selecting a task</text>
+
+  <!-- Workspace children -->
+  <rect x="482" y="226" width="248" height="108" class="context"/>
+  <text x="504" y="260" class="box-title">Left Structured Input</text>
+  <text x="504" y="288" class="box-text">Core settings</text>
+  <text x="504" y="312" class="box-text">Output specification</text>
+
+  <rect x="768" y="226" width="278" height="108" class="context"/>
+  <text x="790" y="260" class="box-title">Output Preview</text>
+  <text x="790" y="288" class="box-text">Generated text artifact</text>
+  <text x="790" y="312" class="box-text">Copy · Regenerate · Refine</text>
+
+  <rect x="482" y="370" width="564" height="96" class="context"/>
+  <text x="504" y="404" class="box-title">Floating Context Bar</text>
+  <text x="504" y="432" class="box-text">Context · Knowledge Source · References · Prompt Preview</text>
+
+  <!-- Comparison -->
+  <rect x="450" y="596" width="360" height="108" class="node"/>
+  <text x="478" y="632" class="box-title">Free-text Comparison</text>
+  <text x="478" y="660" class="box-text">Traditional prompt textarea</text>
+  <text x="478" y="684" class="box-text">Generate · Output result</text>
+
+  <!-- Task list -->
+  <rect x="64" y="356" width="250" height="246" class="node"/>
+  <text x="88" y="392" class="box-title">Task Cards</text>
+  <text x="88" y="426" class="box-text">Blog Post</text>
+  <text x="88" y="452" class="box-text">Summary</text>
+  <text x="88" y="478" class="box-text">Email Writer</text>
+  <text x="88" y="504" class="box-text">Lesson Plan</text>
+  <text x="88" y="530" class="box-text">Report Outline</text>
+  <text x="88" y="556" class="box-text">Rewrite / Polish</text>
+
+  <!-- Detail labels -->
+  <rect x="874" y="596" width="216" height="108" class="node"/>
+  <text x="902" y="632" class="box-title">Research Data</text>
+  <text x="902" y="660" class="box-text">Prompt construction time</text>
+  <text x="902" y="684" class="box-text">Usability measures</text>
+
+  <!-- Connectors -->
+  <path d="M314 213 C360 213 392 188 450 188" class="strong-line"/>
+  <path d="M189 276 L189 356" class="line"/>
+  <path d="M314 479 C382 479 394 650 450 650" class="line"/>
+  <path d="M730 280 L768 280" class="line"/>
+  <path d="M764 334 L764 370" class="line"/>
+  <path d="M810 650 L874 650" class="line"/>
+
+  <!-- Layer legend -->
+  <rect x="64" y="650" width="250" height="54" fill="#FFFFFF" stroke="#D8DEE8" rx="10"/>
+  <circle cx="90" cy="677" r="6" fill="#2563EB"/>
+  <text x="108" y="682" class="small">Primary user flow</text>
+  <circle cx="228" cy="677" r="6" fill="#98A2B3"/>
+  <text x="246" y="682" class="small">Support flow</text>
+</svg>

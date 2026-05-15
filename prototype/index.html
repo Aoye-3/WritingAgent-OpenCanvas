@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FacetWrite Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell" data-view="home">
+      <header class="topbar topbar-home" aria-label="Primary navigation">
+        <button class="brand-button" type="button" data-go-home aria-label="Go to task cards">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img">
+              <path d="M6 4h12v16H6z" />
+              <path d="M9 8h6M9 12h4M9 16h6" />
+            </svg>
+          </span>
+          <span>FacetWrite</span>
+        </button>
+        <label class="search-field" for="task-search">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m16.5 16.5 4 4" />
+          </svg>
+          <input id="task-search" type="search" placeholder="Search tasks" autocomplete="off" />
+        </label>
+        <nav class="topbar-actions" aria-label="Workspace actions">
+          <button class="mode-switch" type="button" data-open-comparison aria-label="Switch to free-text comparison mode" aria-pressed="false">
+            <span>Faceted</span>
+            <span>Free text</span>
+          </button>
+          <button class="button button-primary" type="button">New Project</button>
+        </nav>
+      </header>
+
+      <main class="view view-home" id="home-view">
+        <div class="home-content">
+          <section class="home-header" aria-labelledby="home-title">
+            <div class="home-heading">
+              <p class="eyebrow">Structured prompt engineering</p>
+              <h1 id="home-title">Choose a text generation task</h1>
+              <p class="subcopy">Start with a focused workflow, then shape the prompt through visible facets.</p>
+            </div>
+            <aside class="home-status-panel" aria-label="Prototype status">
+              <div class="home-status">
+                <span class="status-dot"></span>
+                Research prototype
+              </div>
+              <p>Task cards lead into structured workspaces with prompt preview and context controls.</p>
+            </aside>
+          </section>
+
+          <section class="task-toolbar" aria-label="Task categories">
+            <button class="chip chip-selected" type="button">All</button>
+            <button class="chip" type="button">Writing</button>
+            <button class="chip" type="button">Education</button>
+            <button class="chip" type="button">Summarise</button>
+            <button class="chip" type="button">Rewrite</button>
+          </section>
+
+          <section class="task-grid" aria-label="Text generation tasks">
+          <article class="task-card" tabindex="0" data-open-workspace>
+            <div class="task-icon accent-blue" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+            </div>
+            <button class="icon-button card-star" type="button" aria-label="Favorite Blog Post">
+              <svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.9Z" /></svg>
+            </button>
+            <h2>Blog Post</h2>
+            <p>Draft a structured article from topic, audience, tone, and references.</p>
+          </article>
+
+          <article class="task-card" tabindex="0">
+            <div class="task-icon accent-green" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h13" /></svg>
+            </div>
+            <button class="icon-button card-star" type="button" aria-label="Favorite Summary">
+              <svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.9Z" /></svg>
+            </button>
+            <h2>Summary</h2>
+            <p>Condense source text into a clear output for a selected reader.</p>
+          </article>
+
+          <article class="task-card" tabindex="0">
+            <div class="task-icon accent-orange" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z" /><path d="m4 7 8 6 8-6" /></svg>
+            </div>
+            <button class="icon-button card-star" type="button" aria-label="Favorite Email Writer">
+              <svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.9Z" /></svg>
+            </button>
+            <h2>Email Writer</h2>
+            <p>Create concise emails with purpose, recipient, message, and call to action.</p>
+          </article>
+
+          <article class="task-card" tabindex="0">
+            <div class="task-icon accent-violet" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 19.5V5a2 2 0 0 1 2-2h11v18H6a2 2 0 0 1-2-1.5Z" /><path d="M8 7h5M8 11h6" /></svg>
+            </div>
+            <button class="icon-button card-star" type="button" aria-label="Favorite Lesson Plan">
+              <svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.9Z" /></svg>
+            </button>
+            <h2>Lesson Plan</h2>
+            <p>Build teaching materials from subject, grade level, objective, and duration.</p>
+          </article>
+
+          <article class="task-card" tabindex="0">
+            <div class="task-icon accent-rose" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M7 4h10l3 3v13H7z" /><path d="M17 4v4h4M10 12h7M10 16h5" /></svg>
+            </div>
+            <button class="icon-button card-star" type="button" aria-label="Favorite Report Outline">
+              <svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.9Z" /></svg>
+            </button>
+            <h2>Report Outline</h2>
+            <p>Plan sections and detail levels for reports before writing the full draft.</p>
+          </article>
+
+          <article class="task-card" tabindex="0">
+            <div class="task-icon accent-blue" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15-6.7" /><path d="M18 3v5h-5" /><path d="M21 12a9 9 0 0 1-15 6.7" /><path d="M6 21v-5h5" /></svg>
+            </div>
+            <button class="icon-button card-star" type="button" aria-label="Favorite Rewrite or Polish">
+              <svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.9Z" /></svg>
+            </button>
+            <h2>Rewrite / Polish</h2>
+            <p>Improve existing text for clarity, tone, audience, and format constraints.</p>
+          </article>
+          </section>
+        </div>
+      </main>
+
+      <section class="view view-workspace" id="workspace-view" aria-label="Blog Post workspace">
+        <header class="topbar topbar-workspace">
+          <button class="brand-button" type="button" data-go-home aria-label="Go to task cards">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" role="img">
+                <path d="M6 4h12v16H6z" />
+                <path d="M9 8h6M9 12h4M9 16h6" />
+              </svg>
+            </span>
+            <span>FacetWrite</span>
+          </button>
+          <label class="search-field topbar-context-field">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+            </svg>
+            <input type="text" value="Blog Post workspace" aria-label="Current workspace" readonly />
+          </label>
+          <div class="topbar-actions">
+            <button class="mode-switch" type="button" data-open-comparison aria-label="Switch to free-text comparison mode" aria-pressed="false">
+              <span>Faceted</span>
+              <span>Free text</span>
+            </button>
+            <button class="button button-secondary" type="button" data-preview-prompt>Preview Prompt</button>
+            <button class="button button-primary" type="button" data-generate>Generate</button>
+          </div>
+        </header>
+
+        <div class="workspace-grid">
+          <aside class="input-drawer" aria-label="Structured input drawer">
+            <div class="drawer-header">
+              <div>
+                <p class="eyebrow">Facet Layer</p>
+                <h2>Structured Input</h2>
+              </div>
+              <button class="icon-button" type="button" aria-label="Favorite Blog Post">
+                <svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.9Z" /></svg>
+              </button>
+            </div>
+
+            <form class="facet-form">
+              <fieldset>
+                <legend>Core Settings</legend>
+                <label class="field">
+                  <span>Topic <strong>*</strong></span>
+                  <input type="text" value="Climate change" />
+                </label>
+                <label class="field">
+                  <span>Audience</span>
+                  <select>
+                    <option>Secondary school students</option>
+                    <option>General readers</option>
+                    <option>Teachers</option>
+                    <option>Professionals</option>
+                  </select>
+                </label>
+                <div class="field">
+                  <span>Tone</span>
+                  <div class="chip-row" role="group" aria-label="Tone">
+                    <button class="chip chip-selected" type="button">Friendly</button>
+                    <button class="chip" type="button">Formal</button>
+                    <button class="chip" type="button">Academic</button>
+                  </div>
+                </div>
+                <label class="field">
+                  <span>Language</span>
+                  <select>
+                    <option>English</option>
+                    <option>Chinese</option>
+                  </select>
+                </label>
+              </fieldset>
+
+              <fieldset>
+                <legend>Output Specification</legend>
+                <label class="field">
+                  <span>Length</span>
+                  <select>
+                    <option>300 words</option>
+                    <option>Short</option>
+                    <option>Medium</option>
+                    <option>Long</option>
+                  </select>
+                </label>
+                <div class="field">
+                  <span>Output Format</span>
+                  <div class="segmented" role="group" aria-label="Output format">
+                    <button type="button">Paragraph</button>
+                    <button class="selected" type="button">Bullet points</button>
+                    <button type="button">Outline</button>
+                  </div>
+                </div>
+                <label class="field">
+                  <span>Key Points</span>
+                  <textarea>Greenhouse gases, human activity, weather patterns, everyday examples.</textarea>
+                </label>
+              </fieldset>
+
+              <fieldset>
+                <legend>Custom Instruction</legend>
+                <label class="field">
+                  <span>Additional notes</span>
+                  <textarea>Keep the explanation accessible and avoid technical jargon.</textarea>
+                </label>
+              </fieldset>
+            </form>
+
+            <div class="drawer-footer">
+              <button class="button button-secondary" type="button">Clear</button>
+              <button class="button button-primary" type="button" data-generate>Generate</button>
+            </div>
+          </aside>
+
+          <main class="output-area" aria-label="Output preview">
+            <div class="output-toolbar">
+              <div>
+                <p class="eyebrow">Output Layer</p>
+                <h1>Output Preview</h1>
+              </div>
+              <span class="metadata-chip">
+                <span class="status-dot"></span>
+                Generated from structured prompt
+              </span>
+            </div>
+
+            <article class="document-preview">
+              <div class="document-header">
+                <p>Generated draft</p>
+                <button class="button button-secondary button-small" type="button">Copy</button>
+              </div>
+              <h2>Climate Change Explained</h2>
+              <ul>
+                <li>Climate change means long-term shifts in temperature, rainfall, and weather patterns across the planet.</li>
+                <li>One major cause is the increase of greenhouse gases, which trap heat in the atmosphere.</li>
+                <li>Human activities such as burning coal, oil, and gas add more of these gases to the air.</li>
+                <li>The effects can include hotter summers, stronger storms, rising sea levels, and changes to food production.</li>
+                <li>People can respond by saving energy, using cleaner transport, reducing waste, and supporting climate-aware decisions.</li>
+              </ul>
+            </article>
+
+            <div class="refine-panel" aria-label="Refine generated text">
+              <button class="chip" type="button">Make shorter</button>
+              <button class="chip" type="button">More formal</button>
+              <button class="chip" type="button">Simplify</button>
+              <button class="chip chip-selected" type="button">Bullet points</button>
+            </div>
+          </main>
+        </div>
+
+        <aside class="context-bar" aria-label="Context configuration" data-expanded="false">
+          <div class="context-collapsed">
+            <div class="context-tabs" role="tablist" aria-label="Context tabs">
+              <button class="context-tab active" type="button">Context</button>
+              <button class="context-tab" type="button">Knowledge</button>
+              <button class="context-tab" type="button">References</button>
+              <button class="context-tab" type="button">Prompt Preview</button>
+            </div>
+            <div class="context-summary">
+              <span class="metadata-chip">Course Notes</span>
+              <span class="metadata-chip">Audience Profile</span>
+              <span>2 contexts selected</span>
+            </div>
+            <button class="button button-secondary button-small" type="button" data-toggle-context>Expand</button>
+          </div>
+
+          <div class="context-expanded" aria-hidden="true">
+            <section class="context-panel">
+              <div>
+                <p class="eyebrow">Context Layer</p>
+                <h2>Context & References</h2>
+              </div>
+              <div class="context-columns">
+                <div class="context-card">
+                  <h3>Writing Style</h3>
+                  <p>Friendly, clear, and suitable for secondary school students.</p>
+                </div>
+                <div class="context-card">
+                  <h3>Knowledge Source</h3>
+                  <p>Course Notes: Climate and Environment</p>
+                </div>
+                <div class="context-card prompt-card">
+                  <h3>Generated Prompt</h3>
+                  <pre>Write a 300-word bullet-point explanation about climate change for secondary school students. Use a friendly tone and the course notes as context.</pre>
+                </div>
+              </div>
+            </section>
+          </div>
+        </aside>
+      </section>
+
+      <section class="view view-comparison" id="comparison-view" aria-label="Free-text chat interface">
+        <header class="topbar topbar-workspace">
+          <button class="brand-button" type="button" data-go-home aria-label="Go to task cards">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" role="img">
+                <path d="M6 4h12v16H6z" />
+                <path d="M9 8h6M9 12h4M9 16h6" />
+              </svg>
+            </span>
+            <span>FacetWrite</span>
+          </button>
+          <label class="search-field topbar-context-field">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m16.5 16.5 4 4" />
+            </svg>
+            <input type="text" value="Free-text chat" aria-label="Current mode" readonly />
+          </label>
+          <div class="topbar-actions">
+            <button class="mode-switch is-free" type="button" data-go-home aria-label="Switch to faceted task mode" aria-pressed="true">
+              <span>Faceted</span>
+              <span>Free text</span>
+            </button>
+            <button class="button button-primary" type="button">New Project</button>
+          </div>
+        </header>
+        <main class="free-chat-layout">
+          <section class="chat-stage" aria-label="Free-text conversation">
+            <div class="chat-heading">
+              <p class="eyebrow">Traditional Free Text Mode</p>
+              <h1>Free conversation</h1>
+              <p>Ask in your own words. This mode keeps the interface open-ended, without faceted guidance or structured context controls.</p>
+            </div>
+
+            <div class="message-list" aria-live="polite">
+              <article class="message message-user">
+                <div class="message-avatar" aria-hidden="true">U</div>
+                <div class="message-bubble">
+                  <p>Write a short explanation of climate change for secondary school students.</p>
+                </div>
+              </article>
+
+              <article class="message message-assistant">
+                <div class="message-avatar" aria-hidden="true">F</div>
+                <div class="message-bubble">
+                  <p>Climate change is the long-term change in Earth's weather and temperature. It is mainly caused by greenhouse gases from human activities such as burning fossil fuels.</p>
+                </div>
+              </article>
+            </div>
+
+            <form class="chat-composer" aria-label="Free-text prompt composer">
+              <textarea aria-label="Message" placeholder="Message FacetWrite..." rows="1">Can you make it more engaging and add one everyday example?</textarea>
+              <div class="composer-actions">
+                <button class="composer-tool" type="button" aria-label="Attach reference">
+                  <svg viewBox="0 0 24 24"><path d="m21.4 11.6-8.5 8.5a5 5 0 0 1-7.1-7.1l9.2-9.2a3.5 3.5 0 1 1 5 5l-9.2 9.2a2 2 0 1 1-2.8-2.8l8.5-8.5" /></svg>
+                </button>
+                <button class="button button-primary chat-send" type="submit" aria-label="Send message">
+                  <svg viewBox="0 0 24 24"><path d="M22 2 11 13" /><path d="m22 2-7 20-4-9-9-4Z" /></svg>
+                  Send
+                </button>
+              </div>
+            </form>
+          </section>
+        </main>
+      </section>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
