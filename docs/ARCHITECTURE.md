@@ -9,8 +9,9 @@ Primary flow:
 User input
  -> AgentCard + AgentSettings
  -> PromptBuilder + Skills + Tool policy
- -> Provider runtime
- -> Tool runtime, when tool_calls are returned
+ -> DeerFlow runtime, when DEERFLOW_ENABLED=true
+ -> Provider runtime fallback, when DeerFlow is disabled
+ -> Tool runtime, when local tool_calls are returned by the fallback runtime
  -> SQLite run records and Canvas write requests
  -> Thread state refresh in the UI
 ```
@@ -26,6 +27,7 @@ User input
 - `server/app.ts` wires Express middleware, storage, Agent runtime, generation service, and route modules.
 - `server/routes/*` defines API endpoints for health, catalog, agents, threads, projects, Canvas, settings, and generation.
 - `server/services/*` contains Agent definition/catalog behavior, generation orchestration, and settings persistence/validation.
+- `server/deerflow/*` contains the DeerFlow sidecar runtime adapter, SSE parsing, and AgentCard-to-subagent mapping.
 - `server/providerRuntime.ts` normalizes provider request behavior for supported provider IDs.
 - `server/agentRunLoop.ts` runs Chat Completions, executes returned tool calls, records tool events, and stops when final content or `maxToolCalls` is reached.
 
@@ -36,6 +38,13 @@ User input
 - `server/tools/policies.ts` derives whether each tool is enabled, auto-runnable, externally configured, or approval-gated.
 - `server/toolRuntime.ts` executes local ToolUse behavior and creates Canvas write requests when `canvas_write` is called.
 
+## DeerFlow Runtime Boundary
+- DeerFlow is now an integration foundation for Agent runtime work, not only reference source.
+- FacetWrite calls DeerFlow as a Python sidecar over HTTP/SSE when `DEERFLOW_ENABLED=true`.
+- DeerFlow `lead_agent` is the default main-agent entrypoint.
+- FacetWrite Task cards are mapped to DeerFlow subagent metadata with skills, tools, model inheritance, timeout, and max-turn defaults.
+- FacetWrite remains responsible for product data, SQLite persistence, frontend state, Canvas approval, and local fallback behavior.
+
 ## Storage
 - `server/storage.ts` owns SQLite initialization, migrations, repositories, and local thread data directories.
 - Runtime database path: `.facetwrite/data/facetwrite.db`.
@@ -43,6 +52,6 @@ User input
 
 ## Important Current Constraints
 - Canvas writes are never applied directly by the Agent. The Agent can only create a pending write request, and the user approves or rejects it.
+- DeerFlow-generated write or side-effect proposals must still be converted into FacetWrite approval flows before data changes.
 - Tool definitions, prompt hints, schemas, risk levels, and approval requirements should stay in the Tool catalog/policy layer.
 - Provider details should stay behind provider runtime/profile code rather than being inferred in UI components.
-

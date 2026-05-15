@@ -1,5 +1,12 @@
 # FacetWrite Technical Decisions
 
+## 2026-05-15: DeerFlow Is The Primary Agent Runtime Foundation
+Decision: Integrate DeerFlow as a sidecar Agent runtime and use its Lead Agent as the main orchestration Agent when `DEERFLOW_ENABLED=true`.
+
+Reason: FacetWrite needs mature Agent runtime capability without rebuilding LangGraph-style orchestration, subagents, skill/tool filtering, and streaming semantics from scratch.
+
+Impact: FacetWrite keeps ownership of product data, frontend interaction, SQLite persistence, Canvas writes, and approval flows. DeerFlow runtime events are adapted into FacetWrite run records, and the TypeScript run loop remains as a fallback during migration.
+
 ## 2026-05-15: Maintain Seven Project Fact Documents
 Decision: Use `PROJECT_BRIEF.md`, `ARCHITECTURE.md`, `API.md`, `DATABASE.md`, `AGENT.md`, `DECISIONS.md`, and `REFACTOR_LOG.md` as the maintained technical documentation set.
 
@@ -41,4 +48,3 @@ Decision: Real API keys belong only in `.env.local` or the shell environment and
 Reason: FacetWrite is local-first but provider keys are production secrets.
 
 Impact: Settings save requires explicit confirmation for local key writes, and docs must avoid pasted secrets.
-

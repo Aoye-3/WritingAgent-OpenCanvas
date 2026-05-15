@@ -2,6 +2,8 @@ import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
 import { runAgentCompletion } from "../agentRunLoop.js";
 import { getBaseURL, getModel, getProviderId, getSystemPrompt } from "../config/providerConfig.js";
 import type { GenerateRequest, GenerateResponse } from "../contracts/generation.js";
+import { getDeerFlowRuntimeConfig } from "../deerflow/config.js";
+import { runDeerFlowAgent } from "../deerflow/client.js";
 import { buildAgentPrompt } from "../promptBuilder.js";
 import { createOpenAIChatClient, getProviderProfile, type ChatMessage } from "../providerRuntime.js";
 import { loadSkillsByRefs } from "../skillLoader.js";
@@ -37,8 +39,59 @@ export function createGenerationService(storage: SQLiteStorageRepository, agentR
     const modelSettings = resolveModelSettings(runtimeConfig.settings.model, payload.providerId);
     const providerId = modelSettings.providerId;
     const mode = isChatMode(payload.mode) ? "chat" : "structured";
+    const messages = buildChatMessages({
+      systemPrompt: payload.systemPrompt?.trim() || getSystemPrompt(payload.locale),
+      prompt,
+      threadId,
+      contextCount: modelSettings.contextCount,
+      clearContext: Boolean(effectiveToolState.clear_context)
+    });
 
     try {
+      const deerFlowConfig = getDeerFlowRuntimeConfig();
+      if (deerFlowConfig.enabled) {
+        const run = await runDeerFlowAgent({
+          config: deerFlowConfig,
+          threadId,
+          agentCard,
+          settings: runtimeConfig.settings,
+          messages,
+          prompt,
+          onToolEvent
+        });
+
+        if (!run.text) {
+          throw new Error("DeerFlow returned an empty response");
+        }
+
+        const saved = storage.recordRun({
+          threadId,
+          agentCardId: agentCard.id,
+          mode,
+          prompt,
+          output: run.text,
+          provider: "deerflow",
+          usedMock: false,
+          userMessage: userMessageForRun(payload, agentCard.title[payload.locale]),
+          toolState: effectiveToolState,
+          events: run.events,
+          finishReason: run.finishReason,
+          usage: run.usage
+        });
+
+        return {
+          text: run.text,
+          prompt,
+          provider: "deerflow",
+          usedMock: false,
+          threadId,
+          runId: saved.runId,
+          events: run.events,
+          finishReason: run.finishReason,
+          usage: run.usage
+        };
+      }
+
       const apiKey = process.env.OPENAI_API_KEY;
       if (!apiKey) {
         throw new Error("OPENAI_API_KEY is not configured");
@@ -48,13 +101,7 @@ export function createGenerationService(storage: SQLiteStorageRepository, agentR
         client: createOpenAIChatClient({ apiKey, baseURL: getBaseURL(providerId) }),
         providerId,
         modelSettings,
-        messages: buildChatMessages({
-          systemPrompt: payload.systemPrompt?.trim() || getSystemPrompt(payload.locale),
-          prompt,
-          threadId,
-          contextCount: modelSettings.contextCount,
-          clearContext: Boolean(effectiveToolState.clear_context)
-        }),
+        messages,
         allowedToolRefs: agentCard.toolRefs,
         toolState: effectiveToolState,
         toolContext: {

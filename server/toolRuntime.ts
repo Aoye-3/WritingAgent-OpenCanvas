@@ -24,7 +24,12 @@ export type ToolExecutionResult = {
 };
 
 export type ToolEventRecord = {
-  eventType: "tool_call_requested" | "tool_call_completed" | "tool_call_failed" | "tool_loop_stopped";
+  eventType:
+    | "tool_call_requested"
+    | "tool_call_completed"
+    | "tool_call_failed"
+    | "tool_loop_stopped"
+    | `deerflow_${string}`;
   payload: Record<string, unknown>;
 };
 

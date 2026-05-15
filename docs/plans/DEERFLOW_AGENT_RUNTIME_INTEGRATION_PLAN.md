@@ -1,7 +1,7 @@
 # DeerFlow Main Agent + FacetWrite Subagent Runtime Integration Plan
 
 Date: 2026-05-15
-Status: Planned, not yet implemented
+Status: First backend adapter slice implemented; live DeerFlow sidecar validation still pending
 
 ## Summary
 

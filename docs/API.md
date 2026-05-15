@@ -40,9 +40,19 @@ The implementation lives in `server/utils/http.ts`.
 - `POST /api/generate`
   - Body is parsed by `parseGenerateRequest`.
   - Runs generation, records the result, and returns generation metadata and output.
+  - Uses DeerFlow as the runtime when `DEERFLOW_ENABLED=true`; otherwise uses the current TypeScript provider runtime.
 - `POST /api/generate/stream`
   - SSE endpoint.
   - Emits `tool_event`, `token`, `final`, and `error` events.
+  - DeerFlow custom subagent events are emitted as `tool_event` records with `eventType` prefixed by `deerflow_`.
+
+## DeerFlow Runtime Configuration
+- `DEERFLOW_ENABLED`
+  - Enables the DeerFlow runtime path when set to `true` or `1`.
+- `DEERFLOW_BASE_URL`
+  - DeerFlow Gateway base URL. Defaults to `http://127.0.0.1:8000`.
+- `DEERFLOW_ASSISTANT_ID`
+  - DeerFlow assistant ID. Defaults to `lead_agent`.
 
 ## Threads
 - `GET /api/threads/recent`
@@ -88,4 +98,3 @@ The implementation lives in `server/utils/http.ts`.
   - Validates provider settings.
 - `POST /api/settings/save`
   - Saves settings. Writing an API key requires explicit local key write confirmation.
-

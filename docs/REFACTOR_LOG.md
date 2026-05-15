@@ -1,5 +1,30 @@
 # FacetWrite Refactor Log
 
+## 2026-05-15: DeerFlow Runtime Adapter First Slice
+Scope: Implemented the first backend slice of the DeerFlow Agent runtime integration.
+
+Findings:
+- DeerFlow can be introduced through the stateless `/api/runs/stream` Gateway endpoint without changing the FacetWrite SQLite schema in this slice.
+- The current `generationService` is the right integration point because it already owns prompt construction, thread creation, run recording, and fallback behavior.
+- FacetWrite's existing `ToolEventRecord` needed to accept DeerFlow subagent events in addition to local tool-call events.
+
+Completed:
+- Added `server/deerflow/config.ts`, `server/deerflow/client.ts`, `server/deerflow/sse.ts`, and `server/deerflow/taskAgentMapping.ts`.
+- Added `DEERFLOW_ENABLED`, `DEERFLOW_BASE_URL`, and `DEERFLOW_ASSISTANT_ID` runtime configuration.
+- Routed generation through DeerFlow when enabled, while keeping the existing TypeScript provider runtime available when disabled.
+- Mapped FacetWrite AgentCards to DeerFlow subagent metadata.
+- Mapped DeerFlow custom `task_*` stream events into persisted `deerflow_*` tool events.
+- Added unit tests for request construction, SSE parsing, stream reading, and Task-card subagent mapping.
+
+Open TODO:
+- Start and validate against a real DeerFlow backend process.
+- Add frontend settings/status surfaces for DeerFlow availability and shared Skill/Tool config.
+- Add controlled bridge behavior for DeerFlow-proposed Canvas writes rather than exposing direct database writes.
+- Expand the first real Task-card run into all built-in Task cards after the end-to-end path is stable.
+
+Next Priority Check:
+- Run FacetWrite with `DEERFLOW_ENABLED=true` and verify one Task-card generation against a live DeerFlow sidecar.
+
 ## 2026-05-15: DeerFlow Agent Runtime Integration Plan
 Scope: Saved the DeerFlow main-agent and FacetWrite subagent runtime integration plan for later implementation.
 

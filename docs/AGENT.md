@@ -33,6 +33,16 @@ Saved settings are merged back onto the base Agent card by the runtime adapter.
 
 Runtime config includes the resolved card/settings, available tools, tool policies, available skills, and missing/deprecated references.
 
+## DeerFlow Main Agent And Subagents
+DeerFlow is the primary Agent runtime integration foundation when `DEERFLOW_ENABLED=true`.
+
+- DeerFlow `lead_agent` acts as the main orchestration Agent.
+- Each FacetWrite Task card maps to a DeerFlow subagent configuration.
+- The mapping lives in `server/deerflow/taskAgentMapping.ts`.
+- Subagent metadata includes name, description, system prompt, skills, tools, model inheritance, timeout, and max turns.
+- FacetWrite records DeerFlow runs as provider `deerflow`.
+- The current TypeScript run loop remains available when DeerFlow is disabled or unavailable.
+
 ## Tool Catalog
 `server/tools/catalog.ts` is the Tool metadata source of truth. Each ToolDefinition includes:
 
@@ -60,7 +70,7 @@ A tool can auto-run only when it is enabled, does not require approval, and does
 `canvas_write` must never directly mutate Canvas content from model output. It can only create a pending request that the user approves or rejects.
 
 ## Run Loop
-`server/agentRunLoop.ts` performs the Agent run:
+When DeerFlow is disabled, `server/agentRunLoop.ts` performs the fallback Agent run:
 
 ```text
 build messages
@@ -72,6 +82,7 @@ build messages
 
 Tool events are recorded as `tool_call_requested`, `tool_call_completed`, `tool_call_failed`, and `tool_loop_stopped`.
 
+When DeerFlow is enabled, `server/deerflow/client.ts` calls `/api/runs/stream`, maps token/message stream output into the FacetWrite response, and maps DeerFlow custom task events into `deerflow_*` tool events for the run history.
+
 ## Provider Boundary
 Provider-specific request normalization belongs in `server/providerRuntime.ts`. UI and product code should use provider IDs and capabilities rather than inferring provider behavior from base URLs or model strings.
-
