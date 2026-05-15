@@ -1,11 +1,19 @@
 # AI Dashboard And DeerFlow Runtime Control Plane Plan
 
 Date: 2026-05-15
-Status: Planned, not yet implemented
+Status: Implemented and validated
 
 ## Summary
 
 Add an `AI Dashboard` entry that shows the full AI runtime state. FacetWrite is the workspace, configuration surface, interaction window, approval layer, and data boundary. DeerFlow is the execution/runtime plane for Lead Agent, subagents, ToolUse, MCP, and orchestration.
+
+## Run Result
+
+- Added `/api/deerflow/dashboard`.
+- Added the `AI仪表盘` / `AI Dashboard` navigation entry.
+- Added a read-only dashboard page for runtime status, Skills/MCP overview, Agent runtime mapping, ToolUse bridge status, and integration maturity.
+- Added a pending-session guard in the DeerFlow auth helper so concurrent protected requests share one setup/login flow.
+- Verified typecheck, tests, and dashboard API against the local Docker sidecar.
 
 ## Key Changes
 

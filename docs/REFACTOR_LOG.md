@@ -1,5 +1,30 @@
 # FacetWrite Refactor Log
 
+## 2026-05-15: AI Dashboard And DeerFlow Control Plane
+Scope: Added a read-only AI Dashboard and DeerFlow dashboard aggregation API.
+
+Findings:
+- Dashboard aggregation initially triggered duplicate DeerFlow setup-status checks through concurrent status/config reads; DeerFlow rate-limits that endpoint.
+- The DeerFlow auth helper needed an in-process pending session promise so concurrent protected requests share one setup/login flow.
+- The user-facing distinction is Agent settings for concrete Agent configuration versus AI Dashboard for runtime/control-plane observability.
+
+Completed:
+- Added `GET /api/deerflow/dashboard`.
+- Added dashboard payloads for runtime status, Skills/MCP overview, Lead Agent metadata, AgentCard-to-DeerFlow subagent mappings, ToolUse bridge status, and integration maturity.
+- Added the `AI仪表盘` / `AI Dashboard` sidebar entry between Agent settings and Knowledge settings.
+- Added the AI Dashboard page with runtime metrics, capabilities, mapping table, ToolUse bridge cards, and maturity indicators.
+- Updated sidebar labels to clean current Chinese copy for the shared sidebar.
+- Added unit tests for dashboard aggregation and concurrent DeerFlow auth session setup.
+- Verified dashboard API returns `runtime:"deerflow"`, `reachable:true`, `authState:"authenticated"`, 21 Skills, 3 MCP servers, 6 Agent mappings, and 5 ToolUse bridge entries against the running Docker sidecar.
+
+Open TODO:
+- Add richer DeerFlow run-event and ToolUse execution visibility in the workspace.
+- Bridge CanvasWrite, KnowledgeBase, and WebSearch into DeerFlow Tool/MCP execution while keeping FacetWrite approval for writes.
+- Decide whether AI Dashboard should show recent run/event history after multiple Task-card validations.
+
+Next Priority Check:
+- Implement DeerFlow ToolUse / MCP execution visibility so the frontend shows actual tool calls, inputs, outputs, artifacts, and approval requests.
+
 ## 2026-05-15: AI Dashboard And DeerFlow Control Plane Plan
 Scope: Saved the AI Dashboard plan before implementation.
 

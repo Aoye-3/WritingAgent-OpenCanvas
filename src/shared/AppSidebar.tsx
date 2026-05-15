@@ -10,10 +10,11 @@ type AppSidebarProps = {
   className?: string;
 };
 
-const navItems: Array<{ view: AppView; icon: ComponentType; labelKey: "home" | "projects" | "agentSettings" | "knowledgeSettings" }> = [
+const navItems: Array<{ view: AppView; icon: ComponentType; labelKey: "home" | "projects" | "agentSettings" | "aiDashboard" | "knowledgeSettings" }> = [
   { view: "home", icon: HomeGlyph, labelKey: "home" },
   { view: "projects", icon: DocumentGlyph, labelKey: "projects" },
   { view: "agentSettings", icon: AgentGlyph, labelKey: "agentSettings" },
+  { view: "aiDashboard", icon: RuntimeGlyph, labelKey: "aiDashboard" },
   { view: "knowledgeSettings", icon: BookGlyph, labelKey: "knowledgeSettings" }
 ];
 
@@ -23,6 +24,7 @@ export function AppSidebar({ activeView, onNavigate, onOpenSettings, className }
     home: locale === "zh" ? "家" : "Home",
     projects: locale === "zh" ? "项目" : "Projects",
     agentSettings: locale === "zh" ? "Agent设置" : "Agent settings",
+    aiDashboard: locale === "zh" ? "AI仪表盘" : "AI Dashboard",
     knowledgeSettings: locale === "zh" ? "知识库设置" : "Knowledge settings"
   };
 
@@ -75,6 +77,10 @@ function HomeGlyph() {
 
 function AgentGlyph() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9Z" /><path d="m12 12 8-4.5M12 12v9M12 12 4 7.5" /></svg>;
+}
+
+function RuntimeGlyph() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h6v6H4zM14 4h6v6h-6zM14 14h6v6h-6z" /><path d="M10 9h2a2 2 0 0 1 2 2v1M14 17h-2a2 2 0 0 1-2-2v-3" /></svg>;
 }
 
 function BookGlyph() {

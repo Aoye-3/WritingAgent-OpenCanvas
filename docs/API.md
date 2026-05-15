@@ -70,6 +70,9 @@ The implementation lives in `server/utils/http.ts`.
   - Returns read-only DeerFlow skills and MCP server overview.
   - Secret-like MCP values such as keys, tokens, passwords, authorization headers, and OAuth client secrets are redacted.
   - Uses the backend DeerFlow auth session for protected DeerFlow APIs. If auth fails, the route returns safe overview defaults plus `lastError`; it must not expose DeerFlow secrets or MCP environment values.
+- `GET /api/deerflow/dashboard`
+  - Returns a read-only AI Dashboard payload containing runtime status, DeerFlow Skills/MCP overview, Lead Agent metadata, AgentCard-to-DeerFlow subagent mappings, ToolUse bridge status, and integration maturity.
+  - This endpoint must not return API keys, provider secrets, DeerFlow cookies, CSRF tokens, or MCP secret-like values.
 
 ## DeerFlow Auth Status
 - DeerFlow Docker sidecar health is reachable without auth at `/health`.

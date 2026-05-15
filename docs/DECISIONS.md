@@ -1,5 +1,19 @@
 # FacetWrite Technical Decisions
 
+## 2026-05-15: DeerFlow Is The AI Execution Plane
+Decision: Treat FacetWrite as the workspace/control plane and DeerFlow as the AI execution/runtime plane.
+
+Reason: The product goal is to reuse DeerFlow's mature Lead Agent, subagent, ToolUse, and MCP framework instead of maintaining a competing FacetWrite Agent runtime.
+
+Impact: Agent settings remain the user configuration surface, while the AI Dashboard shows runtime health, Skills/MCP, Agent mapping, and ToolUse bridge progress. FacetWrite capabilities such as CanvasWrite should be progressively bridged into DeerFlow ToolUse while preserving FacetWrite approval and data boundaries.
+
+## 2026-05-15: AI Dashboard Is Read-only Runtime Observability
+Decision: Add an AI Dashboard as a read-only control-plane view rather than another Agent editor.
+
+Reason: Users need to see whether DeerFlow is actually online, authenticated, mapped, and ready for ToolUse/MCP execution, without mixing runtime observability into per-Agent prompt/model settings.
+
+Impact: `/api/deerflow/dashboard` aggregates runtime status, DeerFlow config overview, AgentCard-to-subagent mapping, ToolUse bridge status, and integration maturity. Writing DeerFlow config remains out of scope.
+
 ## 2026-05-15: Docker Is The Preferred Local DeerFlow Runtime
 Decision: Run DeerFlow as a Docker sidecar through its Compose nginx entrypoint at `http://127.0.0.1:2026` for local FacetWrite integration work.
 

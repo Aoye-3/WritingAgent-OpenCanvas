@@ -26,7 +26,7 @@ export async function createApp() {
   app.use(express.json({ limit: "1mb" }));
 
   registerHealthRoutes(app);
-  registerDeerFlowRoutes(app);
+  registerDeerFlowRoutes(app, { agentRuntime });
   registerCatalogRoutes(app);
   registerAgentRoutes(app, { agentRuntime });
   registerThreadRoutes(app, { storage, agentRuntime });

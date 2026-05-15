@@ -2171,6 +2171,7 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 
 .app-shell[data-view="projects"] .management-app[data-active="true"],
 .app-shell[data-view="agentSettings"] .management-app[data-active="true"],
+.app-shell[data-view="aiDashboard"] .management-app[data-active="true"],
 .app-shell[data-view="knowledgeSettings"] .management-app[data-active="true"] {
   display: grid;
 }
@@ -2303,6 +2304,213 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 .knowledge-placeholder strong {
   color: var(--color-text);
   font-size: 18px;
+}
+
+.ai-dashboard-main {
+  display: grid;
+  gap: 18px;
+}
+
+.ai-dashboard-grid,
+.ai-capability-grid,
+.ai-tool-grid,
+.ai-maturity-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.ai-dashboard-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.ai-capability-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ai-tool-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ai-maturity-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.ai-metric,
+.ai-dashboard-section,
+.ai-capability-list,
+.ai-tool-card,
+.ai-maturity-item {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.ai-metric {
+  min-height: 96px;
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  padding: 16px;
+}
+
+.ai-metric span,
+.ai-section-header span,
+.ai-muted,
+.ai-tool-card small,
+.ai-maturity-item p {
+  color: var(--color-text-muted);
+}
+
+.ai-metric strong {
+  font-size: 18px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.ai-metric-online {
+  border-color: #a7f3d0;
+  background: #f0fdf4;
+}
+
+.ai-metric-warn {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.ai-dashboard-section {
+  overflow: hidden;
+}
+
+.ai-section-header {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ai-section-header h2,
+.ai-capability-list h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.ai-capability-grid,
+.ai-tool-grid,
+.ai-maturity-grid {
+  padding: 16px;
+}
+
+.ai-capability-list {
+  padding: 16px;
+}
+
+.ai-chip-list,
+.ai-chip-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ai-chip {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0 9px;
+  background: #f8fafc;
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.ai-mapping-table {
+  display: grid;
+}
+
+.ai-mapping-head,
+.ai-mapping-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.9fr) minmax(220px, 1.2fr) minmax(160px, 1fr) minmax(180px, 1fr) 130px;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 16px;
+}
+
+.ai-mapping-head {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ai-mapping-row {
+  min-height: 78px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ai-mapping-row:last-child {
+  border-bottom: 0;
+}
+
+.ai-mapping-row div {
+  min-width: 0;
+}
+
+.ai-mapping-row strong,
+.ai-tool-card strong,
+.ai-maturity-item strong {
+  display: block;
+}
+
+.ai-mapping-row small {
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.ai-tool-card,
+.ai-maturity-item {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 14px;
+}
+
+.ai-tool-card p,
+.ai-maturity-item p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.ai-bridge-pill {
+  width: fit-content;
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.ai-bridge-mapped_metadata {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.ai-bridge-pending_bridge {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.ai-bridge-control_plane {
+  background: #ede9fe;
+  color: #5b21b6;
 }
 
 .agent-settings-layout {
@@ -2620,6 +2828,12 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   .management-main { padding: 24px 18px 48px; }
   .agent-settings-layout { grid-template-columns: 1fr; }
   .agent-editor-panel { position: static; max-height: none; }
+  .ai-dashboard-grid,
+  .ai-capability-grid,
+  .ai-tool-grid,
+  .ai-maturity-grid { grid-template-columns: 1fr; }
+  .ai-mapping-head { display: none; }
+  .ai-mapping-row { grid-template-columns: 1fr; }
   .project-table-head { display: none; }
   .project-table-row { grid-template-columns: 1fr; }
 }

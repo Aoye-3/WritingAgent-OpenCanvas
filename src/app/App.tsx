@@ -3,6 +3,7 @@ import { createThread, fetchThreadState, hardDeleteThread, moveThreadToTrash, re
 import { AgentSettingsView } from "../features/agents/AgentSettingsView";
 import { useAgentCards } from "../features/agents/hooks/useAgentCards";
 import type { AgentCard, AgentValues, CanvasNode, CanvasWriteRequest, StoredOutputVersion, StoredThread, StoredToolEvent, ThreadStateResponse } from "../features/agents/types";
+import { AiDashboardView } from "../features/ai-dashboard/AiDashboardView";
 import { approveCanvasWriteRequest, createCanvasNode, deleteCanvasNode, fetchCanvas, rejectCanvasWriteRequest, updateCanvasNode, type CanvasNodeDraft, type CanvasNodePatch } from "../features/canvas/canvasClient";
 import { useAppNavigation } from "../features/app/useAppNavigation";
 import { generateText, generateTextStream } from "../features/generation/generationClient";
@@ -16,7 +17,7 @@ import { ProjectsView } from "../features/projects/ProjectsView";
 import { useProjects } from "../features/projects/hooks/useProjects";
 import { WorkspaceView } from "../features/workspace/WorkspaceView";
 
-export type AppView = "start" | "home" | "workspace" | "projects" | "agentSettings" | "knowledgeSettings";
+export type AppView = "start" | "home" | "workspace" | "projects" | "agentSettings" | "aiDashboard" | "knowledgeSettings";
 
 const fallbackAgentCards: AgentCard[] = [
   {
@@ -405,6 +406,7 @@ function AppContent() {
         onNavigate={setView}
         onOpenAgent={openWorkspace}
       />
+      <AiDashboardView activeView={view} onNavigate={setView} />
       <KnowledgeSettingsView activeView={view} onNavigate={setView} />
       <WorkspaceView
         activeAgent={activeAgent}

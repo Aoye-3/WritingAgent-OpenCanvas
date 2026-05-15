@@ -94,6 +94,34 @@ test("401 or 403 clears session and retries login once", async () => {
   assert.equal(calls.filter((call) => call.endsWith("/api/skills")).length, 2);
 });
 
+test("concurrent protected requests share one auth session setup", async () => {
+  clearDeerFlowSession();
+  let setupStatusCalls = 0;
+  let loginCalls = 0;
+
+  const fetchImpl = async (url: string | URL | Request) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/setup-status")) {
+      setupStatusCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return Response.json({ needs_setup: false });
+    }
+    if (textUrl.endsWith("/login/local")) {
+      loginCalls += 1;
+      return responseWithSession({ ok: true });
+    }
+    return Response.json({ ok: true });
+  };
+
+  await Promise.all([
+    authenticatedDeerFlowFetch({ config, path: "/api/skills", init: { method: "GET" }, fetchImpl }),
+    authenticatedDeerFlowFetch({ config, path: "/api/mcp/config", init: { method: "GET" }, fetchImpl })
+  ]);
+
+  assert.equal(setupStatusCalls, 1);
+  assert.equal(loginCalls, 1);
+});
+
 test("auth failure reports safe error without secrets", async () => {
   clearDeerFlowSession();
   const status = await getDeerFlowAuthStatus({

@@ -21,6 +21,7 @@ type AuthenticatedFetchInput = {
 
 const csrfHeaderName = "X-CSRF-Token";
 let cachedSession: DeerFlowSession | undefined;
+let pendingSession: Promise<DeerFlowSession> | undefined;
 
 export async function getDeerFlowAuthStatus(input: {
   config: DeerFlowRuntimeConfig;
@@ -53,11 +54,23 @@ export async function authenticatedDeerFlowFetch(input: AuthenticatedFetchInput)
 
 export function clearDeerFlowSession() {
   cachedSession = undefined;
+  pendingSession = undefined;
 }
 
 async function ensureDeerFlowSession(config: DeerFlowRuntimeConfig, fetchImpl: typeof fetch = fetch): Promise<DeerFlowSession> {
   if (cachedSession) return cachedSession;
+  if (pendingSession) return pendingSession;
 
+  pendingSession = createDeerFlowSession(config, fetchImpl);
+  try {
+    cachedSession = await pendingSession;
+    return cachedSession;
+  } finally {
+    pendingSession = undefined;
+  }
+}
+
+async function createDeerFlowSession(config: DeerFlowRuntimeConfig, fetchImpl: typeof fetch): Promise<DeerFlowSession> {
   const auth = normalizeAuthConfig(config);
   const setupStatus = await readSetupStatus(config, auth.timeoutMs, fetchImpl);
   if (setupStatus.needsSetup) {
@@ -67,16 +80,14 @@ async function ensureDeerFlowSession(config: DeerFlowRuntimeConfig, fetchImpl: t
     if (!auth.autoSetup) {
       throw new DeerFlowAuthError("setup_required", "DeerFlow first-boot setup is required");
     }
-    cachedSession = await initializeAdmin(config, requireCredentials(auth), fetchImpl);
-    return cachedSession;
+    return initializeAdmin(config, requireCredentials(auth), fetchImpl);
   }
 
   if (!auth.email || !auth.password) {
     throw new DeerFlowAuthError("not_configured", "DeerFlow auth credentials are not configured");
   }
 
-  cachedSession = await login(config, requireCredentials(auth), fetchImpl);
-  return cachedSession;
+  return login(config, requireCredentials(auth), fetchImpl);
 }
 
 async function fetchWithSession(fetchImpl: typeof fetch, config: DeerFlowRuntimeConfig, path: string, init: RequestInit | undefined, session: DeerFlowSession) {

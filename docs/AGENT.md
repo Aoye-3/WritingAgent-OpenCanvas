@@ -28,6 +28,8 @@ Settings cover:
 
 Saved settings are merged back onto the base Agent card by the runtime adapter.
 
+Agent settings are the user-controlled configuration surface for concrete Agents. They define intent, model preferences, prompts, Skills, tool refs, memory, knowledge scope, and quick phrases. DeerFlow remains the execution/runtime plane that should consume these settings through FacetWrite's adapter contract.
+
 ## Runtime Config
 `GET /api/agent-cards/:agentCardId/runtime-config` is the frontend source for rendering settings safely. It should be preferred over hard-coded settings UI assumptions.
 
@@ -45,7 +47,15 @@ DeerFlow is the primary Agent runtime integration foundation when `DEERFLOW_ENAB
 - The current TypeScript run loop remains available when DeerFlow is disabled or unavailable.
 - Runtime status is exposed through `/api/deerflow/status`.
 - DeerFlow skills and MCP server overview are read through `/api/deerflow/config`; MCP environment and secret-like values are redacted before reaching the frontend.
+- AI runtime status, Agent mapping, and ToolUse bridge progress are exposed through `/api/deerflow/dashboard` and shown in the AI Dashboard.
 - Current Docker sidecar status: `/health`, backend auth, `/api/deerflow/config`, and one Summary Task-card generation pass against DeerFlow nginx.
+
+## AI Dashboard
+The AI Dashboard is not a second Agent settings page. It is a read-only runtime/control-plane surface.
+
+- It shows DeerFlow runtime reachability, auth state, Lead Agent ID, Skills, MCP servers, AgentCard-to-subagent mapping, and ToolUse bridge status.
+- It describes FacetWrite capabilities as progressively bridged to DeerFlow ToolUse or MCP capabilities rather than as a competing local Agent runtime.
+- Canvas write behavior remains Human-in-the-loop: DeerFlow may eventually propose the write, but FacetWrite approval applies it.
 
 ## Tool Catalog
 `server/tools/catalog.ts` is the Tool metadata source of truth. Each ToolDefinition includes:
