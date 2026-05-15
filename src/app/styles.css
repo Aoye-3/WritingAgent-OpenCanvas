@@ -2473,6 +2473,55 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   color: #b42318;
 }
 
+.skill-catalog-list {
+  display: grid;
+  gap: 10px;
+}
+
+.skill-catalog-row {
+  min-height: 76px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: #ffffff;
+}
+
+.skill-catalog-row > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.skill-catalog-row strong {
+  color: var(--color-text);
+}
+
+.skill-catalog-row small {
+  color: var(--color-primary);
+  font-weight: 800;
+}
+
+.skill-catalog-row em,
+.skill-tool-refs {
+  color: var(--color-text-muted);
+  font-style: normal;
+  line-height: 1.45;
+}
+
+.skill-tool-refs {
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.skill-catalog-row input {
+  width: 20px;
+  height: 20px;
+}
+
 .quick-message-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 36px;

@@ -240,6 +240,15 @@ function SettingsTabPanel({
 
   if (tab === "prompt") {
     const missingSkills = runtimeConfig?.missingSkillRefs ?? [];
+    const selectedSkillRefs = new Set(settings.prompt.skillRefs);
+    const availableSkills = runtimeConfig?.availableSkills ?? [];
+    const toggleSkillRef = (skillId: string, checked: boolean) => {
+      const next = checked
+        ? [...settings.prompt.skillRefs, skillId]
+        : settings.prompt.skillRefs.filter((skillRef) => skillRef !== skillId);
+      setPrompt({ skillRefs: Array.from(new Set(next)) });
+    };
+
     return (
       <div className="agent-editor-section">
         <label className="field">
@@ -262,13 +271,24 @@ function SettingsTabPanel({
           <span>{text(locale, "outputFormat")}</span>
           <input value={settings.prompt.outputFormat} onChange={(event) => setPrompt({ outputFormat: event.target.value })} />
         </label>
-        <label className="field">
-          <span>Skill refs</span>
-          <input value={settings.prompt.skillRefs.join(", ")} onChange={(event) => setPrompt({ skillRefs: splitRefs(event.target.value) })} />
-        </label>
-        {runtimeConfig?.availableSkills.length ? (
-          <p className="agent-editor-note">{text(locale, "availableSkills")}: {runtimeConfig.availableSkills.map((skill) => skill.id).join(", ")}</p>
-        ) : null}
+        <div className="field">
+          <span>{text(locale, "skills")}</span>
+          <div className="skill-catalog-list">
+            {availableSkills.length ? availableSkills.map((skill) => (
+              <label className="skill-catalog-row" key={skill.id}>
+                <span>
+                  <strong>{skill.name}</strong>
+                  <small>{skill.id}</small>
+                  <em>{skill.description}</em>
+                  {skill.allowedTools.length ? <span className="skill-tool-refs">{text(locale, "allowedTools")}: {skill.allowedTools.join(", ")}</span> : null}
+                </span>
+                <input type="checkbox" checked={selectedSkillRefs.has(skill.id)} onChange={(event) => toggleSkillRef(skill.id, event.target.checked)} />
+              </label>
+            )) : (
+              <p className="agent-editor-note">{text(locale, "noSkills")}</p>
+            )}
+          </div>
+        </div>
         {missingSkills.length ? <p className="settings-message">{text(locale, "unknownSkills")}: {missingSkills.join(", ")}</p> : null}
       </div>
     );
@@ -369,10 +389,6 @@ function RangeField({ label, min, max, step, value, onChange }: { label: string;
   );
 }
 
-function splitRefs(value: string) {
-  return value.split(",").map((item) => item.trim()).filter(Boolean);
-}
-
 function riskLabel(riskLevel: "low" | "medium" | "high", locale: "en" | "zh") {
   const labels = {
     low: { en: "Low risk", zh: "低风险" },
@@ -431,7 +447,9 @@ const copy = {
     identityPrompt: "Identity prompt",
     outputType: "Output type",
     outputFormat: "Output format",
-    availableSkills: "Available skills",
+    skills: "Skills",
+    allowedTools: "Allowed tools",
+    noSkills: "No skills are available yet",
     unknownSkills: "Unknown skill refs",
     enableKnowledge: "Enable knowledge base",
     referenceScope: "Reference scope",
@@ -476,7 +494,9 @@ const copy = {
     identityPrompt: "身份提示词",
     outputType: "输出类型",
     outputFormat: "输出格式",
-    availableSkills: "可用技能",
+    skills: "技能",
+    allowedTools: "允许工具",
+    noSkills: "暂时没有可用技能",
     unknownSkills: "未知技能引用",
     enableKnowledge: "启用知识库",
     referenceScope: "引用范围",
