@@ -1,5 +1,25 @@
 # FacetWrite Refactor Log
 
+## 2026-05-15: DeerFlow Auth Session Run Plan
+Scope: Saved the automatic DeerFlow local-session auth plan before implementation.
+
+Findings:
+- DeerFlow Docker sidecar health/status is online, but protected endpoints require auth.
+- DeerFlow exposes public setup/login endpoints and protected API routes behind cookie plus CSRF behavior.
+- FacetWrite should keep DeerFlow session cookies server-side only.
+
+Completed:
+- Added `docs/plans/DEERFLOW_AUTH_SESSION_RUN_PLAN.md`.
+- Captured the planned env configuration, backend session helper, authenticated fetch behavior, frontend status states, tests, and documentation updates.
+
+Open TODO:
+- Implement backend DeerFlow auth/session handling.
+- Wire config proxy and run stream requests through authenticated fetch.
+- Validate one real DeerFlow-backed Task-card generation.
+
+Next Priority Check:
+- Start with unit-tested auth/session helper behavior before wiring protected endpoints.
+
 ## 2026-05-15: DeerFlow Docker Sidecar Run
 Scope: Ran the Docker sidecar path and validated the first real FacetWrite-to-DeerFlow runtime checks.
 
