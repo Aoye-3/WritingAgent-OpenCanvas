@@ -1,5 +1,25 @@
 # FacetWrite Refactor Log
 
+## 2026-05-15: DeerFlow Docker Sidecar Run Plan
+Scope: Saved the Docker sidecar execution plan before implementation.
+
+Findings:
+- DeerFlow includes Docker Compose files for nginx/gateway startup.
+- Docker CLI is available, but reading `C:\Users\123\.docker\config.json` reports an access-denied warning.
+- FacetWrite currently reports DeerFlow disabled and uses TypeScript fallback.
+
+Completed:
+- Added `docs/plans/DEERFLOW_DOCKER_SIDECAR_RUN_PLAN.md`.
+- Captured the intended Docker execution path, sidecar URL, FacetWrite env values, validation checks, and layer-boundary constraints.
+
+Open TODO:
+- Run Docker commands with a workspace-local `DOCKER_CONFIG`.
+- Start DeerFlow nginx/gateway through Compose.
+- Validate FacetWrite `/api/deerflow/status` and one DeerFlow-backed Task-card generation if credentials are available.
+
+Next Priority Check:
+- Generate missing DeerFlow local config files and start the Docker sidecar.
+
 ## 2026-05-15: DeerFlow Runtime Observability And Live Validation
 Scope: Implemented DeerFlow runtime status/config visibility and attempted real sidecar validation.
 
