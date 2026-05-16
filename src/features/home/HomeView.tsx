@@ -14,11 +14,24 @@ type HomeViewProps = {
   onOpenThread: (thread: StoredThread) => void;
   onNavigate: (view: AppView) => void;
   onDeleteThread: (thread: StoredThread) => void;
+  onRenameThread: (threadId: string, title: string) => Promise<void>;
 };
 
-export function HomeView({ activeView, agentCards, recentThreads, onOpenSettings, onOpenAgent, onOpenThread, onNavigate, onDeleteThread }: HomeViewProps) {
+export function HomeView({
+  activeView,
+  agentCards,
+  recentThreads,
+  onOpenSettings,
+  onOpenAgent,
+  onOpenThread,
+  onNavigate,
+  onDeleteThread,
+  onRenameThread
+}: HomeViewProps) {
   const { locale, setLocale } = useI18n();
   const [homePrompt, setHomePrompt] = useState("");
+  const [openMenuThreadId, setOpenMenuThreadId] = useState("");
+  const [renameThread, setRenameThread] = useState<StoredThread | null>(null);
 
   const featuredAgents = useMemo(() => {
     const preferred = ["blog-post", "rewrite-polish", "email-writer", "lesson-plan"];
@@ -55,39 +68,39 @@ export function HomeView({ activeView, agentCards, recentThreads, onOpenSettings
   return (
     <main className="view view-home home-app" id="home-view" data-active={activeView === "home"}>
       <div hidden>
-      <aside className="home-sidebar" aria-label="Home navigation">
-        <div className="home-sidebar-brand">
-          <span className="brand-mark" aria-hidden="true"><BrandIcon /></span>
-          <span>FacetWrite</span>
-        </div>
+        <aside className="home-sidebar" aria-label="Home navigation">
+          <div className="home-sidebar-brand">
+            <span className="brand-mark" aria-hidden="true"><BrandIcon /></span>
+            <span>FacetWrite</span>
+          </div>
 
-        <nav className="home-sidebar-nav">
-          <button className="home-nav-item is-active" type="button" onClick={() => onNavigate("home")}>
-            <HomeGlyph />
-            <span>{locale === "zh" ? "家" : "Home"}</span>
-          </button>
-          <button className="home-nav-item" type="button" onClick={() => onNavigate("projects")}>
-            <DocumentGlyph />
-            <span>{locale === "zh" ? "项目" : "Projects"}</span>
-          </button>
-          <button className="home-nav-item" type="button" onClick={() => onNavigate("agentSettings")}>
-            <AgentGlyph />
-            <span>{locale === "zh" ? "Agent设置" : "Agent settings"}</span>
-          </button>
-          <button className="home-nav-item" type="button" onClick={() => onNavigate("knowledgeSettings")}>
-            <BookGlyph />
-            <span>{locale === "zh" ? "知识库设置" : "Knowledge settings"}</span>
-          </button>
-        </nav>
+          <nav className="home-sidebar-nav">
+            <button className="home-nav-item is-active" type="button" onClick={() => onNavigate("home")}>
+              <HomeGlyph />
+              <span>{locale === "zh" ? "首页" : "Home"}</span>
+            </button>
+            <button className="home-nav-item" type="button" onClick={() => onNavigate("projects")}>
+              <DocumentGlyph />
+              <span>{locale === "zh" ? "项目" : "Projects"}</span>
+            </button>
+            <button className="home-nav-item" type="button" onClick={() => onNavigate("agentSettings")}>
+              <AgentGlyph />
+              <span>{locale === "zh" ? "Agent 设置" : "Agent settings"}</span>
+            </button>
+            <button className="home-nav-item" type="button" onClick={() => onNavigate("knowledgeSettings")}>
+              <BookGlyph />
+              <span>{locale === "zh" ? "知识库设置" : "Knowledge settings"}</span>
+            </button>
+          </nav>
 
-        <div className="home-sidebar-footer">
-          <button className="home-side-pill" type="button">{locale === "zh" ? "本地应用模式" : "Local app mode"}</button>
-          <button className="home-side-pill" type="button" onClick={onOpenSettings}>{locale === "zh" ? "项目设置" : "Project settings"}</button>
-          <button className="home-side-pill" type="button" onClick={() => setLocale(locale === "en" ? "zh" : "en")}>
-            {locale === "zh" ? "Switch to English" : "切换中文"}
-          </button>
-        </div>
-      </aside>
+          <div className="home-sidebar-footer">
+            <button className="home-side-pill" type="button">{locale === "zh" ? "本地应用模式" : "Local app mode"}</button>
+            <button className="home-side-pill" type="button" onClick={onOpenSettings}>{locale === "zh" ? "项目设置" : "Project settings"}</button>
+            <button className="home-side-pill" type="button" onClick={() => setLocale(locale === "en" ? "zh" : "en")}>
+              {locale === "zh" ? "Switch to English" : "切换中文"}
+            </button>
+          </div>
+        </aside>
       </div>
       <AppSidebar activeView={activeView} onNavigate={onNavigate} onOpenSettings={onOpenSettings} />
 
@@ -96,7 +109,7 @@ export function HomeView({ activeView, agentCards, recentThreads, onOpenSettings
           <strong>{locale === "zh" ? "FacetWrite 小技巧：" : "FacetWrite tip:"}</strong>
           <span>{locale === "zh" ? "先用任务卡确定意图，再让右侧 AI 协作层继续改写和解释。" : "Start with an AgentCard, then use the right AI collaboration layer for revisions and explanation."}</span>
           <button className="button button-secondary button-small" type="button" onClick={() => primaryAgent && onOpenAgent(primaryAgent)}>
-            {locale === "zh" ? "开始一个画布" : "Create a canvas"}
+            {locale === "zh" ? "创建画布" : "Create a canvas"}
           </button>
         </div>
 
@@ -107,7 +120,7 @@ export function HomeView({ activeView, agentCards, recentThreads, onOpenSettings
             <form className="home-prompt-box" onSubmit={submitPrompt}>
               <textarea
                 aria-label={locale === "zh" ? "首页提示词输入" : "Home prompt input"}
-                placeholder={locale === "zh" ? "问问 FacetWrite 什么都行……" : "Ask FacetWrite to draft, rewrite, plan, or explain..."}
+                placeholder={locale === "zh" ? "问 FacetWrite 任何写作任务..." : "Ask FacetWrite to draft, rewrite, plan, or explain..."}
                 value={homePrompt}
                 onChange={(event) => setHomePrompt(event.target.value)}
               />
@@ -145,37 +158,42 @@ export function HomeView({ activeView, agentCards, recentThreads, onOpenSettings
                 const isThread = "id" in item;
                 const thread = isThread ? item : undefined;
                 const agentTitle = isThread ? agentCards.find((agent) => agent.id === item.agentCardId)?.title[locale] ?? item.agentCardId : item.title;
+                const projectTitle = isThread ? item.title || agentTitle : item.title;
                 const updatedAt = isThread ? new Date(item.updatedAt).toLocaleString() : item.updatedAt;
                 const assets = isThread ? locale === "zh" ? "1 项资产" : "1 asset" : item.assets;
                 return (
-                  <button className="home-project-row" key={isThread ? item.id : item.title} type="button" onClick={() => thread && onOpenThread(thread)}>
-                    <DocumentGlyph />
-                    <span>{agentTitle}</span>
+                  <article className="home-project-row" key={isThread ? item.id : item.title}>
+                    <button className="home-project-open" type="button" onClick={() => thread && onOpenThread(thread)}>
+                      <DocumentGlyph />
+                      <span>{projectTitle}</span>
+                    </button>
                     {index === 0 ? <em>{locale === "zh" ? "本地项目" : "Local"}</em> : null}
+                    {isThread ? <small className="home-project-agent">{agentTitle}</small> : null}
                     <small>{assets}</small>
                     <time>{updatedAt}</time>
                     {thread ? (
-                      <span
-                        className="home-project-delete"
-                        role="button"
-                        tabIndex={0}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onDeleteThread(thread);
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            onDeleteThread(thread);
-                          }
-                        }}
-                        aria-label={locale === "zh" ? "移入回收站" : "Move to trash"}
-                      >
-                        ×
-                      </span>
+                      <div className="project-more-wrap">
+                        <button
+                          className="icon-button project-more-button"
+                          type="button"
+                          aria-label={locale === "zh" ? "项目操作" : "Project actions"}
+                          onClick={() => setOpenMenuThreadId((current) => current === thread.id ? "" : thread.id)}
+                        >
+                          ...
+                        </button>
+                        {openMenuThreadId === thread.id ? (
+                          <div className="project-more-menu">
+                            <button type="button" onClick={() => { setRenameThread(thread); setOpenMenuThreadId(""); }}>
+                              {locale === "zh" ? "重命名" : "Rename"}
+                            </button>
+                            <button type="button" onClick={() => { onDeleteThread(thread); setOpenMenuThreadId(""); }}>
+                              {locale === "zh" ? "移入回收站" : "Move to trash"}
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
                     ) : null}
-                  </button>
+                  </article>
                 );
               })}
             </div>
@@ -204,7 +222,65 @@ export function HomeView({ activeView, agentCards, recentThreads, onOpenSettings
           </section>
         </div>
       </section>
+      {renameThread ? (
+        <RenameThreadDialog
+          initialTitle={renameThread.title}
+          locale={locale}
+          onClose={() => setRenameThread(null)}
+          onRename={async (title) => {
+            await onRenameThread(renameThread.id, title);
+            setRenameThread(null);
+          }}
+        />
+      ) : null}
     </main>
+  );
+}
+
+function RenameThreadDialog({
+  initialTitle,
+  locale,
+  onClose,
+  onRename
+}: {
+  initialTitle: string;
+  locale: "en" | "zh";
+  onClose: () => void;
+  onRename: (title: string) => Promise<void>;
+}) {
+  const [title, setTitle] = useState(initialTitle);
+  const [isSaving, setIsSaving] = useState(false);
+  const cleanTitle = title.trim();
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!cleanTitle || isSaving) return;
+    setIsSaving(true);
+    try {
+      await onRename(cleanTitle);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="rename-dialog-backdrop" role="presentation">
+      <form className="rename-dialog" onSubmit={submit} role="dialog" aria-modal="true" aria-label={locale === "zh" ? "重命名项目" : "Rename project"}>
+        <h2>{locale === "zh" ? "重命名项目" : "Rename project"}</h2>
+        <label className="field">
+          <span>{locale === "zh" ? "项目标题" : "Project title"}</span>
+          <input autoFocus maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} />
+        </label>
+        <div className="rename-dialog-actions">
+          <button className="button button-secondary" type="button" onClick={onClose} disabled={isSaving}>
+            {locale === "zh" ? "取消" : "Cancel"}
+          </button>
+          <button className="button button-primary" type="submit" disabled={!cleanTitle || isSaving}>
+            {isSaving ? (locale === "zh" ? "保存中" : "Saving") : (locale === "zh" ? "保存" : "Save")}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 

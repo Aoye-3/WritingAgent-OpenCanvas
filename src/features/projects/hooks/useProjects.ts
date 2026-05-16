@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { fetchProjects, fetchRecentThreads } from "../../agents/agentClient";
+import { batchHardDeleteThreads, batchMoveThreadsToTrash, fetchProjects, fetchRecentThreads, renameThread } from "../../agents/agentClient";
 import type { ProjectSummary, StoredThread } from "../../agents/types";
 
 export function useProjects() {
@@ -30,7 +30,25 @@ export function useProjects() {
     await Promise.all([refreshRecentThreads(), refreshProjects()]);
   }, [refreshProjects, refreshRecentThreads]);
 
+  const handleRenameThread = useCallback(async (threadId: string, title: string) => {
+    await renameThread(threadId, title);
+    await refreshProjectSurfaces();
+  }, [refreshProjectSurfaces]);
+
+  const handleBatchMoveToTrash = useCallback(async (threadIds: string[]) => {
+    await batchMoveThreadsToTrash(threadIds);
+    await refreshProjectSurfaces();
+  }, [refreshProjectSurfaces]);
+
+  const handleBatchHardDelete = useCallback(async (threadIds: string[]) => {
+    await batchHardDeleteThreads(threadIds);
+    await refreshProjectSurfaces();
+  }, [refreshProjectSurfaces]);
+
   return {
+    handleBatchHardDelete,
+    handleBatchMoveToTrash,
+    handleRenameThread,
     projects,
     recentThreads,
     refreshProjects,

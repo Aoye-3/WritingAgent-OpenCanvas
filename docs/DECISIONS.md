@@ -1,5 +1,26 @@
 # FacetWrite Technical Decisions
 
+## 2026-05-16: CanvasWriter Uses Proposal Plus User Confirmation
+Decision: Reframe `canvas_write` from a hard approval card into a Canvas write proposal that the user can confirm from the collaboration drawer.
+
+Reason: The Agent should be allowed to suggest useful Canvas writes, but product data must still require user intent. The UI can make confirmation lightweight without granting silent write access.
+
+Impact: `canvas_write` still creates `canvas_write_requests` and keeps `requiresApproval:true`. The frontend may show "write all", "write annotated snippets", and "cancel"; confirmation calls the backend approve/apply flow. Temporary selected-response annotations and highlights are client-only and are not persisted.
+
+## 2026-05-16: Threads Are The Current Project Rename Boundary
+Decision: Treat local project rename as `threads.title` rename rather than introducing a separate project title table.
+
+Reason: Current project rows, recent project cards, open behavior, trash behavior, and Canvas assets are all keyed by thread id.
+
+Impact: `PATCH /api/threads/:threadId` updates active thread titles only. Home and Projects use the custom title as the primary label and keep AgentCard title as secondary metadata. Trash entries cannot be renamed.
+
+## 2026-05-16: Project Bulk Operations Stay Thread-scoped
+Decision: Add batch move-to-trash and batch hard-delete as thread-scoped operations.
+
+Reason: Projects currently represent local threads. Batch management should reuse existing trash/delete semantics instead of introducing a parallel project lifecycle.
+
+Impact: `POST /api/threads/batch-trash` works on active threads; `POST /api/threads/batch-delete` permanently deletes only threads already in trash. The Projects UI exposes selection state and a context-aware batch action.
+
 ## 2026-05-15: DeerFlow Is The AI Execution Plane
 Decision: Treat FacetWrite as the workspace/control plane and DeerFlow as the AI execution/runtime plane.
 
@@ -71,11 +92,11 @@ Reason: Duplicating Tool definitions across UI, runtime, and prompt code causes 
 Impact: New tools must update catalog/policy docs and Agent runtime config behavior.
 
 ## 2026-05-15: Canvas Writes Require User Approval
-Decision: The `canvas_write` tool can create pending write requests only. It cannot directly change Canvas nodes.
+Decision: The `canvas_write` tool can create pending write requests only. It cannot directly change Canvas nodes. This decision is preserved by the 2026-05-16 proposal UI: user confirmation may auto-call approval, but the Agent still cannot write silently.
 
 Reason: Canvas mutation is a user-visible data write and should not happen solely because a model produced a tool call.
 
-Impact: UI must show approve/reject controls. Backend approval is the only path that applies write requests.
+Impact: UI must collect explicit user confirmation. Backend approval is the only path that applies write requests.
 
 ## 2026-05-15: Chat Completions Is The Provider Baseline
 Decision: Provider runtime uses Chat Completions-style messages, tools, tool calls, and tool result messages as the common baseline.

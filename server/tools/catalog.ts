@@ -104,9 +104,9 @@ export const toolCatalog: ToolDefinition[] = [
   {
     name: "canvas_write",
     group: "chat",
-    label: "Canvas Write Request",
-    description: "Create a pending request to write to the user's Canvas. The application will ask the user to approve before applying the change.",
-    promptHint: "Request a Canvas write only through the canvas_write function. Never claim the Canvas was changed unless the user approves the pending request.",
+    label: "Canvas Write Proposal",
+    description: "Propose content to write to the user's Canvas. The application will ask the user to confirm before applying the change.",
+    promptHint: "Use canvas_write to propose a Canvas write when the user asks to save or when the response is useful for Canvas. Never claim the Canvas was changed until the user confirms the proposal.",
     schema: {
       type: "object",
       properties: {

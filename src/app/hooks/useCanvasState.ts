@@ -55,6 +55,7 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces }: Use
     const request = await createCanvasWriteRequest(threadId, draft);
     setCanvasWriteRequests((current) => [request, ...current]);
     await onRefreshProjectSurfaces();
+    return request;
   };
 
   const handleUpdateCanvasNode = async (nodeId: string, patch: CanvasNodePatch) => {

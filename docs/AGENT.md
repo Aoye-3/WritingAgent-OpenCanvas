@@ -83,7 +83,7 @@ The AI Dashboard is not a second Agent settings page. It is a read-only runtime/
 
 - It shows DeerFlow runtime reachability, auth state, Lead Agent ID, Skills, MCP servers, AgentCard-to-subagent mapping, and ToolUse bridge status.
 - It describes FacetWrite capabilities as progressively bridged to DeerFlow ToolUse or MCP capabilities rather than as a competing local Agent runtime.
-- Canvas write behavior remains Human-in-the-loop: DeerFlow may propose the write through the bridge, but FacetWrite records only a pending request until the user approves it.
+- Canvas write behavior remains Human-in-the-loop: DeerFlow may propose the write through the bridge, but FacetWrite records only a pending request until the user confirms it and the backend approval path applies it.
 
 ## Tool Catalog
 `server/tools/catalog.ts` is the Tool metadata source of truth. Each ToolDefinition includes:
@@ -102,7 +102,7 @@ Current tools:
 - `knowledge_base`: local context tool, low risk.
 - `quick_messages`: local editing intent tool, low risk.
 - `clear_context`: local context control tool, low risk.
-- `canvas_write`: local high-risk write request tool, requires approval.
+- `canvas_write`: local high-risk write proposal tool, requires approval.
 
 ## Tool Policy
 `server/tools/policies.ts` derives runtime policy from Agent tool refs, saved settings, and per-run tool state.
@@ -111,7 +111,9 @@ A tool can auto-run only when it is enabled, does not require approval, and does
 
 `server/tools/toolPolicyGuard.ts` is the execution-time gate. It rejects unknown tools, tools not allowed by the active Agent, tools disabled for the current run, and tools that require missing external configuration before the executor branch runs.
 
-`canvas_write` must never directly mutate Canvas content from model output. It can only create a pending request that the user approves or rejects.
+`canvas_write` must never directly mutate Canvas content from model output. It can only create a pending request/proposal. The user-facing UI may offer "write all" or "write annotated snippets"; once the user confirms, FacetWrite applies the same backend approve path.
+
+The workspace also supports user-created temporary annotations on assistant responses. These annotations are not model output and are not saved as ToolUse state; they only help the user choose which response fragments should be written to Canvas.
 
 When DeerFlow is the active runtime, the FacetWrite bridge tools still call the same policy and executor path. This keeps disabled tools, disallowed Agent tools, and approval-gated writes consistent across DeerFlow and the TypeScript fallback runtime.
 

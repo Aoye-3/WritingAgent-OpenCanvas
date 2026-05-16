@@ -26,7 +26,7 @@ Thread IDs and node/request IDs are validated before filesystem operations so da
 - `projects`
   - Local project records. Current default project is `local-project`.
 - `threads`
-  - Thread/project records with `agent_card_id`, title, timestamps, and optional `deleted_at`.
+  - Thread/project records with `agent_card_id`, custom project `title`, timestamps, and optional `deleted_at`.
 - `messages`
   - User and assistant messages for a thread.
 - `runs`
@@ -61,6 +61,15 @@ Thread IDs and node/request IDs are validated before filesystem operations so da
 - `pending` requests are shown to the user.
 - `approved` requests are applied and marked approved.
 - `rejected` requests are not applied.
+
+The current frontend labels these as Canvas write proposals. This changes the interaction model, not the schema: proposed writes still enter `canvas_write_requests` and only mutate `canvas_nodes` through the approve path.
+
+Temporary assistant-message annotations are not persisted. Annotated snippets and highlight state live in React state only and are cleared after write, cancel, or page refresh.
+
+## Thread And Project Title Semantics
+The current project list is backed by `threads`; there is no separate project table-level rename. Renaming a project updates `threads.title` and `updated_at` for active, non-trashed threads only.
+
+Recent projects and Projects search prefer the custom thread title for the primary label. AgentCard title remains secondary type metadata.
 
 ## Migration Notes
 Schema creation and migration live in `server/db/schema.ts`. The migration is idempotent and currently ensures `threads.deleted_at` exists for trash/restore behavior.

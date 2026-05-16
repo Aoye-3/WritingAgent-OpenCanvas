@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { AppView } from "../../app/App";
 import type { AgentCard, ProjectSummary, StoredThread } from "../agents/types";
 import { useI18n } from "../i18n/I18nProvider";
@@ -9,9 +9,12 @@ type ProjectsViewProps = {
   agentCards: AgentCard[];
   projects: ProjectSummary[];
   trashProjects: ProjectSummary[];
+  onBatchHardDelete: (threadIds: string[]) => Promise<void>;
+  onBatchMoveToTrash: (threadIds: string[]) => Promise<void>;
   onNavigate: (view: AppView) => void;
   onOpenThread: (thread: StoredThread) => void;
   onMoveToTrash: (threadId: string) => void;
+  onRenameThread: (threadId: string, title: string) => Promise<void>;
   onRestore: (threadId: string) => void;
   onHardDelete: (threadId: string) => void;
 };
@@ -21,9 +24,12 @@ export function ProjectsView({
   agentCards,
   projects,
   trashProjects,
+  onBatchHardDelete,
+  onBatchMoveToTrash,
   onNavigate,
   onOpenThread,
   onMoveToTrash,
+  onRenameThread,
   onRestore,
   onHardDelete
 }: ProjectsViewProps) {
@@ -31,6 +37,10 @@ export function ProjectsView({
   const [query, setQuery] = useState("");
   const [agentFilter, setAgentFilter] = useState("all");
   const [showTrash, setShowTrash] = useState(false);
+  const [openMenuThreadId, setOpenMenuThreadId] = useState("");
+  const [renameProject, setRenameProject] = useState<ProjectSummary | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [batchBusy, setBatchBusy] = useState(false);
   const source = showTrash ? trashProjects : projects;
 
   const filtered = useMemo(() => {
@@ -42,6 +52,43 @@ export function ProjectsView({
     });
   }, [agentFilter, query, source]);
 
+  const visibleIds = useMemo(() => filtered.map((project) => project.id), [filtered]);
+  const selectedVisibleIds = selectedIds.filter((id) => visibleIds.includes(id));
+  const allVisibleSelected = visibleIds.length > 0 && selectedVisibleIds.length === visibleIds.length;
+  const agentTitle = (project: ProjectSummary) => agentCards.find((agent) => agent.id === project.agentCardId)?.title[locale] ?? project.agentTitle ?? project.agentCardId;
+
+  useEffect(() => {
+    setSelectedIds([]);
+    setOpenMenuThreadId("");
+  }, [showTrash]);
+
+  useEffect(() => {
+    setSelectedIds((current) => current.filter((id) => visibleIds.includes(id)));
+  }, [visibleIds]);
+
+  const toggleSelected = (threadId: string) => {
+    setSelectedIds((current) => current.includes(threadId) ? current.filter((id) => id !== threadId) : [...current, threadId]);
+  };
+
+  const toggleAllVisible = () => {
+    setSelectedIds(allVisibleSelected ? [] : visibleIds);
+  };
+
+  const runBatchAction = async () => {
+    if (selectedVisibleIds.length === 0 || batchBusy) return;
+    setBatchBusy(true);
+    try {
+      if (showTrash) {
+        await onBatchHardDelete(selectedVisibleIds);
+      } else {
+        await onBatchMoveToTrash(selectedVisibleIds);
+      }
+      setSelectedIds([]);
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
   return (
     <main className="view management-app" data-active={activeView === "projects"}>
       <ManagementSidebar activeView={activeView} onNavigate={onNavigate} />
@@ -52,7 +99,7 @@ export function ProjectsView({
             <p>{locale === "zh" ? "管理本地线程、画布资产和回收站。" : "Manage local threads, canvas assets, and trash."}</p>
           </div>
           <button className="button button-primary" type="button" onClick={() => onNavigate("home")}>
-            {locale === "zh" ? "创建新画布" : "Create canvas"}
+            {locale === "zh" ? "创建画布" : "Create canvas"}
           </button>
         </div>
 
@@ -69,8 +116,31 @@ export function ProjectsView({
           </button>
         </div>
 
+        <div className="project-batch-bar" data-active={selectedVisibleIds.length > 0}>
+          <span>
+            {selectedVisibleIds.length > 0
+              ? `${selectedVisibleIds.length} ${locale === "zh" ? "项已选择" : "selected"}`
+              : (locale === "zh" ? "选择项目后可批量操作" : "Select projects for batch actions")}
+          </span>
+          <button className={showTrash ? "button button-danger button-small" : "button button-secondary button-small"} type="button" onClick={runBatchAction} disabled={selectedVisibleIds.length === 0 || batchBusy}>
+            {batchBusy
+              ? (locale === "zh" ? "处理中" : "Working")
+              : showTrash
+                ? (locale === "zh" ? "批量永久删除" : "Delete selected")
+                : (locale === "zh" ? "批量移入回收站" : "Move selected to trash")}
+          </button>
+          {selectedVisibleIds.length > 0 ? (
+            <button className="button button-secondary button-small" type="button" onClick={() => setSelectedIds([])} disabled={batchBusy}>
+              {locale === "zh" ? "清除选择" : "Clear"}
+            </button>
+          ) : null}
+        </div>
+
         <section className="project-table" aria-label={showTrash ? "Trash" : "Projects"}>
           <div className="project-table-head">
+            <label className="project-select-cell">
+              <input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} disabled={visibleIds.length === 0} aria-label={locale === "zh" ? "选择全部可见项目" : "Select all visible projects"} />
+            </label>
             <span>{locale === "zh" ? "名称" : "Name"}</span>
             <span>Agent</span>
             <span>{locale === "zh" ? "资产" : "Assets"}</span>
@@ -79,11 +149,19 @@ export function ProjectsView({
           </div>
           {filtered.map((project) => (
             <article className="project-table-row" key={project.id}>
+              <label className="project-select-cell">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(project.id)}
+                  onChange={() => toggleSelected(project.id)}
+                  aria-label={`${locale === "zh" ? "选择" : "Select"} ${project.title || agentTitle(project)}`}
+                />
+              </label>
               <button type="button" onClick={() => !showTrash && onOpenThread(project)} disabled={showTrash}>
-                <strong>{project.agentTitle || project.title}</strong>
-                <small>{project.id}</small>
+                <strong>{project.title || agentTitle(project)}</strong>
+                <small>{agentTitle(project)} / {project.id}</small>
               </button>
-              <span>{agentCards.find((agent) => agent.id === project.agentCardId)?.title[locale] ?? project.agentCardId}</span>
+              <span>{agentTitle(project)}</span>
               <span>{project.assetCount ?? 0}</span>
               <time>{new Date(project.updatedAt).toLocaleString()}</time>
               <div className="project-row-actions">
@@ -101,9 +179,25 @@ export function ProjectsView({
                     <button className="button button-secondary button-small" type="button" onClick={() => onOpenThread(project)}>
                       {locale === "zh" ? "打开" : "Open"}
                     </button>
-                    <button className="button button-secondary button-small" type="button" onClick={() => onMoveToTrash(project.id)}>
-                      {locale === "zh" ? "移入回收站" : "Trash"}
-                    </button>
+                    <div className="project-more-wrap">
+                      <button
+                        className="button button-secondary button-small project-more-button"
+                        type="button"
+                        onClick={() => setOpenMenuThreadId((current) => current === project.id ? "" : project.id)}
+                      >
+                        {locale === "zh" ? "更多" : "More"}
+                      </button>
+                      {openMenuThreadId === project.id ? (
+                        <div className="project-more-menu">
+                          <button type="button" onClick={() => { setRenameProject(project); setOpenMenuThreadId(""); }}>
+                            {locale === "zh" ? "重命名" : "Rename"}
+                          </button>
+                          <button type="button" onClick={() => { onMoveToTrash(project.id); setOpenMenuThreadId(""); }}>
+                            {locale === "zh" ? "移入回收站" : "Trash"}
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
                   </>
                 )}
               </div>
@@ -114,41 +208,68 @@ export function ProjectsView({
           ) : null}
         </section>
       </section>
+      {renameProject ? (
+        <RenameProjectDialog
+          initialTitle={renameProject.title}
+          locale={locale}
+          onClose={() => setRenameProject(null)}
+          onRename={async (title) => {
+            await onRenameThread(renameProject.id, title);
+            setRenameProject(null);
+          }}
+        />
+      ) : null}
     </main>
   );
 }
 
 export function ManagementSidebar({ activeView, onNavigate }: { activeView: AppView; onNavigate: (view: AppView) => void }) {
   return <AppSidebar activeView={activeView} onNavigate={onNavigate} className="management-sidebar" />;
+}
 
-  const { locale, setLocale } = useI18n();
-  const items: Array<{ view: AppView; label: string }> = [
-    { view: "home", label: locale === "zh" ? "家" : "Home" },
-    { view: "projects", label: locale === "zh" ? "项目" : "Projects" },
-    { view: "agentSettings", label: locale === "zh" ? "Agent设置" : "Agent settings" },
-    { view: "knowledgeSettings", label: locale === "zh" ? "知识库设置" : "Knowledge settings" }
-  ];
+function RenameProjectDialog({
+  initialTitle,
+  locale,
+  onClose,
+  onRename
+}: {
+  initialTitle: string;
+  locale: "en" | "zh";
+  onClose: () => void;
+  onRename: (title: string) => Promise<void>;
+}) {
+  const [title, setTitle] = useState(initialTitle);
+  const [isSaving, setIsSaving] = useState(false);
+  const cleanTitle = title.trim();
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!cleanTitle || isSaving) return;
+    setIsSaving(true);
+    try {
+      await onRename(cleanTitle);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
-    <aside className="home-sidebar management-sidebar" aria-label="Management navigation">
-      <div className="home-sidebar-brand">
-        <span className="brand-mark" aria-hidden="true">F</span>
-        <span>FacetWrite</span>
-      </div>
-      <nav className="home-sidebar-nav">
-        {items.map((item) => (
-          <button className={activeView === item.view ? "home-nav-item is-active" : "home-nav-item"} key={item.view} type="button" onClick={() => onNavigate(item.view)}>
-            <span className="sidebar-dot" aria-hidden="true" />
-            <span>{item.label}</span>
+    <div className="rename-dialog-backdrop" role="presentation">
+      <form className="rename-dialog" onSubmit={submit} role="dialog" aria-modal="true" aria-label={locale === "zh" ? "重命名项目" : "Rename project"}>
+        <h2>{locale === "zh" ? "重命名项目" : "Rename project"}</h2>
+        <label className="field">
+          <span>{locale === "zh" ? "项目标题" : "Project title"}</span>
+          <input autoFocus maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} />
+        </label>
+        <div className="rename-dialog-actions">
+          <button className="button button-secondary" type="button" onClick={onClose} disabled={isSaving}>
+            {locale === "zh" ? "取消" : "Cancel"}
           </button>
-        ))}
-      </nav>
-      <div className="home-sidebar-footer">
-        <button className="home-side-pill" type="button">{locale === "zh" ? "本地应用模式" : "Local app mode"}</button>
-        <button className="home-side-pill" type="button" onClick={() => setLocale(locale === "en" ? "zh" : "en")}>
-          {locale === "zh" ? "Switch to English" : "切换中文"}
-        </button>
-      </div>
-    </aside>
+          <button className="button button-primary" type="submit" disabled={!cleanTitle || isSaving}>
+            {isSaving ? (locale === "zh" ? "保存中" : "Saving") : (locale === "zh" ? "保存" : "Save")}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }

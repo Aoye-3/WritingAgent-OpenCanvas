@@ -37,8 +37,8 @@ type WorkspaceViewProps = {
   onGoHome: () => void;
   onOpenSettings: () => void;
   onAgentValuesChange: (values: AgentValues) => void;
+  onApplyCanvasWriteFromMessage: (text: string) => Promise<void>;
   onRejectCanvasWriteRequest: (requestId: string) => Promise<void>;
-  onRequestCanvasWriteFromMessage: (text: string) => Promise<void>;
   onRestoreVersion: (version: StoredOutputVersion) => void;
   onSelectCanvasNode: (nodeId?: string) => void;
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
@@ -65,8 +65,8 @@ export function WorkspaceView({
   onGoHome,
   onOpenSettings,
   onAgentValuesChange,
+  onApplyCanvasWriteFromMessage,
   onRejectCanvasWriteRequest,
-  onRequestCanvasWriteFromMessage,
   onSelectCanvasNode,
   onToolStateChange,
   onUpdateCanvasNode,
@@ -221,8 +221,8 @@ export function WorkspaceView({
           messages={collaborationMessages}
           modelSettings={activeAgent.settings?.model}
           onApproveWriteRequest={onApproveCanvasWriteRequest}
+          onApplyWriteText={onApplyCanvasWriteFromMessage}
           onRejectWriteRequest={onRejectCanvasWriteRequest}
-          onRequestWriteMessage={onRequestCanvasWriteFromMessage}
           onSend={onChatSend}
           onResizeStart={startRightDrawerResize}
           onToggleCollapsed={() => setRightCollapsed((value) => !value)}

@@ -1,5 +1,30 @@
 # FacetWrite Refactor Log
 
+## 2026-05-16: Project Management And CanvasWriter Confirmation
+Scope: Added project title management, batch project operations, and the first CanvasWriter proposal/annotation UX.
+
+Findings:
+- Project rows are currently thread rows, so rename should update `threads.title` and keep AgentCard title as secondary metadata.
+- Canvas writes should become easier to confirm, but the Agent must still be unable to silently mutate Canvas.
+- Highlighting selected assistant text must be integrated into Markdown rendering rather than replacing Markdown with plain text.
+
+Completed:
+- Added thread/project rename via `PATCH /api/threads/:threadId`, with title validation, updated timestamps, and Home/Projects refresh behavior.
+- Added Projects batch selection, batch move to trash, and batch hard delete from trash.
+- Changed CanvasWriter UX to show write proposals with `write all`, `write annotated snippets`, and `cancel`.
+- Added assistant-response text selection, temporary annotation chips, and persistent in-message highlight for annotated snippets.
+- Kept `canvas_write_requests` and approve/reject APIs as the backend safety boundary; frontend confirmation auto-submits approval only after explicit user intent.
+- Extended Canvas write intent recognition for Chinese and English phrases such as `写入`, `保存到画板`, `save to canvas`, and `write this`.
+- Updated Markdown rendering so annotation highlights preserve headings, lists, bold, code, and links.
+- Verified `npm.cmd run typecheck`, `npm.cmd test`, `npm.cmd run build`, and Playwright checks for annotation/highlight and no console warnings/errors.
+
+Open TODO:
+- Add dedicated frontend component tests for annotation/highlight behavior if a browser test suite becomes part of regular CI.
+- Consider persisting selected write snippets only if users later need cross-refresh draft state; current annotations are intentionally temporary.
+
+Next Priority Check:
+- Before expanding Canvas actions beyond document write/append, document the target-node selection rule and add browser coverage for replace/append edge cases.
+
 ## 2026-05-16: DeerFlow Runtime And ToolUse Bridge Stabilization
 Scope: Implemented the first stable DeerFlow primary-runtime ToolUse bridge and updated runtime acceptance docs.
 

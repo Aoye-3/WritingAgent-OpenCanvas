@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 
 type MarkdownTextProps = {
+  highlights?: string[];
   text: string;
 };
 
-export function MarkdownText({ text }: MarkdownTextProps) {
+export function MarkdownText({ highlights = [], text }: MarkdownTextProps) {
   const blocks = toBlocks(text);
 
   return (
@@ -13,7 +14,7 @@ export function MarkdownText({ text }: MarkdownTextProps) {
         if (block.kind === "ul") {
           return (
             <ul key={index}>
-              {block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item)}</li>)}
+              {block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item, highlights)}</li>)}
             </ul>
           );
         }
@@ -21,21 +22,21 @@ export function MarkdownText({ text }: MarkdownTextProps) {
         if (block.kind === "ol") {
           return (
             <ol key={index}>
-              {block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item)}</li>)}
+              {block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item, highlights)}</li>)}
             </ol>
           );
         }
 
         if (block.kind === "heading") {
           const Tag = `h${block.level}` as "h1" | "h2" | "h3" | "h4";
-          return <Tag key={index}>{renderInline(block.text)}</Tag>;
+          return <Tag key={index}>{renderInline(block.text, highlights)}</Tag>;
         }
 
         if (block.kind === "hr") {
           return <hr key={index} />;
         }
 
-        return <p key={index}>{renderInline(block.text)}</p>;
+        return <p key={index}>{renderInline(block.text, highlights)}</p>;
       })}
     </div>
   );
@@ -122,36 +123,67 @@ function toBlocks(text: string): Block[] {
   return blocks.length > 0 ? blocks : [{ kind: "p", text }];
 }
 
-function renderInline(text: string) {
+function renderInline(text: string, highlights: string[]) {
   const nodes: ReactNode[] = [];
   const pattern = /(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__|`[^`]+`)/g;
   let lastIndex = 0;
 
   for (const match of text.matchAll(pattern)) {
     if (match.index > lastIndex) {
-      nodes.push(text.slice(lastIndex, match.index));
+      nodes.push(...renderHighlightedText(text.slice(lastIndex, match.index), highlights, nodes.length));
     }
 
     const token = match[0];
     if (token.startsWith("`")) {
-      nodes.push(<code key={nodes.length}>{token.slice(1, -1)}</code>);
+      nodes.push(<code key={nodes.length}>{renderHighlightedText(token.slice(1, -1), highlights, 0)}</code>);
     } else if (token.startsWith("[")) {
       const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       nodes.push(link ? (
         <a key={nodes.length} href={safeHref(link[2])} target="_blank" rel="noreferrer">
-          {link[1]}
+          {renderHighlightedText(link[1], highlights, 0)}
         </a>
       ) : token);
     } else {
-      nodes.push(<strong key={nodes.length}>{token.slice(2, -2)}</strong>);
+      nodes.push(<strong key={nodes.length}>{renderHighlightedText(token.slice(2, -2), highlights, 0)}</strong>);
     }
     lastIndex = match.index + token.length;
   }
 
   if (lastIndex < text.length) {
-    nodes.push(text.slice(lastIndex));
+    nodes.push(...renderHighlightedText(text.slice(lastIndex), highlights, nodes.length));
   }
 
+  return nodes;
+}
+
+function renderHighlightedText(text: string, highlights: string[], keyOffset: number) {
+  const activeHighlights = highlights.map((highlight) => highlight.trim()).filter(Boolean);
+  if (!activeHighlights.length || !text) return [text];
+
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const highlight of activeHighlights) {
+    const start = text.indexOf(highlight);
+    if (start < 0) continue;
+    const end = start + highlight.length;
+    if (ranges.some((range) => start < range.end && end > range.start)) continue;
+    ranges.push({ start, end });
+  }
+
+  if (!ranges.length) return [text];
+  ranges.sort((left, right) => left.start - right.start);
+
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  for (const range of ranges) {
+    if (range.start > cursor) {
+      nodes.push(text.slice(cursor, range.start));
+    }
+    nodes.push(<mark className="message-annotation-highlight" key={`${keyOffset}-${range.start}`}>{text.slice(range.start, range.end)}</mark>);
+    cursor = range.end;
+  }
+  if (cursor < text.length) {
+    nodes.push(text.slice(cursor));
+  }
   return nodes;
 }
 

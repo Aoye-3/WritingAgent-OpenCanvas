@@ -230,5 +230,28 @@ function maybeCreateCanvasWriteRequest(input: {
 
 function hasCanvasWriteIntent(payload: GenerateRequest) {
   const instruction = `${payload.chatInstruction ?? ""}\n${payload.freeTextPrompt ?? ""}`.toLowerCase();
-  return /canvas|画板|畫板|放到|写入|寫入|添加到|加入/.test(instruction);
+  const intentKeywords = [
+    "canvas",
+    "画板",
+    "畫板",
+    "写入",
+    "寫入",
+    "保存到",
+    "加入",
+    "添加到",
+    "放到",
+    "save to canvas",
+    "write this",
+    "write to canvas",
+    "add to canvas",
+    "鐢绘澘",
+    "鐣澘",
+    "鏀惧埌",
+    "鍐欏叆",
+    "瀵叆",
+    "娣诲姞鍒",
+    "鍔犲叆"
+  ];
+  return intentKeywords.some((keyword) => instruction.includes(keyword)) ||
+    /save\s+to\s+canvas|write\s+this|write\s+to\s+canvas|add\s+to\s+canvas/.test(instruction);
 }

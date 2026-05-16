@@ -27,6 +27,46 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime }: Th
     }
   });
 
+  app.post("/api/threads/batch-trash", (request, response) => {
+    const threadIds = parseThreadIds(request.body?.threadIds);
+    if (!threadIds) {
+      sendError(response, 400, "bad_request", "threadIds must be a non-empty array");
+      return;
+    }
+
+    const results = threadIds.map((threadId) => ({
+      threadId,
+      ok: storage.moveThreadToTrash(threadId)
+    }));
+    sendOk(response, {
+      ok: true,
+      results,
+      movedCount: results.filter((result) => result.ok).length
+    });
+  });
+
+  app.post("/api/threads/batch-delete", async (request, response) => {
+    const threadIds = parseThreadIds(request.body?.threadIds);
+    if (!threadIds) {
+      sendError(response, 400, "bad_request", "threadIds must be a non-empty array");
+      return;
+    }
+
+    try {
+      const results = await Promise.all(threadIds.map(async (threadId) => ({
+        threadId,
+        ok: await storage.hardDeleteThread(threadId)
+      })));
+      sendOk(response, {
+        ok: true,
+        results,
+        deletedCount: results.filter((result) => result.ok).length
+      });
+    } catch (error) {
+      sendError(response, 500, "internal_error", errorMessage(error, "Unable to delete threads"));
+    }
+  });
+
   app.post("/api/threads/:threadId/trash", (request, response) => {
     const moved = storage.moveThreadToTrash(request.params.threadId);
     if (!moved) {
@@ -45,6 +85,20 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime }: Th
     }
 
     sendOk(response, { ok: true });
+  });
+
+  app.patch("/api/threads/:threadId", (request, response) => {
+    try {
+      const thread = storage.renameThread(request.params.threadId, request.body?.title);
+      if (!thread) {
+        sendError(response, 404, "not_found", "Thread not found");
+        return;
+      }
+
+      sendOk(response, { thread });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to rename thread"));
+    }
   });
 
   app.delete("/api/threads/:threadId", async (request, response) => {
@@ -81,4 +135,10 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime }: Th
       canvasWriteRequests: storage.listCanvasWriteRequests(request.params.threadId, "pending")
     });
   });
+}
+
+function parseThreadIds(value: unknown) {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const ids = value.map((item) => safeId(item)).filter((item): item is string => Boolean(item));
+  return ids.length === value.length ? [...new Set(ids)] : undefined;
 }

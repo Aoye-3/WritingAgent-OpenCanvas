@@ -62,6 +62,15 @@ export class ThreadRepository {
     return result.changes > 0;
   }
 
+  renameThread(threadId: string, title: string) {
+    const now = nowIso();
+    const result = this.db
+      .prepare(`UPDATE threads SET title = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`)
+      .run(title, now, threadId);
+    if (result.changes === 0) return undefined;
+    return this.getThread(threadId);
+  }
+
   touchThread(threadId: string, updatedAt = nowIso()) {
     this.db.prepare(`UPDATE threads SET updated_at = ? WHERE id = ?`).run(updatedAt, threadId);
   }

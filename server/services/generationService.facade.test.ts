@@ -140,6 +140,33 @@ test("generation facade creates a pending Canvas write request for DeerFlow canv
   assert.ok((records[0] as { events: Array<{ payload: { tool?: string; requestId?: string } }> }).events.some((event) => event.payload.tool === "canvas_write" && event.payload.requestId === "write_1"));
 });
 
+test("generation facade recognizes Chinese and English Canvas write intents", async () => {
+  for (const chatInstruction of ["请写入画板", "save to canvas", "write this"]) {
+    const { storage, canvasWriteRequests } = fakeStorage();
+    const service = createGenerationService(storage, fakeAgentRuntime(), {
+      deerflow: {
+        getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://deerflow", assistantId: "lead_agent" }),
+        runAgent: async () => ({
+          text: "Reusable answer",
+          finishReason: "stop",
+          events: []
+        })
+      }
+    });
+
+    await service.generateAndRecord({
+      mode: "chat",
+      locale: "zh",
+      agentCardId: "blog-post",
+      chatInstruction,
+      toolState: { canvas_write: true }
+    });
+
+    assert.equal(canvasWriteRequests.length, 1);
+    assert.equal((canvasWriteRequests[0] as { content: string }).content, "Reusable answer");
+  }
+});
+
 test("generation facade falls back to provider when DeerFlow returns no usable text", async () => {
   const { storage, records } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {

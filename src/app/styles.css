@@ -676,7 +676,7 @@ textarea:focus-visible,
 .home-project-row {
   min-height: 40px;
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto 100px 92px;
+  grid-template-columns: minmax(0, 1fr) auto 96px 84px 96px 40px;
   align-items: center;
   gap: 10px;
   border: 0;
@@ -691,15 +691,31 @@ textarea:focus-visible,
   background: var(--color-surface-subtle);
 }
 
-.home-project-row svg {
+.home-project-open {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  padding: 0;
+  text-align: left;
+}
+
+.home-project-open svg {
   color: #344054;
   width: 18px;
   height: 18px;
 }
 
-.home-project-row span {
+.home-project-open span {
   font-size: 15px;
   font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .home-project-row em {
@@ -717,6 +733,9 @@ textarea:focus-visible,
   color: var(--color-text-muted);
   font-size: 13px;
   text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .home-agent-card-row {
@@ -1462,6 +1481,87 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   justify-content: flex-end;
   gap: 8px;
   margin-top: 10px;
+}
+
+.canvas-write-proposal {
+  border-color: #7aa7ff;
+  background: #f7fbff;
+}
+
+.canvas-write-status {
+  margin: 0;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.annotation-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.annotation-chip-row-compact {
+  margin: 0;
+  padding: 7px;
+  border: 1px solid #cfe0ff;
+  border-radius: var(--radius-sm);
+  background: #f8fbff;
+}
+
+.annotation-chip-summary {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 750;
+  padding: 0 2px;
+}
+
+.annotation-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  border: 1px solid #b7c9f6;
+  border-radius: 999px;
+  background: #edf4ff;
+  color: #1f4a8d;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.annotation-chip span {
+  color: #46628f;
+  font-size: 11px;
+}
+
+.assistant-selectable-text {
+  user-select: text;
+}
+
+.message-annotation-highlight {
+  border-radius: 4px;
+  background: #fff1a8;
+  color: inherit;
+  padding: 0 2px;
+}
+
+.message-annotation-popover {
+  position: fixed;
+  z-index: 1000;
+  transform: translate(-50%, calc(-100% - 8px));
+  border: 1px solid #9bbcff;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--color-primary);
+  box-shadow: 0 10px 24px rgba(35, 50, 80, 0.18);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .ai-drawer {
@@ -2245,24 +2345,6 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   color: #b42318;
 }
 
-.home-project-delete {
-  width: 26px;
-  height: 26px;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  color: var(--color-text-muted);
-  font-size: 18px;
-  line-height: 1;
-}
-
-.home-project-delete:hover {
-  border-color: #fecaca;
-  background: #fff7f7;
-  color: #b42318;
-}
-
 .management-app {
   min-height: 100vh;
   display: none;
@@ -2338,7 +2420,7 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 .project-table-head,
 .project-table-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1.4fr) minmax(160px, 0.8fr) 90px 180px 220px;
+  grid-template-columns: 34px minmax(260px, 1.4fr) minmax(160px, 0.8fr) 90px 180px 220px;
   gap: 14px;
   align-items: center;
 }
@@ -2386,6 +2468,109 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.project-batch-bar {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -4px 0 14px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.project-batch-bar[data-active="true"] {
+  color: var(--color-text);
+}
+
+.project-batch-bar span {
+  font-weight: 750;
+  margin-right: auto;
+}
+
+.project-select-cell {
+  display: inline-grid;
+  place-items: center;
+}
+
+.project-select-cell input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-primary);
+}
+
+.project-more-wrap {
+  position: relative;
+  display: inline-flex;
+  justify-content: flex-end;
+}
+
+.project-more-button {
+  min-width: var(--control-height-sm);
+}
+
+.project-more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 50;
+  min-width: 150px;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+}
+
+.project-more-menu button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  padding: 0 10px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.project-more-menu button:hover {
+  background: var(--color-surface-subtle);
+}
+
+.rename-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.rename-dialog {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  padding: 20px;
+  box-shadow: var(--shadow-floating);
+}
+
+.rename-dialog h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.rename-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .empty-management-state,
@@ -2905,7 +3090,7 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   .home-workspace-card { min-height: auto; padding: 44px 20px 70px; }
   .home-quick-actions { grid-template-columns: 1fr; }
   .home-agent-card-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .home-project-row { grid-template-columns: 24px minmax(0, 1fr) auto; }
+  .home-project-row { grid-template-columns: minmax(0, 1fr) auto 40px; }
   .home-project-row small,
   .home-project-row time { display: none; }
   .home-header { grid-template-columns: 1fr; }

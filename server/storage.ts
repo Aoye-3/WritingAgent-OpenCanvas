@@ -131,6 +131,7 @@ export type CanvasWriteRequestInput = {
 const appRoot = path.resolve(process.cwd(), ".facetwrite");
 const dbDir = path.join(appRoot, "data");
 const dbPath = path.join(dbDir, "facetwrite.db");
+const maxThreadTitleLength = 120;
 
 export class SQLiteStorageRepository {
   private db: DatabaseSync;
@@ -249,6 +250,18 @@ export class SQLiteStorageRepository {
 
   restoreThread(threadId: string) {
     return this.threads.restoreThread(threadId);
+  }
+
+  renameThread(threadId: string, title: unknown) {
+    validateId(threadId, "threadId");
+    const cleanTitle = cleanText(title);
+    if (!cleanTitle) {
+      throw new Error("Thread title is required");
+    }
+    if (cleanTitle.length > maxThreadTitleLength) {
+      throw new Error(`Thread title must be ${maxThreadTitleLength} characters or fewer`);
+    }
+    return this.threads.renameThread(threadId, cleanTitle);
   }
 
   async hardDeleteThread(threadId: string) {

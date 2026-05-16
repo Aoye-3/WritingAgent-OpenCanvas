@@ -50,7 +50,7 @@ Acceptance checks:
 - `/api/deerflow/status` returns `reachable:true`, `authState:"authenticated"`, and `runtimeProvider:"deerflow"`.
 - A Summary or Blog generation returns `provider:"deerflow"`.
 - No `deerflow_runtime_failed` event appears during the primary runtime check.
-- `canvas_write` creates a pending write request only; Canvas content changes only after user approval.
+- `canvas_write` creates a pending write proposal/request only; Canvas content changes only after explicit user confirmation through the approval path.
 
 See [DeerFlow Runtime Runbook](docs/DEERFLOW_RUNTIME_RUNBOOK.md) for the full Docker Desktop and Linux Docker Compose checklist.
 

@@ -104,6 +104,19 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `POST /api/threads`
   - Body may include `agentCardId` and optional safe `threadId`.
   - Ensures the thread exists and returns `{ threadId, agentCardId }`.
+- `PATCH /api/threads/:threadId`
+  - Body: `{ title: string }`.
+  - Renames an active thread/project by updating `threads.title` and `updated_at`.
+  - Titles are trimmed, must be non-empty, and are limited to 120 characters.
+  - Returns `{ thread }`; missing or trashed threads return 404.
+- `POST /api/threads/batch-trash`
+  - Body: `{ threadIds: string[] }`.
+  - Moves active threads to trash and returns `{ ok, results, movedCount }`.
+  - Empty or invalid arrays return HTTP 400.
+- `POST /api/threads/batch-delete`
+  - Body: `{ threadIds: string[] }`.
+  - Permanently deletes trashed threads and returns `{ ok, results, deletedCount }`.
+  - Threads must already be in trash; empty or invalid arrays return HTTP 400.
 - `POST /api/threads/:threadId/trash`
   - Soft-deletes a thread.
 - `POST /api/threads/:threadId/restore`
@@ -119,7 +132,7 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 
 ## Projects
 - `GET /api/projects`
-  - Returns active project/thread summaries.
+  - Returns active project/thread summaries. `title` is the custom thread/project title; Agent display name remains available as Agent metadata.
 - `GET /api/projects/trash`
   - Returns trashed project/thread summaries.
 
@@ -129,13 +142,13 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `POST /api/threads/:threadId/canvas/nodes`
   - Creates a Canvas node.
 - `POST /api/threads/:threadId/canvas/write-requests`
-  - Creates a pending Canvas write request from explicit user action or Agent runtime intent. The request is not applied until approved.
+  - Creates a pending Canvas write request from explicit user action, annotated assistant snippets, or Agent runtime intent. The request is not applied until approved.
 - `PATCH /api/threads/:threadId/canvas/nodes/:nodeId`
   - Updates a Canvas node.
 - `DELETE /api/threads/:threadId/canvas/nodes/:nodeId`
   - Deletes a Canvas node.
 - `POST /api/threads/:threadId/canvas/write-requests/:requestId/approve`
-  - Applies a pending write request.
+  - Applies a pending write request. The frontend can call this immediately after explicit user confirmation in the Canvas write proposal UI.
 - `POST /api/threads/:threadId/canvas/write-requests/:requestId/reject`
   - Rejects a pending write request without changing Canvas nodes.
 

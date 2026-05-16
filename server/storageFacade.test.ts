@@ -34,8 +34,16 @@ test("storage facade records thread runs, messages, versions, events, projects, 
   assert.ok(storage.listToolEvents(threadId).some((event) => event.eventType === "tool_call_completed"));
   assert.ok(storage.listProjects(agentCards).some((project) => project.id === threadId && project.assetCount >= 1));
 
+  const renamed = storage.renameThread(threadId, "Renamed project");
+  assert.equal(renamed?.title, "Renamed project");
+  assert.ok(storage.getThread(threadId)?.updatedAt);
+  assert.ok(storage.listRecentThreads().some((thread) => thread.id === threadId && thread.title === "Renamed project"));
+  assert.ok(storage.listProjects(agentCards).some((project) => project.id === threadId && project.title === "Renamed project"));
+  assert.throws(() => storage.renameThread(threadId, "   "), /required/);
+
   assert.equal(storage.moveThreadToTrash(threadId), true);
   assert.ok(storage.listProjects(agentCards, true).some((project) => project.id === threadId));
+  assert.equal(storage.renameThread(threadId, "Hidden rename"), undefined);
   assert.equal(storage.restoreThread(threadId), true);
   assert.equal(storage.moveThreadToTrash(threadId), true);
   assert.equal(await storage.hardDeleteThread(threadId), true);

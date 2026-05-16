@@ -18,13 +18,14 @@ The app is currently an MVP focused on Agent-assisted writing workflows rather t
 - Provider support through DeepSeek, OpenAI, OpenAI-compatible, and mock fallback paths.
 - DeerFlow Docker sidecar integration as the preferred AI execution/runtime plane when enabled, with the TypeScript provider runtime kept as fallback.
 - SQLite-backed threads, messages, runs, prompt versions, output versions, tool events, Agent settings, Canvas nodes, and Canvas write requests.
-- Canvas write workflow where the Agent can request writes, but user approval is required before Canvas content changes.
+- Project management for local threads, including custom thread titles, recent-project rename, project-list rename, trash/restore, batch move to trash, and batch hard delete from trash.
+- Canvas write workflow where the Agent can propose writes, selected assistant-response snippets can be annotated/highlighted, and user confirmation applies the write through the existing approval backend before Canvas content changes.
 
 ## MVP Boundaries
 - The app is local-first and stores runtime data under `.facetwrite/`.
 - Agent cards are predefined in code; the current UI edits settings for existing cards.
 - `web_search`, `knowledge_base`, and `canvas_write` are in progressive DeerFlow ToolUse/MCP bridging; not every configured capability is proven consumed by DeerFlow yet.
-- Canvas write requests are internal ToolUse operations, not direct model-side mutations.
+- Canvas write requests are internal ToolUse operations, not direct model-side mutations. The current UI may auto-submit approval after explicit user confirmation, but the Agent never writes Canvas silently.
 - Knowledge settings exist as a product surface, but full knowledge ingestion is outside the current documented MVP.
 
 ## Do Not Do Yet

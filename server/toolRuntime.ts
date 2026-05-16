@@ -132,7 +132,7 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
       });
       return {
         ok: true,
-        content: `A Canvas write request (${request.operation}) is pending user approval. Request id: ${request.id}. Do not say it has been applied yet.`,
+        content: `A Canvas write proposal (${request.operation}) is ready for user confirmation. Request id: ${request.id}. Do not say it has been applied yet.`,
         payload: {
           tool: name,
           requestId: request.id,

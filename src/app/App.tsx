@@ -47,7 +47,7 @@ function AppContent() {
   const { locale } = useI18n();
   const { view, setView } = useAppNavigation("start");
   const { agentCards, updateAgentCard } = useAgentCards(fallbackAgentCards);
-  const { projects, recentThreads, refreshProjectSurfaces, refreshProjects, refreshRecentThreads, trashProjects } = useProjects();
+  const { handleBatchHardDelete, handleBatchMoveToTrash, handleRenameThread, projects, recentThreads, refreshProjectSurfaces, refreshProjects, refreshRecentThreads, trashProjects } = useProjects();
   const [activeAgent, setActiveAgent] = useState<AgentCard>(fallbackAgentCards[0]);
   const [agentValues, setAgentValues] = useState<AgentValues>(() => getInitialValues(fallbackAgentCards[0]));
   const [toolState, setToolState] = useState<GenerateRequest["toolState"]>({ knowledge_base: true, canvas_write: true });
@@ -219,16 +219,20 @@ function AppContent() {
         onOpenThread={openRecentThread}
         onNavigate={setView}
         onDeleteThread={projectTrash.handleMoveToTrash}
+        onRenameThread={handleRenameThread}
       />
       <ProjectsView
         activeView={view}
         agentCards={agentCards}
+        onBatchHardDelete={handleBatchHardDelete}
+        onBatchMoveToTrash={handleBatchMoveToTrash}
         projects={projects}
         trashProjects={trashProjects}
         onHardDelete={projectTrash.handleHardDeleteThread}
         onMoveToTrash={projectTrash.handleMoveToTrash}
         onNavigate={setView}
         onOpenThread={openRecentThread}
+        onRenameThread={handleRenameThread}
         onRestore={projectTrash.handleRestoreThread}
       />
       <AgentSettingsView
@@ -265,13 +269,17 @@ function AppContent() {
         onGoHome={() => setView("home")}
         onOpenSettings={() => setSettingsOpen(true)}
         onRejectCanvasWriteRequest={canvasState.handleRejectCanvasWriteRequest}
-        onRequestCanvasWriteFromMessage={(text) => canvasState.handleCreateCanvasWriteRequest({
-          operation: "create",
-          nodeKind: "document",
-          title: activeAgent.title[locale],
-          content: text,
-          rationale: locale === "zh" ? "用户从 AI 回复点击写入画板。" : "Requested by the user from an AI reply."
-        })}
+        onApplyCanvasWriteFromMessage={async (text) => {
+          const request = await canvasState.handleCreateCanvasWriteRequest({
+            operation: canvasState.selectedCanvasNodeId ? "append" : "create",
+            targetNodeId: canvasState.selectedCanvasNodeId,
+            nodeKind: "document",
+            title: activeAgent.title[locale],
+            content: text,
+            rationale: locale === "zh" ? "用户确认写入 Canvas。" : "Confirmed by the user for Canvas."
+          });
+          await canvasState.handleApproveCanvasWriteRequest(request.id);
+        }}
         onRestoreVersion={generationRun.restoreVersion}
         onSelectCanvasNode={canvasState.setSelectedCanvasNodeId}
         onToolStateChange={setToolState}

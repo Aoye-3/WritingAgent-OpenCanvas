@@ -113,13 +113,13 @@ FacetWrite bridge tools:
 - `knowledge_base` calls back into `/api/internal/deerflow/tool-call` and reads explicit runtime context.
 - `quick_messages` calls back into FacetWrite and normalizes the current instruction.
 - `clear_context` calls back into FacetWrite and confirms prior context should be ignored.
-- `canvas_write` calls back into FacetWrite and creates a pending Canvas write request only.
+- `canvas_write` calls back into FacetWrite and creates a pending Canvas write proposal/request only.
 
 Canvas acceptance:
 
-- Before approval, Canvas content must remain unchanged.
+- Before user confirmation and backend approval, Canvas content must remain unchanged.
 - The pending request must appear in thread state.
-- Only the FacetWrite approve endpoint may apply the pending write.
+- Only the FacetWrite approve endpoint may apply the pending write; the frontend may call it automatically after explicit user confirmation.
 
 ## Common Failures
 
@@ -129,4 +129,4 @@ Canvas acceptance:
 - FacetWrite status is reachable but auth is not authenticated: wait for setup-status rate limits to cool down, then retry backend auth.
 - Bridge calls fail from Docker: confirm `FACETWRITE_INTERNAL_BASE_URL=http://host.docker.internal:8787`, FacetWrite backend is listening, and any configured token matches.
 - DeepSeek tool calls fail with `reasoning_content` errors: use DeerFlow `deerflow.models.patched_deepseek:PatchedChatDeepSeek` for the current DeepSeek-compatible model so reasoning metadata is preserved across tool-call turns.
-- `canvas_write` appears applied before approval: this is a blocker; DeerFlow bridge must only create a pending request.
+- `canvas_write` appears applied before user confirmation/approval: this is a blocker; DeerFlow bridge must only create a pending request.

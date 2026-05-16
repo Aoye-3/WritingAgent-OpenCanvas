@@ -9,7 +9,7 @@ import type {
   ThreadStateResponse,
   ToolCatalogItem
 } from "./types";
-import { apiDelete, apiGet, apiPost, apiPut } from "../../shared/apiClient";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "../../shared/apiClient";
 
 export async function fetchAgentCards(): Promise<AgentCard[]> {
   const payload = await apiGet<{ agentCards: AgentCard[] }>("/api/agent-cards");
@@ -34,12 +34,25 @@ export async function moveThreadToTrash(threadId: string): Promise<void> {
   await apiPost<{ ok: true }>(`/api/threads/${encodeURIComponent(threadId)}/trash`);
 }
 
+export async function batchMoveThreadsToTrash(threadIds: string[]): Promise<void> {
+  await apiPost<{ ok: true; movedCount: number }>("/api/threads/batch-trash", { threadIds });
+}
+
 export async function restoreThreadFromTrash(threadId: string): Promise<void> {
   await apiPost<{ ok: true }>(`/api/threads/${encodeURIComponent(threadId)}/restore`);
 }
 
 export async function hardDeleteThread(threadId: string): Promise<void> {
   await apiDelete<{ ok: true }>(`/api/threads/${encodeURIComponent(threadId)}`);
+}
+
+export async function batchHardDeleteThreads(threadIds: string[]): Promise<void> {
+  await apiPost<{ ok: true; deletedCount: number }>("/api/threads/batch-delete", { threadIds });
+}
+
+export async function renameThread(threadId: string, title: string): Promise<StoredThread> {
+  const payload = await apiPatch<{ thread: StoredThread }>(`/api/threads/${encodeURIComponent(threadId)}`, { title });
+  return payload.thread;
 }
 
 export async function fetchAgentSettings(agentCardId: string): Promise<AgentSettings> {

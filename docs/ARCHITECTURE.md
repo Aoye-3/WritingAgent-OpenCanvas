@@ -26,6 +26,8 @@ User input
 - `src/features/agents/hooks/useAgentRuntimeConfig.ts` owns Agent runtime-config loading and settings save. `AgentSettingsView` owns gallery/filter/tab navigation, while tab UI lives in `src/features/agents/components/AgentSettingsTabs.tsx`.
 - `src/features/*` groups product areas: agents, canvas, generation, home, i18n, knowledge, projects, settings, start, tasks, and workspace.
 - `src/features/workspace/WorkspaceView.tsx` renders the main writing workspace: structured Agent inputs, document Canvas, collaboration drawer, tool events, version history, and workspace utility surfaces.
+- `src/features/workspace/components/AICollaborationDrawer.tsx` owns chat-side Canvas write proposals, temporary response annotations, annotation chips, and highlighted assistant-message text. Annotation state is intentionally client-only and is cleared after write/cancel/page refresh.
+- `src/shared/MarkdownText.tsx` preserves Markdown block/inline rendering while optionally wrapping annotated text fragments in highlight marks.
 - Runtime context is sourced from the left AgentCard structured input drawer plus current draft/Canvas state. The bottom workspace utility bar is reserved for future tools and prompt preview; it must not inject course-note, audience-profile, or other hidden context.
 - `src/features/ai-dashboard/AiDashboardView.tsx` renders the AI runtime dashboard for DeerFlow status, Skills/MCP visibility, Agent mapping, and ToolUse bridge progress.
 - `src/shared/apiClient.ts` provides shared frontend API helpers used by feature clients.
@@ -87,9 +89,10 @@ User input
 - `server/repositories/*` contains focused repository boundaries introduced behind the facade. Thread listing/trash and Agent settings already delegate through repository classes; run and Canvas behavior remain facade-covered while their repository boundaries continue to mature.
 - Runtime database path: `.facetwrite/data/facetwrite.db`.
 - Thread file workspace path: `.facetwrite/threads/<threadId>/user-data/`.
+- Thread rows are the current project identity boundary. Project rename updates `threads.title`; AgentCard names remain type metadata and are displayed as secondary information.
 
 ## Important Current Constraints
-- Canvas writes are never applied directly by the Agent. The Agent can only create a pending write request, and the user approves or rejects it.
-- DeerFlow-generated write or side-effect proposals must still be converted into FacetWrite approval flows before data changes.
+- Canvas writes are never applied directly by the Agent. The Agent can only create a pending write proposal/request. The UI may ask the user to write all content or only annotated snippets, then convert that explicit confirmation into the backend approve/apply flow.
+- DeerFlow-generated write or side-effect proposals must still be converted into FacetWrite confirmation and approval flows before data changes.
 - Tool definitions, prompt hints, schemas, risk levels, and approval requirements should stay in the Tool catalog/policy layer.
 - Provider details should stay behind provider runtime/profile code rather than being inferred in UI components.

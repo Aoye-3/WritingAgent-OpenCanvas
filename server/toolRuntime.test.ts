@@ -112,7 +112,7 @@ test("canvas_write creates a pending request instead of writing directly", async
   assert.equal(result.ok, true);
   assert.equal(result.payload.requestId, "write_1");
   assert.equal(result.payload.status, "pending");
-  assert.match(result.content, /pending user approval/i);
+  assert.match(result.content, /ready for user confirmation/i);
 });
 
 test("canvas_write rejects malformed write arguments", async () => {
