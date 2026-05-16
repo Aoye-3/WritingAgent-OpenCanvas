@@ -17,3 +17,7 @@ pnpm-debug.log*
 .superpowers/
 .facetwrite/
 .docker-codex/
+Deerflow/backend/.venv/
+Deerflow/backend/.uv-cache/
+Deerflow/backend/.pytest_cache/
+Deerflow/frontend/node_modules/
