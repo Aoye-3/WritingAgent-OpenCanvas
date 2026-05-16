@@ -3,6 +3,7 @@ import type { AppView } from "../../app/App";
 import type { AgentCard, ProjectSummary, StoredThread } from "../agents/types";
 import { useI18n } from "../i18n/I18nProvider";
 import { AppSidebar } from "../../shared/AppSidebar";
+import { MoreIcon } from "../../shared/icons";
 
 type ProjectsViewProps = {
   activeView: AppView;
@@ -185,6 +186,7 @@ export function ProjectsView({
                         type="button"
                         onClick={() => setOpenMenuThreadId((current) => current === project.id ? "" : project.id)}
                       >
+                        <MoreIcon aria-hidden="true" size={18} />
                         {locale === "zh" ? "更多" : "More"}
                       </button>
                       {openMenuThreadId === project.id ? (

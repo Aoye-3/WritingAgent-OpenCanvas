@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
-import { StarIcon } from "../../shared/icons";
+import { ChevronLeftIcon, ChevronRightIcon, StarIcon } from "../../shared/icons";
 import { Topbar } from "../../shared/Topbar";
 import type { AgentCard, AgentCardField, AgentValues, CanvasNode, CanvasWriteRequest, StoredOutputVersion, StoredToolEvent } from "../agents/types";
 import type { CanvasNodeDraft, CanvasNodePatch } from "../canvas/canvasClient";
@@ -151,7 +151,7 @@ export function WorkspaceView({
             <button className="drawer-rail drawer-rail-left" type="button" onClick={() => setLeftCollapsed(false)} aria-label={locale === "zh" ? "展开 AgentCard 输入" : "Expand AgentCard inputs"}>
               <span>{activeAgent.title[locale].slice(0, 1)}</span>
               <small>AgentCard</small>
-              <b>&gt;</b>
+              <b><ChevronRightIcon aria-hidden="true" size={18} /></b>
             </button>
           ) : null}
 
@@ -166,7 +166,7 @@ export function WorkspaceView({
                   <StarIcon />
                 </button>
                 <button className="icon-button" type="button" onClick={() => setLeftCollapsed(true)} aria-label={locale === "zh" ? "收起左侧栏" : "Collapse left drawer"}>
-                  <span aria-hidden="true">&lt;</span>
+                  <ChevronLeftIcon aria-hidden="true" />
                 </button>
               </div>
             </div>

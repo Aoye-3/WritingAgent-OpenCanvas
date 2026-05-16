@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { AppView } from "../app/App";
 import { useI18n } from "../features/i18n/I18nProvider";
-import { BrandIcon, SearchIcon } from "./icons";
+import { BrandIcon, SearchIcon, SettingsIcon } from "./icons";
 
 type TopbarProps = {
   activeView: AppView;
@@ -41,14 +41,7 @@ export function Topbar({
       <nav className="topbar-actions" aria-label="Workspace actions">
         <button className="project-settings-button" type="button" onClick={onOpenSettings}>
           <span>{t("app.projectSettings")}</span>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 7h10" />
-            <path d="M18 7h2" />
-            <path d="M16 5v4" />
-            <path d="M4 17h2" />
-            <path d="M10 17h10" />
-            <path d="M8 15v4" />
-          </svg>
+          <SettingsIcon aria-hidden="true" />
         </button>
         <button className="language-switch" type="button" onClick={() => setLocale(locale === "en" ? "zh" : "en")}>
           <span className={locale === "en" ? "selected" : ""}>EN</span>

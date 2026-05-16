@@ -1,4 +1,5 @@
 import { useI18n } from "../i18n/I18nProvider";
+import { CloseIcon } from "../../shared/icons";
 import { DeerFlowRuntimePanel } from "./components/DeerFlowRuntimePanel";
 import { ProviderSettingsForm } from "./components/ProviderSettingsForm";
 import { useProjectSettings } from "./hooks/useProjectSettings";
@@ -38,10 +39,7 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
             <p>{t("settings.subtitle")}</p>
           </div>
           <button className="icon-button" type="button" onClick={onClose} aria-label={t("settings.close")}>
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
+            <CloseIcon aria-hidden="true" />
           </button>
         </div>
 

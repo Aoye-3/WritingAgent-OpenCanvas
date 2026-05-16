@@ -1,7 +1,6 @@
-import type { ComponentType } from "react";
 import type { AppView } from "../app/App";
 import { useI18n } from "../features/i18n/I18nProvider";
-import { BrandIcon } from "./icons";
+import { AgentIcon, BookIcon, BrandIcon, DocumentIcon, HomeIcon, RuntimeIcon } from "./icons";
 
 type AppSidebarProps = {
   activeView: AppView;
@@ -10,12 +9,12 @@ type AppSidebarProps = {
   className?: string;
 };
 
-const navItems: Array<{ view: AppView; icon: ComponentType; labelKey: "home" | "projects" | "agentSettings" | "aiDashboard" | "knowledgeSettings" }> = [
-  { view: "home", icon: HomeGlyph, labelKey: "home" },
-  { view: "projects", icon: DocumentGlyph, labelKey: "projects" },
-  { view: "agentSettings", icon: AgentGlyph, labelKey: "agentSettings" },
-  { view: "aiDashboard", icon: RuntimeGlyph, labelKey: "aiDashboard" },
-  { view: "knowledgeSettings", icon: BookGlyph, labelKey: "knowledgeSettings" }
+const navItems: Array<{ view: AppView; icon: typeof HomeIcon; labelKey: "home" | "projects" | "agentSettings" | "aiDashboard" | "knowledgeSettings" }> = [
+  { view: "home", icon: HomeIcon, labelKey: "home" },
+  { view: "projects", icon: DocumentIcon, labelKey: "projects" },
+  { view: "agentSettings", icon: AgentIcon, labelKey: "agentSettings" },
+  { view: "aiDashboard", icon: RuntimeIcon, labelKey: "aiDashboard" },
+  { view: "knowledgeSettings", icon: BookIcon, labelKey: "knowledgeSettings" }
 ];
 
 export function AppSidebar({ activeView, onNavigate, onOpenSettings, className }: AppSidebarProps) {
@@ -65,24 +64,4 @@ export function AppSidebar({ activeView, onNavigate, onOpenSettings, className }
       </div>
     </aside>
   );
-}
-
-export function DocumentGlyph() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h7l4 4v12H7z" /><path d="M14 4v5h5" /></svg>;
-}
-
-function HomeGlyph() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11 12 4l8 7v8H5v-8Z" /><path d="M9 20v-6h6v6" /></svg>;
-}
-
-function AgentGlyph() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9Z" /><path d="m12 12 8-4.5M12 12v9M12 12 4 7.5" /></svg>;
-}
-
-function RuntimeGlyph() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h6v6H4zM14 4h6v6h-6zM14 14h6v6h-6z" /><path d="M10 9h2a2 2 0 0 1 2 2v1M14 17h-2a2 2 0 0 1-2-2v-3" /></svg>;
-}
-
-function BookGlyph() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h7a4 4 0 0 1 4 4v10H9a4 4 0 0 0-4-4Z" /><path d="M19 5h-3a4 4 0 0 0-4 4v10" /></svg>;
 }

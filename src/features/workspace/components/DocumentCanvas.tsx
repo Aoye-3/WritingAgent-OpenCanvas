@@ -1,7 +1,8 @@
-import { MouseEvent, PointerEvent, useEffect, useMemo, useRef, useState, WheelEvent } from "react";
+import { MouseEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { CanvasNode, CanvasNodeKind } from "../../agents/types";
 import type { CanvasNodeDraft, CanvasNodePatch } from "../../canvas/canvasClient";
 import { useI18n } from "../../i18n/I18nProvider";
+import { CloseIcon, ResetIcon, ZoomInIcon, ZoomOutIcon } from "../../../shared/icons";
 
 type DocumentCanvasProps = {
   nodes: CanvasNode[];
@@ -113,9 +114,9 @@ export function DocumentCanvas({ nodes, providerLabel, selectedNodeId, onCreateN
     });
   };
 
-  const wheelZoom = (event: WheelEvent<HTMLDivElement>) => {
+  const handleWheelEvent = (event: { deltaX: number; deltaY: number; ctrlKey: boolean; metaKey?: boolean; clientX: number; clientY: number; preventDefault: () => void }) => {
     event.preventDefault();
-    if (!event.ctrlKey) {
+    if (!event.ctrlKey && !event.metaKey) {
       setPan((value) => ({
         x: value.x - event.deltaX,
         y: value.y - event.deltaY
@@ -139,6 +140,23 @@ export function DocumentCanvas({ nodes, providerLabel, selectedNodeId, onCreateN
     setZoom(nextZoom);
   };
 
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const handleWheel = (event: globalThis.WheelEvent) => handleWheelEvent(event);
+    const preventBrowserZoom = (event: globalThis.WheelEvent) => {
+      if ((!event.ctrlKey && !event.metaKey) || !viewport.contains(event.target as Node)) return;
+      event.preventDefault();
+    };
+
+    document.addEventListener("wheel", preventBrowserZoom, { capture: true, passive: false });
+    viewport.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      document.removeEventListener("wheel", preventBrowserZoom, { capture: true });
+      viewport.removeEventListener("wheel", handleWheel);
+    };
+  }, [zoom]);
+
   return (
     <section className="canvas-shell" aria-label="Document canvas workspace">
       <div className="canvas-topline">
@@ -151,10 +169,15 @@ export function DocumentCanvas({ nodes, providerLabel, selectedNodeId, onCreateN
             <span className="status-dot" />
             {providerLabel}
           </span>
-          <button className="button button-secondary button-small" type="button" onClick={() => setZoom((value) => clamp(value - 0.1, MIN_ZOOM, MAX_ZOOM))}>-</button>
+          <button className="icon-button canvas-zoom-button" type="button" aria-label="Zoom out" onClick={() => setZoom((value) => clamp(value - 0.1, MIN_ZOOM, MAX_ZOOM))}>
+            <ZoomOutIcon aria-hidden="true" size={18} />
+          </button>
           <span>{Math.round(zoom * 100)}%</span>
-          <button className="button button-secondary button-small" type="button" onClick={() => setZoom((value) => clamp(value + 0.1, MIN_ZOOM, MAX_ZOOM))}>+</button>
+          <button className="icon-button canvas-zoom-button" type="button" aria-label="Zoom in" onClick={() => setZoom((value) => clamp(value + 0.1, MIN_ZOOM, MAX_ZOOM))}>
+            <ZoomInIcon aria-hidden="true" size={18} />
+          </button>
           <button className="button button-secondary button-small" type="button" onClick={() => { setPan({ x: 0, y: 0 }); setZoom(1); }}>
+            <ResetIcon aria-hidden="true" size={16} />
             {locale === "zh" ? "重置" : "Reset"}
           </button>
         </div>
@@ -167,7 +190,6 @@ export function DocumentCanvas({ nodes, providerLabel, selectedNodeId, onCreateN
         onPointerMove={movePointer}
         onPointerUp={endPointer}
         onPointerCancel={endPointer}
-        onWheel={wheelZoom}
         ref={viewportRef}
       >
         <div className="canvas-grid" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
@@ -262,7 +284,7 @@ function CanvasNodeCard({
       <div className="canvas-node-header" onPointerDown={(event) => onStartNodeDrag(event, node)}>
         <span>{kindLabels[node.kind][locale]}</span>
         <button className="icon-button canvas-node-delete" type="button" aria-label="Delete node" onClick={(event) => { event.stopPropagation(); void onDeleteNode(node.id); }}>
-          x
+          <CloseIcon aria-hidden="true" size={16} />
         </button>
       </div>
       <input

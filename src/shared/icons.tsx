@@ -1,47 +1,107 @@
-export function BrandIcon() {
-  return (
-    <svg viewBox="0 0 24 24" role="img">
-      <path d="M6 4h12v16H6z" />
-      <path d="M9 8h6M9 12h4M9 16h6" />
-    </svg>
-  );
-}
+import {
+  Archive,
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  Bot,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Circle,
+  ClipboardList,
+  Database,
+  FileText,
+  FolderOpen,
+  Home,
+  LayoutDashboard,
+  Mail,
+  Minus,
+  MoreHorizontal,
+  PenLine,
+  Plus,
+  RefreshCcw,
+  RotateCcw,
+  Search,
+  Send,
+  Settings2,
+  Sparkles,
+  Star,
+  Trash2,
+  X,
+  ZoomIn,
+  ZoomOut,
+  type LucideIcon
+} from "lucide-react";
 
-export function SearchIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="11" cy="11" r="7" />
-      <path d="m16.5 16.5 4 4" />
-    </svg>
-  );
-}
+export const iconProps = {
+  size: 20,
+  strokeWidth: 1.75,
+  absoluteStrokeWidth: true
+} as const;
 
-export function SendIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M22 2 11 13" />
-      <path d="m22 2-7 20-4-9-9-4Z" />
-    </svg>
-  );
-}
+type IconComponentProps = {
+  className?: string;
+  size?: number;
+  "aria-hidden"?: boolean | "true" | "false";
+};
 
-export function StarIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.8 1-6.1-4.4-4.3 6.1-.9Z" />
-    </svg>
-  );
-}
-
-export function TaskIcon({ icon }: { icon: "pen" | "lines" | "mail" | "book" | "report" | "refresh" }) {
-  const paths = {
-    pen: <><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></>,
-    lines: <><path d="M4 6h16M4 12h10M4 18h13" /></>,
-    mail: <><path d="M4 6h16v12H4z" /><path d="m4 7 8 6 8-6" /></>,
-    book: <><path d="M4 19.5V5a2 2 0 0 1 2-2h11v18H6a2 2 0 0 1-2-1.5Z" /><path d="M8 7h5M8 11h6" /></>,
-    report: <><path d="M7 4h10l3 3v13H7z" /><path d="M17 4v4h4M10 12h7M10 16h5" /></>,
-    refresh: <><path d="M3 12a9 9 0 0 1 15-6.7" /><path d="M18 3v5h-5" /><path d="M21 12a9 9 0 0 1-15 6.7" /><path d="M6 21v-5h5" /></>
+function createIcon(Icon: LucideIcon) {
+  return function SharedIcon({ size, ...props }: IconComponentProps) {
+    return <Icon {...iconProps} size={size ?? iconProps.size} {...props} />;
   };
+}
 
-  return <svg viewBox="0 0 24 24" aria-hidden="true">{paths[icon]}</svg>;
+export function BrandIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" role="img" aria-label="FacetWrite">
+      <path d="M6.5 4.5h8.2l2.8 2.8v12.2h-11z" />
+      <path d="M14.5 4.7v3.1h3.1" />
+      <path d="M9.1 10.2h5.8" />
+      <path d="M9.1 13.4h4.4" />
+      <path d="M9.1 16.6h6" />
+    </svg>
+  );
+}
+
+export const AddIcon = createIcon(Plus);
+export const AgentIcon = createIcon(Bot);
+export const ArrowLeftIcon = createIcon(ArrowLeft);
+export const ArrowRightIcon = createIcon(ArrowRight);
+export const BookIcon = createIcon(BookOpen);
+export const CheckIcon = createIcon(Check);
+export const ChevronLeftIcon = createIcon(ChevronLeft);
+export const ChevronRightIcon = createIcon(ChevronRight);
+export const CloseIcon = createIcon(X);
+export const DatabaseIcon = createIcon(Database);
+export const DocumentIcon = createIcon(FileText);
+export const FolderIcon = createIcon(FolderOpen);
+export const HomeIcon = createIcon(Home);
+export const KnowledgeIcon = createIcon(BookOpen);
+export const MoreIcon = createIcon(MoreHorizontal);
+export const RemoveIcon = createIcon(Minus);
+export const ResetIcon = createIcon(RotateCcw);
+export const RuntimeIcon = createIcon(LayoutDashboard);
+export const SearchIcon = createIcon(Search);
+export const SendIcon = createIcon(Send);
+export const SettingsIcon = createIcon(Settings2);
+export const SparkleIcon = createIcon(Sparkles);
+export const StarIcon = createIcon(Star);
+export const StatusIcon = createIcon(Circle);
+export const TrashIcon = createIcon(Trash2);
+export const ArchiveIcon = createIcon(Archive);
+export const ZoomInIcon = createIcon(ZoomIn);
+export const ZoomOutIcon = createIcon(ZoomOut);
+
+const taskIcons = {
+  pen: PenLine,
+  lines: ClipboardList,
+  mail: Mail,
+  book: BookOpen,
+  report: FileText,
+  refresh: RefreshCcw
+} satisfies Record<string, LucideIcon>;
+
+export function TaskIcon({ icon, size = 20 }: { icon: keyof typeof taskIcons; size?: number }) {
+  const Icon = taskIcons[icon];
+  return <Icon {...iconProps} size={size} aria-hidden="true" />;
 }

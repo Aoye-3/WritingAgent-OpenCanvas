@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { SendIcon } from "../../../shared/icons";
+import { ChevronLeftIcon, ChevronRightIcon, SendIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
 import type { CanvasWriteRequest, StoredToolEvent } from "../../agents/types";
 import type { AgentSettings } from "../../agents/types";
@@ -194,7 +194,7 @@ export function AICollaborationDrawer({
         <button className="drawer-rail drawer-rail-right" type="button" onClick={onToggleCollapsed} aria-label={locale === "zh" ? "展开 AI 协作层" : "Expand AI collaboration"}>
           <span>AI</span>
           <small>{messages.length}</small>
-          <b>&lt;</b>
+          <b><ChevronLeftIcon aria-hidden="true" size={18} /></b>
         </button>
       </aside>
     );
@@ -217,7 +217,7 @@ export function AICollaborationDrawer({
           <h2>{locale === "zh" ? "对话与修改建议" : "Chat and revision support"}</h2>
         </div>
         <button className="icon-button" type="button" onClick={onToggleCollapsed} aria-label={locale === "zh" ? "收起右侧栏" : "Collapse right drawer"}>
-          <span aria-hidden="true">&gt;</span>
+          <ChevronRightIcon aria-hidden="true" />
         </button>
       </div>
 
