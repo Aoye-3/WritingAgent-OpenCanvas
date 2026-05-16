@@ -66,6 +66,12 @@ The current frontend labels these as Canvas write proposals. This changes the in
 
 Temporary assistant-message annotations are not persisted. Annotated snippets and highlight state live in React state only and are cleared after write, cancel, or page refresh.
 
+Direct user write intent does not add a new table or bypass the request table. The frontend can auto-approve only newly created pending requests from the same generation run, so `canvas_write_requests` remains the audit/safety buffer even when the UI feels like a direct write.
+
+Canvas document nodes store the same content and size fields. The current UI expands document-node height to fit full content instead of rendering an internal scroll region; this is a presentation rule, not a schema change.
+
+Canvas pan/drag hit testing is also presentation-only. The visual grid and future decorative overlays should not introduce persistence changes or new node state; they must remain separate from `canvas_nodes` and avoid intercepting viewport pointer events unless they represent an explicit interactive tool.
+
 ## Thread And Project Title Semantics
 The current project list is backed by `threads`; there is no separate project table-level rename. Renaming a project updates `threads.title` and `updated_at` for active, non-trashed threads only.
 

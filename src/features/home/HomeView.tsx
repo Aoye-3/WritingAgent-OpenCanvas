@@ -14,6 +14,8 @@ type HomeViewProps = {
   onOpenThread: (thread: StoredThread) => void;
   onNavigate: (view: AppView) => void;
   onDeleteThread: (thread: StoredThread) => void;
+  onTogglePinnedThread: (threadId: string) => void;
+  pinnedThreadIds: string[];
   onRenameThread: (threadId: string, title: string) => Promise<void>;
 };
 
@@ -26,6 +28,8 @@ export function HomeView({
   onOpenThread,
   onNavigate,
   onDeleteThread,
+  onTogglePinnedThread,
+  pinnedThreadIds,
   onRenameThread
 }: HomeViewProps) {
   const { locale, setLocale } = useI18n();
@@ -154,7 +158,7 @@ export function HomeView({
               <button type="button" onClick={() => onNavigate("projects")}>{locale === "zh" ? "查看全部" : "View all"}</button>
             </div>
             <div className="home-project-list">
-              {(recentThreads.length > 0 ? recentThreads.slice(0, 6) : fallbackProjects(locale)).map((item, index) => {
+              {(recentThreads.length > 0 ? recentThreads.slice(0, 6) : fallbackProjects(locale)).map((item) => {
                 const isThread = "id" in item;
                 const thread = isThread ? item : undefined;
                 const agentTitle = isThread ? agentCards.find((agent) => agent.id === item.agentCardId)?.title[locale] ?? item.agentCardId : item.title;
@@ -167,7 +171,6 @@ export function HomeView({
                       <DocumentGlyph />
                       <span>{projectTitle}</span>
                     </button>
-                    {index === 0 ? <em>{locale === "zh" ? "本地项目" : "Local"}</em> : null}
                     {isThread ? <small className="home-project-agent">{agentTitle}</small> : null}
                     <small>{assets}</small>
                     <time>{updatedAt}</time>
@@ -183,6 +186,11 @@ export function HomeView({
                         </button>
                         {openMenuThreadId === thread.id ? (
                           <div className="project-more-menu">
+                            <button type="button" onClick={() => { onTogglePinnedThread(thread.id); setOpenMenuThreadId(""); }}>
+                              {pinnedThreadIds.includes(thread.id)
+                                ? (locale === "zh" ? "取消置顶" : "Unpin")
+                                : (locale === "zh" ? "置顶" : "Pin")}
+                            </button>
                             <button type="button" onClick={() => { setRenameThread(thread); setOpenMenuThreadId(""); }}>
                               {locale === "zh" ? "重命名" : "Rename"}
                             </button>

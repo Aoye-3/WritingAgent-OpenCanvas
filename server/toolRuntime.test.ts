@@ -115,6 +115,43 @@ test("canvas_write creates a pending request instead of writing directly", async
   assert.match(result.content, /ready for user confirmation/i);
 });
 
+test("canvas_write normalizes replace unless the user explicitly asks to replace", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_replace",
+      type: "function",
+      function: {
+        name: "canvas_write",
+        arguments: JSON.stringify({
+          operation: "replace",
+          nodeKind: "document",
+          title: "Draft",
+          content: "Safer draft"
+        })
+      }
+    },
+    {
+      selectedCanvasNodeId: "node_1",
+      chatInstruction: "写入画板",
+      createCanvasWriteRequest(input) {
+        assert.equal(input.operation, "append");
+        assert.equal(input.targetNodeId, "node_1");
+        return {
+          id: "write_replace",
+          operation: input.operation,
+          targetNodeId: input.targetNodeId,
+          nodeKind: input.nodeKind ?? "document",
+          title: input.title ?? "",
+          status: "pending"
+        };
+      }
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.operation, "append");
+});
+
 test("canvas_write rejects malformed write arguments", async () => {
   const result = await executeToolCall(
     {

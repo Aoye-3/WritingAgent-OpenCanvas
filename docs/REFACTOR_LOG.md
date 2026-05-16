@@ -18,9 +18,17 @@ Completed:
 - Updated Markdown rendering so annotation highlights preserve headings, lists, bold, code, and links.
 - Verified `npm.cmd run typecheck`, `npm.cmd test`, `npm.cmd run build`, and Playwright checks for annotation/highlight and no console warnings/errors.
 
+Follow-up:
+- Added composer-level annotation chips above the chat input so users can see and remove selected snippets before sending a write command.
+- Updated document Canvas nodes to show full document content without an internal scroll pane, and widened zoom to 25%-300% for both overview and close inspection.
+- Fixed direct-write behavior so explicit write commands auto-approve only the newly generated pending request from the same run, instead of leaving a duplicate suggestion card.
+- Normalized model-requested `replace` Canvas operations to append/create unless the user explicitly asked to replace or overwrite.
+- Fixed Canvas center drag blocking by making the full-size visual grid layer ignore pointer events while keeping Canvas nodes interactive.
+
 Open TODO:
 - Add dedicated frontend component tests for annotation/highlight behavior if a browser test suite becomes part of regular CI.
 - Consider persisting selected write snippets only if users later need cross-refresh draft state; current annotations are intentionally temporary.
+- Add a Playwright regression that checks `elementFromPoint` at a blank Canvas coordinate hits the viewport rather than decorative layers.
 
 Next Priority Check:
 - Before expanding Canvas actions beyond document write/append, document the target-node selection rule and add browser coverage for replace/append edge cases.

@@ -20,13 +20,15 @@ User input
 - `src/app/App.tsx` is the control-plane composition layer. It owns navigation, active Agent selection, and view wiring, while thread, generation, Canvas, and trash workflows live in focused hooks under `src/app/hooks/`.
 - `src/app/hooks/useThreadSession.ts` owns thread creation, thread restore, and last-thread persistence.
 - `src/app/hooks/useCanvasState.ts` owns Canvas nodes, pending write requests, selected node state, and approve/reject handlers.
-- `src/app/hooks/useGenerationRun.ts` owns structured generation, chat generation, streaming token/tool-event updates, versions, and collaboration messages.
+- `src/app/hooks/useGenerationRun.ts` owns structured generation, chat generation, streaming token/tool-event updates, versions, collaboration messages, and direct Canvas-write intent handoff. When the user explicitly asks to write to Canvas, it auto-approves only the new pending write requests created by that run.
 - `src/app/hooks/useProjectTrash.ts` owns trash, restore, and hard-delete flows.
 - `src/features/settings/hooks/useProjectSettings.ts` owns provider settings state, validation/save actions, and DeerFlow status loading. `ProjectSettingsPanel` only renders the dialog shell and composes the provider form with the read-only DeerFlow runtime panel.
 - `src/features/agents/hooks/useAgentRuntimeConfig.ts` owns Agent runtime-config loading and settings save. `AgentSettingsView` owns gallery/filter/tab navigation, while tab UI lives in `src/features/agents/components/AgentSettingsTabs.tsx`.
 - `src/features/*` groups product areas: agents, canvas, generation, home, i18n, knowledge, projects, settings, start, tasks, and workspace.
 - `src/features/workspace/WorkspaceView.tsx` renders the main writing workspace: structured Agent inputs, document Canvas, collaboration drawer, tool events, version history, and workspace utility surfaces.
-- `src/features/workspace/components/AICollaborationDrawer.tsx` owns chat-side Canvas write proposals, temporary response annotations, annotation chips, and highlighted assistant-message text. Annotation state is intentionally client-only and is cleared after write/cancel/page refresh.
+- `src/features/workspace/components/AICollaborationDrawer.tsx` owns chat-side Canvas write proposals, temporary response annotations, annotation chips, and highlighted assistant-message text. Annotation chips are shown both in the proposal panel and above the composer so the user can see the active write selection before sending "write" instructions. Annotation state is intentionally client-only and is cleared after write/cancel/page refresh.
+- `src/features/workspace/components/DocumentCanvas.tsx` renders Canvas nodes with document nodes sized to their full content instead of internal scroll panes. Canvas zoom supports a wider inspection/editing range, currently 25% to 300%.
+- Canvas hit testing is intentionally split between the viewport and nodes: `.canvas-viewport` owns background pan/context-menu events, `.canvas-grid` is visual-only with `pointer-events:none`, and `.canvas-node` restores `pointer-events:auto` for node selection, editing, and dragging. Transparent grid or overlay layers must not intercept background drag.
 - `src/shared/MarkdownText.tsx` preserves Markdown block/inline rendering while optionally wrapping annotated text fragments in highlight marks.
 - Runtime context is sourced from the left AgentCard structured input drawer plus current draft/Canvas state. The bottom workspace utility bar is reserved for future tools and prompt preview; it must not inject course-note, audience-profile, or other hidden context.
 - `src/features/ai-dashboard/AiDashboardView.tsx` renders the AI runtime dashboard for DeerFlow status, Skills/MCP visibility, Agent mapping, and ToolUse bridge progress.
@@ -52,7 +54,7 @@ User input
 - `server/tools/catalog.ts` is the Tool metadata source of truth.
 - `server/tools/policies.ts` derives whether each tool is enabled, auto-runnable, externally configured, or approval-gated.
 - `server/tools/toolPolicyGuard.ts` performs runtime checks before a tool call can execute.
-- `server/toolRuntime.ts` executes local ToolUse behavior and creates Canvas write requests when `canvas_write` is called.
+- `server/toolRuntime.ts` executes local ToolUse behavior and creates Canvas write requests when `canvas_write` is called. If a model asks for `replace` without an explicit user replace/overwrite instruction, the runtime normalizes the operation to `append` for a selected node or `create` otherwise.
 
 ## Agent Output Boundary
 - Runtime streams are never written directly to UI messages. DeerFlow/provider output must pass through the Agent output normalizer before it is recorded as an assistant message or output version.
@@ -92,7 +94,8 @@ User input
 - Thread rows are the current project identity boundary. Project rename updates `threads.title`; AgentCard names remain type metadata and are displayed as secondary information.
 
 ## Important Current Constraints
-- Canvas writes are never applied directly by the Agent. The Agent can only create a pending write proposal/request. The UI may ask the user to write all content or only annotated snippets, then convert that explicit confirmation into the backend approve/apply flow.
+- Canvas background drag depends on pointer events reaching `.canvas-viewport`. Any future decorative grid, empty state, alignment guide, selection marquee, or overlay should be verified with browser hit testing so it does not become an invisible drag blocker.
+- Canvas writes are never applied directly by the Agent. The Agent can only create a pending write proposal/request. The UI may ask the user to write all content or only annotated snippets, then convert that explicit confirmation into the backend approve/apply flow. Direct user commands such as "写入" or "save to canvas" are treated as explicit confirmation for the new request from that same run, not as permission to apply older pending proposals.
 - DeerFlow-generated write or side-effect proposals must still be converted into FacetWrite confirmation and approval flows before data changes.
 - Tool definitions, prompt hints, schemas, risk levels, and approval requirements should stay in the Tool catalog/policy layer.
 - Provider details should stay behind provider runtime/profile code rather than being inferred in UI components.

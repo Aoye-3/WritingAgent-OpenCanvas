@@ -17,6 +17,9 @@ type PanState = { startX: number; startY: number; originX: number; originY: numb
 type DragState = { nodeId: string; startX: number; startY: number; originX: number; originY: number };
 type MenuState = { screenX: number; screenY: number; canvasX: number; canvasY: number };
 
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 3;
+
 const kindLabels: Record<CanvasNodeKind, { en: string; zh: string }> = {
   document: { en: "Document", zh: "文档" },
   note: { en: "Note", zh: "便签" },
@@ -105,15 +108,34 @@ export function DocumentCanvas({ nodes, providerLabel, selectedNodeId, onCreateN
       content: "",
       x: Math.round(menu.canvasX),
       y: Math.round(menu.canvasY),
-      width: kind === "document" ? 360 : 300,
+      width: kind === "document" ? 520 : 300,
       height: kind === "document" ? 260 : 190
     });
   };
 
   const wheelZoom = (event: WheelEvent<HTMLDivElement>) => {
-    if (!event.ctrlKey && Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
     event.preventDefault();
-    const nextZoom = clamp(zoom - event.deltaY * 0.001, 0.45, 1.8);
+    if (!event.ctrlKey) {
+      setPan((value) => ({
+        x: value.x - event.deltaX,
+        y: value.y - event.deltaY
+      }));
+      return;
+    }
+
+    const rect = viewportRef.current?.getBoundingClientRect();
+    if (!rect) {
+      setZoom((value) => clamp(value - event.deltaY * 0.001, MIN_ZOOM, MAX_ZOOM));
+      return;
+    }
+
+    const nextZoom = clamp(zoom - event.deltaY * 0.001, MIN_ZOOM, MAX_ZOOM);
+    const cursorX = event.clientX - rect.left;
+    const cursorY = event.clientY - rect.top;
+    setPan((currentPan) => ({
+      x: cursorX - ((cursorX - currentPan.x) / zoom) * nextZoom,
+      y: cursorY - ((cursorY - currentPan.y) / zoom) * nextZoom
+    }));
     setZoom(nextZoom);
   };
 
@@ -129,9 +151,9 @@ export function DocumentCanvas({ nodes, providerLabel, selectedNodeId, onCreateN
             <span className="status-dot" />
             {providerLabel}
           </span>
-          <button className="button button-secondary button-small" type="button" onClick={() => setZoom((value) => clamp(value - 0.1, 0.45, 1.8))}>-</button>
+          <button className="button button-secondary button-small" type="button" onClick={() => setZoom((value) => clamp(value - 0.1, MIN_ZOOM, MAX_ZOOM))}>-</button>
           <span>{Math.round(zoom * 100)}%</span>
-          <button className="button button-secondary button-small" type="button" onClick={() => setZoom((value) => clamp(value + 0.1, 0.45, 1.8))}>+</button>
+          <button className="button button-secondary button-small" type="button" onClick={() => setZoom((value) => clamp(value + 0.1, MIN_ZOOM, MAX_ZOOM))}>+</button>
           <button className="button button-secondary button-small" type="button" onClick={() => { setPan({ x: 0, y: 0 }); setZoom(1); }}>
             {locale === "zh" ? "重置" : "Reset"}
           </button>
@@ -150,36 +172,17 @@ export function DocumentCanvas({ nodes, providerLabel, selectedNodeId, onCreateN
       >
         <div className="canvas-grid" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
           {localNodes.map((node) => (
-            <article
-              className={`canvas-node canvas-node-${node.kind} ${selectedNodeId === node.id ? "is-selected" : ""}`}
+            <CanvasNodeCard
               key={node.id}
-              style={{ left: node.x, top: node.y, width: node.width, minHeight: node.height }}
-              onPointerDown={(event) => {
-                event.stopPropagation();
-                onSelectNode(node.id);
-                setMenu(null);
-              }}
-            >
-              <div className="canvas-node-header" onPointerDown={(event) => startNodeDrag(event, node)}>
-                <span>{kindLabels[node.kind][locale]}</span>
-                <button className="icon-button canvas-node-delete" type="button" aria-label="Delete node" onClick={(event) => { event.stopPropagation(); void onDeleteNode(node.id); }}>
-                  x
-                </button>
-              </div>
-              <input
-                className="canvas-node-title"
-                defaultValue={node.title}
-                onBlur={(event) => void onUpdateNode(node.id, { title: event.currentTarget.value })}
-                onPointerDown={(event) => event.stopPropagation()}
-              />
-              <textarea
-                className="canvas-node-content"
-                defaultValue={node.content}
-                placeholder={locale === "zh" ? "在这里编辑节点内容..." : "Edit node content..."}
-                onBlur={(event) => void onUpdateNode(node.id, { content: event.currentTarget.value })}
-                onPointerDown={(event) => event.stopPropagation()}
-              />
-            </article>
+              locale={locale}
+              node={node}
+              selected={selectedNodeId === node.id}
+              onCloseMenu={() => setMenu(null)}
+              onDeleteNode={onDeleteNode}
+              onSelectNode={onSelectNode}
+              onStartNodeDrag={startNodeDrag}
+              onUpdateNode={onUpdateNode}
+            />
           ))}
         </div>
 
@@ -205,8 +208,79 @@ export function DocumentCanvas({ nodes, providerLabel, selectedNodeId, onCreateN
         ) : (
           <span>{locale === "zh" ? "未选中节点" : "No node selected"}</span>
         )}
+        <span className="canvas-interaction-hint">
+          {locale === "zh" ? "拖拽空白移动画布 · 滚轮平移 · Ctrl + 滚轮缩放" : "Drag blank space to pan · Wheel to pan · Ctrl + wheel to zoom"}
+        </span>
       </div>
     </section>
+  );
+}
+
+function CanvasNodeCard({
+  locale,
+  node,
+  selected,
+  onCloseMenu,
+  onDeleteNode,
+  onSelectNode,
+  onStartNodeDrag,
+  onUpdateNode
+}: {
+  locale: "en" | "zh";
+  node: CanvasNode;
+  selected: boolean;
+  onCloseMenu: () => void;
+  onDeleteNode: (nodeId: string) => Promise<void>;
+  onSelectNode: (nodeId?: string) => void;
+  onStartNodeDrag: (event: PointerEvent<HTMLDivElement>, node: CanvasNode) => void;
+  onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<void>;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [content, setContent] = useState(node.content);
+
+  useEffect(() => {
+    setContent(node.content);
+  }, [node.content]);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [content]);
+
+  return (
+    <article
+      className={`canvas-node canvas-node-${node.kind} ${selected ? "is-selected" : ""}`}
+      style={{ left: node.x, top: node.y, width: node.width, minHeight: node.height }}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        onSelectNode(node.id);
+        onCloseMenu();
+      }}
+    >
+      <div className="canvas-node-header" onPointerDown={(event) => onStartNodeDrag(event, node)}>
+        <span>{kindLabels[node.kind][locale]}</span>
+        <button className="icon-button canvas-node-delete" type="button" aria-label="Delete node" onClick={(event) => { event.stopPropagation(); void onDeleteNode(node.id); }}>
+          x
+        </button>
+      </div>
+      <input
+        className="canvas-node-title"
+        defaultValue={node.title}
+        onBlur={(event) => void onUpdateNode(node.id, { title: event.currentTarget.value })}
+        onPointerDown={(event) => event.stopPropagation()}
+      />
+      <textarea
+        className="canvas-node-content"
+        ref={textareaRef}
+        value={content}
+        placeholder={locale === "zh" ? "在这里编辑节点内容..." : "Edit node content..."}
+        onBlur={(event) => void onUpdateNode(node.id, { content: event.currentTarget.value })}
+        onChange={(event) => setContent(event.currentTarget.value)}
+        onPointerDown={(event) => event.stopPropagation()}
+      />
+    </article>
   );
 }
 

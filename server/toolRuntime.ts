@@ -103,9 +103,9 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
       };
     }
 
-    const operation = readCanvasOperation(args.operation);
     const content = readString(args.content);
     const targetNodeId = readString(args.targetNodeId) || context.selectedCanvasNodeId || undefined;
+    const operation = normalizeCanvasOperation(readCanvasOperation(args.operation), targetNodeId, context.chatInstruction);
     if (!operation) {
       return {
         ok: false,
@@ -186,6 +186,16 @@ function readNumber(value: unknown, fallback: number) {
 
 function readCanvasOperation(value: unknown) {
   return value === "create" || value === "replace" || value === "append" ? value : undefined;
+}
+
+function normalizeCanvasOperation(operation: "create" | "replace" | "append" | undefined, targetNodeId: string | undefined, instruction = "") {
+  if (operation !== "replace") return operation;
+  if (hasCanvasReplaceIntent(instruction)) return operation;
+  return targetNodeId ? "append" : "create";
+}
+
+function hasCanvasReplaceIntent(instruction: string) {
+  return /\u66ff\u6362|\u8986\u76d6|replace|overwrite/i.test(instruction);
 }
 
 function readCanvasNodeKind(value: unknown) {

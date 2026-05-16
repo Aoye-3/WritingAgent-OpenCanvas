@@ -47,7 +47,7 @@ function AppContent() {
   const { locale } = useI18n();
   const { view, setView } = useAppNavigation("start");
   const { agentCards, updateAgentCard } = useAgentCards(fallbackAgentCards);
-  const { handleBatchHardDelete, handleBatchMoveToTrash, handleRenameThread, projects, recentThreads, refreshProjectSurfaces, refreshProjects, refreshRecentThreads, trashProjects } = useProjects();
+  const { handleBatchHardDelete, handleBatchMoveToTrash, handleRenameThread, handleTogglePinnedThread, pinnedThreadIds, projects, recentThreads, refreshProjectSurfaces, refreshProjects, refreshRecentThreads, trashProjects } = useProjects();
   const [activeAgent, setActiveAgent] = useState<AgentCard>(fallbackAgentCards[0]);
   const [agentValues, setAgentValues] = useState<AgentValues>(() => getInitialValues(fallbackAgentCards[0]));
   const [toolState, setToolState] = useState<GenerateRequest["toolState"]>({ knowledge_base: true, canvas_write: true });
@@ -146,6 +146,8 @@ function AppContent() {
     onRefreshThreadState: refreshThreadState,
     onFetchAndApplyThreadState: fetchThreadState,
     onApplyThreadState: applyThreadState,
+    onApproveCanvasWriteRequest: canvasState.handleApproveCanvasWriteRequest,
+    getPendingCanvasWriteRequestIds: () => canvasState.canvasWriteRequests.map((request) => request.id),
     onRefreshProjectSurfaces: refreshProjectSurfaces
   });
 
@@ -219,6 +221,8 @@ function AppContent() {
         onOpenThread={openRecentThread}
         onNavigate={setView}
         onDeleteThread={projectTrash.handleMoveToTrash}
+        onTogglePinnedThread={handleTogglePinnedThread}
+        pinnedThreadIds={pinnedThreadIds}
         onRenameThread={handleRenameThread}
       />
       <ProjectsView

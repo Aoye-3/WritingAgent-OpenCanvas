@@ -47,6 +47,7 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - Uses DeerFlow as the runtime when `DEERFLOW_ENABLED=true`; otherwise uses the current TypeScript provider runtime.
   - If DeerFlow fails without a user-visible answer, returns only internal/runtime output, or returns an empty stream, the backend records a `deerflow_runtime_failed` tool event and continues with the Provider runtime before considering Mock fallback.
   - Provider-private runtime metadata, including DeepSeek `reasoning_content`, is not part of the public request or response schema. It may be used internally for provider continuation only.
+  - Direct Canvas-write intent in `chatInstruction`, such as `写入`, `保存到画板`, `save to canvas`, or `write this`, may cause the frontend to approve the newly returned pending Canvas write request after this endpoint completes. The API still records the request first; Canvas mutation remains behind the approve path.
 - `POST /api/generate/stream`
   - SSE endpoint.
   - Emits `tool_event`, `token`, `final`, and `error` events.
@@ -91,6 +92,7 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - Body: `{ threadId, toolName, arguments, allowedToolRefs, toolState, selectedCanvasNodeId, contextValues, chatInstruction }`.
   - Reuses FacetWrite ToolUse policy and executors. Unknown tools, disabled tools, or tools not allowed by the active Agent return an `ok:false` result rather than bypassing policy.
   - `canvas_write` creates a pending Canvas write request only; it does not mutate Canvas content.
+  - `canvas_write` defaults to non-destructive behavior. A requested `replace` operation is honored only when the user instruction includes an explicit replace/overwrite intent; otherwise it is normalized to append/create.
 
 ## DeerFlow Auth Status
 - DeerFlow Docker sidecar health is reachable without auth at `/health`.

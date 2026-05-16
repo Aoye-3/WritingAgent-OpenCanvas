@@ -1,5 +1,19 @@
 # FacetWrite Technical Decisions
 
+## 2026-05-16: Canvas Visual Layers Must Not Block Background Drag
+Decision: Keep Canvas decorative and layout layers out of pointer hit testing unless they are intentionally interactive.
+
+Reason: The Canvas viewport owns background pan and context-menu behavior. A transparent full-size grid layer can visually look harmless while intercepting pointer events and making the center of the board feel blocked.
+
+Impact: `.canvas-grid` is visual-only and uses `pointer-events:none`; `.canvas-node` restores `pointer-events:auto` for selection, editing, and node dragging. Future overlays such as grids, guides, empty states, selection marquees, or alignment helpers must be browser-verified so they do not block viewport drag.
+
+## 2026-05-16: Direct Canvas Write Intent Auto-Approves Same-Run Requests
+Decision: Treat explicit user write commands as confirmation for newly created Canvas write requests from the same generation run.
+
+Reason: Users expect "写入" / "save to canvas" to apply the content, while the Agent must still be unable to mutate Canvas silently.
+
+Impact: `canvas_write` and fallback write-intent detection still create `canvas_write_requests` first. The frontend records pending request ids before the run, refreshes thread state after the run, and auto-approves only new pending requests. Existing stale requests remain pending. Model-requested `replace` operations are honored only when the user explicitly asks to replace/overwrite; otherwise they become append/create.
+
 ## 2026-05-16: CanvasWriter Uses Proposal Plus User Confirmation
 Decision: Reframe `canvas_write` from a hard approval card into a Canvas write proposal that the user can confirm from the collaboration drawer.
 

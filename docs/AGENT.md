@@ -113,6 +113,10 @@ A tool can auto-run only when it is enabled, does not require approval, and does
 
 `canvas_write` must never directly mutate Canvas content from model output. It can only create a pending request/proposal. The user-facing UI may offer "write all" or "write annotated snippets"; once the user confirms, FacetWrite applies the same backend approve path.
 
+If the user directly says to write/save/add content to Canvas, the generation hook treats that message as confirmation for newly created write requests from the same run and auto-calls the approve path after the thread state refresh. Existing pending requests from earlier runs are deliberately excluded so stale suggestions cannot be applied accidentally.
+
+When a model proposes a `replace` Canvas operation without an explicit user replace/overwrite instruction, the runtime downgrades it to `append` for the selected node or `create` when no node is selected. This keeps ordinary "write this to Canvas" requests non-destructive by default.
+
 The workspace also supports user-created temporary annotations on assistant responses. These annotations are not model output and are not saved as ToolUse state; they only help the user choose which response fragments should be written to Canvas.
 
 When DeerFlow is the active runtime, the FacetWrite bridge tools still call the same policy and executor path. This keeps disabled tools, disallowed Agent tools, and approval-gated writes consistent across DeerFlow and the TypeScript fallback runtime.

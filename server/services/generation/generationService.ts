@@ -204,8 +204,10 @@ function maybeCreateCanvasWriteRequest(input: {
   const content = input.text.trim();
   if (!content) return events;
 
+  const operation = input.payload.selectedCanvasNodeId ? "append" : "create";
   const request = input.storage.createCanvasWriteRequest(input.threadId, {
-    operation: "create",
+    operation,
+    ...(input.payload.selectedCanvasNodeId ? { targetNodeId: input.payload.selectedCanvasNodeId } : {}),
     nodeKind: "document",
     title: input.agentTitle,
     content,
@@ -232,14 +234,14 @@ function hasCanvasWriteIntent(payload: GenerateRequest) {
   const instruction = `${payload.chatInstruction ?? ""}\n${payload.freeTextPrompt ?? ""}`.toLowerCase();
   const intentKeywords = [
     "canvas",
-    "画板",
-    "畫板",
-    "写入",
-    "寫入",
-    "保存到",
-    "加入",
-    "添加到",
-    "放到",
+    "\u753b\u677f",
+    "\u756b\u677f",
+    "\u5199\u5165",
+    "\u5beb\u5165",
+    "\u4fdd\u5b58\u5230",
+    "\u52a0\u5165",
+    "\u6dfb\u52a0\u5230",
+    "\u653e\u5230",
     "save to canvas",
     "write this",
     "write to canvas",

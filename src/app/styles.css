@@ -1304,12 +1304,14 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   width: 2400px;
   height: 1600px;
   transform-origin: 0 0;
+  pointer-events: none;
 }
 
 .canvas-node {
   position: absolute;
+  pointer-events: auto;
   display: grid;
-  grid-template-rows: auto auto minmax(80px, 1fr);
+  grid-template-rows: auto auto auto;
   gap: 8px;
   padding: 10px;
   border: 1px solid var(--color-border);
@@ -1367,7 +1369,8 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   min-height: 120px;
   border: 0;
   outline: 0;
-  resize: vertical;
+  resize: none;
+  overflow: hidden;
   background: transparent;
   color: #2b3447;
   font-size: 13px;
@@ -1420,11 +1423,21 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   min-height: 38px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 8px 14px;
   border-top: 1px solid var(--color-border);
   color: var(--color-text-muted);
   font-size: 12px;
   font-weight: 750;
+}
+
+.canvas-interaction-hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #71809a;
+  font-weight: 650;
 }
 
 .canvas-write-card {
@@ -2411,10 +2424,11 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 }
 
 .project-table {
+  position: relative;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .project-table-head,
@@ -2435,9 +2449,14 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 }
 
 .project-table-row {
+  position: relative;
   min-height: 72px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--color-border);
+}
+
+.project-table-row:has(.project-more-menu) {
+  z-index: 20;
 }
 
 .project-table-row:last-child {
@@ -2504,6 +2523,7 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   position: relative;
   display: inline-flex;
   justify-content: flex-end;
+  z-index: 1;
 }
 
 .project-more-button {
@@ -2514,7 +2534,7 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
-  z-index: 50;
+  z-index: 90;
   min-width: 150px;
   display: grid;
   gap: 4px;

@@ -22,6 +22,8 @@ Agent tools are configured through the tool catalog and policy layer:
 
 - Low-risk local context tools may run automatically when enabled.
 - `canvas_write` can only create a pending write proposal/request. The user must explicitly confirm the write before Canvas content changes; the frontend may then submit the backend approval automatically.
+- Direct write phrases such as `写入`, `保存到画板`, `save to canvas`, or `write this` are considered user confirmation only for new Canvas write requests created by the same run. Older pending requests still require their own visible confirmation.
+- Model-requested Canvas replacement is not trusted by itself. Unless the user explicitly asks to replace or overwrite, replace proposals are normalized to append/create before approval.
 - External tools such as web search must report when they are not configured.
 
 Runtime tool calls pass through `server/tools/toolPolicyGuard.ts` before executor logic runs. The guard rejects unknown tools, tools outside the active Agent's refs, tools disabled for the current run, and tools missing required external configuration.

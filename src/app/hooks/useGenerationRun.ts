@@ -17,7 +17,9 @@ type UseGenerationRunOptions = {
   onRefreshThreadState: (threadId: string) => Promise<void>;
   onFetchAndApplyThreadState: (threadId: string) => Promise<ThreadStateResponse>;
   onApplyThreadState: (state: ThreadStateResponse) => void;
+  onApproveCanvasWriteRequest: (requestId: string) => Promise<void>;
   onRefreshProjectSurfaces: () => Promise<void>;
+  getPendingCanvasWriteRequestIds: () => string[];
 };
 
 export function useGenerationRun(options: UseGenerationRunOptions) {
@@ -82,6 +84,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
 
   const handleChatSend = async (text: string, modelOverrides?: GenerateRequest["modelOverrides"]) => {
     setIsChatSending(true);
+    const previousPendingWriteIds = new Set(options.getPendingCanvasWriteRequestIds());
     setCollaborationMessages((current) => [
       ...current,
       {
@@ -114,7 +117,18 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       setGeneration(result);
       options.onPersistThreadId(result.threadId);
       const state = await options.onFetchAndApplyThreadState(result.threadId);
-      options.onApplyThreadState(state);
+      const directWriteRequests = isDirectCanvasWriteInstruction(text)
+        ? (state.canvasWriteRequests ?? []).filter((request) => !previousPendingWriteIds.has(request.id) && request.status === "pending")
+        : [];
+      if (directWriteRequests.length > 0) {
+        for (const request of directWriteRequests) {
+          await options.onApproveCanvasWriteRequest(request.id);
+        }
+        const refreshedState = await options.onFetchAndApplyThreadState(result.threadId);
+        options.onApplyThreadState(refreshedState);
+      } else {
+        options.onApplyThreadState(state);
+      }
       await options.onRefreshProjectSurfaces();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Generation failed";
@@ -165,4 +179,8 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     handleChatSend,
     restoreVersion
   };
+}
+
+function isDirectCanvasWriteInstruction(text: string) {
+  return /canvas|\u753b\u677f|\u756b\u677f|\u5199\u5165|\u5beb\u5165|\u4fdd\u5b58\u5230|\u52a0\u5165|\u6dfb\u52a0\u5230|\u653e\u5230|save\s+to\s+canvas|write\s+this|write\s+to\s+canvas|add\s+to\s+canvas/i.test(text);
 }
