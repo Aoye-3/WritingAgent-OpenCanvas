@@ -30,6 +30,11 @@ export async function runDeerFlowGeneration(input: DeerFlowRunnerInput, deps: De
     settings: input.runtimeConfig.settings,
     messages: input.messages,
     prompt: input.prompt,
+    allowedToolRefs: input.runtimeConfig.enabledTools,
+    toolState: input.payload.toolState,
+    selectedCanvasNodeId: input.payload.selectedCanvasNodeId,
+    contextValues: input.payload.contextValues,
+    chatInstruction: input.payload.chatInstruction ?? input.payload.freeTextPrompt,
     onToolEvent: input.onToolEvent
   });
 

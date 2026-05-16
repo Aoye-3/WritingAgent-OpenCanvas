@@ -14,7 +14,12 @@ test("builds LangGraph-compatible DeerFlow run request", () => {
       model: { ...settings.model, model: "deepseek-v4-flash", thinkingMode: "enabled", reasoningEffort: "high" }
     },
     messages: [{ role: "user", content: "Summarise this" }],
-    prompt: "Summarise this"
+    prompt: "Summarise this",
+    allowedToolRefs: ["knowledge_base", "canvas_write"],
+    toolState: { knowledge_base: true, canvas_write: true },
+    selectedCanvasNodeId: "node_123",
+    contextValues: { currentDraft: "Draft body" },
+    chatInstruction: "Use the draft"
   }, {
     enabled: true,
     baseUrl: "http://127.0.0.1:8000",
@@ -27,6 +32,11 @@ test("builds LangGraph-compatible DeerFlow run request", () => {
   assert.equal(request.config.configurable.thinking_enabled, true);
   assert.equal(request.config.configurable.reasoning_effort, "high");
   assert.equal(request.context.thinking_enabled, true);
+  assert.deepEqual(request.context.facetwrite_allowed_tool_refs, ["knowledge_base", "canvas_write"]);
+  assert.deepEqual(request.context.facetwrite_tool_state, { knowledge_base: true, canvas_write: true });
+  assert.deepEqual(request.context.facetwrite_context_values, { currentDraft: "Draft body" });
+  assert.equal(request.context.facetwrite_selected_canvas_node_id, "node_123");
+  assert.equal(request.context.facetwrite_chat_instruction, "Use the draft");
   assert.equal(request.metadata.agentCardId, "summary");
   assert.equal(request.metadata.subagent.name, "facetwrite-summary");
   assert.deepEqual(request.stream_mode, ["messages-tuple", "custom", "values"]);
@@ -182,6 +192,51 @@ test("ignores DeerFlow values events that replay prompt messages", async () => {
 
   assert.equal(result.text, "Visible answer");
   assert.equal(result.text.includes("# AgentCard"), false);
+});
+
+test("uses final values AI message when DeerFlow does not emit assistant message chunks", async () => {
+  const body = [
+    'event: values\ndata: {"messages":[{"type":"human","content":"Say hello"},{"type":"ai","content":"Hello from DeerFlow"}]}\n\n',
+    'event: end\ndata: null\n\n'
+  ].join("");
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+      controller.close();
+    }
+  });
+  const fetchImpl = async (url: string | URL | Request) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) return Response.json({ needs_setup: false });
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, { headers });
+    }
+    return new Response(stream, { status: 200 }) as Response;
+  };
+
+  const result = await runDeerFlowAgent({
+    config: {
+      enabled: true,
+      baseUrl: "http://deerflow.local",
+      assistantId: "lead_agent",
+      auth: {
+        email: "admin@example.com",
+        password: "strong-password",
+        autoSetup: false,
+        timeoutMs: 5000
+      }
+    },
+    threadId: "thread_1",
+    agentCard: getAgentCard("summary"),
+    messages: [{ role: "user", content: "Say hello" }],
+    prompt: "Say hello",
+    fetchImpl
+  });
+
+  assert.equal(result.text, "Hello from DeerFlow");
 });
 
 test("only accepts assistant text from DeerFlow message tuples", async () => {

@@ -87,6 +87,10 @@ async function createDeerFlowSession(config: DeerFlowRuntimeConfig, fetchImpl: t
     throw new DeerFlowAuthError("not_configured", "DeerFlow auth credentials are not configured");
   }
 
+  if (setupStatus.rateLimited) {
+    return login(config, requireCredentials(auth), fetchImpl);
+  }
+
   return login(config, requireCredentials(auth), fetchImpl);
 }
 
@@ -105,8 +109,11 @@ async function fetchWithSession(fetchImpl: typeof fetch, config: DeerFlowRuntime
   });
 }
 
-async function readSetupStatus(config: DeerFlowRuntimeConfig, timeoutMs: number, fetchImpl: typeof fetch): Promise<{ needsSetup: boolean }> {
+async function readSetupStatus(config: DeerFlowRuntimeConfig, timeoutMs: number, fetchImpl: typeof fetch): Promise<{ needsSetup: boolean; rateLimited?: boolean }> {
   const response = await fetchWithTimeout(fetchImpl, `${config.baseUrl}/api/v1/auth/setup-status`, { method: "GET" }, timeoutMs);
+  if (response.status === 429) {
+    return { needsSetup: false, rateLimited: true };
+  }
   if (!response.ok) {
     throw new DeerFlowAuthError("auth_failed", `DeerFlow setup status returned HTTP ${response.status}`);
   }

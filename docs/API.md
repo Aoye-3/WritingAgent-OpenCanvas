@@ -70,6 +70,10 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - Enables first-boot admin initialization through DeerFlow `/api/v1/auth/initialize` when set to `true` or `1`. Defaults to `false`.
 - `DEERFLOW_AUTH_TIMEOUT_MS`
   - Timeout for DeerFlow auth/setup/login requests. Defaults to `5000`.
+- `FACETWRITE_INTERNAL_BASE_URL`
+  - DeerFlow-to-FacetWrite callback base URL for bridged ToolUse. Docker sidecar default is `http://host.docker.internal:8787`.
+- `FACETWRITE_INTERNAL_TOOL_TOKEN`
+  - Optional shared token for DeerFlow internal ToolUse calls. When set, DeerFlow sends it as `x-facetwrite-tool-token`; the value is never exposed by FacetWrite APIs.
 - `GET /api/deerflow/status`
   - Returns DeerFlow runtime status: enabled, baseUrl, assistantId, reachable, runtimeProvider, authState, and lastError.
   - `authState` is one of `not_configured`, `setup_required`, `authenticated`, or `auth_failed`.
@@ -81,6 +85,12 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `GET /api/deerflow/dashboard`
   - Returns a read-only AI Dashboard payload containing runtime status, DeerFlow Skills/MCP overview, Lead Agent metadata, AgentCard-to-DeerFlow subagent mappings, ToolUse bridge status, and integration maturity.
   - This endpoint must not return API keys, provider secrets, DeerFlow cookies, CSRF tokens, or MCP secret-like values.
+- `POST /api/internal/deerflow/tool-call`
+  - Internal service-to-service endpoint for DeerFlow bridge tools.
+  - Accepts only trusted local/container calls. Requests must include `x-facetwrite-internal: deerflow` or the configured `x-facetwrite-tool-token`.
+  - Body: `{ threadId, toolName, arguments, allowedToolRefs, toolState, selectedCanvasNodeId, contextValues, chatInstruction }`.
+  - Reuses FacetWrite ToolUse policy and executors. Unknown tools, disabled tools, or tools not allowed by the active Agent return an `ok:false` result rather than bypassing policy.
+  - `canvas_write` creates a pending Canvas write request only; it does not mutate Canvas content.
 
 ## DeerFlow Auth Status
 - DeerFlow Docker sidecar health is reachable without auth at `/health`.

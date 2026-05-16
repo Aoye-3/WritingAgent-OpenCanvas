@@ -1,5 +1,29 @@
 # FacetWrite Refactor Log
 
+## 2026-05-16: DeerFlow Runtime And ToolUse Bridge Stabilization
+Scope: Implemented the first stable DeerFlow primary-runtime ToolUse bridge and updated runtime acceptance docs.
+
+Findings:
+- Local acceptance should use Docker Desktop plus DeerFlow Docker Compose; Windows native `make/nginx` is a fallback development path, not the main validation path.
+- DeerFlow needs FacetWrite per-run tool context so bridge calls can reuse the existing Tool catalog policy and Canvas approval boundary.
+- `web_search` should remain DeerFlow built-in ToolUse, while FacetWrite local tools bridge through a controlled callback.
+
+Completed:
+- Added `/api/internal/deerflow/tool-call` with internal-source checks and reuse of `executeToolCall`, Tool policy, and Canvas pending request creation.
+- Passed bridge context from FacetWrite DeerFlow run requests: allowed tool refs, effective tool state, explicit context values, selected Canvas node, and current instruction.
+- Added DeerFlow `deerflow.tools.facetwrite_bridge` tools for `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write`.
+- Registered FacetWrite bridge tools in DeerFlow `config.yaml` and `config.example.yaml`.
+- Switched the local DeerFlow model config to `PatchedChatDeepSeek` so DeepSeek reasoning metadata survives multi-turn tool-call conversations.
+- Updated AI Dashboard bridge states so FacetWrite tools show `facetwrite_bridge` and DeerFlow `web_search` shows `deerflow_builtin`.
+- Added `docs/DEERFLOW_RUNTIME_RUNBOOK.md` and updated architecture, API, Agent, env, and DeerFlow troubleshooting docs.
+
+Open TODO:
+- Add higher-level UI assertions for displayed DeerFlow ToolUse events once the workspace timeline consumes DeerFlow's final `values` tool metadata directly.
+- Consider adding persisted recent ToolUse bridge events to the AI Dashboard after the runtime stream shape is validated.
+
+Next Priority Check:
+- Preserve the Docker sidecar acceptance checklist from `docs/DEERFLOW_RUNTIME_RUNBOOK.md` in future runtime changes and treat Provider/Mock fallback as a failure for DeerFlow acceptance unless intentionally testing fallback.
+
 ## 2026-05-15: Maintainability Boundary Refactor
 Scope: Implemented the first maintainability pass from the control-plane/execution-plane review.
 

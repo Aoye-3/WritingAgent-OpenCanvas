@@ -35,7 +35,9 @@ test("dashboard returns runtime, config, agent mapping, and tool bridge status",
   assert.equal(dashboard.config.skills.length, 1);
   assert.equal(dashboard.agentMappings[0].subagent.name, "facetwrite-summary");
   assert.equal(dashboard.agentMappings[0].subagent.skills[0], "summary");
-  assert.equal(dashboard.toolBridgeStatus.some((item) => item.name === "canvas_write" && item.approvalBoundary === "FacetWrite pending approval"), true);
+  assert.equal(dashboard.toolBridgeStatus.some((item) => item.name === "canvas_write" && item.bridgeState === "facetwrite_bridge" && item.approvalBoundary === "FacetWrite pending approval"), true);
+  assert.equal(dashboard.toolBridgeStatus.some((item) => item.name === "web_search" && item.bridgeState === "deerflow_builtin"), true);
+  assert.equal(dashboard.integrationMaturity.some((item) => item.label === "ToolUse bridge" && item.state === "verified"), true);
   assert.equal(dashboard.config.mcpServers.search && JSON.stringify(dashboard.config.mcpServers.search).includes("secret"), false);
 });
 

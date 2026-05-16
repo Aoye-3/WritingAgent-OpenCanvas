@@ -26,6 +26,15 @@ export function MarkdownText({ text }: MarkdownTextProps) {
           );
         }
 
+        if (block.kind === "heading") {
+          const Tag = `h${block.level}` as "h1" | "h2" | "h3" | "h4";
+          return <Tag key={index}>{renderInline(block.text)}</Tag>;
+        }
+
+        if (block.kind === "hr") {
+          return <hr key={index} />;
+        }
+
         return <p key={index}>{renderInline(block.text)}</p>;
       })}
     </div>
@@ -34,6 +43,8 @@ export function MarkdownText({ text }: MarkdownTextProps) {
 
 type Block =
   | { kind: "p"; text: string }
+  | { kind: "heading"; level: 1 | 2 | 3 | 4; text: string }
+  | { kind: "hr" }
   | { kind: "ul"; items: string[] }
   | { kind: "ol"; items: string[] };
 
@@ -62,6 +73,21 @@ function toBlocks(text: string): Block[] {
     if (!trimmed) {
       flushParagraph();
       flushList();
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      blocks.push({ kind: "heading", level: heading[1].length as 1 | 2 | 3 | 4, text: heading[2] });
+      continue;
+    }
+
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      flushParagraph();
+      flushList();
+      blocks.push({ kind: "hr" });
       continue;
     }
 
@@ -98,7 +124,7 @@ function toBlocks(text: string): Block[] {
 
 function renderInline(text: string) {
   const nodes: ReactNode[] = [];
-  const pattern = /(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`)/g;
+  const pattern = /(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__|`[^`]+`)/g;
   let lastIndex = 0;
 
   for (const match of text.matchAll(pattern)) {
@@ -107,11 +133,17 @@ function renderInline(text: string) {
     }
 
     const token = match[0];
-    const content = token.slice(2, -2);
     if (token.startsWith("`")) {
       nodes.push(<code key={nodes.length}>{token.slice(1, -1)}</code>);
+    } else if (token.startsWith("[")) {
+      const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      nodes.push(link ? (
+        <a key={nodes.length} href={safeHref(link[2])} target="_blank" rel="noreferrer">
+          {link[1]}
+        </a>
+      ) : token);
     } else {
-      nodes.push(<strong key={nodes.length}>{content}</strong>);
+      nodes.push(<strong key={nodes.length}>{token.slice(2, -2)}</strong>);
     }
     lastIndex = match.index + token.length;
   }
@@ -121,4 +153,9 @@ function renderInline(text: string) {
   }
 
   return nodes;
+}
+
+function safeHref(href: string) {
+  const trimmed = href.trim();
+  return /^https?:\/\//i.test(trimmed) ? trimmed : "#";
 }

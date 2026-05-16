@@ -38,6 +38,27 @@ token_usage:
 # Configure available LLM models for the agent to use
 
 models:
+  - name: facetwrite-provider
+    display_name: FacetWrite Provider
+    use: deerflow.models.patched_deepseek:PatchedChatDeepSeek
+    model: $OPENAI_MODEL
+    api_base: $OPENAI_BASE_URL
+    api_key: $OPENAI_API_KEY
+    timeout: 600.0
+    max_retries: 2
+    temperature: 0.7
+    supports_thinking: true
+    supports_reasoning_effort: true
+    supports_vision: false
+    when_thinking_enabled:
+      extra_body:
+        thinking:
+          type: enabled
+    when_thinking_disabled:
+      extra_body:
+        thinking:
+          type: disabled
+
   # Example: Volcengine (Doubao) model
   # - name: doubao-seed-1.8
   #   display_name: Doubao-Seed-1.8
@@ -357,6 +378,8 @@ models:
 
 tool_groups:
   - name: web
+  - name: context
+  - name: chat
   - name: file:read
   - name: file:write
   - name: bash
@@ -367,6 +390,25 @@ tool_groups:
 # Configure available tools for the agent to use
 
 tools:
+  # FacetWrite controlled ToolUse bridge. These tools call back into
+  # /api/internal/deerflow/tool-call and keep FacetWrite policy and Canvas
+  # approval semantics as the source of truth.
+  - name: knowledge_base
+    group: context
+    use: deerflow.tools.facetwrite_bridge:knowledge_base_tool
+
+  - name: quick_messages
+    group: chat
+    use: deerflow.tools.facetwrite_bridge:quick_messages_tool
+
+  - name: clear_context
+    group: context
+    use: deerflow.tools.facetwrite_bridge:clear_context_tool
+
+  - name: canvas_write
+    group: chat
+    use: deerflow.tools.facetwrite_bridge:canvas_write_tool
+
   # Web search tool (uses DuckDuckGo, no API key required)
   - name: web_search
     group: web

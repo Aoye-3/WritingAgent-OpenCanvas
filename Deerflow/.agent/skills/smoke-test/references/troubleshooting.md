@@ -117,6 +117,8 @@ command not found: nginx
 ```
 
 **Solutions**:
+0. On Windows, prefer Docker Desktop or WSL/Linux for DeerFlow smoke testing. Windows-native `make/nginx` is not the primary acceptance path for FacetWrite DeerFlowRuntime validation.
+
 1. macOS (Homebrew):
    ```bash
    brew install nginx
@@ -137,6 +139,20 @@ command not found: nginx
    ```bash
    nginx -v
    ```
+
+---
+
+### Issue: make Is Not Installed On Windows
+
+**Symptoms**:
+```
+make: command not found
+```
+
+**Solutions**:
+1. Prefer Docker Desktop and the DeerFlow Docker Compose path for local acceptance.
+2. Or use WSL/Linux local mode if you specifically need `make dev-daemon`.
+3. Do not treat Windows-native `make/nginx` setup as the primary FacetWrite DeerFlowRuntime validation path.
 
 ---
 
@@ -402,6 +418,7 @@ Cannot connect to the Docker daemon
 2. macOS: check whether the Docker icon appears in the top menu bar
 3. Linux: run `sudo systemctl start docker`
 4. Run `docker info` again to verify
+5. For FacetWrite local acceptance, Docker mode is preferred over Windows-native local mode when `make` or `nginx` is missing.
 
 ---
 

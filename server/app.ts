@@ -10,6 +10,7 @@ import { registerCanvasRoutes } from "./routes/canvasRoutes.js";
 import { registerDeerFlowRoutes } from "./routes/deerflowRoutes.js";
 import { registerGenerationRoutes } from "./routes/generationRoutes.js";
 import { registerHealthRoutes } from "./routes/healthRoutes.js";
+import { registerInternalDeerFlowRoutes } from "./routes/internalDeerFlowRoutes.js";
 import { registerProjectRoutes } from "./routes/projectRoutes.js";
 import { registerSettingsRoutes } from "./routes/settingsRoutes.js";
 import { registerThreadRoutes } from "./routes/threadRoutes.js";
@@ -26,6 +27,7 @@ export async function createApp() {
   app.use(express.json({ limit: "1mb" }));
 
   registerHealthRoutes(app);
+  registerInternalDeerFlowRoutes(app, { storage });
   registerDeerFlowRoutes(app, { agentRuntime });
   registerCatalogRoutes(app);
   registerAgentRoutes(app, { agentRuntime });

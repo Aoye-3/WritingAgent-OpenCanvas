@@ -1173,6 +1173,30 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 .markdown-text ol:last-child {
   margin-bottom: 0;
 }
+.markdown-text h1,
+.markdown-text h2,
+.markdown-text h3,
+.markdown-text h4 {
+  margin: 12px 0 8px;
+  color: inherit;
+  line-height: 1.24;
+  font-weight: 850;
+}
+.markdown-text h1 { font-size: 1.22em; }
+.markdown-text h2 { font-size: 1.14em; }
+.markdown-text h3,
+.markdown-text h4 { font-size: 1.05em; }
+.markdown-text hr {
+  height: 1px;
+  margin: 10px 0;
+  border: 0;
+  background: var(--color-border);
+}
+.markdown-text a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .markdown-text strong {
   font-weight: 800;
 }

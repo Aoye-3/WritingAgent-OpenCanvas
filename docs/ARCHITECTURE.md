@@ -73,9 +73,12 @@ User input
 - FacetWrite Task cards are mapped to DeerFlow subagent metadata with skills, tools, model inheritance, timeout, and max-turn defaults.
 - FacetWrite exposes read-only DeerFlow status and config overview endpoints for UI observability.
 - FacetWrite exposes an AI Dashboard that summarizes DeerFlow runtime health, auth, Skills/MCP, AgentCard-to-subagent mapping, and ToolUse bridge status.
+- FacetWrite exposes `/api/internal/deerflow/tool-call` as a service-to-service ToolUse bridge for DeerFlow. The bridge accepts only trusted local/container calls, reuses `executeToolCall`, applies the Tool catalog policy guard, and keeps Canvas writes as pending requests.
+- DeerFlow loads `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write` through `deerflow.tools.facetwrite_bridge`. The Docker default callback URL is `http://host.docker.internal:8787`.
+- DeerFlow `web_search` remains a DeerFlow built-in tool and is not counted as a FacetWrite local bridge tool.
 - FacetWrite remains responsible for product data, SQLite persistence, frontend state, Canvas approval, and local fallback behavior.
 - DeerFlow runtime failures that are recoverable by the Provider runtime are visible in the Tool event timeline as `deerflow_runtime_failed` with a safe fallback summary.
-- Current validation status: sidecar health, backend auth, config overview, and one Task-card generation are online against the Docker sidecar.
+- Current validation target: sidecar health, backend auth, config overview, one Task-card generation, five repeated DeerFlow generations, and both DeerFlow built-in ToolUse plus FacetWrite bridge ToolUse against the Docker sidecar.
 
 ## Storage
 - `server/storage.ts` is the compatibility facade for local persistence. It preserves the public storage API used by routes and services.

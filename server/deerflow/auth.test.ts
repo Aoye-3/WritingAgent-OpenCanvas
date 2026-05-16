@@ -72,6 +72,28 @@ test("login success authenticates protected fetch with cookie and csrf", async (
   assert.equal(protectedHeaders.get("X-CSRF-Token"), "csrf-value");
 });
 
+test("falls back to direct login when setup status is rate limited", async () => {
+  clearDeerFlowSession();
+  const calls: string[] = [];
+  const response = await authenticatedDeerFlowFetch({
+    config,
+    path: "/api/runs/stream",
+    init: { method: "POST", body: "{}" },
+    fetchImpl: async (url, init) => {
+      calls.push(`${init?.method ?? "GET"} ${url}`);
+      if (String(url).endsWith("/setup-status")) return new Response("rate limited", { status: 429 });
+      if (String(url).endsWith("/login/local")) return responseWithSession({ ok: true });
+      return Response.json({ ok: true });
+    }
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls.slice(0, 2), [
+    "GET http://deerflow.local/api/v1/auth/setup-status",
+    "POST http://deerflow.local/api/v1/auth/login/local"
+  ]);
+});
+
 test("401 or 403 clears session and retries login once", async () => {
   clearDeerFlowSession();
   const calls: string[] = [];

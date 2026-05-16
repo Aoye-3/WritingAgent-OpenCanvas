@@ -7,6 +7,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 - `ARCHITECTURE.md`: frontend, backend, Agent runtime, DeerFlow sidecar, storage, and boundary rules.
 - `AGENT.md`: AgentCard, Agent settings, DeerFlow runtime mapping, Tool catalog, and ToolUse safety.
 - `API.md`: HTTP API contracts, runtime environment variables, and response shape.
+- `DEERFLOW_RUNTIME_RUNBOOK.md`: Docker Desktop/local and Linux Docker Compose runtime acceptance, dependencies, ports, env, smoke checks, and troubleshooting.
 - `DATABASE.md`: SQLite location, tables, Canvas write semantics, and migration notes.
 - `SECURITY.md`: local secret handling, tool permissions, DeerFlow auth, and runtime redaction rules.
 - `DECISIONS.md`: dated technical decisions and their impacts.

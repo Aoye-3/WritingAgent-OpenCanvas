@@ -72,14 +72,18 @@ DeerFlow is the primary Agent runtime integration foundation when `DEERFLOW_ENAB
 - Runtime status is exposed through `/api/deerflow/status`.
 - DeerFlow skills and MCP server overview are read through `/api/deerflow/config`; MCP environment and secret-like values are redacted before reaching the frontend.
 - AI runtime status, Agent mapping, and ToolUse bridge progress are exposed through `/api/deerflow/dashboard` and shown in the AI Dashboard.
-- Current Docker sidecar status: `/health`, backend auth, `/api/deerflow/config`, and one Summary Task-card generation pass against DeerFlow nginx.
+- FacetWrite sends per-run bridge context to DeerFlow: allowed tool refs, effective tool state, explicit context values, selected Canvas node id, and current chat instruction.
+- DeerFlow loads FacetWrite bridge tools from `deerflow.tools.facetwrite_bridge` for `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write`.
+- The bridge calls FacetWrite `/api/internal/deerflow/tool-call`, so ToolUse policy remains enforced by FacetWrite and `canvas_write` can only create a pending request.
+- `web_search` is verified separately as a DeerFlow built-in tool, not as a FacetWrite local bridge.
+- Current Docker sidecar acceptance target: `/health`, backend auth, `/api/deerflow/config`, provider `deerflow` generation, repeated no-fallback runs, DeerFlow built-in ToolUse, and FacetWrite bridge ToolUse.
 
 ## AI Dashboard
 The AI Dashboard is not a second Agent settings page. It is a read-only runtime/control-plane surface.
 
 - It shows DeerFlow runtime reachability, auth state, Lead Agent ID, Skills, MCP servers, AgentCard-to-subagent mapping, and ToolUse bridge status.
 - It describes FacetWrite capabilities as progressively bridged to DeerFlow ToolUse or MCP capabilities rather than as a competing local Agent runtime.
-- Canvas write behavior remains Human-in-the-loop: DeerFlow may eventually propose the write, but FacetWrite approval applies it.
+- Canvas write behavior remains Human-in-the-loop: DeerFlow may propose the write through the bridge, but FacetWrite records only a pending request until the user approves it.
 
 ## Tool Catalog
 `server/tools/catalog.ts` is the Tool metadata source of truth. Each ToolDefinition includes:
@@ -108,6 +112,8 @@ A tool can auto-run only when it is enabled, does not require approval, and does
 `server/tools/toolPolicyGuard.ts` is the execution-time gate. It rejects unknown tools, tools not allowed by the active Agent, tools disabled for the current run, and tools that require missing external configuration before the executor branch runs.
 
 `canvas_write` must never directly mutate Canvas content from model output. It can only create a pending request that the user approves or rejects.
+
+When DeerFlow is the active runtime, the FacetWrite bridge tools still call the same policy and executor path. This keeps disabled tools, disallowed Agent tools, and approval-gated writes consistent across DeerFlow and the TypeScript fallback runtime.
 
 ## Run Loop
 When DeerFlow is disabled, `server/agentRunLoop.ts` performs the fallback Agent run:

@@ -5,7 +5,7 @@ import { getDeerFlowConfigOverview, type DeerFlowConfigOverview } from "./proxy.
 import { getDeerFlowRuntimeConfig, type DeerFlowRuntimeConfig } from "./config.js";
 import { getDeerFlowRuntimeStatus, type DeerFlowRuntimeStatus } from "./status.js";
 
-export type DeerFlowToolBridgeState = "mapped_metadata" | "pending_bridge" | "control_plane";
+export type DeerFlowToolBridgeState = "deerflow_builtin" | "facetwrite_bridge" | "pending_bridge" | "control_plane";
 
 export type DeerFlowToolBridgeStatus = {
   name: ToolRef;
@@ -82,8 +82,8 @@ export async function getDeerFlowDashboard(input: {
       },
       {
         label: "ToolUse bridge",
-        state: "pending",
-        description: "Workspace capabilities are identified for DeerFlow Tool/MCP bridging, with FacetWrite approval retained for writes."
+        state: "verified",
+        description: "FacetWrite bridge tools are wired through the internal ToolUse endpoint, with FacetWrite approval retained for writes."
       }
     ]
   };
@@ -92,29 +92,29 @@ export async function getDeerFlowDashboard(input: {
 function buildToolBridgeStatus(): DeerFlowToolBridgeStatus[] {
   const definitions: Record<ToolRef, Omit<DeerFlowToolBridgeStatus, "name" | "label">> = {
     web_search: {
-      bridgeState: "pending_bridge",
-      target: "DeerFlow Tool or MCP search capability",
-      executionBoundary: "Search intent is currently passed in the runtime contract; direct DeerFlow search execution is a future bridge."
+      bridgeState: "deerflow_builtin",
+      target: "DeerFlow built-in web_search tool",
+      executionBoundary: "Live search is executed by DeerFlow when the runtime sidecar is connected; FacetWrite records DeerFlow tool events."
     },
     knowledge_base: {
-      bridgeState: "pending_bridge",
-      target: "DeerFlow knowledge Tool or MCP resource",
-      executionBoundary: "Workspace knowledge should become a DeerFlow-readable resource while FacetWrite owns source selection."
+      bridgeState: "facetwrite_bridge",
+      target: "FacetWrite internal ToolUse bridge",
+      executionBoundary: "DeerFlow calls back into FacetWrite for selected workspace context while FacetWrite owns source selection."
     },
     quick_messages: {
-      bridgeState: "control_plane",
-      target: "FacetWrite interaction protocol",
-      executionBoundary: "Quick editing phrases shape user intent before the DeerFlow run."
+      bridgeState: "facetwrite_bridge",
+      target: "FacetWrite internal ToolUse bridge",
+      executionBoundary: "DeerFlow can normalize quick editing intent through FacetWrite's controlled ToolUse bridge."
     },
     clear_context: {
-      bridgeState: "control_plane",
-      target: "FacetWrite interaction protocol",
-      executionBoundary: "Context clearing is a workspace/session control before the DeerFlow run."
+      bridgeState: "facetwrite_bridge",
+      target: "FacetWrite internal ToolUse bridge",
+      executionBoundary: "DeerFlow can request clear-context behavior through FacetWrite's controlled ToolUse bridge."
     },
     canvas_write: {
-      bridgeState: "pending_bridge",
-      target: "DeerFlow Tool proposal with FacetWrite approval",
-      executionBoundary: "DeerFlow should propose Canvas writes; FacetWrite applies them only after user approval.",
+      bridgeState: "facetwrite_bridge",
+      target: "FacetWrite internal ToolUse bridge",
+      executionBoundary: "DeerFlow can propose Canvas writes through FacetWrite; FacetWrite applies them only after user approval.",
       approvalBoundary: "FacetWrite pending approval"
     }
   };

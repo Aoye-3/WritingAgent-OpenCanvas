@@ -1,6 +1,7 @@
 import type { AgentCard, AgentSettings } from "../agentCards.js";
 import type { ChatMessage } from "../providerRuntime.js";
 import type { ToolEventRecord } from "../toolRuntime.js";
+import type { ToolState } from "../toolRegistry.js";
 import { getDeerFlowRuntimeConfig, type DeerFlowRuntimeConfig } from "./config.js";
 import { authenticatedDeerFlowFetch } from "./auth.js";
 import { buildDeerFlowRuntimeMetadata } from "./taskAgentMapping.js";
@@ -12,6 +13,11 @@ export type DeerFlowRunInput = {
   settings?: AgentSettings;
   messages: ChatMessage[];
   prompt: string;
+  allowedToolRefs?: string[];
+  toolState?: ToolState;
+  selectedCanvasNodeId?: string;
+  contextValues?: Record<string, unknown>;
+  chatInstruction?: string;
   fetchImpl?: typeof fetch;
   config?: DeerFlowRuntimeConfig;
   onToolEvent?: (event: ToolEventRecord) => void;
@@ -70,6 +76,11 @@ export function buildRunRequest(input: DeerFlowRunInput, config: DeerFlowRuntime
     },
     context: {
       facetwrite_prompt: input.prompt,
+      facetwrite_allowed_tool_refs: input.allowedToolRefs ?? input.agentCard.toolRefs,
+      facetwrite_tool_state: input.toolState ?? {},
+      facetwrite_selected_canvas_node_id: input.selectedCanvasNodeId,
+      facetwrite_context_values: input.contextValues ?? {},
+      facetwrite_chat_instruction: input.chatInstruction ?? input.prompt,
       ...runtimeContext
     },
     stream_mode: ["messages-tuple", "custom", "values"],
@@ -101,6 +112,7 @@ async function readDeerFlowStream(body: ReadableStream<Uint8Array>, onToolEvent?
   const decoder = new TextDecoder();
   const events: ToolEventRecord[] = [];
   const textParts: string[] = [];
+  let finalValuesText: string | undefined;
   let usage: unknown;
   let buffer = "";
 
@@ -123,7 +135,7 @@ async function readDeerFlowStream(body: ReadableStream<Uint8Array>, onToolEvent?
   }
 
   return {
-    text: textParts.join("").trim(),
+    text: (textParts.join("").trim() || finalValuesText || "").trim(),
     finishReason: "deerflow_completed",
     usage,
     events
@@ -133,6 +145,9 @@ async function readDeerFlowStream(body: ReadableStream<Uint8Array>, onToolEvent?
     for (const parsed of parsedEvents) {
       const text = extractText(parsed.event, parsed.data);
       if (text) textParts.push(text);
+      if (parsed.event === "values") {
+        finalValuesText = extractFinalValuesText(parsed.data) ?? finalValuesText;
+      }
 
       const event = mapToolEvent(parsed.event, parsed.data);
       if (event) {
@@ -152,6 +167,20 @@ function extractText(event: string, data: unknown): string | undefined {
   }
   if (event === "token" || event === "message") {
     return textFromUnknown(data);
+  }
+  return undefined;
+}
+
+function extractFinalValuesText(data: unknown): string | undefined {
+  if (!isRecord(data) || !Array.isArray(data.messages)) return undefined;
+  for (let index = data.messages.length - 1; index >= 0; index -= 1) {
+    const message = data.messages[index];
+    if (!isRecord(message)) continue;
+    const role = typeof message.role === "string" ? message.role.toLowerCase() : "";
+    const type = typeof message.type === "string" ? message.type.toLowerCase() : "";
+    if (role === "assistant" || type === "ai" || type === "assistant") {
+      return textFromUnknown(message);
+    }
   }
   return undefined;
 }
