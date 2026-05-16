@@ -52,6 +52,7 @@ export async function runDeerFlowAgent(input: DeerFlowRunInput): Promise<DeerFlo
 }
 
 export function buildRunRequest(input: DeerFlowRunInput, config: DeerFlowRuntimeConfig) {
+  const runtimeContext = buildDeerFlowRunContext(input.settings);
   return {
     assistant_id: config.assistantId,
     input: {
@@ -63,11 +64,13 @@ export function buildRunRequest(input: DeerFlowRunInput, config: DeerFlowRuntime
     metadata: buildDeerFlowRuntimeMetadata(input.agentCard, input.settings),
     config: {
       configurable: {
-        thread_id: input.threadId
+        thread_id: input.threadId,
+        ...runtimeContext
       }
     },
     context: {
-      facetwrite_prompt: input.prompt
+      facetwrite_prompt: input.prompt,
+      ...runtimeContext
     },
     stream_mode: ["messages-tuple", "custom", "values"],
     stream_subgraphs: true,
@@ -75,6 +78,22 @@ export function buildRunRequest(input: DeerFlowRunInput, config: DeerFlowRuntime
     on_disconnect: "cancel",
     on_completion: "keep"
   };
+}
+
+function buildDeerFlowRunContext(settings?: AgentSettings) {
+  if (!settings) return {};
+  const thinkingMode = settings.model.thinkingMode ?? (settings.model.providerId === "deepseek" && settings.model.model === "deepseek-reasoner" ? "enabled" : "disabled");
+  return {
+    model_name: settings.model.model,
+    thinking_enabled: thinkingMode === "enabled",
+    reasoning_effort: normalizeDeerFlowReasoningEffort(settings.model.reasoningEffort)
+  };
+}
+
+function normalizeDeerFlowReasoningEffort(effort: AgentSettings["model"]["reasoningEffort"]) {
+  if (effort === "max" || effort === "xhigh") return "max";
+  if (effort === "low" || effort === "medium" || effort === "high") return effort;
+  return undefined;
 }
 
 async function readDeerFlowStream(body: ReadableStream<Uint8Array>, onToolEvent?: (event: ToolEventRecord) => void): Promise<DeerFlowRunResult> {
@@ -134,24 +153,26 @@ function extractText(event: string, data: unknown): string | undefined {
   if (event === "token" || event === "message") {
     return textFromUnknown(data);
   }
-  if (event === "values") {
-    return textFromValues(data);
-  }
   return undefined;
 }
 
 function textFromMessageTuple(data: unknown): string | undefined {
   if (Array.isArray(data)) {
-    return textFromUnknown(data[0]);
+    return textFromMessageLike(data[0]);
   }
-  return textFromUnknown(data);
+  return textFromMessageLike(data);
 }
 
-function textFromValues(data: unknown): string | undefined {
-  if (!isRecord(data)) return undefined;
-  const messages = data.messages;
-  if (!Array.isArray(messages) || messages.length === 0) return undefined;
-  return textFromUnknown(messages[messages.length - 1]);
+function textFromMessageLike(value: unknown): string | undefined {
+  if (!isRecord(value)) return typeof value === "string" ? value : undefined;
+  const role = typeof value.role === "string" ? value.role.toLowerCase() : "";
+  const type = typeof value.type === "string" ? value.type.toLowerCase() : "";
+  const id = typeof value.id === "string" ? value.id.toLowerCase() : "";
+  const allowed = role === "assistant" || type === "ai" || type === "assistant" || id.startsWith("run-");
+  if (role || type || id) {
+    return allowed ? textFromUnknown(value) : undefined;
+  }
+  return textFromUnknown(value);
 }
 
 function textFromUnknown(value: unknown): string | undefined {

@@ -98,3 +98,48 @@ test("storage facade saves and returns Agent settings", async () => {
   assert.equal(saved?.model?.providerId, "deepseek");
   assert.deepEqual(saved?.quickMessages, ["Shorten this", "Make it clearer"]);
 });
+
+test("storage facade sanitizes historical leaked assistant messages and output versions", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_sanitize_facade_${Date.now()}`;
+  await storage.ensureThread(threadId, "blog-post");
+
+  storage.recordRun({
+    threadId,
+    agentCardId: "blog-post",
+    mode: "chat",
+    prompt: "Prompt text",
+    output: "You are FacetWrite's writing assistant.\n\n# AgentCard\nAgent: Blog Post",
+    provider: "deerflow",
+    usedMock: false,
+    userMessage: "Hello"
+  });
+
+  const assistant = storage.listMessages(threadId).find((message) => message.role === "assistant");
+  assert.ok(assistant);
+  assert.equal(assistant.text.includes("# AgentCard"), false);
+  assert.equal(assistant.text.includes("FacetWrite's writing assistant"), false);
+  assert.equal(storage.listOutputVersions(threadId)[0].content.includes("# AgentCard"), false);
+
+  storage.moveThreadToTrash(threadId);
+  await storage.hardDeleteThread(threadId);
+});
+
+test("storage facade sanitizes leaked Canvas node content at read time", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_canvas_sanitize_${Date.now()}`;
+  await storage.ensureThread(threadId, "blog-post");
+
+  storage.createCanvasNode(threadId, {
+    kind: "document",
+    title: "Leaked",
+    content: "You are FacetWrite's writing assistant.\n\n# AgentCard\nAgent: Blog Post"
+  });
+
+  const node = storage.listCanvasNodes(threadId)[0];
+  assert.equal(node.content.includes("You are FacetWrite"), false);
+  assert.equal(node.content.includes("# AgentCard"), false);
+
+  storage.moveThreadToTrash(threadId);
+  await storage.hardDeleteThread(threadId);
+});

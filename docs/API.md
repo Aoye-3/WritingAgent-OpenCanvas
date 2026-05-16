@@ -41,13 +41,18 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 ## Generation
 - `POST /api/generate`
   - Body is parsed by `parseGenerateRequest`.
+  - `contextValues`, when present, represents explicit left AgentCard structured inputs and current workspace state such as draft or Canvas node data. It must not contain bottom-bar placeholder content or historical defaults such as course notes or audience profiles.
+  - `modelOverrides`, when present, is a per-run override for runtime-safe model controls such as `thinkingMode` and `reasoningEffort`. It does not mutate saved Agent settings.
   - Runs generation, records the result, and returns generation metadata and output.
   - Uses DeerFlow as the runtime when `DEERFLOW_ENABLED=true`; otherwise uses the current TypeScript provider runtime.
+  - If DeerFlow fails without a user-visible answer, returns only internal/runtime output, or returns an empty stream, the backend records a `deerflow_runtime_failed` tool event and continues with the Provider runtime before considering Mock fallback.
+  - Provider-private runtime metadata, including DeepSeek `reasoning_content`, is not part of the public request or response schema. It may be used internally for provider continuation only.
 - `POST /api/generate/stream`
   - SSE endpoint.
   - Emits `tool_event`, `token`, `final`, and `error` events.
   - `error` payloads include `code` and `message`.
   - DeerFlow custom subagent events are emitted as `tool_event` records with `eventType` prefixed by `deerflow_`.
+  - Recoverable DeerFlow-to-Provider fallback is emitted as a `tool_event` with `eventType:"deerflow_runtime_failed"` and a redacted payload containing `fallback:"provider"`.
 
 ## DeerFlow Runtime Configuration
 - `DEERFLOW_ENABLED`
@@ -98,7 +103,9 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `GET /api/threads/:threadId/messages`
   - Returns `{ messages }`.
 - `GET /api/threads/:threadId/state`
-  - Returns thread, messages, output versions, tool events, Canvas nodes, and pending Canvas write requests.
+  - Returns thread, sanitized messages, sanitized output versions, tool events, Canvas nodes, and pending Canvas write requests.
+  - Internal prompt text, raw ToolUse JSON, provider-private fields such as DeepSeek `reasoning_content`, and DeerFlow replay values must not appear in `messages` or `outputVersions`; they are represented as redacted tool/runtime events when needed.
+  - Runtime fallback events such as `deerflow_runtime_failed` are returned in `toolEvents` so the UI can show when a run switched from DeerFlow to the Provider runtime.
 
 ## Projects
 - `GET /api/projects`
@@ -111,6 +118,8 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - Returns `{ nodes, writeRequests }` for an active thread.
 - `POST /api/threads/:threadId/canvas/nodes`
   - Creates a Canvas node.
+- `POST /api/threads/:threadId/canvas/write-requests`
+  - Creates a pending Canvas write request from explicit user action or Agent runtime intent. The request is not applied until approved.
 - `PATCH /api/threads/:threadId/canvas/nodes/:nodeId`
   - Updates a Canvas node.
 - `DELETE /api/threads/:threadId/canvas/nodes/:nodeId`

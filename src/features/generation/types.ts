@@ -13,6 +13,10 @@ export type GenerateRequest = {
   chatInstruction?: string;
   toolState?: Partial<Record<"web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write", boolean>>;
   systemPrompt?: string;
+  modelOverrides?: {
+    thinkingMode?: "enabled" | "disabled";
+    reasoningEffort?: "high" | "max" | "low" | "medium" | "xhigh";
+  };
   selectedCanvasNodeId?: string;
 };
 

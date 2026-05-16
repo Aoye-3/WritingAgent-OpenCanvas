@@ -59,3 +59,60 @@ test("continues after tool calls and records tool events", async () => {
   assert.equal(result.finishReason, "stop");
   assert.equal(events.map((event) => event.eventType).join(","), "tool_call_requested,tool_call_completed");
 });
+
+test("keeps DeepSeek reasoning_content across thinking tool-call turns", async () => {
+  let secondRequestReasoning: unknown;
+  const client: ChatClient = {
+    async createChatCompletion(request) {
+      const hasToolResult = request.messages.some((message) => message.role === "tool");
+      if (!hasToolResult) {
+        return {
+          choices: [{
+            finish_reason: "tool_calls",
+            message: {
+              role: "assistant",
+              content: "I will check the local context.",
+              reasoning_content: "Need local context before answering.",
+              tool_calls: [{
+                id: "call_1",
+                type: "function",
+                function: { name: "knowledge_base", arguments: JSON.stringify({ query: "draft", limit: 1 }) }
+              }]
+            }
+          }]
+        };
+      }
+
+      secondRequestReasoning = request.messages.find((message) => message.role === "assistant" && message.tool_calls?.length)?.reasoning_content;
+      return {
+        choices: [{ finish_reason: "stop", message: { role: "assistant", content: "Final answer" } }]
+      };
+    }
+  };
+
+  const result = await runAgentCompletion({
+    client,
+    providerId: "deepseek",
+    modelSettings: {
+      providerId: "deepseek",
+      model: "deepseek-v4-flash",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: false,
+      toolCallMode: "auto",
+      maxToolCalls: 4,
+      thinkingMode: "enabled",
+      reasoningEffort: "high"
+    },
+    messages: [{ role: "user", content: "Use context" }],
+    allowedToolRefs: ["knowledge_base"],
+    toolState: { knowledge_base: true },
+    toolContext: { contextValues: { currentDraft: "Draft body" }, chatInstruction: "Use context" }
+  });
+
+  assert.equal(result.text, "Final answer");
+  assert.equal(secondRequestReasoning, "Need local context before answering.");
+});

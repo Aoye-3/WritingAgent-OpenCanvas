@@ -2,13 +2,15 @@ import { useState } from "react";
 import type { CanvasNode, CanvasWriteRequest } from "../../features/agents/types";
 import {
   approveCanvasWriteRequest,
+  createCanvasWriteRequest,
   createCanvasNode,
   deleteCanvasNode,
   fetchCanvas,
   rejectCanvasWriteRequest,
   updateCanvasNode,
   type CanvasNodeDraft,
-  type CanvasNodePatch
+  type CanvasNodePatch,
+  type CanvasWriteRequestDraft
 } from "../../features/canvas/canvasClient";
 
 type UseCanvasStateOptions = {
@@ -45,6 +47,13 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces }: Use
     const node = await createCanvasNode(threadId, draft);
     setCanvasNodes((current) => [...current, node]);
     setSelectedCanvasNodeId(node.id);
+    await onRefreshProjectSurfaces();
+  };
+
+  const handleCreateCanvasWriteRequest = async (draft: CanvasWriteRequestDraft) => {
+    const threadId = await ensureThreadId();
+    const request = await createCanvasWriteRequest(threadId, draft);
+    setCanvasWriteRequests((current) => [request, ...current]);
     await onRefreshProjectSurfaces();
   };
 
@@ -88,6 +97,7 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces }: Use
     applyCanvasState,
     refreshCanvas,
     handleCreateCanvasNode,
+    handleCreateCanvasWriteRequest,
     handleUpdateCanvasNode,
     handleDeleteCanvasNode,
     handleApproveCanvasWriteRequest,

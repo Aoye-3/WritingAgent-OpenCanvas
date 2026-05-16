@@ -83,6 +83,113 @@ test("normalizes DeepSeek prefix completion into assistant prefix request", () =
   assert.equal(request.messages.at(-1)?.prefix, true);
 });
 
+test("preserves DeepSeek reasoning_content on assistant tool-call messages", () => {
+  const profile = getProviderProfile("deepseek");
+  const request = normalizeChatRequest(profile, {
+    modelSettings: { ...baseModel, providerId: "deepseek", thinkingMode: "enabled", reasoningEffort: "high" },
+    messages: [
+      { role: "user", content: "Use the canvas" },
+      {
+        role: "assistant",
+        content: "I will search first.",
+        reasoning_content: "private chain of thought",
+        tool_calls: [{
+          id: "call_1",
+          type: "function",
+          function: { name: "knowledge_base", arguments: "{}" }
+        }]
+      } as never
+    ],
+    tools: [{ type: "function", function: { name: "knowledge_base", description: "Search", parameters: { type: "object", properties: {}, additionalProperties: false } } }],
+    stream: false
+  });
+
+  assert.equal(request.thinking?.type, "enabled");
+  assert.equal((request.messages[1] as Record<string, unknown>).reasoning_content, "private chain of thought");
+});
+
+test("strips provider-private assistant fields when DeepSeek message has no tool calls", () => {
+  const profile = getProviderProfile("deepseek");
+  const request = normalizeChatRequest(profile, {
+    modelSettings: { ...baseModel, providerId: "deepseek" },
+    messages: [
+      { role: "user", content: "Use the canvas" },
+      {
+        role: "assistant",
+        content: "I will create a write request.",
+        reasoning_content: "private chain of thought"
+      } as never
+    ],
+    tools: [],
+    stream: false
+  });
+
+  assert.equal("reasoning_content" in (request.messages[1] as Record<string, unknown>), false);
+  assert.deepEqual(request.messages[1], {
+    role: "assistant",
+    content: "I will create a write request."
+  });
+});
+
+test("strips DeepSeek-only reasoning_content for OpenAI-compatible providers", () => {
+  const profile = getProviderProfile("openai-compatible");
+  const request = normalizeChatRequest(profile, {
+    modelSettings: { ...baseModel, providerId: "openai-compatible" },
+    messages: [
+      {
+        role: "assistant",
+        content: "Calling a tool.",
+        reasoning_content: "private chain of thought",
+        tool_calls: [{
+          id: "call_1",
+          type: "function",
+          function: { name: "knowledge_base", arguments: "{}" }
+        }]
+      } as never
+    ],
+    tools: [{ type: "function", function: { name: "knowledge_base", description: "Search", parameters: { type: "object", properties: {}, additionalProperties: false } } }],
+    stream: false
+  });
+
+  assert.equal("reasoning_content" in (request.messages[0] as Record<string, unknown>), false);
+});
+
+test("keeps explicit DeepSeek thinking when tool calls are enabled", () => {
+  const profile = getProviderProfile("deepseek");
+  const request = normalizeChatRequest(profile, {
+    modelSettings: { ...baseModel, providerId: "deepseek", thinkingMode: "enabled", reasoningEffort: "high" },
+    messages: [{ role: "user", content: "Search, then write" }],
+    tools: [{ type: "function", function: { name: "web_search", description: "Search", parameters: { type: "object", properties: {}, additionalProperties: false } } }],
+    stream: false
+  });
+
+  assert.deepEqual(request.thinking, { type: "enabled", reasoning_effort: "high" });
+});
+
+test("disables DeepSeek thinking by default when tool calls are enabled", () => {
+  const profile = getProviderProfile("deepseek");
+  const request = normalizeChatRequest(profile, {
+    modelSettings: { ...baseModel, providerId: "deepseek", model: "deepseek-v4-flash", thinkingMode: undefined },
+    messages: [{ role: "user", content: "Search, then write" }],
+    tools: [{ type: "function", function: { name: "web_search", description: "Search", parameters: { type: "object", properties: {}, additionalProperties: false } } }],
+    stream: false
+  });
+
+  assert.deepEqual(request.thinking, { type: "disabled" });
+});
+
+test("keeps DeepSeek thinking enabled for no-tool requests", () => {
+  const profile = getProviderProfile("deepseek");
+  const request = normalizeChatRequest(profile, {
+    modelSettings: { ...baseModel, providerId: "deepseek", thinkingMode: "enabled", reasoningEffort: "max" },
+    messages: [{ role: "user", content: "Think carefully" }],
+    tools: [],
+    stream: false
+  });
+
+  assert.deepEqual(request.thinking, { type: "enabled", reasoning_effort: "max" });
+});
+
 test("rejects prefix completion when provider does not support it", () => {
   const profile = getProviderProfile("openai-compatible");
   assert.throws(

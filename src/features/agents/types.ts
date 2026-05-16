@@ -106,6 +106,7 @@ export type ProviderCapabilities = {
   streaming: boolean;
   toolCalls: boolean;
   thinking: boolean;
+  reasoningContentPolicy?: "strip" | "preserve_when_tool_calling" | "preserve";
   jsonOutput: boolean;
   chatPrefixCompletion: boolean;
   supportsAssistantPrefix: boolean;

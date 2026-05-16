@@ -10,7 +10,9 @@ const eventLabels: Record<string, { en: string; zh: string }> = {
   run_completed: { en: "Run completed", zh: "运行完成" },
   prompt_built: { en: "Prompt built", zh: "Prompt 已构建" },
   output_version_created: { en: "Output version", zh: "输出版本" },
-  tool_state_applied: { en: "Tool state applied", zh: "工具状态已应用" }
+  tool_state_applied: { en: "Tool state applied", zh: "工具状态已应用" },
+  deerflow_runtime_failed: { en: "DeerFlow fell back to provider", zh: "DeerFlow 已降级到 Provider" },
+  internal_output_blocked: { en: "Internal output blocked", zh: "内部输出已拦截" }
 };
 
 export function ToolEventDrawer({ events }: ToolEventDrawerProps) {
@@ -25,7 +27,7 @@ export function ToolEventDrawer({ events }: ToolEventDrawerProps) {
         <span className="status-dot" />
         <strong>{locale === "zh" ? "工具与运行时间线" : "Tool event timeline"}</strong>
         <small>{events.length} · {latestLabel}</small>
-        <b aria-hidden="true">{expanded ? "⌃" : "⌄"}</b>
+        <b aria-hidden="true">{expanded ? "^" : "v"}</b>
       </button>
       {expanded ? (
         <div className="tool-event-list">

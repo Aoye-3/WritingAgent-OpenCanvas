@@ -1,7 +1,9 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { SendIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
 import type { CanvasWriteRequest, StoredToolEvent } from "../../agents/types";
+import type { AgentSettings } from "../../agents/types";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
 import { useI18n } from "../../i18n/I18nProvider";
 import { ToolEventDrawer } from "./ToolEventDrawer";
@@ -14,10 +16,13 @@ type AICollaborationDrawerProps = {
   collapsed: boolean;
   messages: CollaborationMessage[];
   isSending: boolean;
+  modelSettings?: AgentSettings["model"];
   toolEvents: StoredToolEvent[];
   onApproveWriteRequest: (requestId: string) => Promise<void>;
   onRejectWriteRequest: (requestId: string) => Promise<void>;
-  onSend: (text: string) => Promise<void>;
+  onRequestWriteMessage: (text: string) => Promise<void>;
+  onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"]) => Promise<void>;
   onToggleCollapsed: () => void;
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
   toolState: GenerateRequest["toolState"];
@@ -36,9 +41,12 @@ export function AICollaborationDrawer({
   collapsed,
   messages,
   isSending,
+  modelSettings,
   toolEvents,
   onApproveWriteRequest,
   onRejectWriteRequest,
+  onRequestWriteMessage,
+  onResizeStart,
   onSend,
   onToggleCollapsed,
   onToolStateChange,
@@ -46,13 +54,24 @@ export function AICollaborationDrawer({
 }: AICollaborationDrawerProps) {
   const { locale } = useI18n();
   const [input, setInput] = useState("");
+  const supportsThinking = modelSettings?.providerId === "deepseek";
+  const [thinkEnabled, setThinkEnabled] = useState(modelSettings?.thinkingMode === "enabled");
+  const [reasoningEffort, setReasoningEffort] = useState<NonNullable<GenerateRequest["modelOverrides"]>["reasoningEffort"]>(modelSettings?.reasoningEffort ?? "high");
+
+  useEffect(() => {
+    setThinkEnabled(modelSettings?.thinkingMode === "enabled");
+    setReasoningEffort(modelSettings?.reasoningEffort ?? "high");
+  }, [modelSettings?.providerId, modelSettings?.thinkingMode, modelSettings?.reasoningEffort]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const text = input.trim();
     if (!text) return;
     setInput("");
-    await onSend(text);
+    await onSend(text, supportsThinking ? {
+      thinkingMode: thinkEnabled ? "enabled" : "disabled",
+      reasoningEffort
+    } : undefined);
   };
 
   if (collapsed) {
@@ -69,6 +88,15 @@ export function AICollaborationDrawer({
 
   return (
     <aside className="ai-drawer" aria-label="AI collaboration drawer">
+      <div
+        aria-label={locale === "zh" ? "调整 AI 协作层宽度" : "Resize AI collaboration drawer"}
+        aria-orientation="vertical"
+        className="ai-drawer-resize-handle"
+        onPointerDown={onResizeStart}
+        role="separator"
+        tabIndex={0}
+        title={locale === "zh" ? "向左拖拽扩大 AI 协作层" : "Drag left to expand AI collaboration"}
+      />
       <div className="ai-drawer-header">
         <div>
           <p className="eyebrow">{locale === "zh" ? "AI 协作层" : "AI Collaboration"}</p>
@@ -90,6 +118,9 @@ export function AICollaborationDrawer({
             <div className="message-avatar" aria-hidden="true">{message.role === "user" ? "U" : "F"}</div>
             <div className="message-bubble">
               {message.role === "assistant" ? <MarkdownText text={message.text} /> : <p>{message.text}</p>}
+              {message.role === "assistant" && message.text.trim() ? (
+                <WriteMessageButton onWrite={() => onRequestWriteMessage(message.text)} />
+              ) : null}
               {message.usedMock ? <span className="message-meta">{locale === "zh" ? "Mock 兜底" : "Mock fallback"}</span> : null}
             </div>
           </article>
@@ -114,6 +145,31 @@ export function AICollaborationDrawer({
         />
         <div className="composer-tool-row">
           <ToolUseIconBar allowedTools={allowedTools} toolState={toolState} onToolStateChange={onToolStateChange} />
+          {supportsThinking ? (
+            <div className="composer-think-controls" aria-label="Think mode">
+              <button
+                aria-pressed={thinkEnabled}
+                className={thinkEnabled ? "tool-icon-button is-active" : "tool-icon-button"}
+                onClick={() => setThinkEnabled((value) => !value)}
+                title={thinkEnabled ? "Think mode on for this message" : "Think mode off for this message"}
+                type="button"
+              >
+                T
+                {thinkEnabled ? <i aria-hidden="true" /> : null}
+              </button>
+              {thinkEnabled ? (
+                <select
+                  aria-label="Reasoning effort"
+                  className="composer-effort-select"
+                  value={reasoningEffort ?? "high"}
+                  onChange={(event) => setReasoningEffort(event.target.value as NonNullable<GenerateRequest["modelOverrides"]>["reasoningEffort"])}
+                >
+                  <option value="high">High</option>
+                  <option value="max">Max</option>
+                </select>
+              ) : null}
+            </div>
+          ) : null}
           <button className="button button-primary chat-send" type="submit" disabled={isSending}>
             <SendIcon />
             {isSending ? (locale === "zh" ? "发送中" : "Sending") : (locale === "zh" ? "发送" : "Send")}
@@ -123,6 +179,26 @@ export function AICollaborationDrawer({
 
       <ToolEventDrawer events={toolEvents} />
     </aside>
+  );
+}
+
+function WriteMessageButton({ onWrite }: { onWrite: () => Promise<void> }) {
+  const { locale } = useI18n();
+  const [busy, setBusy] = useState(false);
+
+  const act = async () => {
+    setBusy(true);
+    try {
+      await onWrite();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button className="button button-secondary button-small message-write-button" type="button" disabled={busy} onClick={() => void act()}>
+      {busy ? (locale === "zh" ? "创建中" : "Creating") : (locale === "zh" ? "写入画板" : "Write to canvas")}
+    </button>
   );
 }
 

@@ -28,6 +28,14 @@ export function registerCanvasRoutes(app: Express, { storage }: CanvasRouteDeps)
     }
   });
 
+  app.post("/api/threads/:threadId/canvas/write-requests", (request, response) => {
+    try {
+      sendOk(response, { request: storage.createCanvasWriteRequest(request.params.threadId, request.body ?? {}) });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to create canvas write request"));
+    }
+  });
+
   app.patch("/api/threads/:threadId/canvas/nodes/:nodeId", (request, response) => {
     try {
       const node = storage.updateCanvasNode(request.params.threadId, request.params.nodeId, request.body ?? {});

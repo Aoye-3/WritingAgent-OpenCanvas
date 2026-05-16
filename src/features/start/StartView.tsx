@@ -35,7 +35,7 @@ export function StartView({ active, onStart, onOpenSettings }: StartViewProps) {
           <p className="subcopy">
             {locale === "zh"
               ? "FacetWrite 将 Prompt 构建、文档画布、上下文和右侧协作聊天组合成一个分层式工作台，为后续接入 Deerflow 风格 Agent 能力打好基础。"
-              : "FacetWrite combines prompt construction, a document canvas, context controls, and a collaboration drawer into a layered workspace ready for Deerflow-inspired agent capabilities."}
+              : "FacetWrite combines prompt construction, a document canvas, structured inputs, and a collaboration drawer into a layered workspace ready for Deerflow-inspired agent capabilities."}
           </p>
           <div className="start-cta-row">
             <button className="button button-primary start-primary" type="button" onClick={onStart}>

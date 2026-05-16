@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
 import { StarIcon } from "../../shared/icons";
 import { Topbar } from "../../shared/Topbar";
@@ -7,8 +8,11 @@ import type { CanvasNodeDraft, CanvasNodePatch } from "../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../generation/types";
 import { useI18n } from "../i18n/I18nProvider";
 import { AICollaborationDrawer } from "./components/AICollaborationDrawer";
-import { ContextBar } from "./components/ContextBar";
+import { WorkspaceUtilityBar } from "./components/WorkspaceUtilityBar";
 import { DocumentCanvas } from "./components/DocumentCanvas";
+
+const RIGHT_DRAWER_MIN_WIDTH = 360;
+const RIGHT_DRAWER_MAX_WIDTH = 720;
 
 type WorkspaceViewProps = {
   activeAgent: AgentCard;
@@ -25,7 +29,7 @@ type WorkspaceViewProps = {
   selectedCanvasNodeId?: string;
   toolEvents: StoredToolEvent[];
   onApproveCanvasWriteRequest: (requestId: string) => Promise<void>;
-  onChatSend: (text: string) => Promise<void>;
+  onChatSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"]) => Promise<void>;
   onCreateCanvasNode: (draft: CanvasNodeDraft) => Promise<void>;
   onDeleteCanvasNode: (nodeId: string) => Promise<void>;
   onEditableOutputChange: (value: string) => void;
@@ -34,6 +38,7 @@ type WorkspaceViewProps = {
   onOpenSettings: () => void;
   onAgentValuesChange: (values: AgentValues) => void;
   onRejectCanvasWriteRequest: (requestId: string) => Promise<void>;
+  onRequestCanvasWriteFromMessage: (text: string) => Promise<void>;
   onRestoreVersion: (version: StoredOutputVersion) => void;
   onSelectCanvasNode: (nodeId?: string) => void;
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
@@ -61,6 +66,7 @@ export function WorkspaceView({
   onOpenSettings,
   onAgentValuesChange,
   onRejectCanvasWriteRequest,
+  onRequestCanvasWriteFromMessage,
   onSelectCanvasNode,
   onToolStateChange,
   onUpdateCanvasNode,
@@ -71,6 +77,7 @@ export function WorkspaceView({
   const { locale, t } = useI18n();
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [rightDrawerWidth, setRightDrawerWidth] = useState(RIGHT_DRAWER_MIN_WIDTH);
 
   const updateValue = (id: string, value: string) => {
     onAgentValuesChange({ ...agentValues, [id]: value });
@@ -81,6 +88,40 @@ export function WorkspaceView({
       ? t("workspace.mockNotice")
       : generation.provider
     : t("workspace.generatedFromPrompt");
+
+  const startRightDrawerResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = rightDrawerWidth;
+    const maxWidth = Math.max(RIGHT_DRAWER_MIN_WIDTH, Math.min(RIGHT_DRAWER_MAX_WIDTH, window.innerWidth - 520));
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+
+    document.body.style.cursor = "ew-resize";
+    document.body.style.userSelect = "none";
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const delta = startX - moveEvent.clientX;
+      const nextWidth = Math.min(maxWidth, Math.max(RIGHT_DRAWER_MIN_WIDTH, startWidth + delta));
+      setRightDrawerWidth(nextWidth);
+    };
+
+    const stopResize = () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+  };
+
+  const workspaceGridStyle = {
+    "--ai-drawer-width": `${rightDrawerWidth}px`
+  } as CSSProperties;
 
   return (
     <section className="view view-workspace" id="workspace-view" aria-label={`${activeAgent.title[locale]} workspace`}>
@@ -99,7 +140,12 @@ export function WorkspaceView({
         }
       />
 
-      <div className="layered-workspace-grid" data-left-collapsed={leftCollapsed} data-right-collapsed={rightCollapsed}>
+      <div
+        className="layered-workspace-grid"
+        data-left-collapsed={leftCollapsed}
+        data-right-collapsed={rightCollapsed}
+        style={workspaceGridStyle}
+      >
         <aside className="input-drawer" aria-label="AgentCard structured input drawer" data-collapsed={leftCollapsed}>
           {leftCollapsed ? (
             <button className="drawer-rail drawer-rail-left" type="button" onClick={() => setLeftCollapsed(false)} aria-label={locale === "zh" ? "展开 AgentCard 输入" : "Expand AgentCard inputs"}>
@@ -173,9 +219,12 @@ export function WorkspaceView({
           collapsed={rightCollapsed}
           isSending={isChatSending}
           messages={collaborationMessages}
+          modelSettings={activeAgent.settings?.model}
           onApproveWriteRequest={onApproveCanvasWriteRequest}
           onRejectWriteRequest={onRejectCanvasWriteRequest}
+          onRequestWriteMessage={onRequestCanvasWriteFromMessage}
           onSend={onChatSend}
+          onResizeStart={startRightDrawerResize}
           onToggleCollapsed={() => setRightCollapsed((value) => !value)}
           onToolStateChange={onToolStateChange}
           toolEvents={toolEvents}
@@ -183,7 +232,7 @@ export function WorkspaceView({
         />
       </div>
 
-      <ContextBar promptPreview={generation?.prompt ?? promptPreview} />
+      <WorkspaceUtilityBar promptPreview={generation?.prompt ?? promptPreview} />
     </section>
   );
 }

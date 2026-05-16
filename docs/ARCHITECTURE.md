@@ -10,7 +10,7 @@ User input
  -> AgentCard + AgentSettings
  -> PromptBuilder + Skills + Tool policy
  -> DeerFlow runtime, when DEERFLOW_ENABLED=true
- -> Provider runtime fallback, when DeerFlow is disabled
+ -> Provider runtime fallback, when DeerFlow is disabled or returns no user-visible answer
  -> Tool runtime, when local tool_calls are returned by the fallback runtime
  -> SQLite run records and Canvas write requests
  -> Thread state refresh in the UI
@@ -25,7 +25,8 @@ User input
 - `src/features/settings/hooks/useProjectSettings.ts` owns provider settings state, validation/save actions, and DeerFlow status loading. `ProjectSettingsPanel` only renders the dialog shell and composes the provider form with the read-only DeerFlow runtime panel.
 - `src/features/agents/hooks/useAgentRuntimeConfig.ts` owns Agent runtime-config loading and settings save. `AgentSettingsView` owns gallery/filter/tab navigation, while tab UI lives in `src/features/agents/components/AgentSettingsTabs.tsx`.
 - `src/features/*` groups product areas: agents, canvas, generation, home, i18n, knowledge, projects, settings, start, tasks, and workspace.
-- `src/features/workspace/WorkspaceView.tsx` renders the main writing workspace: structured Agent inputs, document Canvas, collaboration drawer, tool events, version history, and context/prompt preview surfaces.
+- `src/features/workspace/WorkspaceView.tsx` renders the main writing workspace: structured Agent inputs, document Canvas, collaboration drawer, tool events, version history, and workspace utility surfaces.
+- Runtime context is sourced from the left AgentCard structured input drawer plus current draft/Canvas state. The bottom workspace utility bar is reserved for future tools and prompt preview; it must not inject course-note, audience-profile, or other hidden context.
 - `src/features/ai-dashboard/AiDashboardView.tsx` renders the AI runtime dashboard for DeerFlow status, Skills/MCP visibility, Agent mapping, and ToolUse bridge progress.
 - `src/shared/apiClient.ts` provides shared frontend API helpers used by feature clients.
 
@@ -51,6 +52,18 @@ User input
 - `server/tools/toolPolicyGuard.ts` performs runtime checks before a tool call can execute.
 - `server/toolRuntime.ts` executes local ToolUse behavior and creates Canvas write requests when `canvas_write` is called.
 
+## Agent Output Boundary
+- Runtime streams are never written directly to UI messages. DeerFlow/provider output must pass through the Agent output normalizer before it is recorded as an assistant message or output version.
+- The normalizer separates user-visible assistant text from tool/internal events. System prompts, AgentCard prompt blocks, ToolUse JSON, search result JSON, reasoning payloads, and DeerFlow replay values are blocked from chat/output surfaces and recorded only as redacted runtime events.
+- If DeerFlow returns an empty answer or only internal/runtime output, FacetWrite records a `deerflow_runtime_failed` event and continues with the Provider runtime. Only if the Provider runtime also fails does the run enter Mock fallback.
+- Stored historical messages and output versions are sanitized again at read time so older leaked local records cannot reappear in the workspace UI.
+
+## Provider Adapter Boundary
+- Provider-specific wire fields stay behind `server/providerRuntime.ts` and the provider profile capability model.
+- DeepSeek `reasoning_content` is runtime-only state. It may be preserved across thinking-mode tool-call turns so DeepSeek can continue a valid conversation, but it is never part of FacetWrite's public message, output version, or Canvas schemas.
+- Provider-private fields are stripped for providers that do not explicitly support them, including OpenAI-compatible defaults.
+- Per-run model overrides from the workspace composer are limited to safe runtime controls such as DeepSeek Think mode and reasoning effort. They do not mutate Agent settings.
+
 ## DeerFlow Runtime Boundary
 - DeerFlow is now an integration foundation for Agent runtime work, not only reference source.
 - FacetWrite calls DeerFlow as a Python sidecar over HTTP/SSE when `DEERFLOW_ENABLED=true`.
@@ -61,6 +74,7 @@ User input
 - FacetWrite exposes read-only DeerFlow status and config overview endpoints for UI observability.
 - FacetWrite exposes an AI Dashboard that summarizes DeerFlow runtime health, auth, Skills/MCP, AgentCard-to-subagent mapping, and ToolUse bridge status.
 - FacetWrite remains responsible for product data, SQLite persistence, frontend state, Canvas approval, and local fallback behavior.
+- DeerFlow runtime failures that are recoverable by the Provider runtime are visible in the Tool event timeline as `deerflow_runtime_failed` with a safe fallback summary.
 - Current validation status: sidecar health, backend auth, config overview, and one Task-card generation are online against the Docker sidecar.
 
 ## Storage

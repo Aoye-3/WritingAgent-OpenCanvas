@@ -112,7 +112,7 @@ export function HomeView({ activeView, agentCards, recentThreads, onOpenSettings
                 onChange={(event) => setHomePrompt(event.target.value)}
               />
               <div className="home-prompt-actions">
-                <button className="icon-button prompt-tool" type="button" aria-label="Add context">+</button>
+                <button className="icon-button prompt-tool" type="button" aria-label="Add input">+</button>
                 <button className="home-agent-chip" type="button">
                   <SearchIcon />
                   <span>{locale === "zh" ? "知识库" : "Knowledge"}</span>

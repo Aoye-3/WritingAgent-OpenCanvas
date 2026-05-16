@@ -92,25 +92,37 @@ function AppContent() {
   });
 
   const selectedCanvasNode = canvasState.canvasNodes.find((node) => node.id === canvasState.selectedCanvasNodeId);
-  const getContextValues = () => ({
-    writingStyle: locale === "zh" ? "清晰、友好、适合学生" : "Friendly, clear, and suitable for students",
-    knowledgeSource: locale === "zh" ? "课程笔记：气候与环境" : "Course Notes: Climate and Environment",
-    currentDraft: generationRun.editableOutput,
-    canvas: {
-      nodes: canvasState.canvasNodes.map((node) => ({
-        id: node.id,
-        kind: node.kind,
-        title: node.title,
-        preview: node.content.slice(0, 600)
-      })),
-      selectedNode: selectedCanvasNode ? {
-        id: selectedCanvasNode.id,
-        kind: selectedCanvasNode.kind,
-        title: selectedCanvasNode.title,
-        content: selectedCanvasNode.content
-      } : null
+  const getContextValues = () => {
+    const structuredInputs = Object.fromEntries(
+      activeAgent.fields
+        .map((field) => [field.id, agentValues[field.id]] as const)
+        .filter(([, value]) => typeof value === "string" ? value.trim().length > 0 : Boolean(value))
+    );
+    const values: Record<string, unknown> = {};
+    if (Object.keys(structuredInputs).length > 0) {
+      values.structuredInputs = structuredInputs;
     }
-  });
+    if (generationRun.editableOutput.trim()) {
+      values.currentDraft = generationRun.editableOutput;
+    }
+    if (canvasState.canvasNodes.length > 0 || selectedCanvasNode) {
+      values.canvas = {
+        nodes: canvasState.canvasNodes.map((node) => ({
+          id: node.id,
+          kind: node.kind,
+          title: node.title,
+          preview: node.content.slice(0, 600)
+        })),
+        selectedNode: selectedCanvasNode ? {
+          id: selectedCanvasNode.id,
+          kind: selectedCanvasNode.kind,
+          title: selectedCanvasNode.title,
+          content: selectedCanvasNode.content
+        } : null
+      };
+    }
+    return values;
+  };
 
   const refreshThreadState = async (threadId: string) => {
     const state = await fetchThreadState(threadId);
@@ -162,8 +174,8 @@ function AppContent() {
 
     if (pairs.length === 0 && tools.length === 0) {
       return locale === "zh"
-        ? "填写左侧结构化输入，或在底部 Command Bar 切换工具后，这里会显示组装后的 Agent Prompt。"
-        : "Fill the left structured inputs or toggle tools in the Command Bar to preview the assembled Agent prompt.";
+        ? "填写左侧结构化输入后，这里会显示组装后的 Agent Prompt。底部栏仅作为后续功能区。"
+        : "Fill the left structured inputs to preview the assembled Agent prompt. The bottom bar is reserved for future tools.";
     }
 
     return [
@@ -253,6 +265,13 @@ function AppContent() {
         onGoHome={() => setView("home")}
         onOpenSettings={() => setSettingsOpen(true)}
         onRejectCanvasWriteRequest={canvasState.handleRejectCanvasWriteRequest}
+        onRequestCanvasWriteFromMessage={(text) => canvasState.handleCreateCanvasWriteRequest({
+          operation: "create",
+          nodeKind: "document",
+          title: activeAgent.title[locale],
+          content: text,
+          rationale: locale === "zh" ? "用户从 AI 回复点击写入画板。" : "Requested by the user from an AI reply."
+        })}
         onRestoreVersion={generationRun.restoreVersion}
         onSelectCanvasNode={canvasState.setSelectedCanvasNodeId}
         onToolStateChange={setToolState}

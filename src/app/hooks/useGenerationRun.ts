@@ -80,8 +80,17 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     }
   };
 
-  const handleChatSend = async (text: string) => {
+  const handleChatSend = async (text: string, modelOverrides?: GenerateRequest["modelOverrides"]) => {
     setIsChatSending(true);
+    setCollaborationMessages((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        text,
+        usedMock: false
+      }
+    ]);
     try {
       const threadId = await options.ensureThreadId();
       const payload: GenerateRequest = {
@@ -93,6 +102,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         contextValues: options.getContextValues(),
         chatInstruction: text,
         toolState: { ...options.toolState, quick_messages: true, canvas_write: true },
+        modelOverrides,
         selectedCanvasNodeId: options.selectedCanvasNodeId
       };
       const result = options.activeAgent.settings?.model.streaming
@@ -106,6 +116,17 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       const state = await options.onFetchAndApplyThreadState(result.threadId);
       options.onApplyThreadState(state);
       await options.onRefreshProjectSurfaces();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Generation failed";
+      setCollaborationMessages((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          text: `Request failed: ${message}`,
+          usedMock: false
+        }
+      ]);
     } finally {
       setIsChatSending(false);
     }

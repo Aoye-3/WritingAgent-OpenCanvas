@@ -18,6 +18,7 @@ export type ChatMessage = {
   content: string | null;
   name?: string;
   prefix?: boolean;
+  reasoning_content?: string;
   tool_call_id?: string;
   tool_calls?: ChatToolCall[];
 };
@@ -65,6 +66,7 @@ export type ProviderCapabilities = {
   streaming: boolean;
   toolCalls: boolean;
   thinking: boolean;
+  reasoningContentPolicy: "strip" | "preserve_when_tool_calling" | "preserve";
   jsonOutput: boolean;
   chatPrefixCompletion: boolean;
   supportsAssistantPrefix: boolean;
@@ -102,6 +104,7 @@ export const providerProfiles: Record<ProviderId, ProviderProfile> = {
       streaming: true,
       toolCalls: true,
       thinking: true,
+      reasoningContentPolicy: "preserve_when_tool_calling",
       jsonOutput: true,
       chatPrefixCompletion: true,
       supportsAssistantPrefix: true,
@@ -118,6 +121,7 @@ export const providerProfiles: Record<ProviderId, ProviderProfile> = {
       streaming: true,
       toolCalls: true,
       thinking: false,
+      reasoningContentPolicy: "strip",
       jsonOutput: true,
       chatPrefixCompletion: false,
       supportsAssistantPrefix: false
@@ -133,6 +137,7 @@ export const providerProfiles: Record<ProviderId, ProviderProfile> = {
       streaming: true,
       toolCalls: true,
       thinking: false,
+      reasoningContentPolicy: "strip",
       jsonOutput: true,
       chatPrefixCompletion: false,
       supportsAssistantPrefix: false
@@ -163,7 +168,7 @@ export function normalizeChatRequest(profile: ProviderProfile, input: NormalizeI
 
   const request: ChatCompletionRequest = {
     model,
-    messages: normalizeMessagesForResponseMode(profile, input.messages, responseMode),
+    messages: normalizeMessagesForResponseMode(profile, input.messages.map((message) => normalizeChatMessage(message, profile)), responseMode),
     temperature: input.modelSettings.temperature,
     top_p: input.modelSettings.topP,
     stream: input.stream && profile.capabilities.streaming
@@ -191,10 +196,35 @@ export function normalizeChatRequest(profile: ProviderProfile, input: NormalizeI
           reasoning_effort: normalizeReasoningEffort(input.modelSettings.reasoningEffort)
         }
       : undefined;
-    request.thinking = explicitThinking ?? alias?.thinking;
+    const configuredThinking = explicitThinking ?? alias?.thinking;
+    request.thinking = tools.length > 0 ? configuredThinking ?? { type: "disabled" } : configuredThinking;
   }
 
   return request;
+}
+
+function normalizeChatMessage(message: ChatMessage, profile: ProviderProfile): ChatMessage {
+  const normalized: ChatMessage = {
+    role: message.role,
+    content: message.content ?? null
+  };
+
+  if (message.name) normalized.name = message.name;
+  if (shouldPreserveReasoningContent(message, profile)) normalized.reasoning_content = message.reasoning_content;
+  if (message.tool_call_id) normalized.tool_call_id = message.tool_call_id;
+  if (message.tool_calls) normalized.tool_calls = message.tool_calls;
+  if (message.prefix) normalized.prefix = message.prefix;
+
+  return normalized;
+}
+
+function shouldPreserveReasoningContent(message: ChatMessage, profile: ProviderProfile) {
+  if (message.role !== "assistant" || !message.reasoning_content) return false;
+  if (profile.capabilities.reasoningContentPolicy === "preserve") return true;
+  if (profile.capabilities.reasoningContentPolicy === "preserve_when_tool_calling") {
+    return Boolean(message.tool_calls?.length);
+  }
+  return false;
 }
 
 export function normalizeToolChoice(mode: AgentSettings["model"]["toolCallMode"], profile?: ProviderProfile): "none" | "auto" | "required" {

@@ -8,6 +8,7 @@ import { cleanText, defaultCanvasTitle, nowIso, parseJson, randomId, readFiniteN
 import { ThreadRepository } from "./repositories/threadRepository.js";
 import type { Provider } from "./types.js";
 import type { ToolEventRecord } from "./toolRuntime.js";
+import { sanitizeVisibleText } from "./services/generation/outputNormalizer.js";
 
 export type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
@@ -223,7 +224,11 @@ export class SQLiteStorageRepository {
       .prepare(`SELECT id, thread_id as threadId, role, text, used_mock as usedMock, created_at as createdAt FROM messages WHERE thread_id = ? ORDER BY created_at ASC`)
       .all(threadId) as StoredMessageRow[];
 
-    return rows.map((row) => ({ ...row, usedMock: Boolean(row.usedMock) }));
+    return rows.map((row) => ({
+      ...row,
+      text: row.role === "assistant" ? sanitizeVisibleText(row.text) : row.text,
+      usedMock: Boolean(row.usedMock)
+    }));
   }
 
   getThread(threadId: string) {
@@ -291,6 +296,7 @@ export class SQLiteStorageRepository {
 
     return rows.map((row) => ({
       ...row,
+      content: sanitizeVisibleText(row.content),
       x: Number(row.x),
       y: Number(row.y),
       width: Number(row.width),
@@ -426,7 +432,11 @@ export class SQLiteStorageRepository {
       )
       .all(...params) as CanvasWriteRequestRow[];
 
-    return rows.map((row) => ({ ...row, targetNodeId: row.targetNodeId ?? undefined }));
+    return rows.map((row) => ({
+      ...row,
+      content: sanitizeVisibleText(row.content),
+      targetNodeId: row.targetNodeId ?? undefined
+    }));
   }
 
   approveCanvasWriteRequest(threadId: string, requestId: string) {
@@ -499,7 +509,11 @@ export class SQLiteStorageRepository {
       )
       .all(threadId) as StoredOutputVersionRow[];
 
-    return rows.map((row) => ({ ...row, usedMock: Boolean(row.usedMock) }));
+    return rows.map((row) => ({
+      ...row,
+      content: sanitizeVisibleText(row.content),
+      usedMock: Boolean(row.usedMock)
+    }));
   }
 
   listToolEvents(threadId: string) {

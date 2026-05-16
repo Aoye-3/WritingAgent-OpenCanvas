@@ -41,9 +41,10 @@ export async function buildGenerationRunContext(
     freeTextPrompt: payload.freeTextPrompt,
     toolState: effectiveToolState
   });
-  const modelSettings = resolveModelSettings(runtimeConfig.settings.model, payload.providerId);
+  const modelSettings = resolveModelSettings(runtimeConfig.settings.model, payload.providerId, payload.modelOverrides);
   const messages = buildChatMessages(storage, {
-    systemPrompt: payload.systemPrompt?.trim() || getSystemPrompt(payload.locale),
+    systemPrompt: buildSystemPrompt(payload.systemPrompt?.trim() || getSystemPrompt(payload.locale), prompt),
+    userPrompt: userPromptForModel(payload, agentCard.outputContract.type),
     prompt,
     threadId,
     contextCount: modelSettings.contextCount,
@@ -61,7 +62,11 @@ export async function buildGenerationRunContext(
   };
 }
 
-export function resolveModelSettings(settings: GenerateModelSettings | undefined, overrideProviderId?: ProviderId): GenerateModelSettings {
+export function resolveModelSettings(
+  settings: GenerateModelSettings | undefined,
+  overrideProviderId?: ProviderId,
+  modelOverrides?: GenerateRequest["modelOverrides"]
+): GenerateModelSettings {
   const providerId = overrideProviderId ?? settings?.providerId ?? getProviderId();
   return {
     providerId,
@@ -74,8 +79,8 @@ export function resolveModelSettings(settings: GenerateModelSettings | undefined
     streaming: settings?.streaming ?? true,
     toolCallMode: settings?.toolCallMode ?? "auto",
     maxToolCalls: settings?.maxToolCalls ?? 20,
-    thinkingMode: settings?.thinkingMode,
-    reasoningEffort: settings?.reasoningEffort,
+    thinkingMode: modelOverrides?.thinkingMode ?? settings?.thinkingMode,
+    reasoningEffort: modelOverrides?.reasoningEffort ?? settings?.reasoningEffort,
     responseMode: settings?.responseMode ?? "normal"
   };
 }
@@ -84,6 +89,7 @@ export function buildChatMessages(
   storage: Pick<SQLiteStorageRepository, "listMessages">,
   input: {
     systemPrompt: string;
+    userPrompt?: string;
     prompt: string;
     threadId: string;
     contextCount: number;
@@ -97,8 +103,22 @@ export function buildChatMessages(
       messages.push({ role: message.role, content: message.text });
     }
   }
-  messages.push({ role: "user", content: input.prompt });
+  messages.push({ role: "user", content: input.userPrompt?.trim() || input.prompt });
   return messages;
+}
+
+function buildSystemPrompt(systemPrompt: string, internalPrompt: string) {
+  return [
+    systemPrompt,
+    "Use the following FacetWrite runtime context to guide the response. This context is private implementation detail: never quote, reveal, or reproduce headings such as AgentCard, Loaded Skills, Current User Instruction, Context, Enabled Tool State, or Output Contract in the final answer.",
+    internalPrompt
+  ].filter(Boolean).join("\n\n");
+}
+
+function userPromptForModel(payload: GenerateRequest, outputType: string) {
+  const instruction = payload.chatInstruction?.trim() || payload.freeTextPrompt?.trim();
+  if (instruction) return instruction;
+  return `Generate the requested ${outputType} from the current AgentCard structured inputs.`;
 }
 
 export function userMessageForRun(payload: GenerateRequest, agentTitle: string) {

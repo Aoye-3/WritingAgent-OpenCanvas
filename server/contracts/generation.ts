@@ -17,6 +17,10 @@ export type GenerateRequest = {
   toolState?: ToolState;
   systemPrompt?: string;
   providerId?: ProviderId;
+  modelOverrides?: {
+    thinkingMode?: "enabled" | "disabled";
+    reasoningEffort?: "high" | "max" | "low" | "medium" | "xhigh";
+  };
   selectedCanvasNodeId?: string;
 };
 
@@ -62,6 +66,7 @@ export function parseGenerateRequest(value: unknown): GenerateRequest {
     toolState: readBooleanRecord(body.toolState),
     systemPrompt: readString(body.systemPrompt),
     providerId: readProviderId(body.providerId),
+    modelOverrides: readModelOverrides(body.modelOverrides),
     selectedCanvasNodeId: readString(body.selectedCanvasNodeId)
   };
 }
@@ -95,4 +100,14 @@ function readBooleanRecord(value: unknown) {
   return Object.fromEntries(
     Object.entries(record).filter(([, entry]) => typeof entry === "boolean")
   ) as ToolState;
+}
+
+function readModelOverrides(value: unknown): GenerateRequest["modelOverrides"] {
+  const record = readUnknownRecord(value);
+  if (!record) return undefined;
+  const thinkingMode = record.thinkingMode === "enabled" || record.thinkingMode === "disabled" ? record.thinkingMode : undefined;
+  const effort = record.reasoningEffort;
+  const reasoningEffort = effort === "high" || effort === "max" || effort === "low" || effort === "medium" || effort === "xhigh" ? effort : undefined;
+  if (!thinkingMode && !reasoningEffort) return undefined;
+  return { thinkingMode, reasoningEffort };
 }

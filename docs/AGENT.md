@@ -43,6 +43,22 @@ Agent settings are the user-controlled configuration surface for concrete Agents
 
 Runtime config includes the resolved card/settings, available tools, tool policies, available skills, and missing/deprecated references.
 
+## Runtime Context Boundary
+Agent runtime context comes from the left AgentCard structured input drawer and current workspace state such as the draft and selected Canvas node. The bottom workspace utility bar is not a context source and must not inject historical placeholder values such as course notes, audience profiles, or default writing style.
+
+Internal AgentCard, Skill, Tool policy, enabled tool state, and output contract text are private runtime context. They may be sent to the model as internal instructions, but assistant messages, stored chat messages, mock fallback text, and DeerFlow stream output must not expose or reproduce prompt headings such as `# AgentCard`, `# Current User Instruction`, or `# Output Contract`.
+
+## Output Classification
+DeerFlow and provider responses are classified before recording:
+
+- `assistant_text`: final user-visible answer only.
+- `tool_event`: ToolUse requests/results, DeerFlow task events, and Canvas write request events.
+- `internal_event`: blocked system prompts, AgentCard prompt blocks, reasoning payloads, replayed values, and raw tool/search JSON.
+
+Only `assistant_text` may enter `messages` and `output_versions`. `tool_event` and `internal_event` are exposed through the runtime timeline with redacted payload previews.
+
+Recoverable DeerFlow failures are also runtime events. If DeerFlow returns no user-visible text or returns content that the output boundary classifies as internal/runtime-only, FacetWrite records `deerflow_runtime_failed` and immediately continues with the Provider runtime. The chat message is recorded from the Provider result, while the timeline shows that DeerFlow was bypassed for that run.
+
 ## DeerFlow Main Agent And Subagents
 DeerFlow is the primary Agent runtime integration foundation when `DEERFLOW_ENABLED=true`.
 
@@ -52,7 +68,7 @@ DeerFlow is the primary Agent runtime integration foundation when `DEERFLOW_ENAB
 - The mapping lives in `server/deerflow/taskAgentMapping.ts`.
 - Subagent metadata includes name, description, system prompt, skills, tools, model inheritance, timeout, and max turns.
 - FacetWrite records DeerFlow runs as provider `deerflow`.
-- The current TypeScript run loop remains available when DeerFlow is disabled or unavailable.
+- The current TypeScript run loop remains available when DeerFlow is disabled, unavailable, or returns no valid user-visible answer.
 - Runtime status is exposed through `/api/deerflow/status`.
 - DeerFlow skills and MCP server overview are read through `/api/deerflow/config`; MCP environment and secret-like values are redacted before reaching the frontend.
 - AI runtime status, Agent mapping, and ToolUse bridge progress are exposed through `/api/deerflow/dashboard` and shown in the AI Dashboard.
@@ -108,9 +124,15 @@ Tool events are recorded as `tool_call_requested`, `tool_call_completed`, `tool_
 
 When DeerFlow is enabled, `server/deerflow/client.ts` calls `/api/runs/stream` through the backend DeerFlow auth session, maps token/message stream output into the FacetWrite response, and maps DeerFlow custom task events into `deerflow_*` tool events for the run history.
 
-The TypeScript run loop remains the fallback when DeerFlow is disabled or unavailable.
+The TypeScript run loop remains the fallback when DeerFlow is disabled, unavailable, returns an empty answer, or returns only internal/runtime output. A recoverable DeerFlow failure should not create a Mock fallback response by itself; Mock fallback is reserved for cases where both DeerFlow and the Provider runtime cannot produce a safe assistant answer.
 
 `server/services/generationService.ts` is now a compatibility export. The implementation is split under `server/services/generation/`: prompt/message/model preparation, DeerFlow runner, provider runner, mock fallback, and run recording are separate modules while preserving the existing `/api/generate` contract.
 
 ## Provider Boundary
 Provider-specific request normalization belongs in `server/providerRuntime.ts`. UI and product code should use provider IDs and capabilities rather than inferring provider behavior from base URLs or model strings.
+
+Provider-private fields are allowed only inside the runtime request chain. DeepSeek thinking mode may return `reasoning_content`; when an assistant message also contains `tool_calls`, that field must be preserved for later DeepSeek API calls, but it must never be recorded as visible assistant text, output version content, Canvas content, or mock fallback text. Other providers strip DeepSeek-only fields according to their provider profile.
+
+The workspace chat composer may send per-run model overrides for DeepSeek Think mode and reasoning effort. These overrides affect only the current request; saved Agent settings remain the default configuration source.
+
+DeepSeek prefix completion remains a separate response mode: only the final assistant message may carry `prefix: true`, and only DeepSeek uses the beta base URL for that mode. Canvas writes continue to use tool calls plus FacetWrite approval, not prefix completion.

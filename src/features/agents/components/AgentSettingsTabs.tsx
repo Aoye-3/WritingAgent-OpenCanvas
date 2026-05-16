@@ -51,6 +51,28 @@ function AgentModelTab({ runtimeConfig, settings, onChange }: TabProps) {
           </select>
         </label>
       ) : null}
+      {providerCapabilities?.thinking ? (
+        <>
+          <label className="toggle-row">
+            <span>{text(locale, "thinkMode")}</span>
+            <input
+              type="checkbox"
+              checked={settings.model.thinkingMode === "enabled"}
+              onChange={(event) => setModel({ thinkingMode: event.target.checked ? "enabled" : "disabled" })}
+            />
+          </label>
+          {settings.model.thinkingMode === "enabled" ? (
+            <label className="field">
+              <span>{text(locale, "reasoningEffort")}</span>
+              <select value={settings.model.reasoningEffort ?? "high"} onChange={(event) => setModel({ reasoningEffort: event.target.value as AgentSettings["model"]["reasoningEffort"] })}>
+                <option value="high">High</option>
+                <option value="max">Max</option>
+              </select>
+              <small>{text(locale, "thinkModeNote")}</small>
+            </label>
+          ) : null}
+        </>
+      ) : null}
       <RangeField label="Temperature" min={0} max={2} step={0.1} value={settings.model.temperature} onChange={(value) => setModel({ temperature: value })} />
       <RangeField label="Top-P" min={0} max={1} step={0.05} value={settings.model.topP} onChange={(value) => setModel({ topP: value })} />
       <RangeField label={text(locale, "contextCount")} min={0} max={100} step={1} value={settings.model.contextCount} onChange={(value) => setModel({ contextCount: value })} />
@@ -300,8 +322,11 @@ const copy = {
     skills: "Skills",
     streaming: "Streaming",
     tokenLimit: "Token limit",
+    thinkMode: "Think mode",
+    thinkModeNote: "Can be combined with tool calls on DeepSeek. The runtime preserves provider-private reasoning state without showing it in chat.",
     toolCallMode: "Tool call mode",
-    unknownSkills: "Unknown skill refs"
+    unknownSkills: "Unknown skill refs",
+    reasoningEffort: "Reasoning effort"
   },
   zh: {
     addPhrase: "添加短语",
@@ -331,7 +356,10 @@ const copy = {
     skills: "技能",
     streaming: "流式输出",
     tokenLimit: "Token 上限",
+    thinkMode: "Think 模式",
+    thinkModeNote: "包含工具调用时会自动关闭，以避免 reasoning 与工具参数混线。",
     toolCallMode: "工具调用方式",
-    unknownSkills: "未知技能引用"
+    unknownSkills: "未知技能引用",
+    reasoningEffort: "推理强度"
   }
 } as const;
