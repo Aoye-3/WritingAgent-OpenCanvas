@@ -68,9 +68,9 @@ Temporary assistant-message annotations are not persisted. Annotated snippets an
 
 Direct user write intent does not add a new table or bypass the request table. The frontend can auto-approve only newly created pending requests from the same generation run, so `canvas_write_requests` remains the audit/safety buffer even when the UI feels like a direct write.
 
-Canvas document nodes store the same content and size fields. The current UI expands document-node height to fit full content instead of rendering an internal scroll region; this is a presentation rule, not a schema change.
+Canvas V2 stores node geometry in the existing `x`, `y`, `width`, and `height` fields. Dragging updates position; resizing updates dimensions and may also update position when resizing from north or west handles. These are presentation/editor interactions and do not require a schema migration.
 
-Canvas pan/drag hit testing is also presentation-only. The visual grid and future decorative overlays should not introduce persistence changes or new node state; they must remain separate from `canvas_nodes` and avoid intercepting viewport pointer events unless they represent an explicit interactive tool.
+Canvas pan, drag, resize, and hit testing are presentation-only. React Flow viewport state, selected node state, visual grid, resize handles, and future decorative overlays should not introduce persistence changes or new node state; they must remain separate from `canvas_nodes` unless they represent an explicit saved user artifact.
 
 ## Thread And Project Title Semantics
 The current project list is backed by `threads`; there is no separate project table-level rename. Renaming a project updates `threads.title` and `updated_at` for active, non-trashed threads only.

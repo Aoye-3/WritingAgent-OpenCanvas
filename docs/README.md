@@ -5,6 +5,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 ## Core Documents
 - `PROJECT_BRIEF.md`: product goal, current capabilities, MVP boundaries, and non-goals.
 - `ARCHITECTURE.md`: frontend, backend, Agent runtime, DeerFlow sidecar, storage, and boundary rules.
+- `CANVAS.md`: Canvas V2 frontend architecture, React Flow mapping, node geometry, resize behavior, and write-safety boundary.
 - `AGENT.md`: AgentCard, Agent settings, DeerFlow runtime mapping, Tool catalog, and ToolUse safety.
 - `API.md`: HTTP API contracts, runtime environment variables, and response shape.
 - `DEERFLOW_RUNTIME_RUNBOOK.md`: Docker Desktop/local and Linux Docker Compose runtime acceptance, dependencies, ports, env, smoke checks, and troubleshooting.
@@ -15,6 +16,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 
 ## Update Rules
 - Code structure changes update `ARCHITECTURE.md`.
+- Canvas interaction, geometry, node renderer, or write-safety changes update `CANVAS.md`.
 - API changes update `API.md`.
 - Database or storage changes update `DATABASE.md`.
 - Agent, ToolUse, Skill, MCP, or DeerFlow runtime changes update `AGENT.md`.

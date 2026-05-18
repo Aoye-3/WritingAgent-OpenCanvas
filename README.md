@@ -69,6 +69,7 @@ Client: `http://127.0.0.1:5173`
 
 - [Project Brief](docs/PROJECT_BRIEF.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Canvas](docs/CANVAS.md)
 - [API](docs/API.md)
 - [Database](docs/DATABASE.md)
 - [Agent And Tools](docs/AGENT.md)
