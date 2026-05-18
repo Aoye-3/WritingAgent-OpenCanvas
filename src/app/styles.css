@@ -1352,43 +1352,50 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   position: relative;
   min-height: 0;
   overflow: hidden;
-  cursor: grab;
   background-color: #f7f9fd;
-  background-image:
-    linear-gradient(rgba(43, 111, 247, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(43, 111, 247, 0.08) 1px, transparent 1px);
-  background-size: 28px 28px;
 }
 
-.canvas-viewport:active {
+.canvas-flow {
+  width: 100%;
+  height: 100%;
+  color: var(--color-text);
+}
+
+.canvas-flow .react-flow__pane {
+  cursor: grab;
+}
+
+.canvas-flow .react-flow__pane:active {
   cursor: grabbing;
 }
 
-.canvas-grid {
-  position: absolute;
-  inset: 0;
-  width: 2400px;
-  height: 1600px;
-  transform-origin: 0 0;
-  pointer-events: none;
+.canvas-flow .react-flow__node {
+  border-radius: var(--radius-md);
+  overflow: visible;
+}
+
+.canvas-flow .react-flow__node.selected {
+  box-shadow: none;
 }
 
 .canvas-node {
-  position: absolute;
-  pointer-events: auto;
+  position: relative;
+  width: 100%;
+  height: 100%;
   display: grid;
-  grid-template-rows: auto auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 8px;
   padding: 10px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: #ffffff;
   box-shadow: 0 14px 34px rgba(15, 23, 42, 0.10);
+  overflow: visible;
 }
 
 .canvas-node.is-selected {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(43, 111, 247, 0.14), 0 18px 40px rgba(15, 23, 42, 0.12);
+  border-color: var(--color-border);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
 }
 
 .canvas-node-note {
@@ -1397,6 +1404,10 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 
 .canvas-node-reference {
   background: #f0fdf4;
+}
+
+.canvas-node-unknown {
+  background: #f8fafc;
 }
 
 .canvas-node-header {
@@ -1420,6 +1431,7 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 
 .canvas-node-title {
   width: 100%;
+  min-width: 0;
   border: 0;
   border-bottom: 1px solid var(--color-border);
   outline: 0;
@@ -1432,16 +1444,162 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 
 .canvas-node-content {
   width: 100%;
-  min-height: 120px;
+  height: 100%;
+  min-height: 0;
   border: 0;
   outline: 0;
   resize: none;
-  overflow: hidden;
+  overflow: auto;
   background: transparent;
   color: #2b3447;
   font-size: 13px;
   line-height: 1.55;
 }
+
+.canvas-node-fallback {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.canvas-node-resize-frame {
+  position: absolute;
+  inset: -8px;
+  z-index: 3;
+  pointer-events: none;
+  border: 1.5px solid var(--color-primary);
+  border-radius: calc(var(--radius-md) + 8px);
+}
+
+.canvas-node-resize-line,
+.canvas-node-resize-handle {
+  pointer-events: auto;
+}
+
+.canvas-node-resize-line {
+  position: absolute;
+  background: var(--color-primary);
+}
+
+.canvas-node-resize-line-n,
+.canvas-node-resize-line-s {
+  left: 8px;
+  right: 8px;
+  height: 1px;
+}
+
+.canvas-node-resize-line-n { top: 0; }
+.canvas-node-resize-line-s { bottom: 0; }
+
+.canvas-node-resize-line-e,
+.canvas-node-resize-line-w {
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+}
+
+.canvas-node-resize-line-e { right: 0; }
+.canvas-node-resize-line-w { left: 0; }
+
+.canvas-node-resize-handle {
+  position: absolute;
+  z-index: 4;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  touch-action: none;
+}
+
+.canvas-node-resize-handle::after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--color-primary);
+  border-radius: 2px;
+  background: var(--color-surface);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.16);
+}
+
+.canvas-node-resize-nw,
+.canvas-node-resize-ne,
+.canvas-node-resize-sw,
+.canvas-node-resize-se {
+  width: 28px;
+  height: 28px;
+}
+
+.canvas-node-resize-n,
+.canvas-node-resize-s {
+  width: 72px;
+  height: 24px;
+}
+
+.canvas-node-resize-w,
+.canvas-node-resize-e {
+  width: 24px;
+  height: 72px;
+}
+
+.canvas-node-resize-nw,
+.canvas-node-resize-n,
+.canvas-node-resize-ne {
+  top: 0;
+}
+
+.canvas-node-resize-sw,
+.canvas-node-resize-s,
+.canvas-node-resize-se {
+  bottom: 0;
+}
+
+.canvas-node-resize-nw,
+.canvas-node-resize-w,
+.canvas-node-resize-sw {
+  left: 0;
+}
+
+.canvas-node-resize-ne,
+.canvas-node-resize-e,
+.canvas-node-resize-se {
+  right: 0;
+}
+
+.canvas-node-resize-n,
+.canvas-node-resize-s {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.canvas-node-resize-w,
+.canvas-node-resize-e {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.canvas-node-resize-nw::after { left: 2px; top: 2px; }
+.canvas-node-resize-ne::after { right: 2px; top: 2px; }
+.canvas-node-resize-sw::after { left: 2px; bottom: 2px; }
+.canvas-node-resize-se::after { right: 2px; bottom: 2px; }
+.canvas-node-resize-n::after,
+.canvas-node-resize-s::after,
+.canvas-node-resize-w::after,
+.canvas-node-resize-e::after {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.canvas-node-resize-nw,
+.canvas-node-resize-se { cursor: nwse-resize; }
+.canvas-node-resize-ne,
+.canvas-node-resize-sw { cursor: nesw-resize; }
+.canvas-node-resize-n,
+.canvas-node-resize-s { cursor: ns-resize; }
+.canvas-node-resize-e,
+.canvas-node-resize-w { cursor: ew-resize; }
 
 .canvas-empty {
   position: absolute;

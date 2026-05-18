@@ -1,5 +1,26 @@
 # FacetWrite Technical Decisions
 
+## 2026-05-18: Canvas V2 Uses React Flow With FacetWrite-Owned Persistence
+Decision: Use `@xyflow/react` as the Canvas V2 viewport and node interaction engine while keeping FacetWrite's Canvas API, SQLite tables, and write-request approval boundary as the source of truth.
+
+Reason: Node editors need reliable pan, zoom, selection, dragging, and future extensibility. React Flow provides that interaction layer without requiring backend schema changes.
+
+Impact: `DocumentCanvas.tsx` maps persisted `CanvasNode` records into React Flow nodes. Dragging and resizing persist through `PATCH /api/threads/:threadId/canvas/nodes/:nodeId`. Current node kinds remain `document`, `note`, and `reference`; future node types should extend the kind renderer and backend validation deliberately. AI-originated writes still go through `canvas_write_requests` and approval.
+
+## 2026-05-18: Canvas Resize Handles Stay Inside Node Hit Areas
+Decision: Use a custom eight-point resize frame rendered just outside the selected node boundary instead of relying on React Flow's default handles.
+
+Reason: Users need a clear separation between the content box and the selection controls. The outer frame makes resize affordances visually obvious, while enlarged transparent hit targets, `nodrag nopan`, and capture-phase pointer handling keep Figma-like resize reliable.
+
+Impact: Resize handles use enlarged transparent hit targets so users do not need pixel-perfect pointer placement. Resize changes update React Flow `style`, `width`, and `height` during pointer drag and persist `x/y/width/height` once on pointer release. While a resize gesture is active, Canvas V2 disables React Flow node/pane dragging and filters position changes for that node so resize cannot also translate the node. Future selection boxes, alignment guides, or resize affordances must preserve handle hit testing, drag locking, and live visual updates.
+
+## 2026-05-18: Canvas Text Nodes Auto-Expand Until Manually Resized
+Decision: Treat text Canvas nodes as full information blocks by default. The frontend measures persisted text content and grows node height automatically until the user manually resizes the node.
+
+Reason: Canvas content is expected to arrive as complete material, not as a truncated preview card. Users should be able to read the full generated or approved content first, then adjust the frame like a design canvas object.
+
+Impact: Auto-expansion is a frontend layout behavior and does not alter the Canvas schema. Manual resize writes `metadata.canvasLayout.sizeMode = "manual"` so future auto-height updates do not override the user's chosen dimensions.
+
 ## 2026-05-16: Canvas Visual Layers Must Not Block Background Drag
 Decision: Keep Canvas decorative and layout layers out of pointer hit testing unless they are intentionally interactive.
 

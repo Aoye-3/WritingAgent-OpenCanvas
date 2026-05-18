@@ -142,11 +142,11 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `GET /api/threads/:threadId/canvas`
   - Returns `{ nodes, writeRequests }` for an active thread.
 - `POST /api/threads/:threadId/canvas/nodes`
-  - Creates a Canvas node.
+  - Creates a Canvas node. Body accepts the existing node draft fields: `kind`, `title`, `content`, `x`, `y`, `width`, `height`, and `metadata`.
 - `POST /api/threads/:threadId/canvas/write-requests`
   - Creates a pending Canvas write request from explicit user action, annotated assistant snippets, or Agent runtime intent. The request is not applied until approved.
 - `PATCH /api/threads/:threadId/canvas/nodes/:nodeId`
-  - Updates a Canvas node.
+  - Updates a Canvas node. Canvas V2 uses this for user-driven title/content edits, node drag position persistence, and node resize geometry persistence.
 - `DELETE /api/threads/:threadId/canvas/nodes/:nodeId`
   - Deletes a Canvas node.
 - `POST /api/threads/:threadId/canvas/write-requests/:requestId/approve`
