@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AppView } from "../../app/App";
 import { AppSidebar } from "../../shared/AppSidebar";
+import { EmptyState, Panel, StatusBadge } from "../../shared/ui";
 import { useI18n } from "../i18n/I18nProvider";
 import { fetchDeerFlowDashboard } from "./aiDashboardClient";
 import type { DeerFlowDashboard, DeerFlowToolBridgeStatus } from "./types";
@@ -14,6 +15,7 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
   const { locale } = useI18n();
   const [dashboard, setDashboard] = useState<DeerFlowDashboard | null>(null);
   const [error, setError] = useState("");
+  const mcpServers = useMemo(() => Object.entries(dashboard?.config.mcpServers ?? {}), [dashboard]);
 
   useEffect(() => {
     if (activeView !== "aiDashboard") return;
@@ -27,33 +29,31 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
       });
   }, [activeView]);
 
-  const mcpServers = useMemo(() => Object.entries(dashboard?.config.mcpServers ?? {}), [dashboard]);
-
   return (
     <main className="view management-app ai-dashboard-app" data-active={activeView === "aiDashboard"}>
       <AppSidebar activeView={activeView} onNavigate={onNavigate} className="management-sidebar" />
       <section className="management-main ai-dashboard-main">
         <div className="management-header">
           <div>
-            <h1>{locale === "zh" ? "AI仪表盘" : "AI Dashboard"}</h1>
-            <p>{locale === "zh" ? "DeerFlow 执行层、MCP、Skills、Agent 映射与 ToolUse 桥接状态。" : "DeerFlow execution, MCP, Skills, Agent mapping, and ToolUse bridge status."}</p>
+            <h1>{locale === "zh" ? "AI 仪表盘" : "AI Dashboard"}</h1>
+            <p>{locale === "zh" ? "查看 DeerFlow 执行层、MCP、Skills、Agent 映射和 ToolUse 桥接状态。" : "DeerFlow execution, MCP, Skills, Agent mapping, and ToolUse bridge status."}</p>
           </div>
           {dashboard ? <StatusPill dashboard={dashboard} /> : null}
         </div>
 
         {error ? <p className="settings-message is-error">{error}</p> : null}
-        {!dashboard && !error ? <div className="empty-management-state">{locale === "zh" ? "正在读取 AI Runtime 状态..." : "Loading AI runtime status..."}</div> : null}
+        {!dashboard && !error ? <EmptyState className="empty-management-state" title={locale === "zh" ? "正在读取 AI Runtime 状态..." : "Loading AI runtime status..."} /> : null}
 
         {dashboard ? (
           <>
             <section className="ai-dashboard-grid" aria-label="Runtime status">
-              <Metric label="Runtime" value={runtimeLabel(dashboard)} tone={dashboard.runtime.reachable ? "online" : "neutral"} />
-              <Metric label="Auth" value={dashboard.runtime.authState} tone={dashboard.runtime.authState === "authenticated" ? "online" : "warn"} />
+              <Metric label="Runtime" value={runtimeLabel(dashboard)} tone={dashboard.runtime.reachable ? "success" : "neutral"} />
+              <Metric label="Auth" value={dashboard.runtime.authState} tone={dashboard.runtime.authState === "authenticated" ? "success" : "warning"} />
               <Metric label="Lead Agent" value={dashboard.leadAgent.assistantId} />
               <Metric label="Base URL" value={dashboard.runtime.baseUrl} />
             </section>
 
-            <section className="ai-dashboard-section">
+            <Panel className="ai-dashboard-section">
               <div className="ai-section-header">
                 <h2>DeerFlow capabilities</h2>
                 <span>{dashboard.config.skills.length} Skills / {mcpServers.length} MCP</span>
@@ -62,9 +62,9 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
                 <CapabilityList title="Skills" items={dashboard.config.skills.map(readName).filter(Boolean)} />
                 <CapabilityList title="MCP servers" items={mcpServers.map(([name, value]) => `${name}${readEnabled(value)}`)} />
               </div>
-            </section>
+            </Panel>
 
-            <section className="ai-dashboard-section">
+            <Panel className="ai-dashboard-section">
               <div className="ai-section-header">
                 <h2>Agent runtime mapping</h2>
                 <span>{dashboard.agentMappings.length} subagents</span>
@@ -93,9 +93,9 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
                   </article>
                 ))}
               </div>
-            </section>
+            </Panel>
 
-            <section className="ai-dashboard-section">
+            <Panel className="ai-dashboard-section">
               <div className="ai-section-header">
                 <h2>ToolUse bridge</h2>
                 <span>{dashboard.toolBridgeStatus.length} capabilities</span>
@@ -103,9 +103,9 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
               <div className="ai-tool-grid">
                 {dashboard.toolBridgeStatus.map((tool) => <ToolBridgeCard key={tool.name} tool={tool} />)}
               </div>
-            </section>
+            </Panel>
 
-            <section className="ai-dashboard-section">
+            <Panel className="ai-dashboard-section">
               <div className="ai-section-header">
                 <h2>Integration maturity</h2>
                 <span>{dashboard.integrationMaturity.filter((item) => item.state !== "pending").length}/{dashboard.integrationMaturity.length}</span>
@@ -119,7 +119,7 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
                   </article>
                 ))}
               </div>
-            </section>
+            </Panel>
           </>
         ) : null}
       </section>
@@ -127,17 +127,17 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
   );
 }
 
-function Metric({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "online" | "warn" | "neutral" }) {
+function Metric({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "success" | "warning" | "neutral" }) {
   return (
-    <article className={`ai-metric ai-metric-${tone}`}>
+    <Panel as="article" className={`ai-metric ai-metric-${tone === "success" ? "online" : tone === "warning" ? "warn" : "neutral"}`}>
       <span>{label}</span>
       <strong>{value}</strong>
-    </article>
+    </Panel>
   );
 }
 
 function StatusPill({ dashboard }: { dashboard: DeerFlowDashboard }) {
-  return <span className={dashboard.runtime.reachable && dashboard.runtime.authState === "authenticated" ? "runtime-pill is-online" : "runtime-pill"}>{runtimeLabel(dashboard)}</span>;
+  return <StatusBadge tone={dashboard.runtime.reachable && dashboard.runtime.authState === "authenticated" ? "success" : "neutral"}>{runtimeLabel(dashboard)}</StatusBadge>;
 }
 
 function runtimeLabel(dashboard: DeerFlowDashboard) {

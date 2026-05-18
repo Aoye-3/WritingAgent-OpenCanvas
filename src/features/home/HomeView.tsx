@@ -2,6 +2,7 @@ import { FormEvent, useMemo, useState } from "react";
 import type { AppView } from "../../app/App";
 import { AppSidebar } from "../../shared/AppSidebar";
 import { AddIcon, ArrowRightIcon, DocumentIcon, MoreIcon, SearchIcon, SendIcon, TaskIcon } from "../../shared/icons";
+import { Button, IconButton, ModalDialog, Panel, TextField } from "../../shared/ui";
 import type { AgentCard, StoredThread } from "../agents/types";
 import { useI18n } from "../i18n/I18nProvider";
 
@@ -19,6 +20,69 @@ type HomeViewProps = {
   onRenameThread: (threadId: string, title: string) => Promise<void>;
 };
 
+const homeCopy = {
+  en: {
+    addInput: "Add input",
+    agentHint: "Your most useful agents live here. Open one to enter its layered workspace.",
+    agents: "Recent agents",
+    cancel: "Cancel",
+    create: "Create canvas",
+    createAgent: "Create agent",
+    createAgentHint: "Start from an AgentCard",
+    createHint: "Open the document workspace",
+    knowledge: "Knowledge",
+    moveToTrash: "Move to trash",
+    pin: "Pin",
+    projectActions: "Project actions",
+    projectTitle: "Project title",
+    projects: "Recent projects",
+    promptLabel: "Home prompt input",
+    promptPlaceholder: "Ask FacetWrite to draft, rewrite, plan, or explain...",
+    rename: "Rename",
+    renameProject: "Rename project",
+    rewrite: "Rewrite draft",
+    rewriteHint: "Polish existing text",
+    save: "Save",
+    saving: "Saving",
+    send: "Send",
+    tip: "FacetWrite tip:",
+    tipText: "Start with an AgentCard, then use the right AI collaboration layer for revisions and explanation.",
+    title: "Welcome back. What work should we shape today?",
+    unpin: "Unpin",
+    viewAll: "View all"
+  },
+  zh: {
+    addInput: "添加输入",
+    agentHint: "常用 Agent 会显示在这里，打开即可进入对应分层工作台。",
+    agents: "近期 Agent",
+    cancel: "取消",
+    create: "创建画布",
+    createAgent: "创建 Agent",
+    createAgentHint: "从任务卡开始配置能力",
+    createHint: "打开文档式写作空间",
+    knowledge: "知识库",
+    moveToTrash: "移入回收站",
+    pin: "置顶",
+    projectActions: "项目操作",
+    projectTitle: "项目标题",
+    projects: "近期项目",
+    promptLabel: "首页提示词输入",
+    promptPlaceholder: "让 FacetWrite 起草、改写、规划或解释...",
+    rename: "重命名",
+    renameProject: "重命名项目",
+    rewrite: "改写草稿",
+    rewriteHint: "润色已有内容",
+    save: "保存",
+    saving: "保存中",
+    send: "发送",
+    tip: "FacetWrite 小技巧：",
+    tipText: "先用任务卡确定意图，再让右侧 AI 协作层继续改写和解释。",
+    title: "欢迎回来。今天要塑造哪项工作？",
+    unpin: "取消置顶",
+    viewAll: "查看全部"
+  }
+} as const;
+
 export function HomeView({
   activeView,
   agentCards,
@@ -33,85 +97,49 @@ export function HomeView({
   onRenameThread
 }: HomeViewProps) {
   const { locale } = useI18n();
+  const copy = homeCopy[locale];
   const [homePrompt, setHomePrompt] = useState("");
   const [openMenuThreadId, setOpenMenuThreadId] = useState("");
   const [renameThread, setRenameThread] = useState<StoredThread | null>(null);
 
   const featuredAgents = useMemo(() => {
     const preferred = ["blog-post", "rewrite-polish", "email-writer", "lesson-plan"];
-    return preferred
-      .map((id) => agentCards.find((agentCard) => agentCard.id === id))
-      .filter((agentCard): agentCard is AgentCard => Boolean(agentCard));
+    return preferred.map((id) => agentCards.find((agentCard) => agentCard.id === id)).filter((agentCard): agentCard is AgentCard => Boolean(agentCard));
   }, [agentCards]);
-
   const primaryAgent = agentCards[0];
+
+  const quickActions = [
+    { label: copy.create, hint: copy.createHint, agent: agentCards.find((agent) => agent.id === "blog-post") },
+    { label: copy.createAgent, hint: copy.createAgentHint, agent: agentCards.find((agent) => agent.id === "report-outline") },
+    { label: copy.rewrite, hint: copy.rewriteHint, agent: agentCards.find((agent) => agent.id === "rewrite-polish") }
+  ];
 
   const submitPrompt = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (primaryAgent) onOpenAgent(primaryAgent);
   };
 
-  const quickActions = [
-    {
-      label: locale === "zh" ? "创建画布" : "Create canvas",
-      hint: locale === "zh" ? "打开文档式写作空间" : "Open the document workspace",
-      agent: agentCards.find((agent) => agent.id === "blog-post")
-    },
-    {
-      label: locale === "zh" ? "创建 Agent" : "Create agent",
-      hint: locale === "zh" ? "从任务卡开始配置能力" : "Start from an AgentCard",
-      agent: agentCards.find((agent) => agent.id === "report-outline")
-    },
-    {
-      label: locale === "zh" ? "改写草稿" : "Rewrite draft",
-      hint: locale === "zh" ? "润色已有内容" : "Polish existing text",
-      agent: agentCards.find((agent) => agent.id === "rewrite-polish")
-    }
-  ];
-
   return (
     <main className="view view-home home-app" id="home-view" data-active={activeView === "home"}>
       <AppSidebar activeView={activeView} onNavigate={onNavigate} onOpenSettings={onOpenSettings} />
-
       <section className="home-main-panel">
         <div className="home-tip-bar">
-          <strong>{locale === "zh" ? "FacetWrite 小技巧：" : "FacetWrite tip:"}</strong>
-          <span>
-            {locale === "zh"
-              ? "先用任务卡确定意图，再让右侧 AI 协作层继续改写和解释。"
-              : "Start with an AgentCard, then use the right AI collaboration layer for revisions and explanation."}
-          </span>
-          <button className="button button-secondary button-small" type="button" onClick={() => primaryAgent && onOpenAgent(primaryAgent)}>
-            {locale === "zh" ? "创建画布" : "Create a canvas"}
-          </button>
+          <strong>{copy.tip}</strong>
+          <span>{copy.tipText}</span>
+          <Button size="sm" type="button" onClick={() => primaryAgent && onOpenAgent(primaryAgent)}>{copy.create}</Button>
         </div>
 
-        <div className="home-workspace-card">
+        <Panel className="home-workspace-card">
           <section className="home-command-center" aria-labelledby="home-title">
-            <h1 id="home-title">{locale === "zh" ? "欢迎回来。今天要塑造哪项工作？" : "Welcome back. What work should we shape today?"}</h1>
-
+            <h1 id="home-title">{copy.title}</h1>
             <form className="home-prompt-box" onSubmit={submitPrompt}>
-              <textarea
-                aria-label={locale === "zh" ? "首页提示词输入" : "Home prompt input"}
-                placeholder={locale === "zh" ? "让 FacetWrite 起草、改写、规划或解释..." : "Ask FacetWrite to draft, rewrite, plan, or explain..."}
-                value={homePrompt}
-                onChange={(event) => setHomePrompt(event.target.value)}
-              />
+              <textarea aria-label={copy.promptLabel} placeholder={copy.promptPlaceholder} value={homePrompt} onChange={(event) => setHomePrompt(event.target.value)} />
               <div className="home-prompt-actions">
-                <button className="icon-button prompt-tool" type="button" aria-label={locale === "zh" ? "添加输入" : "Add input"}>
-                  <AddIcon aria-hidden="true" />
-                </button>
-                <button className="home-agent-chip" type="button">
-                  <SearchIcon aria-hidden="true" />
-                  <span>{locale === "zh" ? "知识库" : "Knowledge"}</span>
-                  <small>1/3</small>
-                </button>
-                <button className="home-send-button" type="submit" aria-label={locale === "zh" ? "发送" : "Send"}>
-                  <SendIcon aria-hidden="true" />
-                </button>
+                <IconButton className="prompt-tool" type="button" aria-label={copy.addInput}><AddIcon aria-hidden="true" /></IconButton>
+                <button className="home-agent-chip" type="button"><SearchIcon aria-hidden="true" /><span>{copy.knowledge}</span><small>1/3</small></button>
+                <button className="home-send-button" type="submit" aria-label={copy.send}><SendIcon aria-hidden="true" /></button>
               </div>
             </form>
-
             <div className="home-quick-actions">
               {quickActions.map((action) => (
                 <button className="home-quick-action" key={action.label} type="button" onClick={() => action.agent && onOpenAgent(action.agent)}>
@@ -123,80 +151,28 @@ export function HomeView({
             </div>
           </section>
 
-          <section className="home-section home-projects" aria-label={locale === "zh" ? "近期项目" : "Recent projects"}>
+          <section className="home-section home-projects" aria-label={copy.projects}>
             <div className="home-section-header">
-              <h2>{locale === "zh" ? "近期项目" : "Recent projects"}</h2>
-              <button type="button" onClick={() => onNavigate("projects")}>{locale === "zh" ? "查看全部" : "View all"}</button>
+              <h2>{copy.projects}</h2>
+              <button type="button" onClick={() => onNavigate("projects")}>{copy.viewAll}</button>
             </div>
             <div className="home-project-list">
-              {(recentThreads.length > 0 ? recentThreads.slice(0, 6) : fallbackProjects(locale)).map((item) => {
-                const isThread = "id" in item;
-                const thread = isThread ? item : undefined;
-                const agentTitle = isThread ? agentCards.find((agent) => agent.id === item.agentCardId)?.title[locale] ?? item.agentCardId : item.title;
-                const projectTitle = isThread ? item.title || agentTitle : item.title;
-                const updatedAt = isThread ? new Date(item.updatedAt).toLocaleString() : item.updatedAt;
-                const assets = isThread ? (locale === "zh" ? "1 项资产" : "1 asset") : item.assets;
-
-                return (
-                  <article className="home-project-row" key={isThread ? item.id : item.title}>
-                    <button className="home-project-open" type="button" onClick={() => thread && onOpenThread(thread)}>
-                      <DocumentIcon aria-hidden="true" />
-                      <span>{projectTitle}</span>
-                    </button>
-                    {isThread ? <small className="home-project-agent">{agentTitle}</small> : null}
-                    <small>{assets}</small>
-                    <time>{updatedAt}</time>
-                    {thread ? (
-                      <div className="project-more-wrap">
-                        <button
-                          className="icon-button project-more-button"
-                          type="button"
-                          aria-label={locale === "zh" ? "项目操作" : "Project actions"}
-                          onClick={() => setOpenMenuThreadId((current) => current === thread.id ? "" : thread.id)}
-                        >
-                          <MoreIcon aria-hidden="true" />
-                        </button>
-                        {openMenuThreadId === thread.id ? (
-                          <div className="project-more-menu">
-                            <button type="button" onClick={() => { onTogglePinnedThread(thread.id); setOpenMenuThreadId(""); }}>
-                              {pinnedThreadIds.includes(thread.id)
-                                ? (locale === "zh" ? "取消置顶" : "Unpin")
-                                : (locale === "zh" ? "置顶" : "Pin")}
-                            </button>
-                            <button type="button" onClick={() => { setRenameThread(thread); setOpenMenuThreadId(""); }}>
-                              {locale === "zh" ? "重命名" : "Rename"}
-                            </button>
-                            <button type="button" onClick={() => { onDeleteThread(thread); setOpenMenuThreadId(""); }}>
-                              {locale === "zh" ? "移入回收站" : "Move to trash"}
-                            </button>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </article>
-                );
-              })}
+              {(recentThreads.length > 0 ? recentThreads.slice(0, 6) : fallbackProjects(locale)).map((item) => renderProjectRow(item, { agentCards, copy, locale, onDeleteThread, onOpenThread, onRename: setRenameThread, onTogglePinnedThread, openMenuThreadId, pinnedThreadIds, setOpenMenuThreadId }))}
             </div>
           </section>
 
-          <section className="home-section home-agents" aria-label={locale === "zh" ? "近期 Agent" : "Recent agents"}>
+          <section className="home-section home-agents" aria-label={copy.agents}>
             <div className="home-section-header">
               <div>
-                <h2>{locale === "zh" ? "近期 Agent" : "Recent agents"}</h2>
-                <p>
-                  {locale === "zh"
-                    ? "常用 Agent 会显示在这里，打开即可进入对应分层工作台。"
-                    : "Your most useful agents live here. Open one to enter its layered workspace."}
-                </p>
+                <h2>{copy.agents}</h2>
+                <p>{copy.agentHint}</p>
               </div>
-              <button type="button" onClick={() => onNavigate("agentSettings")}>{locale === "zh" ? "查看全部" : "View all"}</button>
+              <button type="button" onClick={() => onNavigate("agentSettings")}>{copy.viewAll}</button>
             </div>
             <div className="home-agent-card-row">
               {featuredAgents.map((agentCard) => (
                 <button className="home-agent-card" key={agentCard.id} type="button" onClick={() => onOpenAgent(agentCard)}>
-                  <span className={`task-icon accent-${agentCard.accent}`} aria-hidden="true">
-                    <TaskIcon icon={agentCard.icon} />
-                  </span>
+                  <span className={`task-icon accent-${agentCard.accent}`} aria-hidden="true"><TaskIcon icon={agentCard.icon} /></span>
                   <strong>{agentCard.title[locale]}</strong>
                   <p>{agentCard.description[locale]}</p>
                   <small>{agentCard.outputContract.type}</small>
@@ -204,7 +180,7 @@ export function HomeView({
               ))}
             </div>
           </section>
-        </div>
+        </Panel>
       </section>
 
       {renameThread ? (
@@ -222,17 +198,58 @@ export function HomeView({
   );
 }
 
-function RenameThreadDialog({
-  initialTitle,
-  locale,
-  onClose,
-  onRename
-}: {
-  initialTitle: string;
-  locale: "en" | "zh";
-  onClose: () => void;
-  onRename: (title: string) => Promise<void>;
-}) {
+function renderProjectRow(
+  item: StoredThread | ReturnType<typeof fallbackProjects>[number],
+  context: {
+    agentCards: AgentCard[];
+    copy: (typeof homeCopy)["en" | "zh"];
+    locale: "en" | "zh";
+    onDeleteThread: (thread: StoredThread) => void;
+    onOpenThread: (thread: StoredThread) => void;
+    onRename: (thread: StoredThread) => void;
+    onTogglePinnedThread: (threadId: string) => void;
+    openMenuThreadId: string;
+    pinnedThreadIds: string[];
+    setOpenMenuThreadId: (value: string | ((current: string) => string)) => void;
+  }
+) {
+  const { agentCards, copy, locale, onDeleteThread, onOpenThread, onRename, onTogglePinnedThread, openMenuThreadId, pinnedThreadIds, setOpenMenuThreadId } = context;
+  const isThread = "id" in item;
+  const thread = isThread ? item : undefined;
+  const agentTitle = isThread ? agentCards.find((agent) => agent.id === item.agentCardId)?.title[locale] ?? item.agentCardId : item.title;
+  const projectTitle = isThread ? item.title || agentTitle : item.title;
+  const updatedAt = isThread ? new Date(item.updatedAt).toLocaleString() : item.updatedAt;
+  const assets = isThread ? (locale === "zh" ? "1 项资产" : "1 asset") : item.assets;
+
+  return (
+    <article className="home-project-row" key={isThread ? item.id : item.title}>
+      <button className="home-project-open" type="button" onClick={() => thread && onOpenThread(thread)}>
+        <DocumentIcon aria-hidden="true" />
+        <span>{projectTitle}</span>
+      </button>
+      {isThread ? <small className="home-project-agent">{agentTitle}</small> : null}
+      <small>{assets}</small>
+      <time>{updatedAt}</time>
+      {thread ? (
+        <div className="project-more-wrap">
+          <IconButton className="project-more-button" type="button" aria-label={copy.projectActions} onClick={() => setOpenMenuThreadId((current) => current === thread.id ? "" : thread.id)}>
+            <MoreIcon aria-hidden="true" />
+          </IconButton>
+          {openMenuThreadId === thread.id ? (
+            <div className="project-more-menu">
+              <button type="button" onClick={() => { onTogglePinnedThread(thread.id); setOpenMenuThreadId(""); }}>{pinnedThreadIds.includes(thread.id) ? copy.unpin : copy.pin}</button>
+              <button type="button" onClick={() => { onRename(thread); setOpenMenuThreadId(""); }}>{copy.rename}</button>
+              <button type="button" onClick={() => { onDeleteThread(thread); setOpenMenuThreadId(""); }}>{copy.moveToTrash}</button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function RenameThreadDialog({ initialTitle, locale, onClose, onRename }: { initialTitle: string; locale: "en" | "zh"; onClose: () => void; onRename: (title: string) => Promise<void> }) {
+  const copy = homeCopy[locale];
   const [title, setTitle] = useState(initialTitle);
   const [isSaving, setIsSaving] = useState(false);
   const cleanTitle = title.trim();
@@ -249,23 +266,16 @@ function RenameThreadDialog({
   };
 
   return (
-    <div className="rename-dialog-backdrop" role="presentation">
-      <form className="rename-dialog" onSubmit={submit} role="dialog" aria-modal="true" aria-label={locale === "zh" ? "重命名项目" : "Rename project"}>
-        <h2>{locale === "zh" ? "重命名项目" : "Rename project"}</h2>
-        <label className="field">
-          <span>{locale === "zh" ? "项目标题" : "Project title"}</span>
-          <input autoFocus maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)} />
-        </label>
+    <ModalDialog className="rename-dialog" labelledBy="rename-thread-title">
+      <form onSubmit={submit}>
+        <h2 id="rename-thread-title">{copy.renameProject}</h2>
+        <TextField autoFocus maxLength={120} label={copy.projectTitle} value={title} onChange={(event) => setTitle(event.target.value)} />
         <div className="rename-dialog-actions">
-          <button className="button button-secondary" type="button" onClick={onClose} disabled={isSaving}>
-            {locale === "zh" ? "取消" : "Cancel"}
-          </button>
-          <button className="button button-primary" type="submit" disabled={!cleanTitle || isSaving}>
-            {isSaving ? (locale === "zh" ? "保存中" : "Saving") : (locale === "zh" ? "保存" : "Save")}
-          </button>
+          <Button type="button" onClick={onClose} disabled={isSaving}>{copy.cancel}</Button>
+          <Button variant="primary" type="submit" disabled={!cleanTitle} loading={isSaving}>{isSaving ? copy.saving : copy.save}</Button>
         </div>
       </form>
-    </div>
+    </ModalDialog>
   );
 }
 

@@ -1,5 +1,12 @@
 # FacetWrite Technical Decisions
 
+## 2026-05-18: FacetWrite Uses A Lightweight In-Repo UI Primitive Layer
+Decision: Build shared frontend primitives in `src/shared/ui/` instead of introducing AntD, MUI, Mantine, shadcn, or another large component library.
+
+Reason: FacetWrite already has a product-specific workspace visual language in `docs/DESIGN.md`. A small in-repo primitive layer preserves that language, keeps Canvas hit-testing and approval flows under FacetWrite control, and avoids large third-party styling/runtime assumptions.
+
+Impact: Shared UI components may standardize buttons, fields, panels, tabs, drawers, dialogs, badges, and empty states. They must not own provider, DeerFlow, Canvas approval, or storage behavior; business logic remains in feature components and hooks.
+
 ## 2026-05-18: Canvas V2 Uses React Flow With FacetWrite-Owned Persistence
 Decision: Use `@xyflow/react` as the Canvas V2 viewport and node interaction engine while keeping FacetWrite's Canvas API, SQLite tables, and write-request approval boundary as the source of truth.
 

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { AppView } from "../app/App";
 import { useI18n } from "../features/i18n/I18nProvider";
 import { BrandIcon, SearchIcon, SettingsIcon } from "./icons";
+import { Button } from "./ui";
 
 type TopbarProps = {
   activeView: AppView;
@@ -19,6 +20,7 @@ export function Topbar({
   onOpenSettings
 }: TopbarProps) {
   const { locale, setLocale, t } = useI18n();
+  const nextLocale = locale === "en" ? "zh" : "en";
 
   return (
     <header className={`topbar ${activeView === "home" ? "topbar-home" : "topbar-workspace"}`}>
@@ -39,11 +41,11 @@ export function Topbar({
       )}
 
       <nav className="topbar-actions" aria-label="Workspace actions">
-        <button className="project-settings-button" type="button" onClick={onOpenSettings}>
+        <Button className="project-settings-button" variant="secondary" type="button" onClick={onOpenSettings}>
           <span>{t("app.projectSettings")}</span>
           <SettingsIcon aria-hidden="true" />
-        </button>
-        <button className="language-switch" type="button" onClick={() => setLocale(locale === "en" ? "zh" : "en")}>
+        </Button>
+        <button className="language-switch" type="button" onClick={() => setLocale(nextLocale)} aria-label={locale === "zh" ? "Switch to English" : "切换中文"}>
           <span className={locale === "en" ? "selected" : ""}>EN</span>
           <span className={locale === "zh" ? "selected" : ""}>中文</span>
         </button>

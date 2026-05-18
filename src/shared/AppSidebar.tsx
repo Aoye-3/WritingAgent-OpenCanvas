@@ -1,6 +1,7 @@
 import type { AppView } from "../app/App";
 import { useI18n } from "../features/i18n/I18nProvider";
 import { AgentIcon, BookIcon, BrandIcon, DocumentIcon, HomeIcon, RuntimeIcon } from "./icons";
+import { Button } from "./ui";
 
 type AppSidebarProps = {
   activeView: AppView;
@@ -22,8 +23,8 @@ export function AppSidebar({ activeView, onNavigate, onOpenSettings, className }
   const labels = {
     home: locale === "zh" ? "家" : "Home",
     projects: locale === "zh" ? "项目" : "Projects",
-    agentSettings: locale === "zh" ? "Agent设置" : "Agent settings",
-    aiDashboard: locale === "zh" ? "AI仪表盘" : "AI Dashboard",
+    agentSettings: locale === "zh" ? "Agent 设置" : "Agent settings",
+    aiDashboard: locale === "zh" ? "AI 仪表盘" : "AI Dashboard",
     knowledgeSettings: locale === "zh" ? "知识库设置" : "Knowledge settings"
   };
 
@@ -52,15 +53,15 @@ export function AppSidebar({ activeView, onNavigate, onOpenSettings, className }
       </nav>
 
       <div className="home-sidebar-footer">
-        <button className="home-side-pill" type="button">{locale === "zh" ? "本地应用模式" : "Local app mode"}</button>
+        <Button className="home-side-pill" size="sm" type="button" variant="secondary">{locale === "zh" ? "本地应用模式" : "Local app mode"}</Button>
         {onOpenSettings ? (
-          <button className="home-side-pill" type="button" onClick={onOpenSettings}>
+          <Button className="home-side-pill" size="sm" type="button" variant="secondary" onClick={onOpenSettings}>
             {locale === "zh" ? "项目设置" : "Project settings"}
-          </button>
+          </Button>
         ) : null}
-        <button className="home-side-pill" type="button" onClick={() => setLocale(locale === "en" ? "zh" : "en")}>
+        <Button className="home-side-pill" size="sm" type="button" variant="secondary" onClick={() => setLocale(locale === "en" ? "zh" : "en")}>
           {locale === "zh" ? "Switch to English" : "切换中文"}
-        </button>
+        </Button>
       </div>
     </aside>
   );

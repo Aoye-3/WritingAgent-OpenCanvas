@@ -4,6 +4,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 
 ## Core Documents
 - `PROJECT_BRIEF.md`: product goal, current capabilities, MVP boundaries, and non-goals.
+- `DESIGN.md`: maintained product design system, layout rules, interaction rules, and component guardrails.
 - `ARCHITECTURE.md`: frontend, backend, Agent runtime, DeerFlow sidecar, storage, and boundary rules.
 - `CANVAS.md`: Canvas V2 frontend architecture, React Flow mapping, node geometry, resize behavior, and write-safety boundary.
 - `AGENT.md`: AgentCard, Agent settings, DeerFlow runtime mapping, Tool catalog, and ToolUse safety.
@@ -16,6 +17,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 
 ## Update Rules
 - Code structure changes update `ARCHITECTURE.md`.
+- Product layout, component, visual-system, or interaction-design changes update `DESIGN.md`.
 - Canvas interaction, geometry, node renderer, or write-safety changes update `CANVAS.md`.
 - API changes update `API.md`.
 - Database or storage changes update `DATABASE.md`.

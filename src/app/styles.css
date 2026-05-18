@@ -20,10 +20,17 @@
   --shadow-soft: 0 10px 28px rgba(17, 24, 39, 0.055);
   --radius-sm: 6px;
   --radius-md: 8px;
+  --radius-lg: 12px;
   --topbar-height: 64px;
   --page-gutter: clamp(20px, 4.2vw, 80px);
   --control-height: 44px;
   --control-height-sm: 38px;
+  --z-topbar: 20;
+  --z-drawer: 30;
+  --z-floating: 40;
+  --z-popover: 60;
+  --z-modal: 80;
+  --z-toast: 100;
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --ease-soft: cubic-bezier(0.16, 1, 0.3, 1);
   font-family: "Geist", "Aptos", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -111,6 +118,153 @@ textarea:focus-visible,
 .accent-orange { background: var(--accent-orange); }
 .accent-violet { background: var(--accent-violet); }
 .accent-rose { background: var(--accent-rose); }
+
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--control-height);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+  transition: background 140ms var(--ease-standard), border-color 140ms var(--ease-standard), color 140ms var(--ease-standard), box-shadow 140ms var(--ease-standard);
+}
+
+.ui-button-primary {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.ui-button-primary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+
+.ui-button-secondary,
+.ui-button-ghost {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.ui-button-secondary:hover:not(:disabled),
+.ui-button-ghost:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface-raised);
+}
+
+.ui-button-danger {
+  border-color: rgba(194, 65, 58, 0.28);
+  background: #fff;
+  color: var(--color-danger);
+}
+
+.ui-button-sm {
+  min-height: var(--control-height-sm);
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.ui-icon-button {
+  display: inline-grid;
+  place-items: center;
+  min-width: var(--control-height);
+  min-height: var(--control-height);
+  border-radius: var(--radius-md);
+}
+
+.ui-field {
+  min-width: 0;
+}
+
+.ui-panel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.ui-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ui-tab {
+  min-height: var(--control-height-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ui-tab.is-active {
+  border-color: rgba(37, 99, 235, 0.18);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.ui-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  padding: 4px 9px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.ui-status-primary { border-color: rgba(37, 99, 235, 0.2); color: var(--color-primary); background: var(--color-primary-soft); }
+.ui-status-success { border-color: rgba(17, 132, 91, 0.18); color: var(--color-success); background: #eefbf5; }
+.ui-status-warning { border-color: rgba(183, 110, 0, 0.22); color: var(--color-warning); background: #fff8e7; }
+.ui-status-danger { border-color: rgba(194, 65, 58, 0.22); color: var(--color-danger); background: #fff1f0; }
+
+.ui-empty-state {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 180px;
+  padding: 24px;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.ui-empty-state strong {
+  color: var(--color-text);
+}
+
+.ui-empty-state p {
+  margin: 0;
+  max-width: 48ch;
+}
+
+.ui-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.ui-modal {
+  width: min(520px, 100%);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+}
 
 .search-field {
   display: flex;

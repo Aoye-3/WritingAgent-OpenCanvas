@@ -1,5 +1,37 @@
 # FacetWrite Refactor Log
 
+## 2026-05-18: UI Primitive Layer And Workspace Layout Split
+Scope: Started the all-app frontend layout and component-system pass after Canvas V2 stabilization.
+
+Findings:
+- `DESIGN.md` is now a maintained technical design document and belongs in `docs/`.
+- The app needs a small FacetWrite-owned primitive layer rather than a third-party component library.
+- Workspace data flow can stay intact while the left input drawer, main Canvas surface, and right AI collaboration panel become clearer layout boundaries.
+
+Completed:
+- Added `src/shared/ui/` with lightweight primitives for buttons, icon buttons, fields, segmented controls, chips, panels, tabs, drawers, dialogs, badges, and empty states.
+- Migrated shared Topbar and AppSidebar to the primitive layer and repaired the most visible navigation/language Chinese labels.
+- Split Workspace rendering into layout, Agent input drawer, main Canvas area, and AI collaboration panel components without changing Canvas or generation APIs.
+- Updated Workspace utility bar to use shared tabs, panels, and buttons while preserving the rule that it does not inject hidden runtime context.
+- Migrated Home, Projects, Start, Agent Settings, AI Dashboard, Knowledge Settings, and Project Settings surfaces onto the shared primitives where it was low-risk.
+- Cleaned the most visible mojibake in navigation, start/home, projects, AI dashboard, knowledge settings, and Agent Settings labels.
+- Moved the maintained design guide to `docs/DESIGN.md` and left root `DESIGN.md` as a pointer.
+- Updated architecture and decision docs for the new UI primitive boundary.
+
+Open TODO:
+- Continue replacing feature-specific button/field class usage as pages receive future edits.
+- Finish deep mojibake cleanup in lower-traffic labels through i18n-backed copy instead of scattered hardcoded strings.
+- Add browser screenshots across the documented responsive breakpoints once the app has a regular visual regression harness.
+
+Validation:
+- `npm.cmd run typecheck`
+- `npm.cmd run build`
+- `npm.cmd test`
+- Playwright smoke: Start page loads, Home renders after Start, Projects opens from sidebar, no page errors, and no mojibake in the checked surfaces.
+
+Next Priority Check:
+- Verify Canvas hit-testing and workspace drawer interactions after every visual primitive migration.
+
 ## 2026-05-16: Project Management And CanvasWriter Confirmation
 Scope: Added project title management, batch project operations, and the first CanvasWriter proposal/annotation UX.
 

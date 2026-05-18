@@ -3,6 +3,7 @@ import { CloseIcon } from "../../shared/icons";
 import { DeerFlowRuntimePanel } from "./components/DeerFlowRuntimePanel";
 import { ProviderSettingsForm } from "./components/ProviderSettingsForm";
 import { useProjectSettings } from "./hooks/useProjectSettings";
+import { Button, IconButton, Panel } from "../../shared/ui";
 
 type ProjectSettingsPanelProps = {
   open: boolean;
@@ -38,12 +39,12 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
             <h2 id="settings-title">{t("settings.title")}</h2>
             <p>{t("settings.subtitle")}</p>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label={t("settings.close")}>
+          <IconButton type="button" onClick={onClose} aria-label={t("settings.close")}>
             <CloseIcon aria-hidden="true" />
-          </button>
+          </IconButton>
         </div>
 
-        <dl className="settings-status-list">
+        <dl className="settings-status-list ui-panel">
           {statusRows.map(([label, value]) => (
             <div className="settings-status-row" key={label}>
               <dt>{label}</dt>
@@ -88,20 +89,20 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
           systemPrompt={settings.systemPrompt}
         />
 
-        <section className="settings-danger-zone" aria-labelledby="settings-dev-server-title">
+        <Panel className="settings-danger-zone" aria-labelledby="settings-dev-server-title">
           <div>
             <h3 id="settings-dev-server-title">{t("settings.devServerTitle")}</h3>
             <p>{t("settings.devServerDescription")}</p>
           </div>
-          <button
-            className="button button-danger"
+          <Button
             disabled={settings.busyState !== "idle"}
             onClick={settings.handleShutdownDevServer}
             type="button"
+            variant="danger"
           >
             {settings.busyState === "stopping" ? t("settings.stoppingDevServer") : t("settings.stopDevServer")}
-          </button>
-        </section>
+          </Button>
+        </Panel>
       </section>
     </div>
   );

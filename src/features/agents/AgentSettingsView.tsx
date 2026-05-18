@@ -5,6 +5,7 @@ import { useAgentRuntimeConfig } from "./hooks/useAgentRuntimeConfig";
 import type { AgentCard } from "./types";
 import { useI18n } from "../i18n/I18nProvider";
 import { ManagementSidebar } from "../projects/ProjectsView";
+import { Button, EmptyState, Panel, SelectField, TabButton, Tabs, TextField } from "../../shared/ui";
 
 type AgentSettingsViewProps = {
   activeView: AppView;
@@ -59,20 +60,20 @@ export function AgentSettingsView({ activeView, agentCards, onNavigate, onOpenAg
             <h1>{text(locale, "title")}</h1>
             <p>{text(locale, "subtitle")}</p>
           </div>
-          <button className="button button-primary" type="button" onClick={() => selectedAgent && onOpenAgent(selectedAgent)}>
+          <Button variant="primary" type="button" onClick={() => selectedAgent && onOpenAgent(selectedAgent)}>
             {text(locale, "useAgent")}
-          </button>
+          </Button>
         </div>
 
         <div className="management-toolbar">
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={text(locale, "search")} />
-          <select value={category} onChange={(event) => setCategory(event.target.value)}>
+          <TextField label={text(locale, "search")} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={text(locale, "search")} />
+          <SelectField label={text(locale, "allCategories")} value={category} onChange={(event) => setCategory(event.target.value)}>
             <option value="all">{text(locale, "allCategories")}</option>
             <option value="writing">{text(locale, "writing")}</option>
             <option value="rewrite">{text(locale, "rewrite")}</option>
             <option value="summarise">{text(locale, "summarise")}</option>
             <option value="education">{text(locale, "education")}</option>
-          </select>
+          </SelectField>
         </div>
 
         <div className="agent-settings-layout">
@@ -87,7 +88,7 @@ export function AgentSettingsView({ activeView, agentCards, onNavigate, onOpenAg
             ))}
           </section>
 
-          <aside className="agent-editor-panel" aria-label="Agent settings editor">
+          <Panel as="aside" className="agent-editor-panel" aria-label="Agent settings editor">
             {selectedAgent && runtime.draft ? (
               <>
                 <div className="agent-editor-header">
@@ -96,25 +97,25 @@ export function AgentSettingsView({ activeView, agentCards, onNavigate, onOpenAg
                     <h2>{selectedAgent.title[locale]}</h2>
                     <p className="agent-editor-note">{text(locale, "editorNote")}</p>
                   </div>
-                  <button className="button button-primary button-small" type="button" onClick={runtime.saveDraft} disabled={runtime.saving || runtime.loadingConfig}>
+                  <Button size="sm" variant="primary" type="button" onClick={runtime.saveDraft} disabled={runtime.saving || runtime.loadingConfig}>
                     {runtime.saving ? text(locale, "saving") : text(locale, "save")}
-                  </button>
+                  </Button>
                 </div>
-                <nav className="agent-editor-tabs" aria-label="Agent settings sections">
+                <Tabs className="agent-editor-tabs" ariaLabel="Agent settings sections">
                   {tabs.map((tab) => (
-                    <button className={activeTab === tab ? "is-active" : ""} key={tab} type="button" onClick={() => setActiveTab(tab)}>
+                    <TabButton active={activeTab === tab} className={activeTab === tab ? "is-active" : ""} key={tab} onClick={() => setActiveTab(tab)}>
                       {tabLabel(tab, locale)}
-                    </button>
+                    </TabButton>
                   ))}
-                </nav>
+                </Tabs>
                 <AgentSettingsTabs runtimeConfig={runtime.runtimeConfig} tab={activeTab} settings={runtime.draft} onChange={runtime.updateDraft} />
                 {runtime.runtimeConfig?.deprecatedToolRefs.length ? <p className="settings-message">{text(locale, "deprecatedTools")}: {runtime.runtimeConfig.deprecatedToolRefs.join(", ")}</p> : null}
                 {runtime.message ? <p className="settings-message">{runtime.message}</p> : null}
               </>
             ) : (
-              <div className="empty-management-state">{text(locale, "empty")}</div>
+              <EmptyState className="empty-management-state" title={text(locale, "empty")} />
             )}
-          </aside>
+          </Panel>
         </div>
       </section>
     </main>

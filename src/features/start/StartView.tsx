@@ -1,4 +1,5 @@
 import { BrandIcon } from "../../shared/icons";
+import { Button } from "../../shared/ui";
 import { useI18n } from "../i18n/I18nProvider";
 
 type StartViewProps = {
@@ -18,9 +19,7 @@ export function StartView({ active, onStart, onOpenSettings }: StartViewProps) {
           <span>FacetWrite</span>
         </div>
         <div className="start-actions">
-          <button className="button button-secondary" type="button" onClick={onOpenSettings}>
-            {locale === "zh" ? "项目设置" : "Settings"}
-          </button>
+          <Button type="button" onClick={onOpenSettings}>{locale === "zh" ? "项目设置" : "Settings"}</Button>
           <button className="language-switch" type="button" onClick={() => setLocale(locale === "en" ? "zh" : "en")}>
             <span className={locale === "en" ? "selected" : ""}>EN</span>
             <span className={locale === "zh" ? "selected" : ""}>中文</span>
@@ -34,23 +33,17 @@ export function StartView({ active, onStart, onOpenSettings }: StartViewProps) {
           <h1>{locale === "zh" ? "把任务卡、结构化输入和 AI 协作放进同一个写作界面。" : "Agent cards, structured inputs, and AI collaboration in one writing surface."}</h1>
           <p className="subcopy">
             {locale === "zh"
-              ? "FacetWrite 将 Prompt 构建、文档画布、上下文和右侧协作聊天组合成一个分层式工作台，为后续接入 Deerflow 风格 Agent 能力打好基础。"
-              : "FacetWrite combines prompt construction, a document canvas, structured inputs, and a collaboration drawer into a layered workspace ready for Deerflow-inspired agent capabilities."}
+              ? "FacetWrite 将 Prompt 构建、文档画板、上下文和右侧协作聊天组合成一个分层式工作台，为后续接入 DeerFlow 风格 Agent 能力打好基础。"
+              : "FacetWrite combines prompt construction, a document canvas, structured inputs, and a collaboration drawer into a layered workspace ready for DeerFlow-inspired agent capabilities."}
           </p>
           <div className="start-cta-row">
-            <button className="button button-primary start-primary" type="button" onClick={onStart}>
-              {locale === "zh" ? "Start" : "Start"}
-            </button>
-            <span>{locale === "zh" ? "当前为前端信息入口，预留未来登录扩展。" : "Information entry today, future login expansion later."}</span>
+            <Button className="start-primary" variant="primary" type="button" onClick={onStart}>Start</Button>
+            <span>{locale === "zh" ? "当前是本地信息入口，后续可扩展登录与同步。" : "Information entry today, future login expansion later."}</span>
           </div>
         </div>
 
         <div className="start-preview" aria-hidden="true">
-          <div className="preview-rail">
-            <span />
-            <span />
-            <span />
-          </div>
+          <div className="preview-rail"><span /><span /><span /></div>
           <div className="preview-canvas">
             <div className="preview-card wide" />
             <div className="preview-card" />
@@ -58,11 +51,7 @@ export function StartView({ active, onStart, onOpenSettings }: StartViewProps) {
             <div className="preview-line short" />
             <div className="preview-doc" />
           </div>
-          <div className="preview-chat">
-            <div />
-            <div />
-            <div />
-          </div>
+          <div className="preview-chat"><div /><div /><div /></div>
         </div>
       </section>
     </main>
