@@ -86,7 +86,11 @@ export const translations: Record<Locale, Record<TranslationKey, string>> = {
     "settings.saveSuccess": "Settings saved locally.",
     "settings.validateSuccess": "API validation succeeded.",
     "settings.validateFailed": "API validation failed.",
-    "settings.safeNote": "Keys are written only to the local server .env.local file and are never shown by the UI. Saving a new key requires an explicit local-write confirmation."
+    "settings.safeNote": "Keys are written only to the local server .env.local file and are never shown by the UI. Saving a new key requires an explicit local-write confirmation.",
+    "settings.devServerTitle": "Development server",
+    "settings.devServerDescription": "Stop the local Vite and API development servers for this project.",
+    "settings.stopDevServer": "Stop Development Server",
+    "settings.stoppingDevServer": "Stopping"
   },
   zh: {
     "app.newProject": "新建项目",
@@ -173,6 +177,10 @@ export const translations: Record<Locale, Record<TranslationKey, string>> = {
     "settings.saveSuccess": "设置已保存到本地。",
     "settings.validateSuccess": "API 验证成功。",
     "settings.validateFailed": "API 验证失败。",
-    "settings.safeNote": "Key 只会写入本地服务端 .env.local 文件，界面不会展示明文。保存新 key 时 API 会要求显式本地写入确认。"
+    "settings.safeNote": "Key 只会写入本地服务端 .env.local 文件，界面不会展示明文。保存新 key 时 API 会要求显式本地写入确认。",
+    "settings.devServerTitle": "开发服务器",
+    "settings.devServerDescription": "停止本项目的本地 Vite 和 API 开发服务器。",
+    "settings.stopDevServer": "关闭开发服务器",
+    "settings.stoppingDevServer": "正在关闭"
   }
 };

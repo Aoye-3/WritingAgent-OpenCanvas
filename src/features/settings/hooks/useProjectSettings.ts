@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { getDeerFlowConfigOverview, getDeerFlowRuntimeStatus, getSettingsStatus, saveSettings, validateSettings } from "../settingsClient";
+import { getDeerFlowConfigOverview, getDeerFlowRuntimeStatus, getSettingsStatus, saveSettings, shutdownDevServer, validateSettings } from "../settingsClient";
 import { fallbackDeerFlowConfig, fallbackDeerFlowStatus, fallbackStatus, resolvePreset } from "../settingsDefaults";
 import type { DeerFlowConfigOverview, DeerFlowRuntimeStatus, SettingsStatus } from "../types";
 
@@ -18,7 +18,7 @@ export function useProjectSettings(open: boolean, copy: {
   const [deerFlowStatus, setDeerFlowStatus] = useState<DeerFlowRuntimeStatus>(fallbackDeerFlowStatus);
   const [deerFlowConfig, setDeerFlowConfig] = useState<DeerFlowConfigOverview>(fallbackDeerFlowConfig);
   const [message, setMessage] = useState("");
-  const [busyState, setBusyState] = useState<"idle" | "saving" | "validating">("idle");
+  const [busyState, setBusyState] = useState<"idle" | "saving" | "validating" | "stopping">("idle");
 
   useEffect(() => {
     if (!open) return;
@@ -92,6 +92,20 @@ export function useProjectSettings(open: boolean, copy: {
     }
   };
 
+  const handleShutdownDevServer = async () => {
+    const confirmed = window.confirm("Stop the local development server now?");
+    if (!confirmed) return;
+
+    setBusyState("stopping");
+    setMessage("");
+    try {
+      await shutdownDevServer();
+      setMessage("Development server is shutting down. This page will disconnect shortly.");
+    } finally {
+      setBusyState("idle");
+    }
+  };
+
   return {
     apiKey,
     baseURL,
@@ -105,6 +119,7 @@ export function useProjectSettings(open: boolean, copy: {
     status,
     systemPrompt,
     handleSubmit,
+    handleShutdownDevServer,
     handleValidate,
     setApiKey,
     setBaseURL,

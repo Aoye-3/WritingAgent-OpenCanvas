@@ -2418,6 +2418,31 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   flex-wrap: wrap;
 }
 
+.settings-danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 22px 22px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fff7f7;
+}
+
+.settings-danger-zone h3 {
+  margin: 0 0 4px;
+  color: #7f1d1d;
+  font-size: 15px;
+}
+
+.settings-danger-zone p {
+  margin: 0;
+  color: #991b1b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .button-danger {
   border-color: #fecaca;
   background: #fff7f7;

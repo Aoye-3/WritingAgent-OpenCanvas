@@ -13,6 +13,10 @@ export async function saveSettings(payload: SettingsSaveRequest): Promise<Settin
   return apiPost<SettingsStatus>("/api/settings/save", payload);
 }
 
+export async function shutdownDevServer(): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>("/api/settings/shutdown-dev-server");
+}
+
 export async function getDeerFlowRuntimeStatus(): Promise<DeerFlowRuntimeStatus> {
   return apiGet<DeerFlowRuntimeStatus>("/api/deerflow/status");
 }

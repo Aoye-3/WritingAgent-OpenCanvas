@@ -85,4 +85,8 @@ export type TranslationKey =
   | "settings.saveSuccess"
   | "settings.validateSuccess"
   | "settings.validateFailed"
-  | "settings.safeNote";
+  | "settings.safeNote"
+  | "settings.devServerTitle"
+  | "settings.devServerDescription"
+  | "settings.stopDevServer"
+  | "settings.stoppingDevServer";

@@ -87,6 +87,21 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
           status={settings.status}
           systemPrompt={settings.systemPrompt}
         />
+
+        <section className="settings-danger-zone" aria-labelledby="settings-dev-server-title">
+          <div>
+            <h3 id="settings-dev-server-title">{t("settings.devServerTitle")}</h3>
+            <p>{t("settings.devServerDescription")}</p>
+          </div>
+          <button
+            className="button button-danger"
+            disabled={settings.busyState !== "idle"}
+            onClick={settings.handleShutdownDevServer}
+            type="button"
+          >
+            {settings.busyState === "stopping" ? t("settings.stoppingDevServer") : t("settings.stopDevServer")}
+          </button>
+        </section>
       </section>
     </div>
   );

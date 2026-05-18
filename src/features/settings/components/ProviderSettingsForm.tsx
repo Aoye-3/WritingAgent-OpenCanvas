@@ -5,7 +5,7 @@ import type { FormEvent } from "react";
 type ProviderSettingsFormProps = {
   apiKey: string;
   baseURL: string;
-  busyState: "idle" | "saving" | "validating";
+  busyState: "idle" | "saving" | "validating" | "stopping";
   message: string;
   model: string;
   modelPreset: string;
