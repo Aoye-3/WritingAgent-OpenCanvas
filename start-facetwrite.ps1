@@ -105,15 +105,13 @@ function Ensure-DeerFlowBridgeEnv {
 
 function Start-DeerFlowSidecar {
   if (-not (Test-CommandAvailable -Name "docker")) {
-    Write-Host "Warning: docker was not found. DeerFlow sidecar will not start; FacetWrite may fall back to provider runtime." -ForegroundColor Yellow
-    return
+    throw "Docker was not found. Start Docker Desktop, make sure Docker is available in PATH, then run this launcher again."
   }
 
   Write-Host "Checking Docker daemon..." -ForegroundColor Cyan
   & docker info *> $null
   if ($LASTEXITCODE -ne 0) {
-    Write-Host "Warning: Docker daemon is not reachable. Start Docker Desktop, then run this launcher again for DeerFlowRuntime validation." -ForegroundColor Yellow
-    return
+    throw "Docker daemon is not reachable. Start Docker Desktop and wait until it finishes starting, then run this launcher again."
   }
 
   Ensure-DeerFlowBridgeEnv
@@ -137,7 +135,7 @@ function Start-DeerFlowSidecar {
     Start-Sleep -Seconds 2
   }
 
-  Write-Host "Warning: DeerFlow sidecar did not report healthy within the startup window. Check Docker logs if generation falls back." -ForegroundColor Yellow
+  throw "DeerFlow sidecar did not report healthy within the startup window. Check Docker Desktop containers/logs, then run this launcher again."
 }
 
 Write-Host ""
