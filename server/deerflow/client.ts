@@ -1,11 +1,12 @@
+import type { StreamStatus } from "../agentRunLoop.js";
 import type { AgentCard, AgentSettings } from "../agentCards.js";
 import type { ChatMessage } from "../providerRuntime.js";
 import type { ToolEventRecord } from "../toolRuntime.js";
 import type { ToolState } from "../toolRegistry.js";
-import { getDeerFlowRuntimeConfig, type DeerFlowRuntimeConfig } from "./config.js";
 import { authenticatedDeerFlowFetch } from "./auth.js";
-import { buildDeerFlowRuntimeMetadata } from "./taskAgentMapping.js";
+import { getDeerFlowRuntimeConfig, type DeerFlowRuntimeConfig } from "./config.js";
 import { parseSseChunk } from "./sse.js";
+import { buildDeerFlowRuntimeMetadata } from "./taskAgentMapping.js";
 
 export type DeerFlowRunInput = {
   threadId: string;
@@ -21,6 +22,8 @@ export type DeerFlowRunInput = {
   fetchImpl?: typeof fetch;
   config?: DeerFlowRuntimeConfig;
   onToolEvent?: (event: ToolEventRecord) => void;
+  onToken?: (token: string) => void;
+  onStatus?: (status: StreamStatus) => void;
 };
 
 export type DeerFlowRunResult = {
@@ -29,6 +32,13 @@ export type DeerFlowRunResult = {
   usage?: unknown;
   events: ToolEventRecord[];
 };
+
+const streamLabels = {
+  thinking: "正在思考",
+  searching: "正在查找资料",
+  writing: "正在生成回复",
+  finalizing: "正在整理要点"
+} as const;
 
 export async function runDeerFlowAgent(input: DeerFlowRunInput): Promise<DeerFlowRunResult> {
   const config = input.config ?? getDeerFlowRuntimeConfig();
@@ -54,7 +64,12 @@ export async function runDeerFlowAgent(input: DeerFlowRunInput): Promise<DeerFlo
     throw new Error("DeerFlow runtime returned an empty stream");
   }
 
-  return readDeerFlowStream(response.body, input.onToolEvent);
+  input.onStatus?.({ phase: "thinking", label: streamLabels.thinking });
+  return readDeerFlowStream(response.body, {
+    onToolEvent: input.onToolEvent,
+    onToken: input.onToken,
+    onStatus: input.onStatus
+  });
 }
 
 export function buildRunRequest(input: DeerFlowRunInput, config: DeerFlowRuntimeConfig) {
@@ -85,6 +100,7 @@ export function buildRunRequest(input: DeerFlowRunInput, config: DeerFlowRuntime
     },
     stream_mode: ["messages-tuple", "custom", "values"],
     stream_subgraphs: true,
+    multitask_strategy: "interrupt",
     if_not_exists: "create",
     on_disconnect: "cancel",
     on_completion: "keep"
@@ -107,7 +123,14 @@ function normalizeDeerFlowReasoningEffort(effort: AgentSettings["model"]["reason
   return undefined;
 }
 
-async function readDeerFlowStream(body: ReadableStream<Uint8Array>, onToolEvent?: (event: ToolEventRecord) => void): Promise<DeerFlowRunResult> {
+async function readDeerFlowStream(
+  body: ReadableStream<Uint8Array>,
+  callbacks: {
+    onToolEvent?: (event: ToolEventRecord) => void;
+    onToken?: (token: string) => void;
+    onStatus?: (status: StreamStatus) => void;
+  } = {}
+): Promise<DeerFlowRunResult> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   const events: ToolEventRecord[] = [];
@@ -144,7 +167,11 @@ async function readDeerFlowStream(body: ReadableStream<Uint8Array>, onToolEvent?
   function handleEvents(parsedEvents: ReturnType<typeof parseSseChunk>) {
     for (const parsed of parsedEvents) {
       const text = extractText(parsed.event, parsed.data);
-      if (text) textParts.push(text);
+      if (text) {
+        textParts.push(text);
+        callbacks.onStatus?.({ phase: "writing", label: streamLabels.writing });
+        callbacks.onToken?.(text);
+      }
       if (parsed.event === "values") {
         finalValuesText = extractFinalValuesText(parsed.data) ?? finalValuesText;
       }
@@ -152,13 +179,21 @@ async function readDeerFlowStream(body: ReadableStream<Uint8Array>, onToolEvent?
       const event = mapToolEvent(parsed.event, parsed.data);
       if (event) {
         events.push(event);
-        onToolEvent?.(event);
+        callbacks.onStatus?.(statusFromToolEvent(event));
+        callbacks.onToolEvent?.(event);
       }
 
       const nextUsage = extractUsage(parsed.data);
       if (nextUsage) usage = nextUsage;
     }
   }
+}
+
+function statusFromToolEvent(event: ToolEventRecord): StreamStatus {
+  if (/search|tool|started/i.test(String(event.payload?.type ?? event.eventType))) {
+    return { phase: "searching", label: streamLabels.searching };
+  }
+  return { phase: "finalizing", label: streamLabels.finalizing };
 }
 
 function extractText(event: string, data: unknown): string | undefined {

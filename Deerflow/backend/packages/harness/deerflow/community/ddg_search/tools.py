@@ -17,6 +17,8 @@ def _search_text(
     max_results: int = 5,
     region: str = "wt-wt",
     safesearch: str = "moderate",
+    timeout: int = 8,
+    backend: str = "auto",
 ) -> list[dict]:
     """
     Execute text search using DuckDuckGo.
@@ -36,7 +38,7 @@ def _search_text(
         logger.error("ddgs library not installed. Run: pip install ddgs")
         return []
 
-    ddgs = DDGS(timeout=30)
+    ddgs = DDGS(timeout=timeout)
 
     try:
         results = ddgs.text(
@@ -44,6 +46,7 @@ def _search_text(
             region=region,
             safesearch=safesearch,
             max_results=max_results,
+            backend=backend,
         )
         return list(results) if results else []
 
@@ -64,14 +67,20 @@ def web_search_tool(
         max_results: Maximum number of results to return. Default is 5.
     """
     config = get_app_config().get_tool_config("web_search")
+    timeout = 8
+    backend = "auto"
 
-    # Override max_results from config if set
-    if config is not None and "max_results" in config.model_extra:
+    # Override runtime controls from config if set.
+    if config is not None:
         max_results = config.model_extra.get("max_results", max_results)
+        timeout = config.model_extra.get("timeout", timeout)
+        backend = config.model_extra.get("backend", backend)
 
     results = _search_text(
         query=query,
         max_results=max_results,
+        timeout=timeout,
+        backend=backend,
     )
 
     if not results:

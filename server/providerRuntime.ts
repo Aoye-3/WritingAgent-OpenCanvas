@@ -57,8 +57,24 @@ export type ChatCompletionResponse = {
   usage?: unknown;
 };
 
+export type ChatCompletionStreamChunk = {
+  choices: Array<{
+    finish_reason?: string | null;
+    delta?: Omit<Partial<ChatMessage>, "tool_calls"> & {
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: "function";
+        function?: Partial<ChatToolCall["function"]>;
+      }>;
+    };
+  }>;
+  usage?: unknown;
+};
+
 export type ChatClient = {
   createChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse>;
+  createChatCompletionStream?: (request: ChatCompletionRequest) => AsyncIterable<ChatCompletionStreamChunk>;
 };
 
 export type ProviderCapabilities = {
@@ -240,6 +256,11 @@ export function createOpenAIChatClient(settings: { apiKey: string; baseURL: stri
       const { baseURLOverride, ...wireRequest } = request;
       const client = new OpenAI({ apiKey: settings.apiKey, baseURL: baseURLOverride ?? settings.baseURL });
       return client.chat.completions.create(wireRequest as never) as Promise<ChatCompletionResponse>;
+    },
+    createChatCompletionStream(request) {
+      const { baseURLOverride, ...wireRequest } = request;
+      const client = new OpenAI({ apiKey: settings.apiKey, baseURL: baseURLOverride ?? settings.baseURL });
+      return client.chat.completions.create({ ...wireRequest, stream: true } as never) as unknown as AsyncIterable<ChatCompletionStreamChunk>;
     }
   };
 }

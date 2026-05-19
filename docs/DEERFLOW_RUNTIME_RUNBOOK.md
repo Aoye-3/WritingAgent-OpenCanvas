@@ -90,6 +90,7 @@ Runtime acceptance:
 
 - Run one Summary or Blog generation through FacetWrite.
 - Response provider must be `deerflow`.
+- In the right-side AI conversation drawer, a streaming run must show the assistant avatar/status immediately and then receive visible text before the final `GenerateResponse` completes.
 - Tool events must not include `deerflow_runtime_failed`.
 - Run five short generations in a row and confirm none fall back to Provider or Mock.
 

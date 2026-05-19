@@ -134,7 +134,9 @@ build messages
 
 Tool events are recorded as `tool_call_requested`, `tool_call_completed`, `tool_call_failed`, and `tool_loop_stopped`.
 
-When DeerFlow is enabled, `server/deerflow/client.ts` calls `/api/runs/stream` through the backend DeerFlow auth session, maps token/message stream output into the FacetWrite response, and maps DeerFlow custom task events into `deerflow_*` tool events for the run history.
+For `/api/generate/stream`, the TypeScript run loop uses provider streaming when available. It forwards assistant content deltas as `token` events, emits transient `status` events around thinking, ToolUse/searching, writing, and finalizing phases, and still accumulates the same final text for normalization and persistence.
+
+When DeerFlow is enabled, `server/deerflow/client.ts` calls `/api/runs/stream` through the backend DeerFlow auth session, maps token/message stream output into the FacetWrite response, forwards assistant message chunks as `token` events, and maps DeerFlow custom task events into `deerflow_*` tool events for the run history.
 
 The TypeScript run loop remains the fallback when DeerFlow is disabled, unavailable, returns an empty answer, or returns only internal/runtime output. A recoverable DeerFlow failure should not create a Mock fallback response by itself; Mock fallback is reserved for cases where both DeerFlow and the Provider runtime cannot produce a safe assistant answer.
 

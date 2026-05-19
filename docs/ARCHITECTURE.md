@@ -20,14 +20,14 @@ User input
 - `src/app/App.tsx` is the control-plane composition layer. It owns navigation, active Agent selection, and view wiring, while thread, generation, Canvas, and trash workflows live in focused hooks under `src/app/hooks/`.
 - `src/app/hooks/useThreadSession.ts` owns thread creation, thread restore, and last-thread persistence.
 - `src/app/hooks/useCanvasState.ts` owns Canvas nodes, pending write requests, selected node state, and approve/reject handlers.
-- `src/app/hooks/useGenerationRun.ts` owns structured generation, chat generation, streaming token/tool-event updates, versions, collaboration messages, and direct Canvas-write intent handoff. When the user explicitly asks to write to Canvas, it auto-approves only the new pending write requests created by that run.
+- `src/app/hooks/useGenerationRun.ts` owns structured generation, chat generation, streaming token/status/tool-event updates, versions, collaboration messages, and direct Canvas-write intent handoff. For chat streaming it creates a temporary assistant message in the right AI collaboration drawer, fills that assistant bubble through a typewriter queue, then reconciles with persisted thread state after the final response. The main Canvas layout is not a streaming transcript surface. When the user explicitly asks to write to Canvas, it auto-approves only the new pending write requests created by that run.
 - `src/app/hooks/useProjectTrash.ts` owns trash, restore, and hard-delete flows.
 - `src/features/settings/hooks/useProjectSettings.ts` owns provider settings state, validation/save actions, and DeerFlow status loading. `ProjectSettingsPanel` only renders the dialog shell and composes the provider form with the read-only DeerFlow runtime panel.
 - `src/features/agents/hooks/useAgentRuntimeConfig.ts` owns Agent runtime-config loading and settings save. `AgentSettingsView` owns gallery/filter/tab navigation, while tab UI lives in `src/features/agents/components/AgentSettingsTabs.tsx`.
 - `src/features/*` groups product areas: agents, canvas, generation, home, i18n, knowledge, projects, settings, start, tasks, and workspace.
 - `src/shared/ui/` is the lightweight FacetWrite UI primitive layer. It provides shared buttons, fields, chips, tabs, panels, drawers, dialogs, badges, and empty states without owning business data or backend/runtime behavior.
 - `src/features/workspace/WorkspaceView.tsx` renders the main writing workspace: structured Agent inputs, document Canvas, collaboration drawer, tool events, version history, and workspace utility surfaces.
-- `src/features/workspace/components/AICollaborationDrawer.tsx` owns chat-side Canvas write proposals, temporary response annotations, annotation chips, and highlighted assistant-message text. Annotation chips are shown both in the proposal panel and above the composer so the user can see the active write selection before sending "write" instructions. Annotation state is intentionally client-only and is cleared after write/cancel/page refresh.
+- `src/features/workspace/components/AICollaborationDrawer.tsx` owns chat-side Canvas write proposals, temporary streaming assistant status, temporary response annotations, annotation chips, and highlighted assistant-message text. Annotation chips are shown both in the proposal panel and above the composer so the user can see the active write selection before sending "write" instructions. Annotation state is intentionally client-only and is cleared after write/cancel/page refresh.
 - `src/features/workspace/components/DocumentCanvas.tsx` renders Canvas V2 through `@xyflow/react`. React Flow owns viewport pan, zoom, selection, and node dragging; FacetWrite owns node rendering, node CRUD calls, resize persistence, and Canvas write approval flows.
 - Canvas hit testing is intentionally split between React Flow pane interactions and FacetWrite node controls. Inputs/buttons use `nodrag`, resize controls use `nodrag nopan`, and any future overlay must be browser-verified so it does not block pane context menus, pan/zoom, node drag, node resize, or node editing. See `docs/CANVAS.md`.
 - `src/shared/MarkdownText.tsx` preserves Markdown block/inline rendering while optionally wrapping annotated text fragments in highlight marks.
@@ -40,9 +40,9 @@ User input
 - `server/app.ts` wires Express middleware, storage, Agent runtime, generation service, and route modules.
 - `server/routes/*` defines API endpoints for health, catalog, agents, threads, projects, Canvas, settings, and generation.
 - `server/services/*` contains Agent definition/catalog behavior, generation orchestration, and settings persistence/validation.
-- `server/deerflow/*` contains the DeerFlow sidecar runtime adapter, backend-only auth session handling, SSE parsing, runtime status, read-only config proxy, and AgentCard-to-subagent mapping.
-- `server/providerRuntime.ts` normalizes provider request behavior for supported provider IDs.
-- `server/agentRunLoop.ts` runs Chat Completions, executes returned tool calls, records tool events, and stops when final content or `maxToolCalls` is reached.
+- `server/deerflow/*` contains the DeerFlow sidecar runtime adapter, backend-only auth session handling, SSE parsing, runtime status, read-only config proxy, AgentCard-to-subagent mapping, and token/status forwarding for `/api/generate/stream`.
+- `server/providerRuntime.ts` normalizes provider request behavior for supported provider IDs, including Chat Completions streaming behind the provider profile boundary.
+- `server/agentRunLoop.ts` runs Chat Completions, executes returned tool calls, records tool events, streams final assistant tokens when available, and stops when final content or `maxToolCalls` is reached.
 
 ## Agent And Tool Layers
 - `server/agentCards.ts` is a compatibility export for the Agent modules under `server/agents/`.
@@ -58,8 +58,10 @@ User input
 - `server/toolRuntime.ts` executes local ToolUse behavior and creates Canvas write requests when `canvas_write` is called. If a model asks for `replace` without an explicit user replace/overwrite instruction, the runtime normalizes the operation to `append` for a selected node or `create` otherwise.
 
 ## Agent Output Boundary
-- Runtime streams are never written directly to UI messages. DeerFlow/provider output must pass through the Agent output normalizer before it is recorded as an assistant message or output version.
+- Runtime streams may feed temporary UI-only assistant messages, but they are never treated as persisted truth. DeerFlow/provider output must pass through the Agent output normalizer before it is recorded as an assistant message or output version.
 - The normalizer separates user-visible assistant text from tool/internal events. System prompts, AgentCard prompt blocks, ToolUse JSON, search result JSON, reasoning payloads, and DeerFlow replay values are blocked from chat/output surfaces and recorded only as redacted runtime events.
+- `/api/generate/stream` uses a server-side progressive text gate before releasing text so obvious internal prompt, ToolUse, search JSON, and reasoning payload leaks are not streamed into the UI. After the initial safety buffer, the gate emits small user-visible UI chunks instead of large paragraph-sized blocks; long flush/final remainders are also split before they reach the browser.
+- The frontend treats streamed chunks as input to a UI-only typewriter queue. In chat mode the visible queue target is the assistant bubble in `AICollaborationDrawer`; `final` remains authoritative for persistence, but the UI waits for that typewriter queue to drain and only corrects visible text if the final recorded output differs from the streamed text.
 - If DeerFlow returns an empty answer or only internal/runtime output, FacetWrite records a `deerflow_runtime_failed` event and continues with the Provider runtime. Only if the Provider runtime also fails does the run enter Mock fallback.
 - Stored historical messages and output versions are sanitized again at read time so older leaked local records cannot reappear in the workspace UI.
 

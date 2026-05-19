@@ -29,12 +29,13 @@ export function registerGenerationRoutes(app: Express, { generationService }: Ge
 
     try {
       const payload = parseGenerateRequest(request.body);
-      const result = await generationService.generateAndRecord(payload, (event) => {
-        writeSse(response, "tool_event", event);
+      const result = await generationService.generateAndRecordStream(payload, {
+        onStatus: (status) => writeSse(response, "status", status),
+        onToken: (token) => writeSse(response, "token", { text: token }),
+        onToolEvent: (event) => {
+          writeSse(response, "tool_event", event);
+        }
       });
-      for (const token of chunkText(result.text)) {
-        writeSse(response, "token", { text: token });
-      }
       writeSse(response, "final", result);
     } catch (error) {
       writeSse(response, "error", {
@@ -50,12 +51,4 @@ export function registerGenerationRoutes(app: Express, { generationService }: Ge
 function writeSse(response: Response, event: string, payload: unknown) {
   response.write(`event: ${event}\n`);
   response.write(`data: ${JSON.stringify(payload)}\n\n`);
-}
-
-function chunkText(text: string) {
-  const chunks: string[] = [];
-  for (let index = 0; index < text.length; index += 24) {
-    chunks.push(text.slice(index, index + 24));
-  }
-  return chunks;
 }

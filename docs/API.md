@@ -50,10 +50,13 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - Direct Canvas-write intent in `chatInstruction`, such as `写入`, `保存到画板`, `save to canvas`, or `write this`, may cause the frontend to approve the newly returned pending Canvas write request after this endpoint completes. The API still records the request first; Canvas mutation remains behind the approve path.
 - `POST /api/generate/stream`
   - SSE endpoint.
-  - Emits `tool_event`, `token`, `final`, and `error` events.
+  - Emits `status`, `tool_event`, `token`, `final`, and `error` events.
+  - `status` payloads include `{ phase, label }`, where phase is `thinking`, `searching`, `writing`, or `finalizing`. These events are for transient UI state and are not persisted as messages.
+  - `token` events are emitted as progressive, user-visible assistant text segments after the backend safety gate has enough text to rule out obvious internal prompt, ToolUse, or reasoning leaks. Segments are intentionally small UI chunks so the right AI collaboration drawer can render a visible typewriter effect even when an upstream provider or runtime flushes a large block at once.
   - `error` payloads include `code` and `message`.
   - DeerFlow custom subagent events are emitted as `tool_event` records with `eventType` prefixed by `deerflow_`.
   - Recoverable DeerFlow-to-Provider fallback is emitted as a `tool_event` with `eventType:"deerflow_runtime_failed"` and a redacted payload containing `fallback:"provider"`.
+  - The `final` payload remains the recorded `GenerateResponse`. Clients should let the chat assistant typewriter queue drain before reconciling temporary streaming text with this final thread state so the drawer does not suddenly replace a large block of content.
 
 ## DeerFlow Runtime Configuration
 - `DEERFLOW_ENABLED`

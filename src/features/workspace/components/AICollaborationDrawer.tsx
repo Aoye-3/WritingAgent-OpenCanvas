@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, SendIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
@@ -48,6 +48,11 @@ const toolMeta: Record<string, { en: string; zh: string; icon: string; hint: str
   clear_context: { en: "Clear context", zh: "清除上下文", icon: "C", hint: "Ignore previous conversational context" }
 };
 
+const waitingLabels = {
+  zh: ["思考中", "整理上下文", "检查可用资料", "组织回答结构", "准备生成内容"],
+  en: ["Thinking", "Reviewing context", "Checking available sources", "Structuring the answer", "Preparing the response"]
+} as const;
+
 export function AICollaborationDrawer({
   allowedTools,
   canvasWriteRequests,
@@ -75,6 +80,8 @@ export function AICollaborationDrawer({
   const [selectionAction, setSelectionAction] = useState<SelectionAction | null>(null);
   const [writeBusy, setWriteBusy] = useState(false);
   const [writeStatus, setWriteStatus] = useState("");
+  const [statusIndex, setStatusIndex] = useState(0);
+  const messageListRef = useRef<HTMLDivElement | null>(null);
 
   const pendingWriteRequest = canvasWriteRequests[0];
   const lastAssistantText = useMemo(() => [...messages].reverse().find((message) => message.role === "assistant" && message.text.trim())?.text ?? "", [messages]);
@@ -86,6 +93,15 @@ export function AICollaborationDrawer({
     setThinkEnabled(modelSettings?.thinkingMode === "enabled");
     setReasoningEffort(modelSettings?.reasoningEffort ?? "high");
   }, [modelSettings?.providerId, modelSettings?.thinkingMode, modelSettings?.reasoningEffort]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setStatusIndex((index) => index + 1), 1500);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    messageListRef.current?.scrollTo({ top: messageListRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages, isSending]);
 
   const resetWriteDraft = () => {
     setAnnotations([]);
@@ -221,7 +237,7 @@ export function AICollaborationDrawer({
         </button>
       </div>
 
-      <div className="drawer-message-list" aria-live="polite">
+      <div className="drawer-message-list" aria-live="polite" ref={messageListRef}>
         {messages.length === 0 ? (
           <div className="empty-chat-state">
             {locale === "zh" ? "在这里追问、要求改写，或让 Agent 解释本次生成。" : "Ask follow-ups, request rewrites, or have the agent explain the current draft."}
@@ -229,13 +245,17 @@ export function AICollaborationDrawer({
         ) : null}
         {messages.map((message) => {
           const messageAnnotations = annotations.filter((annotation) => annotation.messageId === message.id);
+          const isPendingAssistant = message.role === "assistant" && message.isStreaming && !message.text.trim();
           return (
-            <article className={`message message-${message.role}`} key={message.id}>
+            <article className={`message message-${message.role}${message.isStreaming ? " message-streaming" : ""}${isPendingAssistant ? " message-thinking" : ""}`} key={message.id}>
               <div className="message-avatar" aria-hidden="true">{message.role === "user" ? "U" : "F"}</div>
-              <div className="message-bubble">
-                {message.role === "assistant" ? (
+              <div className={isPendingAssistant ? "message-thinking-status" : "message-bubble"}>
+                {message.role === "assistant" && message.isStreaming && !message.text.trim() ? (
+                  <StreamingStatus label={streamingStatusLabel(message, locale, statusIndex)} />
+                ) : message.role === "assistant" ? (
                   <div className="assistant-selectable-text" onMouseUp={(event) => captureSelection(event, message)}>
                     <MarkdownText text={message.text} highlights={messageAnnotations.map((annotation) => annotation.text)} />
+                    {message.isStreaming ? <span className="typing-caret" aria-hidden="true" /> : null}
                   </div>
                 ) : <p>{message.text}</p>}
                 {message.role === "assistant" && message.text.trim() ? (
@@ -319,6 +339,25 @@ export function AICollaborationDrawer({
       <ToolEventDrawer events={toolEvents} />
     </aside>
   );
+}
+
+function StreamingStatus({ label }: { label: string }) {
+  return (
+    <div className="streaming-status" aria-live="polite">
+      <span>{label}</span>
+      <i aria-hidden="true" />
+    </div>
+  );
+}
+
+function streamingStatusLabel(message: CollaborationMessage, locale: "en" | "zh", statusIndex: number) {
+  if (message.isStreaming && !message.text.trim()) {
+    const labels = locale === "zh" ? waitingLabels.zh : waitingLabels.en;
+    return labels[statusIndex % labels.length];
+  }
+  if (message.statusLabel) return message.statusLabel;
+  const labels = locale === "zh" ? waitingLabels.zh : waitingLabels.en;
+  return labels[statusIndex % labels.length];
 }
 
 function WriteMessageButton({ onWrite }: { onWrite: () => void }) {

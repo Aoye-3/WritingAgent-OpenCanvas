@@ -1,5 +1,27 @@
 # FacetWrite Refactor Log
 
+## 2026-05-18: Right-side AI Chat Real Streaming
+Scope: Replaced the collaboration drawer's fake post-hoc chunking with real streaming status/token flow and updated maintained technical docs.
+
+Findings:
+- `/api/generate/stream` previously waited for `generateAndRecord` to finish and then sliced the final text into chunks, so the frontend still had a visible empty wait.
+- DeerFlow already exposed useful SSE message chunks internally, while the provider fallback needed a streaming Chat Completions path.
+
+Completed:
+- Added provider streaming support behind `server/providerRuntime.ts` and `server/agentRunLoop.ts`.
+- Forwarded DeerFlow assistant message chunks through the FacetWrite stream path.
+- Added `status` SSE events and temporary assistant status/typewriter UI in the right-side collaboration drawer.
+- Preserved final normalization, SQLite recording, ToolUse events, and Canvas write approval semantics.
+- Updated `docs/API.md`, `docs/ARCHITECTURE.md`, `docs/AGENT.md`, `docs/DEERFLOW_RUNTIME_RUNBOOK.md`, `docs/SECURITY.md`, and `docs/DECISIONS.md`.
+- Confirmed `npm.cmd run typecheck` and `npm.cmd test` pass.
+
+Open TODO:
+- Validate with a live provider key and live DeerFlow sidecar in the browser to confirm perceived latency and real network chunk timing.
+- Consider moving the typewriter queue into a reusable hook if another surface adopts streaming.
+
+Next Priority Check:
+- Browser-verify `http://localhost:5175/` chat streaming with a long prompt, desktop and narrow viewport, and console health.
+
 ## 2026-05-18: UI Primitive Layer And Workspace Layout Split
 Scope: Started the all-app frontend layout and component-system pass after Canvas V2 stabilization.
 

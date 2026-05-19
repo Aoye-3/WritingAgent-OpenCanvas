@@ -64,12 +64,7 @@ function AppContent() {
     const latestVersion = state.outputVersions[0];
     generationRun.setActiveVersionId(latestVersion?.id);
     generationRun.setEditableOutput(latestVersion?.content ?? "");
-    generationRun.setCollaborationMessages(state.messages.map((message) => ({
-      id: message.id,
-      role: message.role,
-      text: message.text,
-      usedMock: message.usedMock
-    })));
+    generationRun.applyCollaborationMessagesFromThreadState(state);
     generationRun.setGeneration(latestVersion ? {
       text: latestVersion.content,
       prompt: "",
