@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ChevronLeftIcon, ChevronRightIcon, StarIcon } from "../../../shared/icons";
 import { ChipGroup, IconButton, SelectField, SegmentedControl, TextareaField, TextField } from "../../../shared/ui";
 import type { AgentCard, AgentCardField, AgentValues } from "../../agents/types";
@@ -8,14 +9,18 @@ type AgentInputDrawerProps = {
   agentValues: AgentValues;
   collapsed: boolean;
   locale: Locale;
+  projectTitle: string;
   onCollapse: () => void;
   onExpand: () => void;
+  onProjectTitleChange: (title: string) => Promise<void>;
   onValuesChange: (values: AgentValues) => void;
   labels: {
     coreSettings: string;
     customInstruction: string;
     outputSpec: string;
     clear: string;
+    projectName: string;
+    projectNamePlaceholder: string;
   };
 };
 
@@ -24,13 +29,30 @@ export function AgentInputDrawer({
   agentValues,
   collapsed,
   locale,
+  projectTitle,
   onCollapse,
   onExpand,
+  onProjectTitleChange,
   onValuesChange,
   labels
 }: AgentInputDrawerProps) {
+  const [projectTitleDraft, setProjectTitleDraft] = useState(projectTitle);
+
+  useEffect(() => {
+    setProjectTitleDraft(projectTitle);
+  }, [projectTitle]);
+
   const updateValue = (id: string, value: string) => {
     onValuesChange({ ...agentValues, [id]: value });
+  };
+
+  const commitProjectTitle = async () => {
+    const nextTitle = projectTitleDraft.trim();
+    if (!nextTitle || nextTitle === projectTitle) {
+      setProjectTitleDraft(projectTitle);
+      return;
+    }
+    await onProjectTitleChange(nextTitle);
   };
 
   return (
@@ -62,6 +84,22 @@ export function AgentInputDrawer({
         <div className="agent-capability-box ui-panel">
           <span>{activeAgent.skillRefs.join(", ")}</span>
           <p>{activeAgent.description[locale]}</p>
+        </div>
+
+        <div className="drawer-project-name">
+          <TextField
+            label={labels.projectName}
+            maxLength={120}
+            placeholder={labels.projectNamePlaceholder}
+            value={projectTitleDraft}
+            onBlur={() => { void commitProjectTitle(); }}
+            onChange={(event) => setProjectTitleDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.currentTarget.blur();
+              }
+            }}
+          />
         </div>
 
         <form className="facet-form">

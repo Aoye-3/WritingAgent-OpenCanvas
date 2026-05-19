@@ -1297,6 +1297,14 @@ textarea:focus-visible,
   line-height: 1.45;
 }
 
+.drawer-project-name {
+  margin: 12px 22px 0;
+}
+
+.drawer-project-name .field {
+  margin-bottom: 0;
+}
+
 .facet-form { padding: 18px 22px 22px; overflow: auto; }
 fieldset { border: 0; padding: 0; margin: 0 0 24px; }
 legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--color-text); }
@@ -2343,6 +2351,10 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 .view-workspace .agent-capability-box {
   margin: 12px 18px 0;
   padding: 12px;
+}
+
+.view-workspace .drawer-project-name {
+  margin: 10px 18px 0;
 }
 
 .view-workspace .facet-form {

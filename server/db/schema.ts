@@ -24,6 +24,12 @@ export function migrateStorageSchema(db: DatabaseSync) {
       deleted_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS thread_inputs (
+      thread_id TEXT PRIMARY KEY,
+      structured_values_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
       thread_id TEXT NOT NULL,

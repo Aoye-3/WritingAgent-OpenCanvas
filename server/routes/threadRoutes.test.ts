@@ -59,6 +59,23 @@ async function post(app: express.Express, path: string, body: unknown) {
   }
 }
 
+async function get(app: express.Express, path: string) {
+  const server = app.listen(0, "127.0.0.1");
+  try {
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const address = server.address();
+    assert.equal(typeof address, "object");
+    assert.ok(address);
+    const response = await fetch(`http://127.0.0.1:${(address as AddressInfo).port}${path}`);
+    return {
+      status: response.status,
+      body: await response.json() as Record<string, unknown>
+    };
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+}
+
 test("renames an active thread title", async () => {
   const { app, storage } = await withThreadRoutes();
   const threadId = `thread_rename_route_${Date.now()}`;
@@ -83,6 +100,34 @@ test("rejects blank thread titles", async () => {
 
   assert.equal(result.status, 400);
   assert.equal((result.body.error as { code: string }).code, "bad_request");
+
+  storage.moveThreadToTrash(threadId);
+  await storage.hardDeleteThread(threadId);
+});
+
+test("persists structured inputs on an active thread", async () => {
+  const { app, storage } = await withThreadRoutes();
+  const threadId = `thread_inputs_route_${Date.now()}`;
+  await storage.ensureThread(threadId, "blog-post");
+
+  const saved = await request(app, `/api/threads/${threadId}/inputs`, {
+    structuredValues: {
+      topic: "Project-scoped draft",
+      tone: "Friendly",
+      ignored: { nested: true }
+    }
+  });
+  const state = await get(app, `/api/threads/${threadId}/state`);
+
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.body.structuredValues, {
+    topic: "Project-scoped draft",
+    tone: "Friendly"
+  });
+  assert.deepEqual(state.body.structuredValues, {
+    topic: "Project-scoped draft",
+    tone: "Friendly"
+  });
 
   storage.moveThreadToTrash(threadId);
   await storage.hardDeleteThread(threadId);

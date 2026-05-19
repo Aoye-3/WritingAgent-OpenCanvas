@@ -101,6 +101,20 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime }: Th
     }
   });
 
+  app.patch("/api/threads/:threadId/inputs", (request, response) => {
+    try {
+      const structuredValues = storage.saveThreadInputValues(request.params.threadId, request.body?.structuredValues);
+      if (!structuredValues) {
+        sendError(response, 404, "not_found", "Thread not found");
+        return;
+      }
+
+      sendOk(response, { structuredValues });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to save structured inputs"));
+    }
+  });
+
   app.delete("/api/threads/:threadId", async (request, response) => {
     try {
       const deleted = await storage.hardDeleteThread(request.params.threadId);
@@ -129,6 +143,7 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime }: Th
     sendOk(response, {
       thread,
       messages: storage.listMessages(request.params.threadId),
+      structuredValues: storage.getThreadInputValues(request.params.threadId),
       outputVersions: storage.listOutputVersions(request.params.threadId),
       toolEvents: storage.listToolEvents(request.params.threadId),
       canvasNodes: storage.listCanvasNodes(request.params.threadId),

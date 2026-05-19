@@ -55,6 +55,11 @@ export async function renameThread(threadId: string, title: string): Promise<Sto
   return payload.thread;
 }
 
+export async function saveThreadInputs(threadId: string, structuredValues: Record<string, string | string[]>): Promise<Record<string, string | string[]>> {
+  const payload = await apiPatch<{ structuredValues: Record<string, string | string[]> }>(`/api/threads/${encodeURIComponent(threadId)}/inputs`, { structuredValues });
+  return payload.structuredValues;
+}
+
 export async function fetchAgentSettings(agentCardId: string): Promise<AgentSettings> {
   const payload = await apiGet<{ settings: AgentSettings }>(`/api/agent-cards/${encodeURIComponent(agentCardId)}/settings`);
   return payload.settings;

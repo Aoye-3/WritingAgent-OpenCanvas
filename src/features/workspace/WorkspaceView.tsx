@@ -29,6 +29,7 @@ type WorkspaceViewProps = {
   canvasWriteRequests: CanvasWriteRequest[];
   selectedCanvasNodeId?: string;
   toolEvents: StoredToolEvent[];
+  projectTitle: string;
   onApproveCanvasWriteRequest: (requestId: string) => Promise<void>;
   onChatSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"]) => Promise<void>;
   onCreateCanvasNode: (draft: CanvasNodeDraft) => Promise<void>;
@@ -38,6 +39,7 @@ type WorkspaceViewProps = {
   onGoHome: () => void;
   onOpenSettings: () => void;
   onAgentValuesChange: (values: AgentValues) => void;
+  onProjectTitleChange: (title: string) => Promise<void>;
   onApplyCanvasWriteFromMessage: (text: string) => Promise<void>;
   onRejectCanvasWriteRequest: (requestId: string) => Promise<void>;
   onRestoreVersion: (version: StoredOutputVersion) => void;
@@ -59,6 +61,7 @@ export function WorkspaceView({
   canvasWriteRequests,
   selectedCanvasNodeId,
   toolEvents,
+  projectTitle,
   onApproveCanvasWriteRequest,
   onChatSend,
   onCreateCanvasNode,
@@ -66,6 +69,7 @@ export function WorkspaceView({
   onGoHome,
   onOpenSettings,
   onAgentValuesChange,
+  onProjectTitleChange,
   onApplyCanvasWriteFromMessage,
   onRejectCanvasWriteRequest,
   onSelectCanvasNode,
@@ -142,11 +146,15 @@ export function WorkspaceView({
             clear: t("workspace.clear"),
             coreSettings: t("workspace.coreSettings"),
             customInstruction: t("workspace.customInstruction"),
-            outputSpec: t("workspace.outputSpec")
+            outputSpec: t("workspace.outputSpec"),
+            projectName: locale === "zh" ? "项目名称" : "Project name",
+            projectNamePlaceholder: locale === "zh" ? "输入项目名称" : "Name this project"
           }}
           locale={locale}
+          projectTitle={projectTitle}
           onCollapse={() => setLeftCollapsed(true)}
           onExpand={() => setLeftCollapsed(false)}
+          onProjectTitleChange={onProjectTitleChange}
           onValuesChange={onAgentValuesChange}
         />
 

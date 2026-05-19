@@ -218,6 +218,7 @@ export type StoredMessage = {
 export type ThreadStateResponse = {
   thread: StoredThread;
   messages: StoredMessage[];
+  structuredValues?: AgentValues;
   outputVersions: StoredOutputVersion[];
   toolEvents: StoredToolEvent[];
   canvasNodes?: CanvasNode[];

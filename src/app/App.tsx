@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { fetchThreadState } from "../features/agents/agentClient";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { fetchThreadState, renameThread, saveThreadInputs } from "../features/agents/agentClient";
 import { AgentSettingsView } from "../features/agents/AgentSettingsView";
 import { useAgentCards } from "../features/agents/hooks/useAgentCards";
 import type { AgentCard, AgentValues, StoredThread, ThreadStateResponse } from "../features/agents/types";
@@ -50,13 +50,15 @@ function AppContent() {
   const { handleBatchHardDelete, handleBatchMoveToTrash, handleRenameThread, handleTogglePinnedThread, pinnedThreadIds, projects, recentThreads, refreshProjectSurfaces, refreshProjects, refreshRecentThreads, trashProjects } = useProjects();
   const [activeAgent, setActiveAgent] = useState<AgentCard>(fallbackAgentCards[0]);
   const [agentValues, setAgentValues] = useState<AgentValues>(() => getInitialValues(fallbackAgentCards[0]));
+  const [activeProjectTitle, setActiveProjectTitle] = useState(fallbackAgentCards[0].title[locale]);
   const [toolState, setToolState] = useState<GenerateRequest["toolState"]>({ knowledge_base: true, canvas_write: true });
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const applyThreadState = (state: ThreadStateResponse) => {
     const agentCard = agentCards.find((card) => card.id === state.thread.agentCardId) ?? fallbackAgentCards[0];
     setActiveAgent(agentCard);
-    setAgentValues(getInitialValues(agentCard));
+    setAgentValues({ ...getInitialValues(agentCard), ...(state.structuredValues ?? {}) });
+    setActiveProjectTitle(state.thread.title);
     threadSession.setThreadId(state.thread.id);
     generationRun.setOutputVersions(state.outputVersions);
     generationRun.setToolEvents(state.toolEvents);
@@ -125,6 +127,7 @@ function AppContent() {
     generationRun.setToolEvents(state.toolEvents);
     generationRun.setActiveVersionId(state.outputVersions[0]?.id);
     canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? []);
+    setActiveProjectTitle(state.thread.title);
     await refreshProjectSurfaces();
   };
 
@@ -158,10 +161,25 @@ function AppContent() {
 
   useEffect(() => {
     const firstAgent = agentCards[0];
-    if (!firstAgent || activeAgent.id !== fallbackAgentCards[0].id) return;
+    if (!firstAgent || view === "workspace" || activeAgent.id !== fallbackAgentCards[0].id) return;
     setActiveAgent(firstAgent);
     setAgentValues(getInitialValues(firstAgent));
-  }, [activeAgent.id, agentCards]);
+  }, [activeAgent.id, agentCards, view]);
+
+  useEffect(() => {
+    if (view !== "workspace" || !threadSession.threadId) return;
+    const saveTimer = window.setTimeout(() => {
+      void saveThreadInputs(threadSession.threadId, agentValues).then(() => refreshProjectSurfaces()).catch(() => undefined);
+    }, 350);
+    return () => window.clearTimeout(saveTimer);
+  }, [agentValues, refreshProjectSurfaces, threadSession.threadId, view]);
+
+  const handleActiveProjectTitleChange = useCallback(async (title: string) => {
+    if (!threadSession.threadId) return;
+    const thread = await renameThread(threadSession.threadId, title);
+    setActiveProjectTitle(thread.title);
+    await refreshProjectSurfaces();
+  }, [refreshProjectSurfaces, threadSession.threadId]);
 
   const promptPreview = useMemo(() => {
     const pairs = activeAgent.fields
@@ -184,8 +202,10 @@ function AppContent() {
   }, [activeAgent, agentValues, locale, toolState]);
 
   const openWorkspace = async (agentCard: AgentCard) => {
+    threadSession.setThreadId("");
     setActiveAgent(agentCard);
     setAgentValues(getInitialValues(agentCard));
+    setActiveProjectTitle(agentCard.title[locale]);
     generationRun.resetGeneration();
     canvasState.resetCanvas();
     setToolState({ knowledge_base: true, canvas_write: true });
@@ -258,7 +278,9 @@ function AppContent() {
         canvasWriteRequests={canvasState.canvasWriteRequests}
         selectedCanvasNodeId={canvasState.selectedCanvasNodeId}
         toolEvents={generationRun.toolEvents}
+        projectTitle={activeProjectTitle}
         onAgentValuesChange={setAgentValues}
+        onProjectTitleChange={handleActiveProjectTitleChange}
         onApproveCanvasWriteRequest={canvasState.handleApproveCanvasWriteRequest}
         onChatSend={generationRun.handleChatSend}
         onCreateCanvasNode={canvasState.handleCreateCanvasNode}

@@ -51,6 +51,8 @@ export type ProjectSummary = StoredThread & {
   provider?: string;
 };
 
+export type StoredStructuredValues = Record<string, string | string[]>;
+
 export type StoredOutputVersion = {
   id: string;
   threadId: string;
@@ -264,6 +266,32 @@ export class SQLiteStorageRepository {
     return this.threads.renameThread(threadId, cleanTitle);
   }
 
+  getThreadInputValues(threadId: string): StoredStructuredValues {
+    validateId(threadId, "threadId");
+    const row = this.db
+      .prepare(`SELECT structured_values_json as structuredValuesJson FROM thread_inputs WHERE thread_id = ?`)
+      .get(threadId) as { structuredValuesJson: string } | undefined;
+    if (!row) return {};
+    return cleanStructuredValues(parseJson(row.structuredValuesJson));
+  }
+
+  saveThreadInputValues(threadId: string, structuredValues: unknown) {
+    validateId(threadId, "threadId");
+    const thread = this.getThread(threadId);
+    if (!thread) return undefined;
+    const values = cleanStructuredValues(structuredValues);
+    const now = nowIso();
+    this.db
+      .prepare(
+        `INSERT INTO thread_inputs (thread_id, structured_values_json, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(thread_id) DO UPDATE SET structured_values_json = excluded.structured_values_json, updated_at = excluded.updated_at`
+      )
+      .run(threadId, JSON.stringify(values), now);
+    this.touchThread(threadId, now);
+    return values;
+  }
+
   async hardDeleteThread(threadId: string) {
     validateId(threadId, "threadId");
     const thread = this.db.prepare(`SELECT id FROM threads WHERE id = ? AND deleted_at IS NOT NULL`).get(threadId);
@@ -272,6 +300,7 @@ export class SQLiteStorageRepository {
     this.withTransaction(() => {
       this.db.prepare(`DELETE FROM canvas_write_requests WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM canvas_nodes WHERE thread_id = ?`).run(threadId);
+      this.db.prepare(`DELETE FROM thread_inputs WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM tool_events WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM output_versions WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM prompt_versions WHERE thread_id = ?`).run(threadId);
@@ -621,4 +650,21 @@ function threadDataRoot(threadId: string) {
     throw new Error("Thread data must stay inside the local app workspace");
   }
   return resolved;
+}
+
+function cleanStructuredValues(value: unknown): StoredStructuredValues {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const values: StoredStructuredValues = {};
+  for (const [key, rawValue] of Object.entries(value)) {
+    if (!/^[A-Za-z0-9_-]{1,80}$/.test(key)) continue;
+    if (typeof rawValue === "string") {
+      values[key] = rawValue.slice(0, 8000);
+    } else if (Array.isArray(rawValue)) {
+      values[key] = rawValue
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.slice(0, 1000))
+        .slice(0, 50);
+    }
+  }
+  return values;
 }
