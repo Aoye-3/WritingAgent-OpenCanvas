@@ -4,6 +4,7 @@ import { getDeerFlowRuntimeConfig, type DeerFlowRuntimeConfig } from "../../deer
 import { runDeerFlowAgent } from "../../deerflow/client.js";
 import type { ChatMessage } from "../../providerRuntime.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
+import type { StreamStatus } from "../../agentRunLoop.js";
 
 export type DeerFlowRunnerInput = {
   payload: GenerateRequest;
@@ -12,6 +13,8 @@ export type DeerFlowRunnerInput = {
   messages: ChatMessage[];
   prompt: string;
   onToolEvent?: (event: ToolEventRecord) => void;
+  onToken?: (token: string) => void;
+  onStatus?: (status: StreamStatus) => void;
 };
 
 export type DeerFlowRunnerDeps = {
@@ -35,7 +38,9 @@ export async function runDeerFlowGeneration(input: DeerFlowRunnerInput, deps: De
     selectedCanvasNodeId: input.payload.selectedCanvasNodeId,
     contextValues: input.payload.contextValues,
     chatInstruction: input.payload.chatInstruction ?? input.payload.freeTextPrompt,
-    onToolEvent: input.onToolEvent
+    onToolEvent: input.onToolEvent,
+    onToken: input.onToken,
+    onStatus: input.onStatus
   });
 
   if (!run.text) {

@@ -1,8 +1,16 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AgentCard, AgentValues, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
 import { generateText, generateTextStream } from "../../features/generation/generationClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../../features/generation/types";
 import type { Locale } from "../../features/i18n/types";
+import {
+  enqueueTypewriterToken,
+  getTypewriterFinalPatch,
+  reconcileCollaborationMessages,
+  takeTypewriterText,
+  TYPEWRITER_TICK_MS,
+  type TypewriterState
+} from "./streamingTypewriter";
 
 type UseGenerationRunOptions = {
   activeAgent: AgentCard;
@@ -22,6 +30,8 @@ type UseGenerationRunOptions = {
   getPendingCanvasWriteRequestIds: () => string[];
 };
 
+type TypewriterTarget = "editable" | `message:${string}`;
+
 export function useGenerationRun(options: UseGenerationRunOptions) {
   const [generation, setGeneration] = useState<GenerateResponse | null>(null);
   const [editableOutput, setEditableOutput] = useState("");
@@ -31,6 +41,15 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const [activeVersionId, setActiveVersionId] = useState<string | undefined>();
   const [isGenerating, setIsGenerating] = useState(false);
   const [isChatSending, setIsChatSending] = useState(false);
+  const typewriterRef = useRef<Partial<Record<TypewriterTarget, TypewriterState<TypewriterTarget>>>>({});
+  const drainWaitersRef = useRef<Partial<Record<TypewriterTarget, Array<() => void>>>>({});
+
+  useEffect(() => () => {
+    for (const state of Object.values(typewriterRef.current)) {
+      if (state?.timer) window.clearTimeout(state.timer);
+    }
+    Object.values(drainWaitersRef.current).flat().forEach((resolve) => resolve?.());
+  }, []);
 
   const resetGeneration = () => {
     setGeneration(null);
@@ -52,6 +71,106 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     }, ...current]);
   };
 
+  const updateStreamingMessage = (messageId: string, patch: Partial<CollaborationMessage>) => {
+    setCollaborationMessages((current) => current.map((message) => (
+      message.id === messageId ? { ...message, ...patch } : message
+    )));
+  };
+
+  const appendTypewriterText = (target: TypewriterTarget, text: string) => {
+    if (target === "editable") {
+      setEditableOutput((current) => current + text);
+      return;
+    }
+
+    const messageId = target.slice("message:".length);
+    setCollaborationMessages((messages) => messages.map((message) => (
+      message.id === messageId
+        ? { ...message, text: `${message.text}${text}`, status: "writing", statusLabel: undefined }
+        : message
+    )));
+  };
+
+  const replaceTypewriterText = (target: TypewriterTarget, text: string) => {
+    if (target === "editable") {
+      setEditableOutput(text);
+      return;
+    }
+
+    const messageId = target.slice("message:".length);
+    setCollaborationMessages((messages) => messages.map((message) => (
+      message.id === messageId ? { ...message, text } : message
+    )));
+  };
+
+  const resolveDrainWaiters = (target: TypewriterTarget) => {
+    const waiters = drainWaitersRef.current[target] ?? [];
+    delete drainWaitersRef.current[target];
+    waiters.forEach((resolve) => resolve());
+  };
+
+  const scheduleTypewriterTick = (target: TypewriterTarget) => {
+    const state = typewriterRef.current[target];
+    if (!state || state.timer) return;
+    state.timer = window.setTimeout(() => {
+      const current = typewriterRef.current[target];
+      if (!current) return;
+      current.timer = null;
+      const next = takeTypewriterText(current.queue);
+      current.queue = next.rest;
+      if (next.text) appendTypewriterText(current.target, next.text);
+      if (current.queue.length > 0) {
+        scheduleTypewriterTick(target);
+      } else {
+        delete typewriterRef.current[target];
+        resolveDrainWaiters(target);
+      }
+    }, TYPEWRITER_TICK_MS);
+  };
+
+  const enqueueStreamingText = (target: TypewriterTarget, token: string) => {
+    if (!token) return;
+    typewriterRef.current[target] = enqueueTypewriterToken(typewriterRef.current[target] ?? null, target, token) ?? undefined;
+    scheduleTypewriterTick(target);
+  };
+
+  const drainStreamingText = (target: TypewriterTarget) => {
+    const state = typewriterRef.current[target];
+    if (!state || state.queue.length === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      drainWaitersRef.current[target] = [...(drainWaitersRef.current[target] ?? []), resolve];
+      scheduleTypewriterTick(target);
+    });
+  };
+
+  const flushStreamingText = (target: TypewriterTarget) => {
+    const state = typewriterRef.current[target];
+    if (!state) return;
+    if (state.timer) {
+      window.clearTimeout(state.timer);
+      state.timer = null;
+    }
+    const rest = state.queue.join("");
+    state.queue = [];
+    if (rest) appendTypewriterText(target, rest);
+    delete typewriterRef.current[target];
+    resolveDrainWaiters(target);
+  };
+
+  const syncFinalTypewriterText = async (target: TypewriterTarget, visibleText: string, finalText: string) => {
+    const patch = getTypewriterFinalPatch(visibleText, finalText);
+    if (!patch) return;
+    if (patch.reset) {
+      replaceTypewriterText(target, "");
+    }
+    enqueueStreamingText(target, patch.token);
+    await drainStreamingText(target);
+  };
+
+  const applyCollaborationMessagesFromThreadState = (state: ThreadStateResponse) => {
+    setCollaborationMessages((current) => reconcileCollaborationMessages(current, state.messages));
+  };
+
   const handleGenerate = async () => {
     setIsGenerating(true);
     try {
@@ -67,15 +186,27 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         selectedCanvasNodeId: options.selectedCanvasNodeId
       };
       setEditableOutput("");
-      const result = options.activeAgent.settings?.model.streaming
+
+      const streamingEnabled = Boolean(options.activeAgent.settings?.model.streaming);
+      let streamedText = "";
+      const result = streamingEnabled
         ? await generateTextStream(payload, {
-            onToken: (token) => setEditableOutput((current) => current + token),
+            onToken: (token) => {
+              streamedText += token;
+              enqueueStreamingText("editable", token);
+            },
             onToolEvent: (event) => appendToolEvent(event, threadId)
           })
         : await generateText(payload);
+
+      if (!streamingEnabled) {
+        enqueueStreamingText("editable", result.text);
+        streamedText = result.text;
+      }
+      await drainStreamingText("editable");
+      await syncFinalTypewriterText("editable", streamedText, result.text);
       setGeneration(result);
       options.onPersistThreadId(result.threadId);
-      setEditableOutput(result.text);
       await options.onRefreshThreadState(result.threadId);
     } finally {
       setIsGenerating(false);
@@ -85,13 +216,23 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const handleChatSend = async (text: string, modelOverrides?: GenerateRequest["modelOverrides"]) => {
     setIsChatSending(true);
     const previousPendingWriteIds = new Set(options.getPendingCanvasWriteRequestIds());
+    const userMessageId = crypto.randomUUID();
+    const assistantMessageId = crypto.randomUUID();
     setCollaborationMessages((current) => [
       ...current,
       {
-        id: crypto.randomUUID(),
+        id: userMessageId,
         role: "user",
         text,
         usedMock: false
+      },
+      {
+        id: assistantMessageId,
+        role: "assistant",
+        text: "",
+        usedMock: false,
+        isStreaming: true,
+        status: "thinking"
       }
     ]);
     try {
@@ -108,39 +249,47 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         modelOverrides,
         selectedCanvasNodeId: options.selectedCanvasNodeId
       };
-      const result = options.activeAgent.settings?.model.streaming
-        ? await generateTextStream(payload, {
-            onToken: (token) => setEditableOutput((current) => current || token ? current + token : token),
-            onToolEvent: (event) => appendToolEvent(event, threadId)
-          })
-        : await generateText(payload);
+      let streamedText = "";
+      const result = await generateTextStream(payload, {
+        onStatus: (status) => updateStreamingMessage(assistantMessageId, {
+          status: status.phase
+        }),
+        onToken: (token) => {
+          streamedText += token;
+          enqueueStreamingText(`message:${assistantMessageId}`, token);
+        },
+        onToolEvent: (event) => appendToolEvent(event, threadId)
+      });
+
+      await drainStreamingText(`message:${assistantMessageId}`);
+      await syncFinalTypewriterText(`message:${assistantMessageId}`, streamedText, result.text);
+      updateStreamingMessage(assistantMessageId, {
+        isStreaming: false,
+        status: "finalizing",
+        statusLabel: undefined
+      });
       setGeneration(result);
       options.onPersistThreadId(result.threadId);
+
       const state = await options.onFetchAndApplyThreadState(result.threadId);
       const directWriteRequests = isDirectCanvasWriteInstruction(text)
         ? (state.canvasWriteRequests ?? []).filter((request) => !previousPendingWriteIds.has(request.id) && request.status === "pending")
         : [];
-      if (directWriteRequests.length > 0) {
-        for (const request of directWriteRequests) {
-          await options.onApproveCanvasWriteRequest(request.id);
-        }
-        const refreshedState = await options.onFetchAndApplyThreadState(result.threadId);
-        options.onApplyThreadState(refreshedState);
-      } else {
-        options.onApplyThreadState(state);
+      for (const request of directWriteRequests) {
+        await options.onApproveCanvasWriteRequest(request.id);
       }
+      await options.onRefreshThreadState(result.threadId);
       await options.onRefreshProjectSurfaces();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Generation failed";
-      setCollaborationMessages((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          text: `Request failed: ${message}`,
-          usedMock: false
-        }
-      ]);
+      flushStreamingText(`message:${assistantMessageId}`);
+      updateStreamingMessage(assistantMessageId, {
+        text: `Request failed: ${message}`,
+        usedMock: false,
+        isStreaming: false,
+        status: "error",
+        statusLabel: undefined
+      });
     } finally {
       setIsChatSending(false);
     }
@@ -175,6 +324,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     setOutputVersions,
     setToolEvents,
     resetGeneration,
+    applyCollaborationMessagesFromThreadState,
     handleGenerate,
     handleChatSend,
     restoreVersion

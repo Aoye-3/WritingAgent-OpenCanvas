@@ -1,4 +1,4 @@
-import { runAgentCompletion } from "../../agentRunLoop.js";
+import { runAgentCompletion, runAgentCompletionStream, type StreamStatus } from "../../agentRunLoop.js";
 import { getBaseURL } from "../../config/providerConfig.js";
 import type { GenerateRequest } from "../../contracts/generation.js";
 import { createOpenAIChatClient, getProviderProfile, type ChatMessage, type ChatClient } from "../../providerRuntime.js";
@@ -26,6 +26,7 @@ export type ProviderRunnerDeps = {
   apiKey?: string;
   createClient?: typeof createOpenAIChatClient;
   runAgent?: typeof runAgentCompletion;
+  runAgentStream?: typeof runAgentCompletionStream;
 };
 
 export async function runProviderGeneration(input: ProviderRunnerInput, deps: ProviderRunnerDeps = {}) {
@@ -51,6 +52,46 @@ export async function runProviderGeneration(input: ProviderRunnerInput, deps: Pr
       createCanvasWriteRequest: (writeInput) => input.storage.createCanvasWriteRequest(input.threadId, writeInput)
     },
     onToolEvent: input.onToolEvent
+  });
+
+  if (!run.text) {
+    throw new Error(`${getProviderProfile(input.providerId).label} returned an empty response`);
+  }
+
+  return run;
+}
+
+export async function runProviderGenerationStream(
+  input: ProviderRunnerInput & {
+    onToken?: (token: string) => void;
+    onStatus?: (status: StreamStatus) => void;
+  },
+  deps: ProviderRunnerDeps = {}
+) {
+  const apiKey = deps.apiKey ?? process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not configured");
+  }
+
+  const run = await (deps.runAgentStream ?? runAgentCompletionStream)({
+    client: (deps.createClient ?? createOpenAIChatClient)({ apiKey, baseURL: getBaseURL(input.providerId) }) as ChatClient,
+    providerId: input.providerId,
+    modelSettings: input.modelSettings,
+    messages: input.messages,
+    allowedToolRefs: input.agentCard.toolRefs,
+    toolState: input.effectiveToolState,
+    toolContext: {
+      threadId: input.threadId,
+      allowedToolRefs: input.agentCard.toolRefs,
+      toolState: input.effectiveToolState,
+      selectedCanvasNodeId: safeId(input.payload.selectedCanvasNodeId),
+      contextValues: input.payload.contextValues,
+      chatInstruction: input.payload.chatInstruction ?? input.payload.freeTextPrompt,
+      createCanvasWriteRequest: (writeInput) => input.storage.createCanvasWriteRequest(input.threadId, writeInput)
+    },
+    onToolEvent: input.onToolEvent,
+    onToken: input.onToken,
+    onStatus: input.onStatus
   });
 
   if (!run.text) {

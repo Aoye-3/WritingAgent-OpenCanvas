@@ -40,6 +40,7 @@ test("builds LangGraph-compatible DeerFlow run request", () => {
   assert.equal(request.metadata.agentCardId, "summary");
   assert.equal(request.metadata.subagent.name, "facetwrite-summary");
   assert.deepEqual(request.stream_mode, ["messages-tuple", "custom", "values"]);
+  assert.equal(request.multitask_strategy, "interrupt");
 });
 
 test("does not expose DeerFlow reasoning kwargs as assistant stream text", async () => {
@@ -101,6 +102,8 @@ test("reads DeerFlow stream text and task events", async () => {
     }
   });
   const events: unknown[] = [];
+  const tokens: string[] = [];
+  const statuses: string[] = [];
   let runHeaders = new Headers();
   const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
     const textUrl = String(url);
@@ -136,12 +139,18 @@ test("reads DeerFlow stream text and task events", async () => {
     messages: [{ role: "user", content: "Summarise this" }],
     prompt: "Summarise this",
     fetchImpl,
-    onToolEvent: (event) => events.push(event)
+    onToolEvent: (event) => events.push(event),
+    onToken: (token) => tokens.push(token),
+    onStatus: (status) => statuses.push(status.phase)
   });
 
   assert.equal(result.text, "Hello world");
+  assert.deepEqual(tokens, ["Hello", " world"]);
   assert.equal(result.events[0]?.eventType, "deerflow_task_started");
   assert.equal(events.length, 1);
+  assert.ok(statuses.includes("thinking"));
+  assert.ok(statuses.includes("searching"));
+  assert.ok(statuses.includes("writing"));
   assert.equal(runHeaders.get("Cookie"), "access_token=session; csrf_token=csrf");
   assert.equal(runHeaders.get("X-CSRF-Token"), "csrf");
 });

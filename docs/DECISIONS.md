@@ -1,5 +1,12 @@
 # FacetWrite Technical Decisions
 
+## 2026-05-18: Right-side AI Chat Uses Real Streaming Preview
+Decision: The collaboration drawer uses `/api/generate/stream` as a real streaming channel for AI chat replies, with transient status events and temporary assistant messages reconciled against persisted thread state after `final`.
+
+Reason: Waiting for the complete model result creates a visible empty period. A temporary assistant avatar/status plus token/typewriter output gives users immediate feedback while keeping SQLite messages, Canvas write requests, and output versions behind the existing normalization and approval boundaries.
+
+Impact: Provider and DeerFlow runtimes may forward assistant token/message deltas through SSE, but final recorded text still passes through `normalizeAgentRunOutput`. Obvious internal prompt or ToolUse payload leaks are buffered/blocked before initial streaming. This does not change Canvas write approval semantics.
+
 ## 2026-05-18: FacetWrite Uses A Lightweight In-Repo UI Primitive Layer
 Decision: Build shared frontend primitives in `src/shared/ui/` instead of introducing AntD, MUI, Mantine, shadcn, or another large component library.
 

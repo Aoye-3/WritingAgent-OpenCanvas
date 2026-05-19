@@ -1,4 +1,5 @@
 import type { AgentRuntimeAdapter } from "../../agentRuntimeAdapter.js";
+import type { StreamStatus } from "../../agentRunLoop.js";
 import type { GenerateRequest, GenerateResponse } from "../../contracts/generation.js";
 import type { SQLiteStorageRepository } from "../../storage.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
@@ -7,17 +8,31 @@ import { runDeerFlowGeneration, type DeerFlowRunnerDeps } from "./deerflowRunner
 import { mockText } from "./mockFallback.js";
 import { normalizeAgentRunOutput } from "./outputNormalizer.js";
 import { buildGenerationRunContext } from "./promptRunBuilder.js";
-import { runProviderGeneration, type ProviderRunnerDeps } from "./providerRunner.js";
+import { createProgressiveTextGate } from "./progressiveTextGate.js";
+import { runProviderGeneration, runProviderGenerationStream, type ProviderRunnerDeps } from "./providerRunner.js";
 import { recordGenerationRun } from "./runRecorder.js";
 
 export type GenerationService = {
   generateAndRecord: (payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void) => Promise<GenerateResponse>;
+  generateAndRecordStream: (
+    payload: GenerateRequest,
+    callbacks?: {
+      onToken?: (token: string) => void;
+      onStatus?: (status: StreamStatus) => void;
+      onToolEvent?: (event: ToolEventRecord) => void;
+    }
+  ) => Promise<GenerateResponse>;
 };
 
 export type GenerationServiceDeps = {
   deerflow?: DeerFlowRunnerDeps;
   provider?: ProviderRunnerDeps;
 };
+
+const streamLabels = {
+  thinking: "正在思考",
+  finalizing: "正在整理要点"
+} as const;
 
 export function createGenerationService(
   storage: SQLiteStorageRepository,
@@ -29,7 +44,6 @@ export function createGenerationService(
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime);
     const agentCard = context.runtimeConfig.agentCard;
     await storage.ensureThread(threadId, agentCard.id);
-
     const runtimeEvents: ToolEventRecord[] = [];
 
     try {
@@ -154,7 +168,157 @@ export function createGenerationService(
     }
   }
 
-  return { generateAndRecord };
+  async function generateAndRecordStream(
+    payload: GenerateRequest,
+    callbacks: {
+      onToken?: (token: string) => void;
+      onStatus?: (status: StreamStatus) => void;
+      onToolEvent?: (event: ToolEventRecord) => void;
+    } = {}
+  ): Promise<GenerateResponse> {
+    const threadId = safeId(payload.threadId) ?? randomThreadId();
+    const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime);
+    const agentCard = context.runtimeConfig.agentCard;
+    await storage.ensureThread(threadId, agentCard.id);
+    const textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
+    const runtimeEvents: ToolEventRecord[] = [];
+
+    callbacks.onStatus?.({ phase: "thinking", label: streamLabels.thinking });
+
+    try {
+      const deerFlowRun = await runDeerFlowGeneration({
+        payload,
+        threadId,
+        runtimeConfig: context.runtimeConfig,
+        messages: context.messages,
+        prompt: context.prompt,
+        onToolEvent: callbacks.onToolEvent,
+        onToken: textGate.push,
+        onStatus: callbacks.onStatus
+      }, deps.deerflow);
+
+      if (deerFlowRun) {
+        textGate.flush();
+        callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
+        const normalized = normalizeAgentRunOutput({
+          text: deerFlowRun.text,
+          locale: payload.locale,
+          source: "deerflow",
+          events: deerFlowRun.events
+        });
+        if (hasBlockedInternalOutput(normalized.events)) {
+          const event = createRuntimeFallbackEvent("deerflow", new Error("DeerFlow returned internal runtime output"));
+          runtimeEvents.push(...(normalized.events ?? []), event);
+          callbacks.onToolEvent?.(event);
+        } else {
+          const events = maybeCreateCanvasWriteRequest({
+            storage,
+            payload,
+            threadId,
+            agentTitle: agentCard.title[payload.locale],
+            text: normalized.text,
+            events: normalized.events,
+            onToolEvent: callbacks.onToolEvent
+          });
+          return recordGenerationRun({
+            storage,
+            payload,
+            threadId,
+            agentCardId: agentCard.id,
+            agentTitle: agentCard.title[payload.locale],
+            mode: context.mode,
+            prompt: context.prompt,
+            text: normalized.text,
+            provider: "deerflow",
+            usedMock: false,
+            toolState: context.effectiveToolState,
+            events,
+            finishReason: deerFlowRun.finishReason,
+            usage: deerFlowRun.usage
+          });
+        }
+      }
+    } catch (error) {
+      const event = createRuntimeFallbackEvent("deerflow", error);
+      runtimeEvents.push(event);
+      callbacks.onToolEvent?.(event);
+    }
+
+    try {
+      const providerRun = await runProviderGenerationStream({
+        payload,
+        threadId,
+        agentCard,
+        providerId: context.providerId,
+        modelSettings: context.modelSettings,
+        messages: context.messages,
+        effectiveToolState: context.effectiveToolState,
+        storage,
+        onToolEvent: callbacks.onToolEvent,
+        onToken: textGate.push,
+        onStatus: callbacks.onStatus
+      }, deps.provider);
+
+      textGate.flush();
+      callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
+      const normalized = normalizeAgentRunOutput({
+        text: providerRun.text,
+        locale: payload.locale,
+        source: context.providerId,
+        events: providerRun.events
+      });
+
+      const events = maybeCreateCanvasWriteRequest({
+        storage,
+        payload,
+        threadId,
+        agentTitle: agentCard.title[payload.locale],
+        text: normalized.text,
+        events: [...runtimeEvents, ...(normalized.events ?? [])],
+        onToolEvent: callbacks.onToolEvent
+      });
+
+      return recordGenerationRun({
+        storage,
+        payload,
+        threadId,
+        agentCardId: agentCard.id,
+        agentTitle: agentCard.title[payload.locale],
+        mode: context.mode,
+        prompt: context.prompt,
+        text: normalized.text,
+        provider: context.providerId,
+        usedMock: false,
+        toolState: context.effectiveToolState,
+        events,
+        finishReason: providerRun.finishReason,
+        usage: providerRun.usage
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown generation error";
+      const text = mockText(payload);
+      textGate.push(text);
+      textGate.flush();
+      return recordGenerationRun({
+        storage,
+        payload,
+        threadId,
+        agentCardId: agentCard.id,
+        agentTitle: agentCard.title[payload.locale],
+        mode: context.mode,
+        prompt: context.prompt,
+        text,
+        provider: "mock",
+        usedMock: true,
+        errorMessage: formatGenerationFailure(runtimeEvents, message),
+        toolState: context.effectiveToolState,
+        events: runtimeEvents,
+        finishReason: "mock_fallback"
+      });
+    }
+  }
+
+  return { generateAndRecord, generateAndRecordStream };
 }
 
 function hasBlockedInternalOutput(events?: ToolEventRecord[]) {
@@ -234,25 +398,18 @@ function hasCanvasWriteIntent(payload: GenerateRequest) {
   const instruction = `${payload.chatInstruction ?? ""}\n${payload.freeTextPrompt ?? ""}`.toLowerCase();
   const intentKeywords = [
     "canvas",
-    "\u753b\u677f",
-    "\u756b\u677f",
-    "\u5199\u5165",
-    "\u5beb\u5165",
-    "\u4fdd\u5b58\u5230",
-    "\u52a0\u5165",
-    "\u6dfb\u52a0\u5230",
-    "\u653e\u5230",
+    "画板",
+    "畫板",
+    "写入",
+    "寫入",
+    "保存到",
+    "加入",
+    "添加到",
+    "放到",
     "save to canvas",
     "write this",
     "write to canvas",
-    "add to canvas",
-    "鐢绘澘",
-    "鐣澘",
-    "鏀惧埌",
-    "鍐欏叆",
-    "瀵叆",
-    "娣诲姞鍒",
-    "鍔犲叆"
+    "add to canvas"
   ];
   return intentKeywords.some((keyword) => instruction.includes(keyword)) ||
     /save\s+to\s+canvas|write\s+this|write\s+to\s+canvas|add\s+to\s+canvas/.test(instruction);

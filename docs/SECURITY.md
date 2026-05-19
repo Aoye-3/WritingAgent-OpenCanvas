@@ -30,6 +30,8 @@ Runtime tool calls pass through `server/tools/toolPolicyGuard.ts` before executo
 
 DeerFlow bridge tool calls use the same executor path through `/api/internal/deerflow/tool-call`. This endpoint is service-to-service only: it requires a trusted local/container marker or optional `FACETWRITE_INTERNAL_TOOL_TOKEN`, and it does not bypass tool policy or Canvas confirmation/approval. Bridge adapter errors redact token-like strings before returning content to DeerFlow.
 
+Streaming assistant text is a temporary UI preview, not a persistence boundary. `/api/generate/stream` must keep an initial safety buffer and must not stream obvious internal prompt headings, raw ToolUse/search JSON, provider reasoning metadata, or DeerFlow replay payloads. The final assistant message is still normalized before it is recorded, and thread-state reconciliation should replace temporary UI text with the persisted safe output.
+
 ## DeerFlow runtime auth
 
 When DeerFlow is enabled, FacetWrite accesses protected DeerFlow APIs through a backend-managed local session. The frontend must never receive DeerFlow cookies, CSRF tokens, auth email/password, provider keys, or MCP secret-like values.

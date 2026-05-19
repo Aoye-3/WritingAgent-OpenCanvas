@@ -38,9 +38,17 @@ export type GenerationEvent = {
   payload: unknown;
 };
 
+export type StreamStatus = {
+  phase: "thinking" | "searching" | "writing" | "finalizing";
+  label: string;
+};
+
 export type CollaborationMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
   usedMock?: boolean;
+  isStreaming?: boolean;
+  status?: StreamStatus["phase"] | "error";
+  statusLabel?: string;
 };
