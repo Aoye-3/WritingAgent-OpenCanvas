@@ -14,6 +14,7 @@ import {
   FolderOpen,
   Home,
   LayoutDashboard,
+  ListTree,
   Mail,
   Minus,
   MoreHorizontal,
@@ -77,6 +78,7 @@ export const DocumentIcon = createIcon(FileText);
 export const FolderIcon = createIcon(FolderOpen);
 export const HomeIcon = createIcon(Home);
 export const KnowledgeIcon = createIcon(BookOpen);
+export const ModelConfigIcon = createIcon(ListTree);
 export const MoreIcon = createIcon(MoreHorizontal);
 export const RemoveIcon = createIcon(Minus);
 export const ResetIcon = createIcon(RotateCcw);

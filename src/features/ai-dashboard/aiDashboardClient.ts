@@ -1,6 +1,6 @@
 import { apiGet } from "../../shared/apiClient";
-import type { DeerFlowDashboard } from "./types";
+import type { AgentBackendDashboard } from "./types";
 
-export function fetchDeerFlowDashboard() {
-  return apiGet<DeerFlowDashboard>("/api/deerflow/dashboard");
+export function fetchAgentBackendDashboard() {
+  return apiGet<AgentBackendDashboard>("/api/agent-backend/dashboard");
 }

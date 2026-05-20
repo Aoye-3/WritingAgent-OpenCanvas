@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 import { agentCards, defaultAgentSettings } from "../agentCards.js";
 import { createGenerationService } from "./generationService.js";
@@ -87,32 +87,32 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
   };
 }
 
-test("generation facade records DeerFlow runs when DeerFlow is enabled", async () => {
+test("generation facade records AgentBackend runs when AgentBackend is enabled", async () => {
   const { storage, records } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {
-    deerflow: {
-      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://deerflow", assistantId: "lead_agent" }),
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async () => ({
-        text: "DeerFlow text",
+        text: "AgentBackend text",
         finishReason: "stop",
         usage: { total_tokens: 3 },
-        events: [{ eventType: "deerflow_task_completed", payload: { ok: true } }]
+        events: [{ eventType: "agent_backend_task_completed", payload: { ok: true } }]
       })
     }
   });
 
   const result = await service.generateAndRecord({ mode: "structured", locale: "en", agentCardId: "blog-post" });
 
-  assert.equal(result.provider, "deerflow");
+  assert.equal(result.provider, "agent-backend");
   assert.equal(result.usedMock, false);
-  assert.equal((records[0] as { provider: string }).provider, "deerflow");
+  assert.equal((records[0] as { provider: string }).provider, "agent-backend");
 });
 
-test("generation facade creates a pending Canvas write request for DeerFlow canvas intent", async () => {
+test("generation facade creates a pending Canvas write request for AgentBackend canvas intent", async () => {
   const { storage, records, canvasWriteRequests } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {
-    deerflow: {
-      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://deerflow", assistantId: "lead_agent" }),
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async () => ({
         text: "A 300-word podcast draft about global warming.",
         finishReason: "stop",
@@ -125,7 +125,7 @@ test("generation facade creates a pending Canvas write request for DeerFlow canv
     mode: "chat",
     locale: "zh",
     agentCardId: "blog-post",
-    chatInstruction: "帮我写个关于气候变暖的播客吧，300字。放到画板里。",
+    chatInstruction: "帮我写个关于气候变暖的播客，300字。放到画板里。",
     toolState: { canvas_write: true }
   });
 
@@ -144,8 +144,8 @@ test("generation facade recognizes Chinese and English Canvas write intents", as
   for (const chatInstruction of ["请写入画板", "save to canvas", "write this"]) {
     const { storage, canvasWriteRequests } = fakeStorage();
     const service = createGenerationService(storage, fakeAgentRuntime(), {
-      deerflow: {
-        getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://deerflow", assistantId: "lead_agent" }),
+      agentBackend: {
+        getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
         runAgent: async () => ({
           text: "Reusable answer",
           finishReason: "stop",
@@ -167,13 +167,13 @@ test("generation facade recognizes Chinese and English Canvas write intents", as
   }
 });
 
-test("generation facade falls back to provider when DeerFlow returns no usable text", async () => {
+test("generation facade falls back to provider when AgentBackend returns no usable text", async () => {
   const { storage, records } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {
-    deerflow: {
-      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://deerflow", assistantId: "lead_agent" }),
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async () => {
-        throw new Error("DeerFlow returned an empty response");
+        throw new Error("AgentBackend returned an empty response");
       }
     },
     provider: {
@@ -193,14 +193,14 @@ test("generation facade falls back to provider when DeerFlow returns no usable t
   assert.equal(result.provider, "deepseek");
   assert.equal(result.usedMock, false);
   assert.equal(result.text, "Provider recovered text");
-  assert.ok((records[0] as { events: Array<{ eventType: string; payload: { fallback?: string } }> }).events.some((event) => event.eventType === "deerflow_runtime_failed" && event.payload.fallback === "provider"));
+  assert.ok((records[0] as { events: Array<{ eventType: string; payload: { fallback?: string } }> }).events.some((event) => event.eventType === "agent_backend_runtime_failed" && event.payload.fallback === "provider"));
 });
 
-test("generation facade blocks DeerFlow internal prompt output before recording", async () => {
+test("generation facade blocks AgentBackend internal prompt output before recording", async () => {
   const { storage, records } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {
-    deerflow: {
-      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://deerflow", assistantId: "lead_agent" }),
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async () => ({
         text: "You are FacetWrite's writing assistant.\n\n# AgentCard\nAgent: Blog Post\n# Output Contract\nReturn article.",
         finishReason: "stop",
@@ -211,7 +211,7 @@ test("generation facade blocks DeerFlow internal prompt output before recording"
       apiKey: "test-key",
       createClient: () => ({ createChatCompletion: async () => ({ choices: [] }) } as ChatClient),
       runAgent: async (input) => ({
-        text: "Provider recovered after internal DeerFlow output",
+        text: "Provider recovered after internal AgentBackend output",
         finishReason: "stop",
         messages: input.messages,
         events: []
@@ -222,7 +222,7 @@ test("generation facade blocks DeerFlow internal prompt output before recording"
   const result = await service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "Hello" });
 
   assert.equal(result.text.includes("# AgentCard"), false);
-  assert.equal(result.text, "Provider recovered after internal DeerFlow output");
+  assert.equal(result.text, "Provider recovered after internal AgentBackend output");
   assert.equal((records[0] as { output: string }).output.includes("# AgentCard"), false);
   assert.ok((records[0] as { events: Array<{ eventType: string }> }).events.some((event) => event.eventType === "internal_output_blocked"));
 });
@@ -230,10 +230,10 @@ test("generation facade blocks DeerFlow internal prompt output before recording"
 test("generation facade strips search result JSON from recorded assistant text", async () => {
   const { storage, records } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {
-    deerflow: {
-      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://deerflow", assistantId: "lead_agent" }),
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async () => ({
-        text: "好的，我来搜索一下。{\"query\":\"2026 news\",\"results\":[{\"title\":\"raw\"}]}整理摘要如下。",
+        text: '好的，我来搜索一下。{"query":"2026 news","results":[{"title":"raw"}]}整理摘要如下。',
         finishReason: "stop",
         events: []
       })
@@ -255,8 +255,8 @@ test("generation facade passes policy-aware tool context to provider runner", as
   let observedToolContext: unknown;
   let observedMessages: unknown[] = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
-    deerflow: {
-      getRuntimeConfig: () => ({ enabled: false, baseUrl: "http://deerflow", assistantId: "lead_agent" })
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: false, baseUrl: "http://AgentBackend", assistantId: "lead_agent" })
     },
     provider: {
       apiKey: "test-key",
@@ -297,8 +297,8 @@ test("generation facade applies per-run model thinking overrides", async () => {
   let observedThinkingMode: unknown;
   let observedReasoningEffort: unknown;
   const service = createGenerationService(storage, fakeAgentRuntime(), {
-    deerflow: {
-      getRuntimeConfig: () => ({ enabled: false, baseUrl: "http://deerflow", assistantId: "lead_agent" })
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: false, baseUrl: "http://AgentBackend", assistantId: "lead_agent" })
     },
     provider: {
       apiKey: "test-key",
@@ -333,8 +333,8 @@ test("generation facade honors clear_context and falls back to mock on provider 
   const { storage, records } = fakeStorage([{ role: "assistant", text: "Should not appear" }]);
   let observedMessages: unknown[] = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
-    deerflow: {
-      getRuntimeConfig: () => ({ enabled: false, baseUrl: "http://deerflow", assistantId: "lead_agent" })
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: false, baseUrl: "http://AgentBackend", assistantId: "lead_agent" })
     },
     provider: {
       apiKey: "test-key",

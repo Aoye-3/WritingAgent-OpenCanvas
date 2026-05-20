@@ -4,6 +4,8 @@ import type { AppView } from "../../app/App";
 import { Button, EmptyState, Panel, SelectField, StatusBadge, TextareaField, TextField } from "../../shared/ui";
 import { useI18n } from "../i18n/I18nProvider";
 import { ManagementSidebar } from "../projects/ProjectsView";
+import { getConfiguredModelApis } from "../settings/settingsClient";
+import type { ConfiguredModelApiSummary } from "../settings/types";
 import { knowledgeClient, type KnowledgeBaseDraft, type KnowledgeItemDraft } from "./knowledgeClient";
 import type { KnowledgeBase, KnowledgeItem, KnowledgeItemType, KnowledgeSearchResult } from "./types";
 
@@ -20,12 +22,14 @@ const layerOptions: Array<{ label: string; type: KnowledgeLayer; icon: typeof Fi
 const defaultBaseDraft: KnowledgeBaseDraft = {
   name: "",
   description: "",
+  embeddingConfigId: "",
   embeddingProvider: "openai-compatible",
   embeddingModel: "text-embedding-3-small",
   embeddingBaseUrl: "",
   documentCount: 6,
   threshold: 0.2,
   rerankEnabled: false,
+  rerankConfigId: "",
   rerankProvider: "",
   rerankModel: "",
   rerankBaseUrl: ""
@@ -52,6 +56,7 @@ export function KnowledgeSettingsView({ activeView, onNavigate }: { activeView: 
   const [results, setResults] = useState<KnowledgeSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [configuredApis, setConfiguredApis] = useState<ConfiguredModelApiSummary[]>([]);
 
   const selectedBase = useMemo(
     () => bases.find((base) => base.id === selectedBaseId) ?? bases[0],
@@ -61,10 +66,34 @@ export function KnowledgeSettingsView({ activeView, onNavigate }: { activeView: 
     () => selectedBase?.items.filter((item) => item.type === activeLayer) ?? [],
     [activeLayer, selectedBase]
   );
+  const embeddingConfigs = useMemo(
+    () => configuredApis.filter((config) => config.enabled && config.keyConfigured && config.modelType?.toLowerCase() === "embedding"),
+    [configuredApis]
+  );
 
   useEffect(() => {
     void refreshBases();
+    void refreshConfiguredApis();
   }, []);
+
+  async function refreshConfiguredApis() {
+    try {
+      const response = await getConfiguredModelApis();
+      setConfiguredApis(response.configs);
+      const firstEmbedding = response.configs.find((config) => config.enabled && config.keyConfigured && config.modelType?.toLowerCase() === "embedding");
+      if (firstEmbedding) {
+        setBaseDraft((current) => current.embeddingConfigId ? current : ({
+          ...current,
+          embeddingConfigId: firstEmbedding.id,
+          embeddingProvider: firstEmbedding.providerId === "ollama" ? "ollama" : "openai-compatible",
+          embeddingModel: firstEmbedding.modelId,
+          embeddingBaseUrl: firstEmbedding.baseURL
+        }));
+      }
+    } catch {
+      setConfiguredApis([]);
+    }
+  }
 
   async function refreshBases() {
     setLoading(true);
@@ -84,9 +113,16 @@ export function KnowledgeSettingsView({ activeView, onNavigate }: { activeView: 
       setMessage(zh ? "请输入知识库名称" : "Knowledge base name is required");
       return;
     }
+    const selectedEmbeddingConfig = embeddingConfigs.find((config) => config.id === baseDraft.embeddingConfigId) ?? embeddingConfigs[0];
     setLoading(true);
     try {
-      const response = await knowledgeClient.createBase(baseDraft);
+      const response = await knowledgeClient.createBase(selectedEmbeddingConfig ? {
+        ...baseDraft,
+        embeddingConfigId: selectedEmbeddingConfig.id,
+        embeddingProvider: selectedEmbeddingConfig.providerId === "ollama" ? "ollama" : "openai-compatible",
+        embeddingModel: selectedEmbeddingConfig.modelId,
+        embeddingBaseUrl: selectedEmbeddingConfig.baseURL
+      } : baseDraft);
       setBases((current) => [response.base, ...current]);
       setSelectedBaseId(response.base.id);
       setBaseDraft(defaultBaseDraft);
@@ -216,6 +252,25 @@ export function KnowledgeSettingsView({ activeView, onNavigate }: { activeView: 
             <Button size="sm" onClick={createBase} variant="ghost"><Plus size={14} />{zh ? "添加" : "Add"}</Button>
           </div>
           <div className="knowledge-create-compact">
+            <SelectField
+              label={zh ? "已配置嵌入 API" : "Configured embedding API"}
+              value={baseDraft.embeddingConfigId ?? ""}
+              onChange={(event) => {
+                const config = embeddingConfigs.find((item) => item.id === event.target.value);
+                setBaseDraft({
+                  ...baseDraft,
+                  embeddingConfigId: config?.id ?? "",
+                  embeddingProvider: config?.providerId === "ollama" ? "ollama" : "openai-compatible",
+                  embeddingModel: config?.modelId ?? baseDraft.embeddingModel,
+                  embeddingBaseUrl: config?.baseURL ?? baseDraft.embeddingBaseUrl
+                });
+              }}
+            >
+              {embeddingConfigs.length === 0 ? <option value="">{zh ? "暂无已配置嵌入模型" : "No configured embedding models"}</option> : null}
+              {embeddingConfigs.map((config) => (
+                <option value={config.id} key={config.id}>{config.providerLabel} / {config.modelName}</option>
+              ))}
+            </SelectField>
             <TextField label={zh ? "名称" : "Name"} value={baseDraft.name} onChange={(event) => setBaseDraft({ ...baseDraft, name: event.target.value })} placeholder={zh ? "新知识库" : "New base"} />
             <SelectField label="Embedding" value={baseDraft.embeddingProvider} onChange={(event) => setBaseDraft({ ...baseDraft, embeddingProvider: event.target.value as KnowledgeBaseDraft["embeddingProvider"] })}>
               <option value="openai-compatible">OpenAI Compatible</option>

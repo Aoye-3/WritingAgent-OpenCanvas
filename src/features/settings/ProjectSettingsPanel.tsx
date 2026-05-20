@@ -1,6 +1,6 @@
 import { useI18n } from "../i18n/I18nProvider";
 import { CloseIcon } from "../../shared/icons";
-import { DeerFlowRuntimePanel } from "./components/DeerFlowRuntimePanel";
+import { AgentBackendRuntimePanel } from "./components/AgentBackendRuntimePanel";
 import { ProviderSettingsForm } from "./components/ProviderSettingsForm";
 import { useProjectSettings } from "./hooks/useProjectSettings";
 import { Button, IconButton, Panel } from "../../shared/ui";
@@ -53,7 +53,7 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
           ))}
         </dl>
 
-        <DeerFlowRuntimePanel config={settings.deerFlowConfig} status={settings.deerFlowStatus} />
+        <AgentBackendRuntimePanel config={settings.agentBackendConfig} status={settings.agentBackendStatus} />
 
         <ProviderSettingsForm
           apiKey={settings.apiKey}

@@ -28,6 +28,8 @@ Current built-in cards include blog post, summary, email writer, lesson plan, re
 Settings cover:
 
 - Model provider, model name, temperature, topP, max tokens, streaming, tool call mode, and max tool calls.
+- Provider ids are resolved through the FacetWrite model registry in `shared/model/`; Agent settings should not hard-code the old three-provider list.
+- Agent settings store `configuredModelApiId` plus compatibility `providerId + model` fields. They must not store API keys, provider secrets, or copied base URL credentials.
 - Prompt name, description, identity prompt, output type, output format, and selected skills.
 - Tool enablement by ToolRef.
 - Knowledge scope.
@@ -36,7 +38,7 @@ Settings cover:
 
 Saved settings are merged back onto the base Agent card by the runtime adapter.
 
-Agent settings are the user-controlled configuration surface for concrete Agents. They define intent, model preferences, prompts, Skills, tool refs, memory, knowledge scope, and quick phrases. DeerFlow remains the execution/runtime plane that should consume these settings through FacetWrite's adapter contract.
+Agent settings are the user-controlled configuration surface for concrete Agents. They define intent, model preferences, prompts, Skills, tool refs, memory, knowledge scope, and quick phrases. AgentBackend remains the execution/runtime plane that should consume these settings through FacetWrite's adapter contract.
 
 ## Runtime Config
 `GET /api/agent-cards/:agentCardId/runtime-config` is the frontend source for rendering settings safely. It should be preferred over hard-coded settings UI assumptions.
@@ -46,44 +48,45 @@ Runtime config includes the resolved card/settings, available tools, tool polici
 ## Runtime Context Boundary
 Agent runtime context comes from the left AgentCard structured input drawer and current workspace state such as the draft and selected Canvas node. The bottom workspace utility bar is not a context source and must not inject historical placeholder values such as course notes, audience profiles, or default writing style.
 
-Internal AgentCard, Skill, Tool policy, enabled tool state, and output contract text are private runtime context. They may be sent to the model as internal instructions, but assistant messages, stored chat messages, mock fallback text, and DeerFlow stream output must not expose or reproduce prompt headings such as `# AgentCard`, `# Current User Instruction`, or `# Output Contract`.
+Internal AgentCard, Skill, Tool policy, enabled tool state, and output contract text are private runtime context. They may be sent to the model as internal instructions, but assistant messages, stored chat messages, mock fallback text, and AgentBackend stream output must not expose or reproduce prompt headings such as `# AgentCard`, `# Current User Instruction`, or `# Output Contract`.
 
 ## Output Classification
-DeerFlow and provider responses are classified before recording:
+AgentBackend and provider responses are classified before recording:
 
 - `assistant_text`: final user-visible answer only.
-- `tool_event`: ToolUse requests/results, DeerFlow task events, and Canvas write request events.
+- `tool_event`: ToolUse requests/results, AgentBackend task events, and Canvas write request events.
 - `internal_event`: blocked system prompts, AgentCard prompt blocks, reasoning payloads, replayed values, and raw tool/search JSON.
 
 Only `assistant_text` may enter `messages` and `output_versions`. `tool_event` and `internal_event` are exposed through the runtime timeline with redacted payload previews.
 
-Recoverable DeerFlow failures are also runtime events. If DeerFlow returns no user-visible text or returns content that the output boundary classifies as internal/runtime-only, FacetWrite records `deerflow_runtime_failed` and immediately continues with the Provider runtime. The chat message is recorded from the Provider result, while the timeline shows that DeerFlow was bypassed for that run.
+Recoverable AgentBackend failures are also runtime events. If AgentBackend returns no user-visible text or returns content that the output boundary classifies as internal/runtime-only, FacetWrite records `agent_backend_runtime_failed` and immediately continues with the Provider runtime. The chat message is recorded from the Provider result, while the timeline shows that AgentBackend was bypassed for that run.
 
-## DeerFlow Main Agent And Subagents
-DeerFlow is the primary Agent runtime integration foundation when `DEERFLOW_ENABLED=true`.
+## AgentBackend Main Agent And Subagents
+AgentBackend is the primary Agent runtime integration foundation when `AGENT_BACKEND_ENABLED=true`.
 
-- DeerFlow `lead_agent` acts as the main orchestration Agent.
-- Local Docker validation uses DeerFlow nginx at `http://127.0.0.1:2026`.
-- Each FacetWrite Task card maps to a DeerFlow subagent configuration.
-- The mapping lives in `server/deerflow/taskAgentMapping.ts`.
+- AgentBackend `lead_agent` acts as the main orchestration Agent.
+- Local Docker validation uses AgentBackend nginx at `http://127.0.0.1:2026` through the `agent-backend-dev` Compose project and `agent-backend-*` containers.
+- AgentBackend enablement uses `AGENT_BACKEND_*` env keys only; stale `DEERFLOW_*` values are historical and leave the runtime disabled.
+- Each FacetWrite Task card maps to a AgentBackend subagent configuration.
+- The mapping lives in `server/agentBackend/taskAgentMapping.ts`.
 - Subagent metadata includes name, description, system prompt, skills, tools, model inheritance, timeout, and max turns.
-- FacetWrite records DeerFlow runs as provider `deerflow`.
-- The current TypeScript run loop remains available when DeerFlow is disabled, unavailable, or returns no valid user-visible answer.
-- Runtime status is exposed through `/api/deerflow/status`.
-- DeerFlow skills and MCP server overview are read through `/api/deerflow/config`; MCP environment and secret-like values are redacted before reaching the frontend.
-- AI runtime status, Agent mapping, and ToolUse bridge progress are exposed through `/api/deerflow/dashboard` and shown in the AI Dashboard.
-- FacetWrite sends per-run bridge context to DeerFlow: allowed tool refs, effective tool state, explicit context values, selected Canvas node id, and current chat instruction.
-- DeerFlow loads FacetWrite bridge tools from `deerflow.tools.facetwrite_bridge` for `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write`.
-- The bridge calls FacetWrite `/api/internal/deerflow/tool-call`, so ToolUse policy remains enforced by FacetWrite and `canvas_write` can only create a pending request.
-- `web_search` is verified separately as a DeerFlow built-in tool, not as a FacetWrite local bridge.
-- Current Docker sidecar acceptance target: `/health`, backend auth, `/api/deerflow/config`, provider `deerflow` generation, repeated no-fallback runs, DeerFlow built-in ToolUse, and FacetWrite bridge ToolUse.
+- FacetWrite records AgentBackend runs as provider `agent-backend`.
+- The current TypeScript run loop remains available when AgentBackend is disabled, unavailable, or returns no valid user-visible answer.
+- Runtime status is exposed through `/api/agent-backend/status`.
+- AgentBackend skills and MCP server overview are read through `/api/agent-backend/config`; MCP environment and secret-like values are redacted before reaching the frontend.
+- AI runtime status, Agent mapping, and ToolUse bridge progress are exposed through `/api/agent-backend/dashboard` and shown in the AI Dashboard.
+- FacetWrite sends per-run bridge context to AgentBackend: allowed tool refs, effective tool state, explicit context values, selected Canvas node id, and current chat instruction.
+- AgentBackend loads FacetWrite bridge tools from `AgentBackend.tools.facetwrite_bridge` for `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write`.
+- The bridge calls FacetWrite `/api/internal/agent-backend/tool-call`, so ToolUse policy remains enforced by FacetWrite and `canvas_write` can only create a pending request.
+- `web_search` is verified separately as a AgentBackend built-in tool, not as a FacetWrite local bridge.
+- Current Docker sidecar acceptance target: `/health`, backend auth, `/api/agent-backend/config`, provider `agent-backend` generation, repeated no-fallback runs, AgentBackend built-in ToolUse, and FacetWrite bridge ToolUse. The 2026-05-20 smoke test confirmed `usedMock:false` and `finishReason:"agent_backend_completed"`.
 
 ## AI Dashboard
 The AI Dashboard is not a second Agent settings page. It is a read-only runtime/control-plane surface.
 
-- It shows DeerFlow runtime reachability, auth state, Lead Agent ID, Skills, MCP servers, AgentCard-to-subagent mapping, and ToolUse bridge status.
-- It describes FacetWrite capabilities as progressively bridged to DeerFlow ToolUse or MCP capabilities rather than as a competing local Agent runtime.
-- Canvas write behavior remains Human-in-the-loop: DeerFlow may propose the write through the bridge, but FacetWrite records only a pending request until the user confirms it and the backend approval path applies it.
+- It shows AgentBackend runtime reachability, auth state, Lead Agent ID, Skills, MCP servers, AgentCard-to-subagent mapping, and ToolUse bridge status.
+- It describes FacetWrite capabilities as progressively bridged to AgentBackend ToolUse or MCP capabilities rather than as a competing local Agent runtime.
+- Canvas write behavior remains Human-in-the-loop: AgentBackend may propose the write through the bridge, but FacetWrite records only a pending request until the user confirms it and the backend approval path applies it.
 
 ## Tool Catalog
 `server/tools/catalog.ts` is the Tool metadata source of truth. Each ToolDefinition includes:
@@ -119,10 +122,10 @@ When a model proposes a `replace` Canvas operation without an explicit user repl
 
 The workspace also supports user-created temporary annotations on assistant responses. These annotations are not model output and are not saved as ToolUse state; they only help the user choose which response fragments should be written to Canvas.
 
-When DeerFlow is the active runtime, the FacetWrite bridge tools still call the same policy and executor path. This keeps disabled tools, disallowed Agent tools, and approval-gated writes consistent across DeerFlow and the TypeScript fallback runtime.
+When AgentBackend is the active runtime, the FacetWrite bridge tools still call the same policy and executor path. This keeps disabled tools, disallowed Agent tools, and approval-gated writes consistent across AgentBackend and the TypeScript fallback runtime.
 
 ## Run Loop
-When DeerFlow is disabled, `server/agentRunLoop.ts` performs the fallback Agent run:
+When AgentBackend is disabled, `server/agentRunLoop.ts` performs the fallback Agent run:
 
 ```text
 build messages
@@ -136,14 +139,18 @@ Tool events are recorded as `tool_call_requested`, `tool_call_completed`, `tool_
 
 For `/api/generate/stream`, the TypeScript run loop uses provider streaming when available. It forwards assistant content deltas as `token` events, emits transient `status` events around thinking, ToolUse/searching, writing, and finalizing phases, and still accumulates the same final text for normalization and persistence.
 
-When DeerFlow is enabled, `server/deerflow/client.ts` calls `/api/runs/stream` through the backend DeerFlow auth session, maps token/message stream output into the FacetWrite response, forwards assistant message chunks as `token` events, and maps DeerFlow custom task events into `deerflow_*` tool events for the run history.
+When AgentBackend is enabled, `server/agentBackend/client.ts` calls `/api/runs/stream` through the backend AgentBackend auth session, maps token/message stream output into the FacetWrite response, forwards assistant message chunks as `token` events, and maps AgentBackend custom task events into `AgentBackend_*` tool events for the run history.
 
-The TypeScript run loop remains the fallback when DeerFlow is disabled, unavailable, returns an empty answer, or returns only internal/runtime output. A recoverable DeerFlow failure should not create a Mock fallback response by itself; Mock fallback is reserved for cases where both DeerFlow and the Provider runtime cannot produce a safe assistant answer.
+The TypeScript run loop remains the fallback when AgentBackend is disabled, unavailable, returns an empty answer, or returns only internal/runtime output. A recoverable AgentBackend failure should not create a Mock fallback response by itself; Mock fallback is reserved for cases where both AgentBackend and the Provider runtime cannot produce a safe assistant answer.
 
-`server/services/generationService.ts` is now a compatibility export. The implementation is split under `server/services/generation/`: prompt/message/model preparation, DeerFlow runner, provider runner, mock fallback, and run recording are separate modules while preserving the existing `/api/generate` contract.
+`server/services/generationService.ts` is now a compatibility export. The implementation is split under `server/services/generation/`: prompt/message/model preparation, AgentBackend runner, provider runner, mock fallback, and run recording are separate modules while preserving the existing `/api/generate` contract.
 
 ## Provider Boundary
 Provider-specific request normalization belongs in `server/providerRuntime.ts`. UI and product code should use provider IDs and capabilities rather than inferring provider behavior from base URLs or model strings.
+
+Provider API credentials belong to the configured model API store, not Agent settings. The Model Config page writes local `API + model` bindings to `.facetwrite/provider-apis.json`; runtime code resolves the active Agent's `configuredModelApiId` immediately before calling the provider. If an Agent references a deleted, disabled, or keyless binding, the Provider runtime returns a clear configuration error and the UI should direct the user back to Model Config.
+
+The Agent Settings model tab only offers saved, enabled, key-configured bindings whose model type can be used for chat generation. This prevents Agents from being assigned models that have no local callable API configuration.
 
 Provider-private fields are allowed only inside the runtime request chain. DeepSeek thinking mode may return `reasoning_content`; when an assistant message also contains `tool_calls`, that field must be preserved for later DeepSeek API calls, but it must never be recorded as visible assistant text, output version content, Canvas content, or mock fallback text. Other providers strip DeepSeek-only fields according to their provider profile.
 

@@ -4,12 +4,14 @@ import type { KnowledgeBase, KnowledgeItem, KnowledgeItemType, KnowledgeSearchRe
 export type KnowledgeBaseDraft = {
   name: string;
   description?: string;
+  embeddingConfigId?: string;
   embeddingProvider?: "openai-compatible" | "ollama";
   embeddingModel?: string;
   embeddingBaseUrl?: string;
   documentCount?: number;
   threshold?: number;
   rerankEnabled?: boolean;
+  rerankConfigId?: string;
   rerankProvider?: string;
   rerankModel?: string;
   rerankBaseUrl?: string;

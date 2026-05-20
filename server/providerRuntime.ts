@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { AgentSettings } from "./agentCards.js";
 import type { ProviderId } from "./types.js";
+import { getProviderReference } from "../shared/modelReferences.js";
 
 export type ChatRole = "system" | "user" | "assistant" | "tool";
 
@@ -105,7 +106,7 @@ export type NormalizeInput = {
   stream: boolean;
 };
 
-export const providerProfiles: Record<ProviderId, ProviderProfile> = {
+export const providerProfiles: Record<string, ProviderProfile> = {
   deepseek: {
     id: "deepseek",
     label: "DeepSeek",
@@ -164,6 +165,26 @@ export const providerProfiles: Record<ProviderId, ProviderProfile> = {
 export function getProviderProfile(providerId?: string): ProviderProfile {
   if (providerId && providerId in providerProfiles) {
     return providerProfiles[providerId as ProviderId];
+  }
+
+  const reference = getProviderReference(providerId);
+  if (reference) {
+    return {
+      id: reference.id,
+      label: reference.name,
+      defaultBaseURL: reference.apiHost,
+      defaultModel: reference.defaultModel ?? reference.models[0]?.id ?? "",
+      capabilities: {
+        chatCompletions: true,
+        streaming: true,
+        toolCalls: reference.type !== "anthropic" && reference.type !== "aws-bedrock",
+        thinking: false,
+        reasoningContentPolicy: "strip",
+        jsonOutput: true,
+        chatPrefixCompletion: false,
+        supportsAssistantPrefix: false
+      }
+    };
   }
 
   return providerProfiles.deepseek;

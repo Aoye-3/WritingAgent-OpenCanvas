@@ -11,6 +11,7 @@ import type { RAGApplication } from "@cherrystudio/embedjs";
 import { getBaseURL } from "../config/providerConfig.js";
 import type { SQLiteStorageRepository } from "../storage.js";
 import type { KnowledgeBase, KnowledgeBaseInput, KnowledgeItem, KnowledgeItemInput, KnowledgeSearchResult } from "./types.js";
+import { resolveConfiguredModelApi } from "../services/providerApiConfigService.js";
 
 type CachedRag = {
   app: RAGApplication;
@@ -57,20 +58,23 @@ export class KnowledgeService {
 
   async createBase(input: KnowledgeBaseInput) {
     await mkdir(knowledgeRoot, { recursive: true });
-    const provider = input.embeddingProvider ?? readEmbeddingProvider(process.env.KNOWLEDGE_EMBEDDING_PROVIDER) ?? "openai-compatible";
-    const model = input.embeddingModel?.trim() || process.env.OPENAI_EMBEDDING_MODEL?.trim() || defaultEmbeddingModel;
+    const embeddingConfig = input.embeddingConfigId ? await resolveConfiguredModelApi(input.embeddingConfigId) : undefined;
+    const provider = input.embeddingProvider ?? providerFromBinding(embeddingConfig?.providerId) ?? readEmbeddingProvider(process.env.KNOWLEDGE_EMBEDDING_PROVIDER) ?? "openai-compatible";
+    const model = embeddingConfig?.modelId || input.embeddingModel?.trim() || process.env.OPENAI_EMBEDDING_MODEL?.trim() || defaultEmbeddingModel;
     const base = this.storage.createKnowledgeBase({
       name: input.name?.trim() || "Knowledge Base",
       description: input.description?.trim() || "",
+      embeddingConfigId: embeddingConfig?.id ?? input.embeddingConfigId,
       embeddingProvider: provider,
       embeddingModel: model,
-      embeddingBaseUrl: input.embeddingBaseUrl?.trim() || defaultEmbeddingBaseUrl(provider),
+      embeddingBaseUrl: embeddingConfig?.baseURL || input.embeddingBaseUrl?.trim() || defaultEmbeddingBaseUrl(provider),
       dimensions: input.dimensions ?? defaultDimensionsByModel[model],
       chunkSize: readInteger(input.chunkSize, defaultChunkSize),
       chunkOverlap: readInteger(input.chunkOverlap, defaultChunkOverlap),
       documentCount: readInteger(input.documentCount, defaultDocumentCount),
       threshold: readThreshold(input.threshold, defaultThreshold),
       rerankEnabled: Boolean(input.rerankEnabled),
+      rerankConfigId: input.rerankConfigId,
       rerankProvider: input.rerankProvider,
       rerankModel: input.rerankModel,
       rerankBaseUrl: input.rerankBaseUrl
@@ -170,18 +174,24 @@ export class KnowledgeService {
   }
 
   private async rerank(base: KnowledgeBase, query: string, results: KnowledgeSearchResult[]) {
-    if (!base.rerankEnabled || !base.rerankProvider || !base.rerankModel || !base.rerankBaseUrl || results.length === 0) {
+    if (!base.rerankEnabled || results.length === 0) {
       return results;
     }
     try {
-      const response = await fetch(buildRerankUrl(base.rerankProvider, base.rerankBaseUrl), {
+      const binding = base.rerankConfigId ? await resolveConfiguredModelApi(base.rerankConfigId) : undefined;
+      const provider = binding?.providerId ?? base.rerankProvider;
+      const model = binding?.modelId ?? base.rerankModel;
+      const baseUrl = binding?.baseURL ?? base.rerankBaseUrl;
+      const apiKey = binding?.apiKey ?? process.env.RERANK_API_KEY ?? process.env.OPENAI_API_KEY ?? "";
+      if (!provider || !model || !baseUrl) return results;
+      const response = await fetch(buildRerankUrl(provider, baseUrl), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.RERANK_API_KEY ?? process.env.OPENAI_API_KEY ?? ""}`
+          Authorization: `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: base.rerankModel,
+          model,
           query,
           documents: results.map((result) => result.content),
           top_n: base.documentCount
@@ -276,22 +286,26 @@ export class KnowledgeService {
     const cached = this.cache.get(base.id);
     if (cached) return cached.app;
     await mkdir(path.join(knowledgeRoot, base.id), { recursive: true });
-    const apiKey = process.env.OPENAI_API_KEY?.trim();
-    if (base.embeddingProvider !== "ollama" && !apiKey) {
-      throw new Error("OPENAI_API_KEY is required for OpenAI-compatible knowledge embeddings");
+    const binding = base.embeddingConfigId ? await resolveConfiguredModelApi(base.embeddingConfigId) : undefined;
+    const apiKey = binding?.apiKey ?? process.env.OPENAI_API_KEY?.trim();
+    const embeddingProvider = binding ? providerFromBinding(binding.providerId) : base.embeddingProvider;
+    const embeddingModelId = binding?.modelId ?? base.embeddingModel;
+    const embeddingBaseUrl = binding?.baseURL ?? base.embeddingBaseUrl;
+    if (embeddingProvider !== "ollama" && !apiKey) {
+      throw new Error("A configured embedding API key is required for this knowledge base");
     }
-    const embeddingModel = base.embeddingProvider === "ollama"
+    const embeddingModel = embeddingProvider === "ollama"
       ? new OllamaEmbeddings({
-          model: base.embeddingModel,
-          baseUrl: base.embeddingBaseUrl.replace(/\/api$/, ""),
+          model: embeddingModelId,
+          baseUrl: embeddingBaseUrl.replace(/\/api$/, ""),
           dimensions: base.dimensions
         })
       : new OpenAiEmbeddings({
-          model: base.embeddingModel,
+          model: embeddingModelId,
           apiKey: apiKey ?? "",
           dimensions: base.dimensions,
           configuration: {
-            baseURL: base.embeddingBaseUrl
+            baseURL: embeddingBaseUrl
           }
         });
     const app = await new RAGApplicationBuilder()
@@ -337,6 +351,10 @@ function defaultEmbeddingBaseUrl(provider: "openai-compatible" | "ollama") {
 
 function readEmbeddingProvider(value?: string) {
   return value === "ollama" || value === "openai-compatible" ? value : undefined;
+}
+
+function providerFromBinding(providerId?: string): "openai-compatible" | "ollama" | undefined {
+  return providerId === "ollama" ? "ollama" : providerId ? "openai-compatible" : undefined;
 }
 
 function readInteger(value: unknown, fallback: number) {

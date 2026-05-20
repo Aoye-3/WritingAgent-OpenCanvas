@@ -531,6 +531,7 @@ export class SQLiteStorageRepository {
         `SELECT id,
                 name,
                 description,
+                embedding_config_id as embeddingConfigId,
                 embedding_provider as embeddingProvider,
                 embedding_model as embeddingModel,
                 embedding_base_url as embeddingBaseUrl,
@@ -540,6 +541,7 @@ export class SQLiteStorageRepository {
                 document_count as documentCount,
                 threshold,
                 rerank_enabled as rerankEnabled,
+                rerank_config_id as rerankConfigId,
                 rerank_provider as rerankProvider,
                 rerank_model as rerankModel,
                 rerank_base_url as rerankBaseUrl,
@@ -560,6 +562,7 @@ export class SQLiteStorageRepository {
         `SELECT id,
                 name,
                 description,
+                embedding_config_id as embeddingConfigId,
                 embedding_provider as embeddingProvider,
                 embedding_model as embeddingModel,
                 embedding_base_url as embeddingBaseUrl,
@@ -569,6 +572,7 @@ export class SQLiteStorageRepository {
                 document_count as documentCount,
                 threshold,
                 rerank_enabled as rerankEnabled,
+                rerank_config_id as rerankConfigId,
                 rerank_provider as rerankProvider,
                 rerank_model as rerankModel,
                 rerank_base_url as rerankBaseUrl,
@@ -582,12 +586,13 @@ export class SQLiteStorageRepository {
     return row ? mapKnowledgeBaseRow(row) : undefined;
   }
 
-  createKnowledgeBase(input: Required<Omit<KnowledgeBaseInput, "dimensions" | "rerankProvider" | "rerankModel" | "rerankBaseUrl">> & Pick<KnowledgeBaseInput, "dimensions" | "rerankProvider" | "rerankModel" | "rerankBaseUrl">) {
+  createKnowledgeBase(input: Required<Omit<KnowledgeBaseInput, "dimensions" | "embeddingConfigId" | "rerankConfigId" | "rerankProvider" | "rerankModel" | "rerankBaseUrl">> & Pick<KnowledgeBaseInput, "dimensions" | "embeddingConfigId" | "rerankConfigId" | "rerankProvider" | "rerankModel" | "rerankBaseUrl">) {
     const now = nowIso();
     const base: KnowledgeBase = {
       id: randomId("kb"),
       name: cleanText(input.name) || "Knowledge Base",
       description: cleanText(input.description),
+      embeddingConfigId: cleanText(input.embeddingConfigId),
       embeddingProvider: input.embeddingProvider,
       embeddingModel: cleanText(input.embeddingModel),
       embeddingBaseUrl: cleanText(input.embeddingBaseUrl),
@@ -597,6 +602,7 @@ export class SQLiteStorageRepository {
       documentCount: input.documentCount,
       threshold: input.threshold,
       rerankEnabled: input.rerankEnabled,
+      rerankConfigId: cleanText(input.rerankConfigId),
       rerankProvider: cleanText(input.rerankProvider),
       rerankModel: cleanText(input.rerankModel),
       rerankBaseUrl: cleanText(input.rerankBaseUrl),
@@ -607,10 +613,10 @@ export class SQLiteStorageRepository {
     this.db
       .prepare(
         `INSERT INTO knowledge_bases
-          (id, name, description, embedding_provider, embedding_model, embedding_base_url, dimensions, chunk_size, chunk_overlap, document_count, threshold, rerank_enabled, rerank_provider, rerank_model, rerank_base_url, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, name, description, embedding_config_id, embedding_provider, embedding_model, embedding_base_url, dimensions, chunk_size, chunk_overlap, document_count, threshold, rerank_enabled, rerank_config_id, rerank_provider, rerank_model, rerank_base_url, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(base.id, base.name, base.description, base.embeddingProvider, base.embeddingModel, base.embeddingBaseUrl, base.dimensions ?? null, base.chunkSize, base.chunkOverlap, base.documentCount, base.threshold, base.rerankEnabled ? 1 : 0, base.rerankProvider ?? null, base.rerankModel ?? null, base.rerankBaseUrl ?? null, base.status, now, now);
+      .run(base.id, base.name, base.description, base.embeddingConfigId ?? null, base.embeddingProvider, base.embeddingModel, base.embeddingBaseUrl, base.dimensions ?? null, base.chunkSize, base.chunkOverlap, base.documentCount, base.threshold, base.rerankEnabled ? 1 : 0, base.rerankConfigId ?? null, base.rerankProvider ?? null, base.rerankModel ?? null, base.rerankBaseUrl ?? null, base.status, now, now);
     return base;
   }
 
@@ -622,6 +628,7 @@ export class SQLiteStorageRepository {
       ...existing,
       name: patch.name === undefined ? existing.name : cleanText(patch.name) || existing.name,
       description: patch.description === undefined ? existing.description : cleanText(patch.description),
+      embeddingConfigId: patch.embeddingConfigId === undefined ? existing.embeddingConfigId : cleanText(patch.embeddingConfigId) || undefined,
       embeddingProvider: patch.embeddingProvider ?? existing.embeddingProvider,
       embeddingModel: patch.embeddingModel === undefined ? existing.embeddingModel : cleanText(patch.embeddingModel) || existing.embeddingModel,
       embeddingBaseUrl: patch.embeddingBaseUrl === undefined ? existing.embeddingBaseUrl : cleanText(patch.embeddingBaseUrl) || existing.embeddingBaseUrl,
@@ -631,6 +638,7 @@ export class SQLiteStorageRepository {
       documentCount: readPositiveInteger(patch.documentCount, existing.documentCount),
       threshold: readThreshold(patch.threshold, existing.threshold),
       rerankEnabled: patch.rerankEnabled ?? existing.rerankEnabled,
+      rerankConfigId: patch.rerankConfigId === undefined ? existing.rerankConfigId : cleanText(patch.rerankConfigId) || undefined,
       rerankProvider: patch.rerankProvider === undefined ? existing.rerankProvider : cleanText(patch.rerankProvider) || undefined,
       rerankModel: patch.rerankModel === undefined ? existing.rerankModel : cleanText(patch.rerankModel) || undefined,
       rerankBaseUrl: patch.rerankBaseUrl === undefined ? existing.rerankBaseUrl : cleanText(patch.rerankBaseUrl) || undefined,
@@ -639,10 +647,10 @@ export class SQLiteStorageRepository {
     this.db
       .prepare(
         `UPDATE knowledge_bases
-         SET name = ?, description = ?, embedding_provider = ?, embedding_model = ?, embedding_base_url = ?, dimensions = ?, chunk_size = ?, chunk_overlap = ?, document_count = ?, threshold = ?, rerank_enabled = ?, rerank_provider = ?, rerank_model = ?, rerank_base_url = ?, updated_at = ?
+         SET name = ?, description = ?, embedding_config_id = ?, embedding_provider = ?, embedding_model = ?, embedding_base_url = ?, dimensions = ?, chunk_size = ?, chunk_overlap = ?, document_count = ?, threshold = ?, rerank_enabled = ?, rerank_config_id = ?, rerank_provider = ?, rerank_model = ?, rerank_base_url = ?, updated_at = ?
          WHERE id = ?`
       )
-      .run(next.name, next.description, next.embeddingProvider, next.embeddingModel, next.embeddingBaseUrl, next.dimensions ?? null, next.chunkSize, next.chunkOverlap, next.documentCount, next.threshold, next.rerankEnabled ? 1 : 0, next.rerankProvider ?? null, next.rerankModel ?? null, next.rerankBaseUrl ?? null, now, baseId);
+      .run(next.name, next.description, next.embeddingConfigId ?? null, next.embeddingProvider, next.embeddingModel, next.embeddingBaseUrl, next.dimensions ?? null, next.chunkSize, next.chunkOverlap, next.documentCount, next.threshold, next.rerankEnabled ? 1 : 0, next.rerankConfigId ?? null, next.rerankProvider ?? null, next.rerankModel ?? null, next.rerankBaseUrl ?? null, now, baseId);
     return next;
   }
 
@@ -886,9 +894,11 @@ function cleanStructuredValues(value: unknown): StoredStructuredValues {
   return values;
 }
 
-type KnowledgeBaseRow = Omit<KnowledgeBase, "dimensions" | "rerankEnabled" | "rerankProvider" | "rerankModel" | "rerankBaseUrl"> & {
+type KnowledgeBaseRow = Omit<KnowledgeBase, "dimensions" | "embeddingConfigId" | "rerankEnabled" | "rerankConfigId" | "rerankProvider" | "rerankModel" | "rerankBaseUrl"> & {
   dimensions: number | null;
+  embeddingConfigId: string | null;
   rerankEnabled: number;
+  rerankConfigId: string | null;
   rerankProvider: string | null;
   rerankModel: string | null;
   rerankBaseUrl: string | null;
@@ -905,7 +915,9 @@ function mapKnowledgeBaseRow(row: KnowledgeBaseRow): KnowledgeBase {
   return {
     ...row,
     dimensions: row.dimensions ?? undefined,
+    embeddingConfigId: row.embeddingConfigId ?? undefined,
     rerankEnabled: Boolean(row.rerankEnabled),
+    rerankConfigId: row.rerankConfigId ?? undefined,
     rerankProvider: row.rerankProvider ?? undefined,
     rerankModel: row.rerankModel ?? undefined,
     rerankBaseUrl: row.rerankBaseUrl ?? undefined

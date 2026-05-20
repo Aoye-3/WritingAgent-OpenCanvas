@@ -1,12 +1,12 @@
 export type SettingsStatus = {
   keyConfigured: boolean;
-  providerId: "deepseek" | "openai" | "openai-compatible";
+  providerId: string;
   providerLabel: string;
   baseURL: string;
   model: string;
   systemPrompt: string;
   apiHealth: "online" | "offline";
-  provider: "deepseek" | "openai" | "openai-compatible" | "mock";
+  provider: string | "mock";
   capabilities: {
     chatCompletions: boolean;
     streaming: boolean;
@@ -25,7 +25,7 @@ export type SettingsValidationResponse = SettingsStatus & {
 };
 
 export type SettingsSaveRequest = {
-  providerId?: "deepseek" | "openai" | "openai-compatible";
+  providerId?: string;
   apiKey?: string;
   baseURL?: string;
   model?: string;
@@ -33,17 +33,107 @@ export type SettingsSaveRequest = {
   confirmLocalKeyWrite?: boolean;
 };
 
-export type DeerFlowRuntimeStatus = {
+export type ProviderApiConfigSummary = {
+  providerId: string;
+  providerLabel: string;
+  keyConfigured: boolean;
+  keyHint?: string;
+  baseURL: string;
+  defaultModel: string;
+  enabled: boolean;
+  updatedAt?: string;
+};
+
+export type ConfiguredModelApiSummary = {
+  id: string;
+  providerId: string;
+  providerLabel: string;
+  modelId: string;
+  modelName: string;
+  modelType?: string;
+  keyConfigured: boolean;
+  keyHint?: string;
+  baseURL: string;
+  enabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type ProviderApiConfigListResponse = {
+  activeProviderId?: string;
+  configs: ProviderApiConfigSummary[];
+};
+
+export type ConfiguredModelApiListResponse = {
+  activeConfigId?: string;
+  configs: ConfiguredModelApiSummary[];
+};
+
+export type ProviderApiConfigSaveRequest = {
+  apiKey?: string;
+  baseURL?: string;
+  defaultModel?: string;
+  enabled?: boolean;
+  confirmLocalKeyWrite?: boolean;
+};
+
+export type ConfiguredModelApiSaveRequest = {
+  providerId?: string;
+  modelId?: string;
+  modelName?: string;
+  modelType?: string;
+  apiKey?: string;
+  baseURL?: string;
+  enabled?: boolean;
+  confirmLocalKeyWrite?: boolean;
+};
+
+export type ModelReference = {
+  id: string;
+  name: string;
+  provider: string;
+  group: string;
+  modelType?: string;
+  description?: string;
+  ownedBy?: string;
+  supportedEndpointTypes?: string[];
+};
+
+export type ProviderReference = {
+  id: string;
+  name: string;
+  type: string;
+  apiHost: string;
+  anthropicApiHost?: string;
+  defaultModel?: string;
+  models: ModelReference[];
+  websites?: {
+    official?: string;
+    apiKey?: string;
+    docs?: string;
+    models?: string;
+  };
+  enabled: boolean;
+};
+
+export type ProviderModelsResponse = {
+  providerId: string;
+  models: ModelReference[];
+  source: "remote" | "static";
+  error?: string;
+};
+
+export type AgentBackendRuntimeStatus = {
   enabled: boolean;
   baseUrl: string;
   assistantId: string;
   reachable: boolean;
-  runtimeProvider: "deerflow" | "typescript";
+  runtimeProvider: "agent-backend" | "typescript";
   authState: "not_configured" | "setup_required" | "authenticated" | "auth_failed";
   lastError?: string;
 };
 
-export type DeerFlowConfigOverview = {
+export type AgentBackendConfigOverview = {
   enabled: boolean;
   baseUrl: string;
   skills: unknown[];

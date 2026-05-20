@@ -37,7 +37,7 @@ export type ToolEventRecord = {
     | "internal_output_blocked"
     | "knowledge_search_completed"
     | "knowledge_search_failed"
-    | `deerflow_${string}`;
+    | `agent_backend_${string}`;
   payload: Record<string, unknown>;
 };
 

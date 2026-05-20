@@ -1,4 +1,5 @@
-import type { DeerFlowConfigOverview, DeerFlowRuntimeStatus, SettingsStatus } from "./types";
+import type { AgentBackendConfigOverview, AgentBackendRuntimeStatus, SettingsStatus } from "./types";
+import { providerReferences } from "../../../shared/modelReferences";
 
 export const fallbackStatus: SettingsStatus = {
   keyConfigured: false,
@@ -19,14 +20,18 @@ export const fallbackStatus: SettingsStatus = {
 };
 
 export const modelPresets = [
-  { id: "deepseek-v4-flash", providerId: "deepseek", label: "DeepSeek V4 Flash", baseURL: "https://api.deepseek.com", model: "deepseek-v4-flash" },
-  { id: "deepseek-v4-pro", providerId: "deepseek", label: "DeepSeek V4 Pro", baseURL: "https://api.deepseek.com", model: "deepseek-v4-pro" },
-  { id: "gpt-4.1-mini", providerId: "openai", label: "OpenAI GPT-4.1 mini", baseURL: "https://api.openai.com/v1", model: "gpt-4.1-mini" },
+  ...providerReferences.flatMap((provider) => provider.models.map((model) => ({
+    id: `${provider.id}:${model.id}`,
+    providerId: provider.id,
+    label: `${provider.name} / ${model.name}`,
+    baseURL: provider.apiHost,
+    model: model.id
+  }))),
   { id: "compatible", providerId: "openai-compatible", label: "OpenAI-compatible", baseURL: "https://api.openai.com/v1", model: "gpt-4.1-mini" },
   { id: "custom", providerId: "openai-compatible", label: "Custom", baseURL: "", model: "" }
 ] as const;
 
-export const fallbackDeerFlowStatus: DeerFlowRuntimeStatus = {
+export const fallbackAgentBackendStatus: AgentBackendRuntimeStatus = {
   enabled: false,
   baseUrl: "http://127.0.0.1:8000",
   assistantId: "lead_agent",
@@ -35,7 +40,7 @@ export const fallbackDeerFlowStatus: DeerFlowRuntimeStatus = {
   authState: "not_configured"
 };
 
-export const fallbackDeerFlowConfig: DeerFlowConfigOverview = {
+export const fallbackAgentBackendConfig: AgentBackendConfigOverview = {
   enabled: false,
   baseUrl: "http://127.0.0.1:8000",
   skills: [],

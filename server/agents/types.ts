@@ -37,7 +37,8 @@ export type AgentModelResponseMode = "normal" | "prefix_completion";
 
 export type AgentSettings = {
   model: {
-    providerId: "deepseek" | "openai" | "openai-compatible";
+    configuredModelApiId?: string;
+    providerId: string;
     model: string;
     responseMode?: AgentModelResponseMode;
     temperature: number;

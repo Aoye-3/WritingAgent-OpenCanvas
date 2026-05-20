@@ -9,6 +9,7 @@ export type KnowledgeBase = {
   name: string;
   description: string;
   embeddingProvider: "openai-compatible" | "ollama";
+  embeddingConfigId?: string;
   embeddingModel: string;
   embeddingBaseUrl: string;
   dimensions?: number;
@@ -17,6 +18,7 @@ export type KnowledgeBase = {
   documentCount: number;
   threshold: number;
   rerankEnabled: boolean;
+  rerankConfigId?: string;
   rerankProvider?: string;
   rerankModel?: string;
   rerankBaseUrl?: string;
@@ -64,6 +66,7 @@ export type KnowledgeBaseInput = {
   name?: string;
   description?: string;
   embeddingProvider?: "openai-compatible" | "ollama";
+  embeddingConfigId?: string;
   embeddingModel?: string;
   embeddingBaseUrl?: string;
   dimensions?: number;
@@ -72,6 +75,7 @@ export type KnowledgeBaseInput = {
   documentCount?: number;
   threshold?: number;
   rerankEnabled?: boolean;
+  rerankConfigId?: string;
   rerankProvider?: string;
   rerankModel?: string;
   rerankBaseUrl?: string;

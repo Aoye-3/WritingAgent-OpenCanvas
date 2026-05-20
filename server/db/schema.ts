@@ -142,6 +142,7 @@ export function migrateStorageSchema(db: DatabaseSync) {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
+      embedding_config_id TEXT,
       embedding_provider TEXT NOT NULL,
       embedding_model TEXT NOT NULL,
       embedding_base_url TEXT NOT NULL,
@@ -151,6 +152,7 @@ export function migrateStorageSchema(db: DatabaseSync) {
       document_count INTEGER NOT NULL,
       threshold REAL NOT NULL,
       rerank_enabled INTEGER NOT NULL DEFAULT 0,
+      rerank_config_id TEXT,
       rerank_provider TEXT,
       rerank_model TEXT,
       rerank_base_url TEXT,
@@ -192,6 +194,12 @@ export function migrateStorageSchema(db: DatabaseSync) {
 
   if (!columnExists(db, "threads", "deleted_at")) {
     db.exec(`ALTER TABLE threads ADD COLUMN deleted_at TEXT`);
+  }
+  if (!columnExists(db, "knowledge_bases", "embedding_config_id")) {
+    db.exec(`ALTER TABLE knowledge_bases ADD COLUMN embedding_config_id TEXT`);
+  }
+  if (!columnExists(db, "knowledge_bases", "rerank_config_id")) {
+    db.exec(`ALTER TABLE knowledge_bases ADD COLUMN rerank_config_id TEXT`);
   }
 }
 

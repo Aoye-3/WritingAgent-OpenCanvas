@@ -10,6 +10,7 @@ import type { ProviderId } from "../../types.js";
 import type { KnowledgeService } from "../../knowledge/service.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import { isChatMode } from "./mockFallback.js";
+import { resolveConfiguredModelApi } from "../../domains/model-config/index.js";
 
 export type GenerateModelSettings = NonNullable<ReturnType<AgentRuntimeAdapter["resolveAgentCard"]>["settings"]>["model"];
 
@@ -45,7 +46,7 @@ export async function buildGenerationRunContext(
     freeTextPrompt: payload.freeTextPrompt,
     toolState: effectiveToolState
   });
-  const modelSettings = resolveModelSettings(runtimeConfig.settings.model, payload.providerId, payload.modelOverrides);
+  const modelSettings = await resolveModelSettings(runtimeConfig.settings.model, payload.providerId, payload.modelOverrides);
   const userPrompt = userPromptForModel(payload, agentCard.outputContract.type);
   const knowledge = await buildKnowledgeContext({
     knowledgeService,
@@ -77,15 +78,18 @@ export async function buildGenerationRunContext(
   };
 }
 
-export function resolveModelSettings(
+export async function resolveModelSettings(
   settings: GenerateModelSettings | undefined,
   overrideProviderId?: ProviderId,
   modelOverrides?: GenerateRequest["modelOverrides"]
-): GenerateModelSettings {
-  const providerId = overrideProviderId ?? settings?.providerId ?? getProviderId();
+): Promise<GenerateModelSettings> {
+  const configuredModelApiId = overrideProviderId ? undefined : settings?.configuredModelApiId;
+  const configured = configuredModelApiId ? await resolveConfiguredModelApi(configuredModelApiId) : undefined;
+  const providerId = overrideProviderId ?? configured?.providerId ?? settings?.providerId ?? getProviderId();
   return {
+    configuredModelApiId,
     providerId,
-    model: settings?.model?.trim() || getModel(providerId),
+    model: configured?.modelId || settings?.model?.trim() || getModel(providerId),
     temperature: settings?.temperature ?? 0.7,
     topP: settings?.topP ?? 1,
     contextCount: settings?.contextCount ?? 5,

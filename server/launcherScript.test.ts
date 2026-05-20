@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 
 const launcher = readFileSync(join(process.cwd(), "start-facetwrite.ps1"), "utf8");
 
-test("launcher fails fast when Docker is unavailable for DeerFlow", () => {
+test("launcher fails fast when Docker is unavailable for AgentBackend", () => {
   assert.match(
     launcher,
     /if \(-not \(Test-CommandAvailable -Name "docker"\)\) \{\s+throw "Docker was not found\./,
@@ -16,7 +16,7 @@ test("launcher fails fast when Docker is unavailable for DeerFlow", () => {
   );
 });
 
-test("launcher fails fast when Docker daemon is unreachable for DeerFlow", () => {
+test("launcher fails fast when Docker daemon is unreachable for AgentBackend", () => {
   assert.match(
     launcher,
     /if \(\$LASTEXITCODE -ne 0\) \{\s+throw "Docker daemon is not reachable\./,
@@ -27,13 +27,13 @@ test("launcher fails fast when Docker daemon is unreachable for DeerFlow", () =>
   );
 });
 
-test("launcher fails when DeerFlow sidecar never becomes healthy", () => {
+test("launcher fails when AgentBackend sidecar never becomes healthy", () => {
   assert.match(
     launcher,
-    /throw "DeerFlow sidecar did not report healthy/,
+    /throw "AgentBackend sidecar did not report healthy/,
   );
   assert.doesNotMatch(
     launcher,
-    /DeerFlow sidecar did not report healthy[\s\S]*?generation falls back/,
+    /AgentBackend sidecar did not report healthy[\s\S]*?generation falls back/,
   );
 });

@@ -40,7 +40,8 @@ export type AgentCard = {
 
 export type AgentSettings = {
   model: {
-    providerId: "deepseek" | "openai" | "openai-compatible";
+    configuredModelApiId?: string;
+    providerId: string;
     model: string;
     responseMode?: AgentModelResponseMode;
     temperature: number;

@@ -1,7 +1,7 @@
 import { runAgentCompletion, runAgentCompletionStream, type StreamStatus } from "../../agentRunLoop.js";
-import { getBaseURL } from "../../config/providerConfig.js";
 import type { GenerateRequest } from "../../contracts/generation.js";
 import { createOpenAIChatClient, getProviderProfile, type ChatMessage, type ChatClient } from "../../providerRuntime.js";
+import { resolveConfiguredModelApi, resolveProviderApiConfig } from "../../domains/model-config/index.js";
 import type { SQLiteStorageRepository } from "../../storage.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { ToolState } from "../../toolRegistry.js";
@@ -26,19 +26,24 @@ export type ProviderRunnerInput = {
 
 export type ProviderRunnerDeps = {
   apiKey?: string;
+  baseURL?: string;
   createClient?: typeof createOpenAIChatClient;
   runAgent?: typeof runAgentCompletion;
   runAgentStream?: typeof runAgentCompletionStream;
 };
 
 export async function runProviderGeneration(input: ProviderRunnerInput, deps: ProviderRunnerDeps = {}) {
-  const apiKey = deps.apiKey ?? process.env.OPENAI_API_KEY;
+  const config = input.modelSettings.configuredModelApiId
+    ? await resolveConfiguredModelApi(input.modelSettings.configuredModelApiId)
+    : await resolveProviderApiConfig(input.providerId);
+  const apiKey = deps.apiKey ?? config.apiKey;
   if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
+    throw new Error(`${getProviderProfile(input.providerId).label} API key is not configured. Open Model Config and save this provider's API key.`);
   }
+  const baseURL = deps.baseURL ?? config.baseURL;
 
   const run = await (deps.runAgent ?? runAgentCompletion)({
-    client: (deps.createClient ?? createOpenAIChatClient)({ apiKey, baseURL: getBaseURL(input.providerId) }) as ChatClient,
+    client: (deps.createClient ?? createOpenAIChatClient)({ apiKey, baseURL }) as ChatClient,
     providerId: input.providerId,
     modelSettings: input.modelSettings,
     messages: input.messages,
@@ -71,13 +76,17 @@ export async function runProviderGenerationStream(
   },
   deps: ProviderRunnerDeps = {}
 ) {
-  const apiKey = deps.apiKey ?? process.env.OPENAI_API_KEY;
+  const config = input.modelSettings.configuredModelApiId
+    ? await resolveConfiguredModelApi(input.modelSettings.configuredModelApiId)
+    : await resolveProviderApiConfig(input.providerId);
+  const apiKey = deps.apiKey ?? config.apiKey;
   if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
+    throw new Error(`${getProviderProfile(input.providerId).label} API key is not configured. Open Model Config and save this provider's API key.`);
   }
+  const baseURL = deps.baseURL ?? config.baseURL;
 
   const run = await (deps.runAgentStream ?? runAgentCompletionStream)({
-    client: (deps.createClient ?? createOpenAIChatClient)({ apiKey, baseURL: getBaseURL(input.providerId) }) as ChatClient,
+    client: (deps.createClient ?? createOpenAIChatClient)({ apiKey, baseURL }) as ChatClient,
     providerId: input.providerId,
     modelSettings: input.modelSettings,
     messages: input.messages,

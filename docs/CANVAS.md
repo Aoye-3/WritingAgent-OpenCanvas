@@ -1,7 +1,7 @@
 # FacetWrite Canvas
 
 ## Purpose
-The Canvas is the visual workspace where generated or user-authored writing artifacts become editable nodes. It is a product surface owned by FacetWrite, not by DeerFlow or the provider runtime.
+The Canvas is the visual workspace where generated or user-authored writing artifacts become editable nodes. It is a product surface owned by FacetWrite, not by AgentBackend or the provider runtime.
 
 The Canvas has two separate responsibilities:
 
@@ -71,12 +71,12 @@ Resize rules:
 - Persistence happens once on pointer release.
 
 ## Canvas Write Safety
-Agent and DeerFlow output must never mutate Canvas nodes directly.
+Agent and AgentBackend output must never mutate Canvas nodes directly.
 
 The only safe write path is:
 
 ```text
-Agent/provider/DeerFlow intent
+Agent/provider/AgentBackend intent
  -> canvas_write tool or explicit user write action
  -> canvas_write_requests row with status "pending"
  -> user confirmation or same-run explicit write intent

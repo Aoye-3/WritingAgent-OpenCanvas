@@ -5,7 +5,7 @@ FacetWrite Knowledge Base is a server-owned RAG capability for local project con
 ## Runtime
 - RAG engine: `@cherrystudio/embedjs`.
 - Vector database: `@cherrystudio/embedjs-libsql`.
-- Embeddings: OpenAI-compatible via `@cherrystudio/embedjs-openai`, or Ollama via `@cherrystudio/embedjs-ollama`.
+- Embeddings: configured model API bindings resolved through Model Config, then OpenAI-compatible via `@cherrystudio/embedjs-openai` or Ollama via `@cherrystudio/embedjs-ollama`.
 - Loaders: text, JSON, uploaded local files, URL/Web, and sitemap.
 - Runtime files: `.facetwrite/knowledge/<baseId>/vectors.db`.
 - Main metadata tables: `knowledge_bases`, `knowledge_items`, and `knowledge_item_events`.
@@ -23,15 +23,15 @@ The current UI is a layered management surface: a left Knowledge Base list, sour
 2. `promptRunBuilder` searches selected `knowledge.baseIds`; if none are selected, all bases are eligible.
 3. Results are injected into the user message as explicit Knowledge References.
 4. The run records a `knowledge_search_completed` tool event with source metadata and scores.
-5. Provider fallback and DeerFlow bridge tools reuse the same `KnowledgeService.search` path.
+5. Provider fallback and AgentBackend bridge tools reuse the same `KnowledgeService.search` path.
 
 ## Provider Direction
-The current MVP reuses existing provider environment settings for embeddings. The next provider iteration should follow Cherry Studio's provider registry approach:
+Knowledge Base runtime now follows the shared Model Config boundary:
 
-- one registry for provider metadata, docs links, base URL defaults, and model capabilities;
-- model capability flags for chat, embedding, rerank, vision, tool use, reasoning, and web search;
-- provider-specific base URL normalization behind the adapter layer;
-- settings UI that edits provider records instead of scattering provider-specific logic across product features.
+- the complete provider/model catalog lives in `shared/model/`;
+- local callable model APIs live in `.facetwrite/provider-apis.json` as `providerId + modelId + API` bindings;
+- new Knowledge Bases should store `embeddingConfigId` for embedding models and optional `rerankConfigId` for rerank models;
+- legacy `embeddingProvider`, `embeddingModel`, and `embeddingBaseUrl` fields remain for compatibility and display.
 
 ## Rerank
 The API stores rerank provider/model/base URL settings and attempts a generic rerank call when enabled. If rerank fails, search falls back to vector similarity order and records `knowledge_rerank_failed`.
@@ -39,7 +39,7 @@ The API stores rerank provider/model/base URL settings and attempts a generic re
 ## Safety
 - Knowledge search never exposes API keys in API responses.
 - Failed provider errors are redacted when they look credential-related.
-- OpenAI-compatible embeddings fail fast when `OPENAI_API_KEY` is missing instead of sending a placeholder key downstream.
+- OpenAI-compatible embeddings fail fast when the selected configured embedding API has no key instead of sending a placeholder key downstream.
 - File imports no longer accept arbitrary local paths by default. The supported path is browser upload to `.facetwrite/knowledge/uploads/<baseId>/`, capped at 20MB per file.
 - Local path import is only available for trusted self-use when `KNOWLEDGE_ALLOW_LOCAL_FILE_PATHS=true` and the resolved file is inside one of the `KNOWLEDGE_ALLOWED_IMPORT_ROOTS` directories.
 - URL and sitemap imports only accept `http` and `https` schemes.

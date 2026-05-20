@@ -1,16 +1,16 @@
 import type { ToolRef } from "../agents/types";
-import type { DeerFlowConfigOverview, DeerFlowRuntimeStatus } from "../settings/types";
+import type { AgentBackendConfigOverview, AgentBackendRuntimeStatus } from "../settings/types";
 
-export type DeerFlowToolBridgeStatus = {
+export type AgentBackendToolBridgeStatus = {
   name: ToolRef;
   label: string;
-  bridgeState: "mapped_metadata" | "pending_bridge" | "control_plane";
+  bridgeState: "agent_backend_builtin" | "facetwrite_bridge" | "pending_bridge" | "control_plane";
   target: string;
   executionBoundary: string;
   approvalBoundary?: string;
 };
 
-export type DeerFlowAgentMapping = {
+export type AgentBackendAgentMapping = {
   agentCardId: string;
   title: string;
   subagent: {
@@ -26,15 +26,15 @@ export type DeerFlowAgentMapping = {
   contractState: "active_runtime" | "mapped_metadata" | "fallback_only";
 };
 
-export type DeerFlowDashboard = {
-  runtime: DeerFlowRuntimeStatus;
-  config: DeerFlowConfigOverview;
+export type AgentBackendDashboard = {
+  runtime: AgentBackendRuntimeStatus;
+  config: AgentBackendConfigOverview;
   leadAgent: {
     assistantId: string;
-    role: "deerflow_execution_runtime";
+    role: "agent_backend_execution_runtime";
   };
-  agentMappings: DeerFlowAgentMapping[];
-  toolBridgeStatus: DeerFlowToolBridgeStatus[];
+  agentMappings: AgentBackendAgentMapping[];
+  toolBridgeStatus: AgentBackendToolBridgeStatus[];
   integrationMaturity: Array<{
     label: string;
     state: "connected" | "mapped" | "verified" | "pending";

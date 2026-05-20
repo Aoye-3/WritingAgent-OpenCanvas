@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 import { normalizeAgentRunOutput, sanitizeVisibleText } from "./outputNormalizer.js";
 
@@ -6,7 +6,7 @@ test("blocks internal prompt output from visible assistant text", () => {
   const result = normalizeAgentRunOutput({
     text: "You are FacetWrite's writing assistant.\n\n# AgentCard\nAgent: Blog Post\n# Output Contract\nReturn article.",
     locale: "en",
-    source: "deerflow"
+    source: "agent-backend"
   });
 
   assert.equal(result.text.includes("FacetWrite's writing assistant"), false);
@@ -18,7 +18,7 @@ test("blocks provider reasoning_content protocol errors from visible output", ()
   const result = normalizeAgentRunOutput({
     text: "LLM request failed: Error code: 400 - {'error': {'message': 'The reasoning_content in the thinking mode must be passed back to the API'}}",
     locale: "en",
-    source: "deerflow"
+    source: "agent-backend"
   });
 
   assert.match(result.text, /internal runtime information/i);
@@ -27,9 +27,9 @@ test("blocks provider reasoning_content protocol errors from visible output", ()
 
 test("strips pasted tool search JSON from visible assistant text", () => {
   const result = normalizeAgentRunOutput({
-    text: "好的，我来搜索一下最近中美两国的主要新闻。{\n  \"query\": \"2026年5月 美国 重大新闻\",\n  \"total_results\": 5,\n  \"results\": [{\"title\":\"raw\"}]\n}\n下面是整理后的摘要。",
+    text: '好的，我来搜索一下最近中美两国的主要新闻。\n{"query":"2026年5月 美国 重大新闻","total_results":5,"results":[{"title":"raw"}]}\n下面是整理后的摘要。',
     locale: "zh",
-    source: "deerflow"
+    source: "agent-backend"
   });
 
   assert.equal(result.text.includes('"query"'), false);

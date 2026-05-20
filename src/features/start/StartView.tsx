@@ -1,4 +1,4 @@
-import { BrandIcon } from "../../shared/icons";
+﻿import { BrandIcon } from "../../shared/icons";
 import { Button } from "../../shared/ui";
 import { useI18n } from "../i18n/I18nProvider";
 
@@ -33,8 +33,8 @@ export function StartView({ active, onStart, onOpenSettings }: StartViewProps) {
           <h1>{locale === "zh" ? "把任务卡、结构化输入和 AI 协作放进同一个写作界面。" : "Agent cards, structured inputs, and AI collaboration in one writing surface."}</h1>
           <p className="subcopy">
             {locale === "zh"
-              ? "FacetWrite 将 Prompt 构建、文档画板、上下文和右侧协作聊天组合成一个分层式工作台，为后续接入 DeerFlow 风格 Agent 能力打好基础。"
-              : "FacetWrite combines prompt construction, a document canvas, structured inputs, and a collaboration drawer into a layered workspace ready for DeerFlow-inspired agent capabilities."}
+              ? "FacetWrite 将 Prompt 构建、文档画布、上下文和右侧协作聊天组合成一个分层式工作台，为后续接入 AgentBackend 风格 Agent 能力打好基础。"
+              : "FacetWrite combines prompt construction, a document canvas, structured inputs, and a collaboration drawer into a layered workspace ready for AgentBackend-inspired agent capabilities."}
           </p>
           <div className="start-cta-row">
             <Button className="start-primary" variant="primary" type="button" onClick={onStart}>Start</Button>
