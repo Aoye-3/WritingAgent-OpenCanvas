@@ -6,6 +6,7 @@ import type { SQLiteStorageRepository } from "../../storage.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { ToolState } from "../../toolRegistry.js";
 import type { ProviderId } from "../../types.js";
+import type { KnowledgeService } from "../../knowledge/service.js";
 import { safeId } from "../../utils/ids.js";
 import type { GenerateModelSettings } from "./promptRunBuilder.js";
 import type { AgentCard } from "../../agentCards.js";
@@ -19,6 +20,7 @@ export type ProviderRunnerInput = {
   messages: ChatMessage[];
   effectiveToolState: ToolState;
   storage: SQLiteStorageRepository;
+  knowledgeService?: KnowledgeService;
   onToolEvent?: (event: ToolEventRecord) => void;
 };
 
@@ -49,6 +51,7 @@ export async function runProviderGeneration(input: ProviderRunnerInput, deps: Pr
       selectedCanvasNodeId: safeId(input.payload.selectedCanvasNodeId),
       contextValues: input.payload.contextValues,
       chatInstruction: input.payload.chatInstruction ?? input.payload.freeTextPrompt,
+      knowledgeService: input.knowledgeService,
       createCanvasWriteRequest: (writeInput) => input.storage.createCanvasWriteRequest(input.threadId, writeInput)
     },
     onToolEvent: input.onToolEvent
@@ -87,6 +90,7 @@ export async function runProviderGenerationStream(
       selectedCanvasNodeId: safeId(input.payload.selectedCanvasNodeId),
       contextValues: input.payload.contextValues,
       chatInstruction: input.payload.chatInstruction ?? input.payload.freeTextPrompt,
+      knowledgeService: input.knowledgeService,
       createCanvasWriteRequest: (writeInput) => input.storage.createCanvasWriteRequest(input.threadId, writeInput)
     },
     onToolEvent: input.onToolEvent,

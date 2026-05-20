@@ -63,6 +63,10 @@ export type AgentSettings = {
   knowledge: {
     enabled: boolean;
     scope: string;
+    baseIds?: string[];
+    documentCount?: number;
+    threshold?: number;
+    rerankEnabled?: boolean;
   };
   memory: {
     enabled: boolean;

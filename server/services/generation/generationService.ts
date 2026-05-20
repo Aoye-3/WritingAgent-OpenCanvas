@@ -3,6 +3,7 @@ import type { StreamStatus } from "../../agentRunLoop.js";
 import type { GenerateRequest, GenerateResponse } from "../../contracts/generation.js";
 import type { SQLiteStorageRepository } from "../../storage.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
+import type { KnowledgeService } from "../../knowledge/service.js";
 import { randomThreadId, safeId } from "../../utils/ids.js";
 import { runDeerFlowGeneration, type DeerFlowRunnerDeps } from "./deerflowRunner.js";
 import { mockText } from "./mockFallback.js";
@@ -27,6 +28,7 @@ export type GenerationService = {
 export type GenerationServiceDeps = {
   deerflow?: DeerFlowRunnerDeps;
   provider?: ProviderRunnerDeps;
+  knowledge?: KnowledgeService;
 };
 
 const streamLabels = {
@@ -41,10 +43,10 @@ export function createGenerationService(
 ): GenerationService {
   async function generateAndRecord(payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
-    const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime);
+    const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge);
     const agentCard = context.runtimeConfig.agentCard;
     await storage.ensureThread(threadId, agentCard.id);
-    const runtimeEvents: ToolEventRecord[] = [];
+    const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
 
     try {
       const deerFlowRun = await runDeerFlowGeneration({
@@ -74,7 +76,7 @@ export function createGenerationService(
             threadId,
             agentTitle: agentCard.title[payload.locale],
             text: normalized.text,
-            events: normalized.events,
+            events: [...runtimeEvents, ...(normalized.events ?? [])],
             onToolEvent
           });
           return recordGenerationRun({
@@ -111,6 +113,7 @@ export function createGenerationService(
         messages: context.messages,
         effectiveToolState: context.effectiveToolState,
         storage,
+        knowledgeService: deps.knowledge,
         onToolEvent
       }, deps.provider);
 
@@ -177,11 +180,11 @@ export function createGenerationService(
     } = {}
   ): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
-    const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime);
+    const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge);
     const agentCard = context.runtimeConfig.agentCard;
     await storage.ensureThread(threadId, agentCard.id);
     const textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
-    const runtimeEvents: ToolEventRecord[] = [];
+    const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
 
     callbacks.onStatus?.({ phase: "thinking", label: streamLabels.thinking });
 
@@ -217,7 +220,7 @@ export function createGenerationService(
             threadId,
             agentTitle: agentCard.title[payload.locale],
             text: normalized.text,
-            events: normalized.events,
+            events: [...runtimeEvents, ...(normalized.events ?? [])],
             onToolEvent: callbacks.onToolEvent
           });
           return recordGenerationRun({
@@ -254,6 +257,7 @@ export function createGenerationService(
         messages: context.messages,
         effectiveToolState: context.effectiveToolState,
         storage,
+        knowledgeService: deps.knowledge,
         onToolEvent: callbacks.onToolEvent,
         onToken: textGate.push,
         onStatus: callbacks.onStatus

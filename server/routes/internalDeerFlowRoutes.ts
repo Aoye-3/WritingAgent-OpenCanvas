@@ -1,15 +1,17 @@
 import type { Express, Request } from "express";
 import type { ChatToolCall } from "../providerRuntime.js";
 import type { SQLiteStorageRepository } from "../storage.js";
+import type { KnowledgeService } from "../knowledge/service.js";
 import { executeToolCall } from "../toolRuntime.js";
 import type { ToolState } from "../tools/catalog.js";
 import { errorMessage, sendError, sendOk } from "../utils/http.js";
 
 type InternalDeerFlowRouteDeps = {
   storage: SQLiteStorageRepository;
+  knowledgeService?: KnowledgeService;
 };
 
-export function registerInternalDeerFlowRoutes(app: Express, { storage }: InternalDeerFlowRouteDeps) {
+export function registerInternalDeerFlowRoutes(app: Express, { storage, knowledgeService }: InternalDeerFlowRouteDeps) {
   app.post("/api/internal/deerflow/tool-call", async (request, response) => {
     if (!isAllowedInternalRequest(request)) {
       sendError(response, 403, "validation_failed", "DeerFlow tool bridge calls require an internal source.");
@@ -25,6 +27,7 @@ export function registerInternalDeerFlowRoutes(app: Express, { storage }: Intern
         selectedCanvasNodeId: body.selectedCanvasNodeId,
         contextValues: body.contextValues,
         chatInstruction: body.chatInstruction,
+        knowledgeService,
         createCanvasWriteRequest: (input) => storage.createCanvasWriteRequest(body.threadId, input)
       });
       sendOk(response, result);

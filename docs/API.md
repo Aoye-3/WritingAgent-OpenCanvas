@@ -27,6 +27,31 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `GET /api/skills/catalog`
   - Returns `{ skills }` from local skill discovery.
 
+## Knowledge
+- `GET /api/knowledge/bases`
+  - Returns `{ bases }` with Knowledge Base metadata and indexed item state. Secret provider values are not returned.
+- `POST /api/knowledge/bases`
+  - Creates a local Knowledge Base. Body may include `name`, `description`, `embeddingProvider`, `embeddingModel`, `embeddingBaseUrl`, chunk/search settings, and optional rerank settings.
+  - Defaults to OpenAI-compatible embeddings with `text-embedding-3-small` and the current provider base URL.
+- `GET /api/knowledge/bases/:baseId`
+  - Returns `{ base }` with items.
+- `PATCH /api/knowledge/bases/:baseId`
+  - Updates metadata and runtime settings. Updating embedding settings clears the cached RAG application; callers should reindex when source embeddings need to be rebuilt.
+- `DELETE /api/knowledge/bases/:baseId`
+  - Deletes metadata and the local vector store under `.facetwrite/knowledge/<baseId>/`.
+- `POST /api/knowledge/bases/:baseId/items`
+  - Adds and indexes one item. Supported `type` values are `text`, `note`, `url`, `sitemap`, and `file`.
+  - `text` and `note` use `content`; `url` and `sitemap` use an `http` or `https` `source`; `file` uses `fileBase64` plus `fileName`.
+  - JSON request bodies are capped at 25MB. File payloads are capped at 20MB after base64 decoding and are stored under `.facetwrite/knowledge/uploads/<baseId>/`.
+  - Trusted local file paths are disabled by default. They require `KNOWLEDGE_ALLOW_LOCAL_FILE_PATHS=true` and a matching `KNOWLEDGE_ALLOWED_IMPORT_ROOTS` directory.
+- `DELETE /api/knowledge/bases/:baseId/items/:itemId`
+  - Deletes the item metadata and removes its loader entries from the vector store when available.
+- `POST /api/knowledge/search`
+  - Body: `{ query, baseIds?, limit?, threshold? }`.
+  - Returns `{ results }`, where each result includes `baseId`, `baseName`, `content`, `score`, `source`, `title`, and metadata.
+- `POST /api/knowledge/bases/:baseId/reindex`
+  - Rebuilds the vector store from stored item metadata/content.
+
 ## Agent Cards
 - `GET /api/agent-cards`
   - Returns `{ agentCards }`.
@@ -48,6 +73,7 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - If DeerFlow fails without a user-visible answer, returns only internal/runtime output, or returns an empty stream, the backend records a `deerflow_runtime_failed` tool event and continues with the Provider runtime before considering Mock fallback.
   - Provider-private runtime metadata, including DeepSeek `reasoning_content`, is not part of the public request or response schema. It may be used internally for provider continuation only.
   - Direct Canvas-write intent in `chatInstruction`, such as `写入`, `保存到画板`, `save to canvas`, or `write this`, may cause the frontend to approve the newly returned pending Canvas write request after this endpoint completes. The API still records the request first; Canvas mutation remains behind the approve path.
+  - When Agent knowledge is enabled and `knowledge_base` is active, generation searches selected Knowledge Bases before model execution. Retrieved references are injected into runtime context and recorded as `knowledge_search_completed` tool events.
 - `POST /api/generate/stream`
   - SSE endpoint.
   - Emits `status`, `tool_event`, `token`, `final`, and `error` events.

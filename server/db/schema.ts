@@ -138,6 +138,51 @@ export function migrateStorageSchema(db: DatabaseSync) {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS knowledge_bases (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      embedding_provider TEXT NOT NULL,
+      embedding_model TEXT NOT NULL,
+      embedding_base_url TEXT NOT NULL,
+      dimensions INTEGER,
+      chunk_size INTEGER NOT NULL,
+      chunk_overlap INTEGER NOT NULL,
+      document_count INTEGER NOT NULL,
+      threshold REAL NOT NULL,
+      rerank_enabled INTEGER NOT NULL DEFAULT 0,
+      rerank_provider TEXT,
+      rerank_model TEXT,
+      rerank_base_url TEXT,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS knowledge_items (
+      id TEXT PRIMARY KEY,
+      base_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      source TEXT NOT NULL,
+      content_text TEXT,
+      unique_id TEXT,
+      unique_ids_json TEXT NOT NULL,
+      status TEXT NOT NULL,
+      error_message TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS knowledge_item_events (
+      id TEXT PRIMARY KEY,
+      base_id TEXT NOT NULL,
+      item_id TEXT,
+      event_type TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
     INSERT OR IGNORE INTO projects (id, title, created_at, updated_at)
     VALUES ('local-project', 'Local Workspace', datetime('now'), datetime('now'));
 

@@ -33,6 +33,7 @@ User input
 - `src/shared/MarkdownText.tsx` preserves Markdown block/inline rendering while optionally wrapping annotated text fragments in highlight marks.
 - Runtime context is sourced from the left AgentCard structured input drawer plus current draft/Canvas state. The bottom workspace utility bar is reserved for future tools and prompt preview; it must not inject course-note, audience-profile, or other hidden context.
 - `src/features/ai-dashboard/AiDashboardView.tsx` renders the AI runtime dashboard for DeerFlow status, Skills/MCP visibility, Agent mapping, and ToolUse bridge progress.
+- `src/features/knowledge/KnowledgeSettingsView.tsx` renders the local Knowledge Base management console for creating RAG bases, importing text/URL/sitemap/local-file sources, viewing indexing status, and testing retrieval.
 - `src/shared/apiClient.ts` provides shared frontend API helpers used by feature clients.
 
 ## Backend
@@ -40,6 +41,7 @@ User input
 - `server/app.ts` wires Express middleware, storage, Agent runtime, generation service, and route modules.
 - `server/routes/*` defines API endpoints for health, catalog, agents, threads, projects, Canvas, settings, and generation.
 - `server/services/*` contains Agent definition/catalog behavior, generation orchestration, and settings persistence/validation.
+- `server/knowledge/*` contains the server-owned Knowledge Base runtime. It wraps the Cherry Studio embedjs/libSQL dependency stack behind FacetWrite APIs and keeps vector data under `.facetwrite/knowledge/`.
 - `server/deerflow/*` contains the DeerFlow sidecar runtime adapter, backend-only auth session handling, SSE parsing, runtime status, read-only config proxy, AgentCard-to-subagent mapping, and token/status forwarding for `/api/generate/stream`.
 - `server/providerRuntime.ts` normalizes provider request behavior for supported provider IDs, including Chat Completions streaming behind the provider profile boundary.
 - `server/agentRunLoop.ts` runs Chat Completions, executes returned tool calls, records tool events, streams final assistant tokens when available, and stops when final content or `maxToolCalls` is reached.
@@ -65,8 +67,17 @@ User input
 - If DeerFlow returns an empty answer or only internal/runtime output, FacetWrite records a `deerflow_runtime_failed` event and continues with the Provider runtime. Only if the Provider runtime also fails does the run enter Mock fallback.
 - Stored historical messages and output versions are sanitized again at read time so older leaked local records cannot reappear in the workspace UI.
 
+## Knowledge Runtime Boundary
+- Knowledge Base is a server-owned capability. The frontend can manage bases and items, but SQLite metadata and vector indexes are owned by the backend.
+- FacetWrite uses Cherry Studio's Apache-licensed embedjs package family as the RAG engine: `RAGApplicationBuilder`, `LibSqlDb`, OpenAI/Ollama embeddings, Web loader, Sitemap loader, local path loader, JSON loader, and text loader.
+- FacetWrite does not copy Cherry Studio application code into runtime paths. The checked-out Cherry Studio source remains reference material under `reference/sources/cherry-studio/`.
+- Knowledge vector stores live under `.facetwrite/knowledge/<baseId>/vectors.db`; FacetWrite's main SQLite DB stores only metadata, item state, source audit, and events.
+- During generation, `promptRunBuilder` performs retrieval when Agent knowledge is enabled and the `knowledge_base` tool is active. Results are injected as explicit Knowledge References and recorded as `knowledge_search_completed` tool events.
+- The local `knowledge_base` tool and DeerFlow internal bridge call the same KnowledgeService search path. If search fails or no bases exist, the tool safely falls back to explicit runtime context values.
+
 ## Provider Adapter Boundary
 - Provider-specific wire fields stay behind `server/providerRuntime.ts` and the provider profile capability model.
+- The current provider layer is intentionally being evolved toward a Cherry Studio-style provider registry for faster MVP closure: provider metadata, docs links, base URL defaults, and model capability flags should live in one registry and feed chat, embedding, rerank, tool-use, and future multimodal settings.
 - DeepSeek `reasoning_content` is runtime-only state. It may be preserved across thinking-mode tool-call turns so DeepSeek can continue a valid conversation, but it is never part of FacetWrite's public message, output version, or Canvas schemas.
 - Provider-private fields are stripped for providers that do not explicitly support them, including OpenAI-compatible defaults.
 - Per-run model overrides from the workspace composer are limited to safe runtime controls such as DeepSeek Think mode and reasoning effort. They do not mutate Agent settings.
@@ -93,6 +104,7 @@ User input
 - `server/db/schema.ts` owns schema creation and idempotent migration checks.
 - `server/repositories/*` contains focused repository boundaries introduced behind the facade. Thread listing/trash and Agent settings already delegate through repository classes; run and Canvas behavior remain facade-covered while their repository boundaries continue to mature.
 - Runtime database path: `.facetwrite/data/facetwrite.db`.
+- Knowledge vector path: `.facetwrite/knowledge/<baseId>/vectors.db`.
 - Thread file workspace path: `.facetwrite/threads/<threadId>/user-data/`.
 - Thread rows are the current project identity boundary. Project rename updates `threads.title`; AgentCard names remain type metadata and are displayed as secondary information.
 
