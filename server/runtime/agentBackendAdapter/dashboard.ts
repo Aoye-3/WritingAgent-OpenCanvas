@@ -1,5 +1,5 @@
-import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
-import { toolCatalog, type ToolRef } from "../tools/catalog.js";
+import type { AgentRuntimeAdapter } from "../../agentRuntimeAdapter.js";
+import { toolCatalog, type ToolRef } from "../../tools/catalog.js";
 import { buildAgentBackendSubagentConfig, type AgentBackendSubagentConfig } from "./taskAgentMapping.js";
 import { getAgentBackendConfigOverview, type AgentBackendConfigOverview } from "./proxy.js";
 import { getAgentBackendRuntimeConfig, type AgentBackendRuntimeConfig } from "./config.js";

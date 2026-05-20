@@ -3,7 +3,7 @@ import type { AppView } from "../../app/App";
 import { AppSidebar } from "../../shared/AppSidebar";
 import { EmptyState, Panel, StatusBadge } from "../../shared/ui";
 import { useI18n } from "../i18n/I18nProvider";
-import { fetchAgentBackendDashboard } from "./aiDashboardClient";
+import { fetchAgentRuntimeDashboard } from "./agentRuntimeClient";
 import type { AgentBackendDashboard, AgentBackendToolBridgeStatus } from "./types";
 
 type AiDashboardViewProps = {
@@ -19,7 +19,7 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
 
   useEffect(() => {
     if (activeView !== "aiDashboard") return;
-    fetchAgentBackendDashboard()
+    fetchAgentRuntimeDashboard()
       .then((nextDashboard) => {
         setDashboard(nextDashboard);
         setError("");
@@ -36,7 +36,7 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
         <div className="management-header">
           <div>
             <h1>{locale === "zh" ? "AI 仪表盘" : "AI Dashboard"}</h1>
-            <p>{locale === "zh" ? "查看 AgentBackend 执行层、MCP、Skills、Agent 映射和 ToolUse 桥接状态。" : "AgentBackend execution, MCP, Skills, Agent mapping, and ToolUse bridge status."}</p>
+            <p>{locale === "zh" ? "查看内置 Agent Runtime、MCP、Skills、Agent 映射和 ToolUse 桥接状态。" : "Internal Agent Runtime, MCP, Skills, Agent mapping, and ToolUse bridge status."}</p>
           </div>
           {dashboard ? <StatusPill dashboard={dashboard} /> : null}
         </div>
@@ -55,7 +55,7 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
 
             <Panel className="ai-dashboard-section">
               <div className="ai-section-header">
-                <h2>AgentBackend capabilities</h2>
+                <h2>Agent Runtime capabilities</h2>
                 <span>{dashboard.config.skills.length} Skills / {mcpServers.length} MCP</span>
               </div>
               <div className="ai-capability-grid">
@@ -72,7 +72,7 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
               <div className="ai-mapping-table">
                 <div className="ai-mapping-head">
                   <span>FacetWrite Agent</span>
-                  <span>AgentBackend subagent</span>
+                  <span>Runtime subagent</span>
                   <span>Skills</span>
                   <span>Tools</span>
                   <span>Status</span>
@@ -142,8 +142,8 @@ function StatusPill({ dashboard }: { dashboard: AgentBackendDashboard }) {
 
 function runtimeLabel(dashboard: AgentBackendDashboard) {
   if (!dashboard.runtime.enabled) return "TypeScript fallback";
-  if (!dashboard.runtime.reachable) return "AgentBackend unreachable";
-  if (dashboard.runtime.authState === "authenticated") return "AgentBackend online";
+  if (!dashboard.runtime.reachable) return "Agent Runtime unreachable";
+  if (dashboard.runtime.authState === "authenticated") return "Agent Runtime online";
   return dashboard.runtime.authState;
 }
 

@@ -1,7 +1,7 @@
 import type { AgentRuntimeConfig } from "../agentDefinitionService.js";
 import type { GenerateRequest } from "../../contracts/generation.js";
-import { getAgentBackendRuntimeConfig, type AgentBackendRuntimeConfig } from "../../agentBackend/config.js";
-import { runAgentBackendAgent } from "../../agentBackend/client.js";
+import { getAgentBackendRuntimeConfig, type AgentBackendRuntimeConfig } from "../../runtime/agentBackendAdapter/config.js";
+import { runAgentBackendAgent } from "../../runtime/agentBackendAdapter/client.js";
 import type { ChatMessage } from "../../providerRuntime.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { StreamStatus } from "../../agentRunLoop.js";

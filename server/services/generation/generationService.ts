@@ -4,8 +4,11 @@ import type { GenerateRequest, GenerateResponse } from "../../contracts/generati
 import type { SQLiteStorageRepository } from "../../storage.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { KnowledgeService } from "../../knowledge/service.js";
+import type { AgentRuntimePort } from "../../runtime/agentRuntimePort.js";
+import { createAgentBackendRuntimePort } from "../../runtime/agentBackendAdapter/index.js";
 import { randomThreadId, safeId } from "../../utils/ids.js";
-import { runAgentBackendGeneration, type AgentBackendRunnerDeps } from "./agentBackendRunner.js";
+import type { AgentBackendRunnerDeps } from "./agentBackendRunner.js";
+import { runAgentRuntimeGeneration } from "./agentRuntimeRunner.js";
 import { mockText } from "./mockFallback.js";
 import { normalizeAgentRunOutput } from "./outputNormalizer.js";
 import { buildGenerationRunContext } from "./promptRunBuilder.js";
@@ -26,6 +29,8 @@ export type GenerationService = {
 };
 
 export type GenerationServiceDeps = {
+  agentRuntime?: AgentRuntimePort;
+  /** Compatibility hook for older tests and callers during the Agent Runtime port migration. */
   agentBackend?: AgentBackendRunnerDeps;
   provider?: ProviderRunnerDeps;
   knowledge?: KnowledgeService;
@@ -41,6 +46,8 @@ export function createGenerationService(
   agentRuntime: AgentRuntimeAdapter,
   deps: GenerationServiceDeps = {}
 ): GenerationService {
+  const executionRuntime = deps.agentRuntime ?? (deps.agentBackend ? createAgentBackendRuntimePort(deps.agentBackend) : undefined);
+
   async function generateAndRecord(payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge);
@@ -49,14 +56,14 @@ export function createGenerationService(
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
 
     try {
-      const agentBackendRun = await runAgentBackendGeneration({
+      const agentBackendRun = await runAgentRuntimeGeneration({
         payload,
         threadId,
         runtimeConfig: context.runtimeConfig,
         messages: context.messages,
         prompt: context.prompt,
         onToolEvent
-      }, deps.agentBackend);
+      }, executionRuntime);
 
       if (agentBackendRun) {
         const normalized = normalizeAgentRunOutput({
@@ -189,7 +196,7 @@ export function createGenerationService(
     callbacks.onStatus?.({ phase: "thinking", label: streamLabels.thinking });
 
     try {
-      const agentBackendRun = await runAgentBackendGeneration({
+      const agentBackendRun = await runAgentRuntimeGeneration({
         payload,
         threadId,
         runtimeConfig: context.runtimeConfig,
@@ -198,7 +205,7 @@ export function createGenerationService(
         onToolEvent: callbacks.onToolEvent,
         onToken: textGate.push,
         onStatus: callbacks.onStatus
-      }, deps.agentBackend);
+      }, executionRuntime);
 
       if (agentBackendRun) {
         textGate.flush();

@@ -42,7 +42,7 @@ export function useProjectSettings(open: boolean, copy: {
         setAgentBackendConfig(nextConfig);
       })
       .catch((error: unknown) => {
-        const messageText = error instanceof Error ? error.message : "Unable to load AgentBackend status";
+        const messageText = error instanceof Error ? error.message : "Unable to load Agent Runtime status";
         setAgentBackendStatus({ ...fallbackAgentBackendStatus, lastError: messageText });
         setAgentBackendConfig({ ...fallbackAgentBackendConfig, lastError: messageText });
       });

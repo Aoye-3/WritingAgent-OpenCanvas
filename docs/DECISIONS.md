@@ -1,4 +1,11 @@
-﻿# FacetWrite Technical Decisions
+# FacetWrite Technical Decisions
+
+## 2026-05-20: AgentBackend Is An Internal Agent Runtime Module
+Decision: Treat AgentBackend as the current implementation of FacetWrite's internal Agent Runtime subsystem. Its source is tracked under `modules/agent-runtime/`, while the FacetWrite backend talks to it through `server/runtime/agentRuntimePort.ts` and the `server/runtime/agentBackendAdapter/` implementation.
+
+Reason: AgentBackend had already been tracked in the main repository and was no longer just reference material. Making it an explicit internal module preserves the useful runtime capability while preventing frontend, generation, storage, and documentation from depending on its historical top-level path or implementation details.
+
+Impact: New code should use `/api/agent-runtime/*`, `npm run agent-runtime:*`, and the runtime port. `/api/agent-backend/*`, `npm run agent-backend:*`, and `server/agentBackend/*` remain compatibility aliases during migration. The Python/LangGraph runtime remains an independent process/container; it is not merged into the Node/Express service process.
 
 ## 2026-05-20: AgentBackend Rename Requires New Runtime Env Keys
 Decision: Treat `AGENT_BACKEND_*` as the only active FacetWrite runtime configuration namespace after the AgentBackend rename.
@@ -12,7 +19,7 @@ Decision: Run the local AgentBackend acceptance sidecar with `agent-backend-*` c
 
 Reason: The original upstream compose shape can expose broad host control and local credential directories. FacetWrite's default local validation only needs nginx, frontend, gateway, auth, and run streaming, so the acceptance profile should reduce local blast radius.
 
-Impact: `npm run agent-backend:up/status/down` injects `AGENT_BACKEND_ROOT` and manages the `agent-backend-dev` compose project. Sandbox execution or CLI auto-auth experiments must explicitly reintroduce sensitive mounts in an isolated environment. The 2026-05-20 smoke test confirmed `provider:"agent-backend"`, `usedMock:false`, and `finishReason:"agent_backend_completed"` with this profile.
+Impact: `npm run agent-runtime:up/status/down` injects `AGENT_RUNTIME_ROOT` and manages the `facetwrite-agent-runtime` compose project. The historical `agent-backend:*` commands remain aliases. Sandbox execution or CLI auto-auth experiments must explicitly reintroduce sensitive mounts in an isolated environment. The 2026-05-20 smoke test confirmed `provider:"agent-backend"`, `usedMock:false`, and `finishReason:"agent_backend_completed"` with this profile.
 
 ## 2026-05-18: Right-side AI Chat Uses Real Streaming Preview
 Decision: The collaboration drawer uses `/api/generate/stream` as a real streaming channel for AI chat replies, with transient status events and temporary assistant messages reconciled against persisted thread state after `final`.
@@ -59,7 +66,7 @@ Impact: `.canvas-grid` is visual-only and uses `pointer-events:none`; `.canvas-n
 ## 2026-05-16: Direct Canvas Write Intent Auto-Approves Same-Run Requests
 Decision: Treat explicit user write commands as confirmation for newly created Canvas write requests from the same generation run.
 
-Reason: Users expect "鍐欏叆" / "save to canvas" to apply the content, while the Agent must still be unable to mutate Canvas silently.
+Reason: Users expect "写入" / "save to canvas" to apply the content, while the Agent must still be unable to mutate Canvas silently.
 
 Impact: `canvas_write` and fallback write-intent detection still create `canvas_write_requests` first. The frontend records pending request ids before the run, refreshes thread state after the run, and auto-approves only new pending requests. Existing stale requests remain pending. Model-requested `replace` operations are honored only when the user explicitly asks to replace/overwrite; otherwise they become append/create.
 
@@ -174,3 +181,4 @@ Decision: Real API keys belong only in `.env.local` or the shell environment and
 Reason: FacetWrite is local-first but provider keys are production secrets.
 
 Impact: Settings save requires explicit confirmation for local key writes, and docs must avoid pasted secrets.
+

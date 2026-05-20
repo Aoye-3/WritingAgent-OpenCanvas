@@ -69,8 +69,8 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - `contextValues`, when present, represents explicit left AgentCard structured inputs and current workspace state such as draft or Canvas node data. It must not contain bottom-bar placeholder content or historical defaults such as course notes or audience profiles.
   - `modelOverrides`, when present, is a per-run override for runtime-safe model controls such as `thinkingMode` and `reasoningEffort`. It does not mutate saved Agent settings.
   - Runs generation, records the result, and returns generation metadata and output.
-  - Uses AgentBackend as the runtime when `AGENT_BACKEND_ENABLED=true`; otherwise uses the current TypeScript provider runtime.
-  - If AgentBackend fails without a user-visible answer, returns only internal/runtime output, or returns an empty stream, the backend records a `agent_backend_runtime_failed` tool event and continues with the Provider runtime before considering Mock fallback.
+  - Uses the internal Agent Runtime when `AGENT_BACKEND_ENABLED=true`; otherwise uses the current TypeScript provider runtime. The current Agent Runtime implementation is the AgentBackend adapter.
+  - If Agent Runtime fails without a user-visible answer, returns only internal/runtime output, or returns an empty stream, the backend records a `agent_backend_runtime_failed` tool event and continues with the Provider runtime before considering Mock fallback.
   - Provider-private runtime metadata, including DeepSeek `reasoning_content`, is not part of the public request or response schema. It may be used internally for provider continuation only.
   - Direct Canvas-write intent in `chatInstruction`, such as `鍐欏叆`, `淇濆瓨鍒扮敾鏉縛, `save to canvas`, or `write this`, may cause the frontend to approve the newly returned pending Canvas write request after this endpoint completes. The API still records the request first; Canvas mutation remains behind the approve path.
   - When Agent knowledge is enabled and `knowledge_base` is active, generation searches selected Knowledge Bases before model execution. Retrieved references are injected into runtime context and recorded as `knowledge_search_completed` tool events.
@@ -80,17 +80,17 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - `status` payloads include `{ phase, label }`, where phase is `thinking`, `searching`, `writing`, or `finalizing`. These events are for transient UI state and are not persisted as messages.
   - `token` events are emitted as progressive, user-visible assistant text segments after the backend safety gate has enough text to rule out obvious internal prompt, ToolUse, or reasoning leaks. Segments are intentionally small UI chunks so the right AI collaboration drawer can render a visible typewriter effect even when an upstream provider or runtime flushes a large block at once.
   - `error` payloads include `code` and `message`.
-  - AgentBackend custom subagent events are emitted as `tool_event` records with `eventType` prefixed by `AgentBackend_`.
-  - Recoverable AgentBackend-to-Provider fallback is emitted as a `tool_event` with `eventType:"agent_backend_runtime_failed"` and a redacted payload containing `fallback:"provider"`.
+  - Agent Runtime custom subagent events from the current adapter are emitted as `tool_event` records with `eventType` prefixed by `AgentBackend_`.
+  - Recoverable Agent Runtime-to-Provider fallback is emitted as a `tool_event` with `eventType:"agent_backend_runtime_failed"` and a redacted payload containing `fallback:"provider"`.
   - The `final` payload remains the recorded `GenerateResponse`. Clients should let the chat assistant typewriter queue drain before reconciling temporary streaming text with this final thread state so the drawer does not suddenly replace a large block of content.
 
-## AgentBackend Runtime Configuration
+## Agent Runtime Configuration
 - `AGENT_BACKEND_ENABLED`
-  - Enables the AgentBackend runtime path when set to `true` or `1`.
+  - Enables the Agent Runtime path when set to `true` or `1`.
   - Historical `DEERFLOW_ENABLED` and other `DEERFLOW_*` keys are not compatibility inputs after the AgentBackend rename. Migrate local `.env.local` values to `AGENT_BACKEND_*` and restart the API process.
 - `AGENT_BACKEND_BASE_URL`
-  - AgentBackend Gateway base URL. Defaults to `http://127.0.0.1:8000`.
-  - For the validated Docker sidecar path, use AgentBackend nginx: `http://127.0.0.1:2026`.
+  - Agent Runtime Gateway base URL. Defaults to `http://127.0.0.1:8000`.
+  - For the validated Docker sidecar path, use Agent Runtime nginx: `http://127.0.0.1:2026`.
 - `AGENT_BACKEND_ASSISTANT_ID`
   - AgentBackend assistant ID. Defaults to `lead_agent`.
 - `AGENT_BACKEND_AUTH_EMAIL`
@@ -102,32 +102,34 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `AGENT_BACKEND_AUTH_TIMEOUT_MS`
   - Timeout for AgentBackend auth/setup/login requests. Defaults to `5000`.
 - `FACETWRITE_INTERNAL_BASE_URL`
-  - AgentBackend-to-FacetWrite callback base URL for bridged ToolUse. Docker sidecar default is `http://host.docker.internal:8787`.
+  - Agent Runtime-to-FacetWrite callback base URL for bridged ToolUse. Docker sidecar default is `http://host.docker.internal:8787`.
 - `FACETWRITE_INTERNAL_TOOL_TOKEN`
-  - Optional shared token for AgentBackend internal ToolUse calls. When set, AgentBackend sends it as `x-facetwrite-tool-token`; the value is never exposed by FacetWrite APIs.
-- `GET /api/agent-backend/status`
-  - Returns AgentBackend runtime status: enabled, baseUrl, assistantId, reachable, runtimeProvider, authState, and lastError.
+  - Optional shared token for Agent Runtime internal ToolUse calls. When set, the runtime sends it as `x-facetwrite-tool-token`; the value is never exposed by FacetWrite APIs.
+- `GET /api/agent-runtime/status`
+  - Returns Agent Runtime status: enabled, baseUrl, assistantId, reachable, runtimeProvider, authState, and lastError.
   - `authState` is one of `not_configured`, `setup_required`, `authenticated`, or `auth_failed`.
   - Docker validation on 2026-05-20 confirmed this endpoint reports `enabled:true`, `reachable:true`, `runtimeProvider:"agent-backend"`, and `authState:"authenticated"` against `http://127.0.0.1:2026` after local session setup.
-- `GET /api/agent-backend/config`
-  - Returns read-only AgentBackend skills and MCP server overview.
+- `GET /api/agent-runtime/config`
+  - Returns read-only Agent Runtime skills and MCP server overview.
   - Secret-like MCP values such as keys, tokens, passwords, authorization headers, and OAuth client secrets are redacted.
   - Uses the backend AgentBackend auth session for protected AgentBackend APIs. If auth fails, the route returns safe overview defaults plus `lastError`; it must not expose AgentBackend secrets or MCP environment values.
-- `GET /api/agent-backend/dashboard`
-  - Returns a read-only AI Dashboard payload containing runtime status, AgentBackend Skills/MCP overview, Lead Agent metadata, AgentCard-to-AgentBackend subagent mappings, ToolUse bridge status, and integration maturity.
+- `GET /api/agent-runtime/dashboard`
+  - Returns a read-only AI Dashboard payload containing runtime status, Agent Runtime Skills/MCP overview, Lead Agent metadata, AgentCard-to-runtime subagent mappings, ToolUse bridge status, and integration maturity.
   - This endpoint must not return API keys, provider secrets, AgentBackend cookies, CSRF tokens, or MCP secret-like values.
-- `POST /api/internal/agent-backend/tool-call`
-  - Internal service-to-service endpoint for AgentBackend bridge tools.
-  - Accepts only trusted local/container calls. Requests must include `x-facetwrite-internal: AgentBackend` or the configured `x-facetwrite-tool-token`.
+- `POST /api/internal/agent-runtime/tool-call`
+  - Internal service-to-service endpoint for Agent Runtime bridge tools. `/api/internal/agent-backend/tool-call` remains a compatibility alias.
+  - Accepts only trusted local/container calls. Requests must include `x-facetwrite-internal: agent-runtime` or the configured `x-facetwrite-tool-token`.
   - Body: `{ threadId, toolName, arguments, allowedToolRefs, toolState, selectedCanvasNodeId, contextValues, chatInstruction }`.
   - Reuses FacetWrite ToolUse policy and executors. Unknown tools, disabled tools, or tools not allowed by the active Agent return an `ok:false` result rather than bypassing policy.
   - `canvas_write` creates a pending Canvas write request only; it does not mutate Canvas content.
   - `canvas_write` defaults to non-destructive behavior. A requested `replace` operation is honored only when the user instruction includes an explicit replace/overwrite intent; otherwise it is normalized to append/create.
 
-## AgentBackend Auth Status
-- AgentBackend Docker sidecar health is reachable without auth at `/health`.
-- AgentBackend `/api/skills`, `/api/mcp/config`, and `/api/runs/stream` are protected in the validated Docker runtime.
-- FacetWrite does not bypass this protection. The backend performs AgentBackend setup/login, caches session cookie plus CSRF token in process memory, and retries once after 401/403.
+Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/api/agent-backend/dashboard` remain aliases for the corresponding Agent Runtime endpoints during migration.
+
+## Agent Runtime Auth Status
+- Agent Runtime Docker sidecar health is reachable without auth at `/health`.
+- Agent Runtime `/api/skills`, `/api/mcp/config`, and `/api/runs/stream` are protected in the validated Docker runtime.
+- FacetWrite does not bypass this protection. The backend performs AgentBackend setup/login through the current adapter, caches session cookie plus CSRF token in process memory, and retries once after 401/403.
 - Session cookies, CSRF tokens, auth email/password, and MCP secret-like values are not exposed through FacetWrite APIs.
 
 ## Threads

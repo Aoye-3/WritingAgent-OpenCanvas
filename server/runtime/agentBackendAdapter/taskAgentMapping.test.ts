@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { defaultAgentSettings, getAgentCard } from "../agentCards.js";
+import { defaultAgentSettings, getAgentCard } from "../../agentCards.js";
 import { buildAgentBackendSubagentConfig } from "./taskAgentMapping.js";
 
 test("builds AgentBackend subagent config from an AgentCard and settings", () => {

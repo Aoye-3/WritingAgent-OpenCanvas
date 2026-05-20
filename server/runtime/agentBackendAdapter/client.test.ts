@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { defaultAgentSettings, getAgentCard } from "../agentCards.js";
+import { defaultAgentSettings, getAgentCard } from "../../agentCards.js";
 import { buildRunRequest, runAgentBackendAgent } from "./client.js";
 
 test("builds LangGraph-compatible AgentBackend run request", () => {

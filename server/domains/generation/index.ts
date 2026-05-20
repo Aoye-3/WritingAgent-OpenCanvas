@@ -18,6 +18,10 @@ export {
   type ProviderRunnerInput
 } from "../../services/generation/providerRunner.js";
 export {
+  runAgentRuntimeGeneration,
+  type AgentRuntimeRunnerInput
+} from "../../services/generation/agentRuntimeRunner.js";
+export {
   runAgentBackendGeneration,
   type AgentBackendRunnerDeps,
   type AgentBackendRunnerInput

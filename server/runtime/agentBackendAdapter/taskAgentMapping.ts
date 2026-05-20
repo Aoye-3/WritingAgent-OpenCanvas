@@ -1,5 +1,5 @@
-import type { AgentCard, AgentSettings } from "../agentCards.js";
-import { toolCatalog, type ToolRef } from "../tools/catalog.js";
+import type { AgentCard, AgentSettings } from "../../agentCards.js";
+import { toolCatalog, type ToolRef } from "../../tools/catalog.js";
 
 export type AgentBackendSubagentConfig = {
   name: string;

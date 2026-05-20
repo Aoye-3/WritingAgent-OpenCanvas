@@ -3,16 +3,21 @@ import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
 import type { AgentRuntimePort } from "../runtime/agentRuntimePort.js";
 import { sendOk } from "../utils/http.js";
 
-export function registerAgentBackendRoutes(app: Express, deps: { agentRuntime: AgentRuntimeAdapter; executionRuntime: AgentRuntimePort }) {
-  app.get("/api/agent-backend/status", async (_request, response) => {
+type AgentRuntimeRouteDeps = {
+  agentRuntime: AgentRuntimeAdapter;
+  executionRuntime: AgentRuntimePort;
+};
+
+export function registerAgentRuntimeRoutes(app: Express, deps: AgentRuntimeRouteDeps) {
+  app.get("/api/agent-runtime/status", async (_request, response) => {
     sendOk(response, await deps.executionRuntime.getStatus());
   });
 
-  app.get("/api/agent-backend/config", async (_request, response) => {
+  app.get("/api/agent-runtime/config", async (_request, response) => {
     sendOk(response, await deps.executionRuntime.getConfigOverview());
   });
 
-  app.get("/api/agent-backend/dashboard", async (_request, response) => {
+  app.get("/api/agent-runtime/dashboard", async (_request, response) => {
     sendOk(response, await deps.executionRuntime.getDashboard({ agentRuntime: deps.agentRuntime }));
   });
 }

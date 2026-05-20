@@ -1,7 +1,7 @@
 # FacetWrite Architecture
 
 ## Overview
-FacetWrite is a Vite/React workspace and control plane with an Express backend and local SQLite persistence. FacetWrite owns the user workspace, configuration surfaces, interaction windows, Human-in-the-loop approval, and product data boundary. AgentBackend is the AI execution/runtime plane for Lead Agent, subagents, ToolUse, MCP, and intelligent orchestration.
+FacetWrite is a Vite/React workspace and control plane with an Express backend and local SQLite persistence. FacetWrite owns the user workspace, configuration surfaces, interaction windows, Human-in-the-loop approval, and product data boundary. Agent Runtime is the internal AI execution subsystem for Lead Agent, subagents, ToolUse, MCP, and intelligent orchestration. The current Agent Runtime implementation is the AgentBackend adapter.
 
 Primary flow:
 
@@ -9,8 +9,8 @@ Primary flow:
 User input
  -> AgentCard + AgentSettings
  -> PromptBuilder + Skills + Tool policy
- -> AgentBackend runtime, when AGENT_BACKEND_ENABLED=true
- -> Provider runtime fallback, when AgentBackend is disabled or returns no user-visible answer
+ -> Agent Runtime, when AGENT_BACKEND_ENABLED=true
+ -> Provider runtime fallback, when Agent Runtime is disabled or returns no user-visible answer
  -> Tool runtime, when local tool_calls are returned by the fallback runtime
  -> SQLite run records and Canvas write requests
  -> Thread state refresh in the UI
@@ -22,7 +22,7 @@ User input
 - `src/app/hooks/useCanvasState.ts` owns Canvas nodes, pending write requests, selected node state, and approve/reject handlers.
 - `src/app/hooks/useGenerationRun.ts` owns structured generation, chat generation, streaming token/status/tool-event updates, versions, collaboration messages, and direct Canvas-write intent handoff. For chat streaming it creates a temporary assistant message in the right AI collaboration drawer, fills that assistant bubble through a typewriter queue, then reconciles with persisted thread state after the final response. The main Canvas layout is not a streaming transcript surface. When the user explicitly asks to write to Canvas, it auto-approves only the new pending write requests created by that run.
 - `src/app/hooks/useProjectTrash.ts` owns trash, restore, and hard-delete flows.
-- `src/features/settings/hooks/useProjectSettings.ts` owns provider settings state, validation/save actions, and AgentBackend status loading. `ProjectSettingsPanel` only renders the dialog shell and composes the provider form with the read-only AgentBackend runtime panel.
+- `src/features/settings/hooks/useProjectSettings.ts` owns provider settings state, validation/save actions, and Agent Runtime status loading. `ProjectSettingsPanel` only renders the dialog shell and composes the provider form with the read-only runtime panel.
 - `src/features/agents/hooks/useAgentRuntimeConfig.ts` owns Agent runtime-config loading and settings save. `AgentSettingsView` owns gallery/filter/tab navigation, while tab UI lives in `src/features/agents/components/AgentSettingsTabs.tsx`.
 - `src/features/*` groups product areas: agents, canvas, generation, home, i18n, knowledge, projects, settings, start, tasks, and workspace.
 - `src/shared/ui/` is the lightweight FacetWrite UI primitive layer. It provides shared buttons, fields, chips, tabs, panels, drawers, dialogs, badges, and empty states without owning business data or backend/runtime behavior.
@@ -32,7 +32,7 @@ User input
 - Canvas hit testing is intentionally split between React Flow pane interactions and FacetWrite node controls. Inputs/buttons use `nodrag`, resize controls use `nodrag nopan`, and any future overlay must be browser-verified so it does not block pane context menus, pan/zoom, node drag, node resize, or node editing. See `docs/CANVAS.md`.
 - `src/shared/MarkdownText.tsx` preserves Markdown block/inline rendering while optionally wrapping annotated text fragments in highlight marks.
 - Runtime context is sourced from the left AgentCard structured input drawer plus current draft/Canvas state. The bottom workspace utility bar is reserved for future tools and prompt preview; it must not inject course-note, audience-profile, or other hidden context.
-- `src/features/ai-dashboard/AiDashboardView.tsx` renders the AI runtime dashboard for AgentBackend status, Skills/MCP visibility, Agent mapping, and ToolUse bridge progress.
+- `src/features/ai-dashboard/AiDashboardView.tsx` renders the AI runtime dashboard for Agent Runtime status, Skills/MCP visibility, Agent mapping, and ToolUse bridge progress.
 - `src/features/knowledge/KnowledgeSettingsView.tsx` renders the local Knowledge Base management console for creating RAG bases, importing text/URL/sitemap/local-file sources, viewing indexing status, and testing retrieval.
 - `src/shared/apiClient.ts` provides shared frontend API helpers used by feature clients.
 
@@ -41,11 +41,11 @@ User input
 - `server/app.ts` wires Express middleware, storage, Agent runtime, generation service, and route modules.
 - `server/routes/*` defines API endpoints for health, catalog, agents, threads, projects, Canvas, settings, and generation. Routes should call domain public APIs or compatibility facades; they should not reach into domain-internal stores or fetchers.
 - `server/domains/model-config/` owns provider references, configured model API bindings, local API key persistence, and remote provider model listing.
-- `server/domains/generation/` is the public domain entry for prompt/run-context building, AgentBackend runner, provider runner, and run recording. `server/services/generationService.ts` remains a compatibility export.
+- `server/domains/generation/` is the public domain entry for prompt/run-context building, Agent Runtime runner, provider runner, and run recording. `server/services/generationService.ts` remains a compatibility export.
 - `server/domains/knowledge/` is the public domain entry for KnowledgeService creation and model binding resolution for embedding/rerank credentials.
 - `server/services/*` now contains compatibility exports plus legacy service facades. New code should prefer `server/domains/*/index.ts` where a domain exists.
 - `server/knowledge/*` contains the server-owned Knowledge Base runtime. It wraps the Cherry Studio embedjs/libSQL dependency stack behind FacetWrite APIs and keeps vector data under `.facetwrite/knowledge/`.
-- `server/agentBackend/*` contains the AgentBackend sidecar runtime adapter, backend-only auth session handling, SSE parsing, runtime status, read-only config proxy, AgentCard-to-subagent mapping, and token/status forwarding for `/api/generate/stream`.
+- `server/runtime/agentRuntimePort.ts` defines the stable FacetWrite execution-runtime boundary. `server/runtime/agentBackendAdapter/*` contains the current AgentBackend implementation: backend-only auth session handling, SSE parsing, runtime status, read-only config proxy, AgentCard-to-subagent mapping, and token/status forwarding for `/api/generate/stream`. `server/agentBackend/*` remains a short-term compatibility re-export layer.
 - `server/providerRuntime.ts` normalizes provider request behavior for supported provider IDs, including Chat Completions streaming behind the provider profile boundary.
 - `server/agentRunLoop.ts` runs Chat Completions, executes returned tool calls, records tool events, streams final assistant tokens when available, and stops when final content or `maxToolCalls` is reached.
 
@@ -91,18 +91,18 @@ User input
 - Provider-private fields are stripped for providers that do not explicitly support them, including OpenAI-compatible defaults.
 - Per-run model overrides from the workspace composer are limited to safe runtime controls such as DeepSeek Think mode and reasoning effort. They do not mutate Agent settings.
 
-## AgentBackend Runtime Boundary
-- AgentBackend is now an integration foundation for Agent runtime work, not only reference source.
-- FacetWrite calls AgentBackend as a Python sidecar over HTTP/SSE when `AGENT_BACKEND_ENABLED=true`.
-- The validated local sidecar path is Docker Compose through AgentBackend nginx at `http://127.0.0.1:2026`.
+## Agent Runtime Boundary
+- Agent Runtime is now a FacetWrite internal subsystem, not reference source. Its source lives under `modules/agent-runtime/`.
+- FacetWrite calls the current AgentBackend adapter as an independent Python sidecar over HTTP/SSE when `AGENT_BACKEND_ENABLED=true`.
+- The validated local sidecar path is Docker Compose through Agent Runtime nginx at `http://127.0.0.1:2026`.
 - Runtime enablement is controlled only by `AGENT_BACKEND_*` variables. Historical `DEERFLOW_*` variables are migration artifacts and must not be used for active FacetWrite configuration.
-- The local dev compose project is `agent-backend-dev` and uses `agent-backend-*` container names. The FacetWrite acceptance compose keeps host Docker socket and local CLI credential directories out of the gateway container by default; those mounts should only be reintroduced for isolated sandbox/CLI-auth experiments.
+- The local dev compose project is `facetwrite-agent-runtime` and container names use `facetwrite-agent-runtime-*`. The FacetWrite acceptance compose keeps host Docker socket and local CLI credential directories out of the gateway container by default; those mounts should only be reintroduced for isolated sandbox/CLI-auth experiments.
 - FacetWrite authenticates to protected AgentBackend APIs with a backend-managed local session cookie and CSRF token; these credentials are never returned to the frontend.
 - AgentBackend `lead_agent` is the default main-agent entrypoint.
 - FacetWrite Task cards are mapped to AgentBackend subagent metadata with skills, tools, model inheritance, timeout, and max-turn defaults.
-- FacetWrite exposes read-only AgentBackend status and config overview endpoints for UI observability.
-- FacetWrite exposes an AI Dashboard that summarizes AgentBackend runtime health, auth, Skills/MCP, AgentCard-to-subagent mapping, and ToolUse bridge status.
-- FacetWrite exposes `/api/internal/agent-backend/tool-call` as a service-to-service ToolUse bridge for AgentBackend. The bridge accepts only trusted local/container calls, reuses `executeToolCall`, applies the Tool catalog policy guard, and keeps Canvas writes as pending requests.
+- FacetWrite exposes read-only Agent Runtime status and config overview endpoints for UI observability at `/api/agent-runtime/*`, with `/api/agent-backend/*` kept as compatibility aliases.
+- FacetWrite exposes an AI Dashboard that summarizes Agent Runtime health, auth, Skills/MCP, AgentCard-to-subagent mapping, and ToolUse bridge status.
+- FacetWrite exposes `/api/internal/agent-runtime/tool-call` as the service-to-service ToolUse bridge, with `/api/internal/agent-backend/tool-call` kept as a compatibility alias. The bridge accepts only trusted local/container calls, reuses `executeToolCall`, applies the Tool catalog policy guard, and keeps Canvas writes as pending requests.
 - AgentBackend loads `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write` through `AgentBackend.tools.facetwrite_bridge`. The Docker default callback URL is `http://host.docker.internal:8787`.
 - AgentBackend `web_search` remains a AgentBackend built-in tool and is not counted as a FacetWrite local bridge tool.
 - FacetWrite remains responsible for product data, SQLite persistence, frontend state, Canvas approval, and local fallback behavior.
@@ -122,12 +122,12 @@ User input
 ## Domain Dependency Rules
 - `routes -> domains -> repositories/shared/config/security/utils`.
 - `Agent` and `Knowledge` may use `model-config` public resolvers; `model-config` must not depend on Agent, Knowledge, Generation, or UI modules.
-- Frontend feature clients own their feature API calls. `src/features/model-config/modelConfigClient.ts` owns provider catalog and configured model API requests; `src/features/settings/settingsClient.ts` owns settings status, validation/save compatibility, and AgentBackend status/config calls.
+- Frontend feature clients own their feature API calls. `src/features/model-config/modelConfigClient.ts` owns provider catalog and configured model API requests; `src/features/settings/settingsClient.ts` owns settings status and validation/save compatibility; runtime status/config calls use `/api/agent-runtime/*`.
 - Compatibility files are allowed only to preserve old imports during branch convergence. New code should import from domain public `index.ts` files or feature-local clients.
 
 ## Important Current Constraints
 - Canvas background drag, context-menu creation, and node resize depend on pointer events reaching the correct React Flow pane or FacetWrite node control. Any future decorative grid, empty state, alignment guide, selection marquee, or overlay should be verified with browser hit testing so it does not become an invisible interaction blocker.
 - Canvas writes are never applied directly by the Agent. The Agent can only create a pending write proposal/request. The UI may ask the user to write all content or only annotated snippets, then convert that explicit confirmation into the backend approve/apply flow. Direct user commands such as "鍐欏叆" or "save to canvas" are treated as explicit confirmation for the new request from that same run, not as permission to apply older pending proposals.
-- AgentBackend-generated write or side-effect proposals must still be converted into FacetWrite confirmation and approval flows before data changes.
+- Agent Runtime-generated write or side-effect proposals must still be converted into FacetWrite confirmation and approval flows before data changes.
 - Tool definitions, prompt hints, schemas, risk levels, and approval requirements should stay in the Tool catalog/policy layer.
 - Provider details should stay behind provider runtime/profile code rather than being inferred in UI components.

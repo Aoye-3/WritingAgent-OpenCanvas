@@ -3,23 +3,28 @@ import assert from "node:assert/strict";
 import express from "express";
 import type { AddressInfo } from "node:net";
 import { registerInternalAgentBackendRoutes } from "./internalAgentBackendRoutes.js";
+import { registerInternalAgentRuntimeRoutes } from "./internalAgentRuntimeRoutes.js";
 import type { SQLiteStorageRepository } from "../storage.js";
 
-function createTestApp(storage: SQLiteStorageRepository) {
+function createTestApp(storage: SQLiteStorageRepository, mode: "agent-backend" | "agent-runtime" = "agent-backend") {
   const app = express();
   app.use(express.json());
-  registerInternalAgentBackendRoutes(app, { storage });
+  if (mode === "agent-runtime") {
+    registerInternalAgentRuntimeRoutes(app, { storage });
+  } else {
+    registerInternalAgentBackendRoutes(app, { storage });
+  }
   return app;
 }
 
-async function request(app: express.Express, body: unknown, headers: Record<string, string> = {}) {
+async function request(app: express.Express, body: unknown, headers: Record<string, string> = {}, path = "/api/internal/agent-backend/tool-call") {
   const server = app.listen(0, "127.0.0.1");
   try {
     await new Promise<void>((resolve) => server.once("listening", resolve));
     const address = server.address();
     assert.equal(typeof address, "object");
     assert.ok(address);
-    const response = await fetch(`http://127.0.0.1:${(address as AddressInfo).port}/api/internal/agent-backend/tool-call`, {
+    const response = await fetch(`http://127.0.0.1:${(address as AddressInfo).port}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(body)
@@ -64,6 +69,23 @@ test("executes allowed knowledge_base bridge calls with workspace context", asyn
   assert.equal(result.body.ok, true);
   assert.match(String(result.body.content), /Bridge context/);
   assert.equal((result.body.payload as { tool: string }).tool, "knowledge_base");
+});
+
+test("executes allowed Agent Runtime bridge calls on the preferred endpoint", async () => {
+  const app = createTestApp(fakeStorage(), "agent-runtime");
+
+  const result = await request(app, {
+    threadId: "thread_bridge",
+    toolName: "knowledge_base",
+    arguments: { query: "draft", limit: 2 },
+    allowedToolRefs: ["knowledge_base"],
+    toolState: { knowledge_base: true },
+    contextValues: { draft: "Runtime context" }
+  }, { "x-facetwrite-internal": "agent-runtime" }, "/api/internal/agent-runtime/tool-call");
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.match(String(result.body.content), /Runtime context/);
 });
 
 test("returns policy denial for disabled bridge tools", async () => {

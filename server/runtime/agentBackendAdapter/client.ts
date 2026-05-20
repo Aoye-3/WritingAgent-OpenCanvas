@@ -1,8 +1,8 @@
-﻿import type { StreamStatus } from "../agentRunLoop.js";
-import type { AgentCard, AgentSettings } from "../agentCards.js";
-import type { ChatMessage } from "../providerRuntime.js";
-import type { ToolEventRecord } from "../toolRuntime.js";
-import type { ToolState } from "../toolRegistry.js";
+import type { StreamStatus } from "../../agentRunLoop.js";
+import type { AgentCard, AgentSettings } from "../../agentCards.js";
+import type { ChatMessage } from "../../providerRuntime.js";
+import type { ToolEventRecord } from "../../toolRuntime.js";
+import type { ToolState } from "../../toolRegistry.js";
 import { authenticatedAgentBackendFetch } from "./auth.js";
 import { getAgentBackendRuntimeConfig, type AgentBackendRuntimeConfig } from "./config.js";
 import { parseSseChunk } from "./sse.js";

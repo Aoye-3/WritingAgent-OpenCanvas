@@ -24,9 +24,9 @@ export async function shutdownDevServer(): Promise<{ ok: boolean }> {
 }
 
 export async function getAgentBackendRuntimeStatus(): Promise<AgentBackendRuntimeStatus> {
-  return apiGet<AgentBackendRuntimeStatus>("/api/agent-backend/status");
+  return apiGet<AgentBackendRuntimeStatus>("/api/agent-runtime/status");
 }
 
 export async function getAgentBackendConfigOverview(): Promise<AgentBackendConfigOverview> {
-  return apiGet<AgentBackendConfigOverview>("/api/agent-backend/config");
+  return apiGet<AgentBackendConfigOverview>("/api/agent-runtime/config");
 }

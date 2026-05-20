@@ -9,10 +9,10 @@ export default defineConfig({
         "**/.git/**",
         "**/.facetwrite/**",
         "**/.docker-codex/**",
-        "**/AgentBackend/backend/.venv/**",
-        "**/AgentBackend/backend/.uv-cache/**",
-        "**/AgentBackend/backend/.pytest_cache/**",
-        "**/AgentBackend/frontend/node_modules/**"
+        "**/modules/agent-runtime/backend/.venv/**",
+        "**/modules/agent-runtime/backend/.uv-cache/**",
+        "**/modules/agent-runtime/backend/.pytest_cache/**",
+        "**/modules/agent-runtime/frontend/node_modules/**"
       ]
     },
     proxy: {

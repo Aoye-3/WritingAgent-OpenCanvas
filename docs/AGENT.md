@@ -38,7 +38,7 @@ Settings cover:
 
 Saved settings are merged back onto the base Agent card by the runtime adapter.
 
-Agent settings are the user-controlled configuration surface for concrete Agents. They define intent, model preferences, prompts, Skills, tool refs, memory, knowledge scope, and quick phrases. AgentBackend remains the execution/runtime plane that should consume these settings through FacetWrite's adapter contract.
+Agent settings are the user-controlled configuration surface for concrete Agents. They define intent, model preferences, prompts, Skills, tool refs, memory, knowledge scope, and quick phrases. Agent Runtime is the execution subsystem that consumes these settings through FacetWrite's adapter contract; the current implementation is AgentBackend.
 
 ## Runtime Config
 `GET /api/agent-cards/:agentCardId/runtime-config` is the frontend source for rendering settings safely. It should be preferred over hard-coded settings UI assumptions.
@@ -48,7 +48,7 @@ Runtime config includes the resolved card/settings, available tools, tool polici
 ## Runtime Context Boundary
 Agent runtime context comes from the left AgentCard structured input drawer and current workspace state such as the draft and selected Canvas node. The bottom workspace utility bar is not a context source and must not inject historical placeholder values such as course notes, audience profiles, or default writing style.
 
-Internal AgentCard, Skill, Tool policy, enabled tool state, and output contract text are private runtime context. They may be sent to the model as internal instructions, but assistant messages, stored chat messages, mock fallback text, and AgentBackend stream output must not expose or reproduce prompt headings such as `# AgentCard`, `# Current User Instruction`, or `# Output Contract`.
+Internal AgentCard, Skill, Tool policy, enabled tool state, and output contract text are private runtime context. They may be sent to the model as internal instructions, but assistant messages, stored chat messages, mock fallback text, and Agent Runtime stream output must not expose or reproduce prompt headings such as `# AgentCard`, `# Current User Instruction`, or `# Output Contract`.
 
 ## Output Classification
 AgentBackend and provider responses are classified before recording:
@@ -61,32 +61,32 @@ Only `assistant_text` may enter `messages` and `output_versions`. `tool_event` a
 
 Recoverable AgentBackend failures are also runtime events. If AgentBackend returns no user-visible text or returns content that the output boundary classifies as internal/runtime-only, FacetWrite records `agent_backend_runtime_failed` and immediately continues with the Provider runtime. The chat message is recorded from the Provider result, while the timeline shows that AgentBackend was bypassed for that run.
 
-## AgentBackend Main Agent And Subagents
-AgentBackend is the primary Agent runtime integration foundation when `AGENT_BACKEND_ENABLED=true`.
+## Agent Runtime Main Agent And Subagents
+Agent Runtime is FacetWrite's internal execution subsystem when `AGENT_BACKEND_ENABLED=true`; the current adapter is AgentBackend.
 
-- AgentBackend `lead_agent` acts as the main orchestration Agent.
-- Local Docker validation uses AgentBackend nginx at `http://127.0.0.1:2026` through the `agent-backend-dev` Compose project and `agent-backend-*` containers.
+- AgentBackend `lead_agent` acts as the main orchestration Agent for the current adapter.
+- Local Docker validation uses Agent Runtime nginx at `http://127.0.0.1:2026` through the `facetwrite-agent-runtime` Compose project and `facetwrite-agent-runtime-*` containers.
 - AgentBackend enablement uses `AGENT_BACKEND_*` env keys only; stale `DEERFLOW_*` values are historical and leave the runtime disabled.
-- Each FacetWrite Task card maps to a AgentBackend subagent configuration.
-- The mapping lives in `server/agentBackend/taskAgentMapping.ts`.
+- Each FacetWrite Task card maps to an Agent Runtime subagent configuration.
+- The current mapping lives in `server/runtime/agentBackendAdapter/taskAgentMapping.ts`, with `server/agentBackend/taskAgentMapping.ts` kept as a compatibility export.
 - Subagent metadata includes name, description, system prompt, skills, tools, model inheritance, timeout, and max turns.
 - FacetWrite records AgentBackend runs as provider `agent-backend`.
 - The current TypeScript run loop remains available when AgentBackend is disabled, unavailable, or returns no valid user-visible answer.
-- Runtime status is exposed through `/api/agent-backend/status`.
-- AgentBackend skills and MCP server overview are read through `/api/agent-backend/config`; MCP environment and secret-like values are redacted before reaching the frontend.
-- AI runtime status, Agent mapping, and ToolUse bridge progress are exposed through `/api/agent-backend/dashboard` and shown in the AI Dashboard.
+- Runtime status is exposed through `/api/agent-runtime/status`.
+- Skills and MCP server overview are read through `/api/agent-runtime/config`; MCP environment and secret-like values are redacted before reaching the frontend.
+- AI runtime status, Agent mapping, and ToolUse bridge progress are exposed through `/api/agent-runtime/dashboard` and shown in the AI Dashboard. `/api/agent-backend/*` remains a compatibility alias.
 - FacetWrite sends per-run bridge context to AgentBackend: allowed tool refs, effective tool state, explicit context values, selected Canvas node id, and current chat instruction.
 - AgentBackend loads FacetWrite bridge tools from `AgentBackend.tools.facetwrite_bridge` for `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write`.
-- The bridge calls FacetWrite `/api/internal/agent-backend/tool-call`, so ToolUse policy remains enforced by FacetWrite and `canvas_write` can only create a pending request.
+- The bridge calls FacetWrite `/api/internal/agent-runtime/tool-call`, so ToolUse policy remains enforced by FacetWrite and `canvas_write` can only create a pending request. `/api/internal/agent-backend/tool-call` remains a compatibility alias.
 - `web_search` is verified separately as a AgentBackend built-in tool, not as a FacetWrite local bridge.
 - Current Docker sidecar acceptance target: `/health`, backend auth, `/api/agent-backend/config`, provider `agent-backend` generation, repeated no-fallback runs, AgentBackend built-in ToolUse, and FacetWrite bridge ToolUse. The 2026-05-20 smoke test confirmed `usedMock:false` and `finishReason:"agent_backend_completed"`.
 
 ## AI Dashboard
 The AI Dashboard is not a second Agent settings page. It is a read-only runtime/control-plane surface.
 
-- It shows AgentBackend runtime reachability, auth state, Lead Agent ID, Skills, MCP servers, AgentCard-to-subagent mapping, and ToolUse bridge status.
-- It describes FacetWrite capabilities as progressively bridged to AgentBackend ToolUse or MCP capabilities rather than as a competing local Agent runtime.
-- Canvas write behavior remains Human-in-the-loop: AgentBackend may propose the write through the bridge, but FacetWrite records only a pending request until the user confirms it and the backend approval path applies it.
+- It shows Agent Runtime reachability, auth state, Lead Agent ID, Skills, MCP servers, AgentCard-to-subagent mapping, and ToolUse bridge status.
+- It describes FacetWrite capabilities as progressively bridged to runtime ToolUse or MCP capabilities rather than as a competing local Agent runtime.
+- Canvas write behavior remains Human-in-the-loop: Agent Runtime may propose the write through the bridge, but FacetWrite records only a pending request until the user confirms it and the backend approval path applies it.
 
 ## Tool Catalog
 `server/tools/catalog.ts` is the Tool metadata source of truth. Each ToolDefinition includes:
@@ -122,7 +122,7 @@ When a model proposes a `replace` Canvas operation without an explicit user repl
 
 The workspace also supports user-created temporary annotations on assistant responses. These annotations are not model output and are not saved as ToolUse state; they only help the user choose which response fragments should be written to Canvas.
 
-When AgentBackend is the active runtime, the FacetWrite bridge tools still call the same policy and executor path. This keeps disabled tools, disallowed Agent tools, and approval-gated writes consistent across AgentBackend and the TypeScript fallback runtime.
+When Agent Runtime is active, the FacetWrite bridge tools still call the same policy and executor path. This keeps disabled tools, disallowed Agent tools, and approval-gated writes consistent across Agent Runtime and the TypeScript fallback runtime.
 
 ## Run Loop
 When AgentBackend is disabled, `server/agentRunLoop.ts` performs the fallback Agent run:
@@ -139,11 +139,11 @@ Tool events are recorded as `tool_call_requested`, `tool_call_completed`, `tool_
 
 For `/api/generate/stream`, the TypeScript run loop uses provider streaming when available. It forwards assistant content deltas as `token` events, emits transient `status` events around thinking, ToolUse/searching, writing, and finalizing phases, and still accumulates the same final text for normalization and persistence.
 
-When AgentBackend is enabled, `server/agentBackend/client.ts` calls `/api/runs/stream` through the backend AgentBackend auth session, maps token/message stream output into the FacetWrite response, forwards assistant message chunks as `token` events, and maps AgentBackend custom task events into `AgentBackend_*` tool events for the run history.
+When Agent Runtime is enabled, `server/runtime/agentBackendAdapter/client.ts` calls `/api/runs/stream` through the backend AgentBackend auth session, maps token/message stream output into the FacetWrite response, forwards assistant message chunks as `token` events, and maps AgentBackend custom task events into `AgentBackend_*` tool events for the run history.
 
 The TypeScript run loop remains the fallback when AgentBackend is disabled, unavailable, returns an empty answer, or returns only internal/runtime output. A recoverable AgentBackend failure should not create a Mock fallback response by itself; Mock fallback is reserved for cases where both AgentBackend and the Provider runtime cannot produce a safe assistant answer.
 
-`server/services/generationService.ts` is now a compatibility export. The domain public entry is `server/domains/generation/index.ts`, which exposes prompt/message/model preparation, AgentBackend runner, provider runner, mock fallback integration, and run recording while preserving the existing `/api/generate` contract.
+`server/services/generationService.ts` is now a compatibility export. The domain public entry is `server/domains/generation/index.ts`, which exposes prompt/message/model preparation, Agent Runtime runner, provider runner, mock fallback integration, and run recording while preserving the existing `/api/generate` contract.
 
 ## Provider Boundary
 Provider-specific request normalization belongs in `server/providerRuntime.ts`. UI and product code should use provider IDs and capabilities rather than inferring provider behavior from base URLs or model strings.

@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { getAgentBackendDashboard } from "./dashboard.js";
-import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
-import type { AgentCard } from "../agentCards.js";
+import type { AgentRuntimeAdapter } from "../../agentRuntimeAdapter.js";
+import type { AgentCard } from "../../agentCards.js";
 import { clearAgentBackendSession } from "./auth.js";
 
 test("dashboard returns runtime, config, agent mapping, and tool bridge status", async () => {
