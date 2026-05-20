@@ -7,11 +7,10 @@ import {
   getProviderApiConfigs,
   getProviderModels,
   getProviderReferences,
-  getSettingsStatus,
   saveConfiguredModelApi,
-  saveProviderApiConfig,
-  validateSettings
-} from "../../settings/settingsClient";
+  saveProviderApiConfig
+} from "../modelConfigClient";
+import { getSettingsStatus, validateSettings } from "../../settings/settingsClient";
 import type { ConfiguredModelApiSummary, ModelReference, ProviderApiConfigSummary, ProviderReference, SettingsStatus } from "../../settings/types";
 
 type BusyState = "idle" | "loading" | "fetching" | "validating" | "saving";

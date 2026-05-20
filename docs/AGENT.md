@@ -143,7 +143,7 @@ When AgentBackend is enabled, `server/agentBackend/client.ts` calls `/api/runs/s
 
 The TypeScript run loop remains the fallback when AgentBackend is disabled, unavailable, returns an empty answer, or returns only internal/runtime output. A recoverable AgentBackend failure should not create a Mock fallback response by itself; Mock fallback is reserved for cases where both AgentBackend and the Provider runtime cannot produce a safe assistant answer.
 
-`server/services/generationService.ts` is now a compatibility export. The implementation is split under `server/services/generation/`: prompt/message/model preparation, AgentBackend runner, provider runner, mock fallback, and run recording are separate modules while preserving the existing `/api/generate` contract.
+`server/services/generationService.ts` is now a compatibility export. The domain public entry is `server/domains/generation/index.ts`, which exposes prompt/message/model preparation, AgentBackend runner, provider runner, mock fallback integration, and run recording while preserving the existing `/api/generate` contract.
 
 ## Provider Boundary
 Provider-specific request normalization belongs in `server/providerRuntime.ts`. UI and product code should use provider IDs and capabilities rather than inferring provider behavior from base URLs or model strings.
@@ -151,6 +151,8 @@ Provider-specific request normalization belongs in `server/providerRuntime.ts`. 
 Provider API credentials belong to the configured model API store, not Agent settings. The Model Config page writes local `API + model` bindings to `.facetwrite/provider-apis.json`; runtime code resolves the active Agent's `configuredModelApiId` immediately before calling the provider. If an Agent references a deleted, disabled, or keyless binding, the Provider runtime returns a clear configuration error and the UI should direct the user back to Model Config.
 
 The Agent Settings model tab only offers saved, enabled, key-configured bindings whose model type can be used for chat generation. This prevents Agents from being assigned models that have no local callable API configuration.
+
+Frontend Agent settings load configured chat bindings through `src/features/model-config/modelConfigClient.ts`; they should not import provider/model API calls from the generic settings client.
 
 Provider-private fields are allowed only inside the runtime request chain. DeepSeek thinking mode may return `reasoning_content`; when an assistant message also contains `tool_calls`, that field must be preserved for later DeepSeek API calls, but it must never be recorded as visible assistant text, output version content, Canvas content, or mock fallback text. Other providers strip DeepSeek-only fields according to their provider profile.
 

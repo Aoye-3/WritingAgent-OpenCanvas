@@ -11,7 +11,7 @@ import type { RAGApplication } from "@cherrystudio/embedjs";
 import { getBaseURL } from "../config/providerConfig.js";
 import type { SQLiteStorageRepository } from "../storage.js";
 import type { KnowledgeBase, KnowledgeBaseInput, KnowledgeItem, KnowledgeItemInput, KnowledgeSearchResult } from "./types.js";
-import { resolveConfiguredModelApi } from "../services/providerApiConfigService.js";
+import { resolveKnowledgeEmbedding, resolveKnowledgeModelConfig, resolveKnowledgeRerank } from "../domains/knowledge/modelConfigResolvers.js";
 
 type CachedRag = {
   app: RAGApplication;
@@ -58,7 +58,7 @@ export class KnowledgeService {
 
   async createBase(input: KnowledgeBaseInput) {
     await mkdir(knowledgeRoot, { recursive: true });
-    const embeddingConfig = input.embeddingConfigId ? await resolveConfiguredModelApi(input.embeddingConfigId) : undefined;
+    const embeddingConfig = await resolveKnowledgeModelConfig(input.embeddingConfigId);
     const provider = input.embeddingProvider ?? providerFromBinding(embeddingConfig?.providerId) ?? readEmbeddingProvider(process.env.KNOWLEDGE_EMBEDDING_PROVIDER) ?? "openai-compatible";
     const model = embeddingConfig?.modelId || input.embeddingModel?.trim() || process.env.OPENAI_EMBEDDING_MODEL?.trim() || defaultEmbeddingModel;
     const base = this.storage.createKnowledgeBase({
@@ -178,7 +178,7 @@ export class KnowledgeService {
       return results;
     }
     try {
-      const binding = base.rerankConfigId ? await resolveConfiguredModelApi(base.rerankConfigId) : undefined;
+      const binding = await resolveKnowledgeRerank(base);
       const provider = binding?.providerId ?? base.rerankProvider;
       const model = binding?.modelId ?? base.rerankModel;
       const baseUrl = binding?.baseURL ?? base.rerankBaseUrl;
@@ -286,7 +286,7 @@ export class KnowledgeService {
     const cached = this.cache.get(base.id);
     if (cached) return cached.app;
     await mkdir(path.join(knowledgeRoot, base.id), { recursive: true });
-    const binding = base.embeddingConfigId ? await resolveConfiguredModelApi(base.embeddingConfigId) : undefined;
+    const binding = await resolveKnowledgeEmbedding(base);
     const apiKey = binding?.apiKey ?? process.env.OPENAI_API_KEY?.trim();
     const embeddingProvider = binding ? providerFromBinding(binding.providerId) : base.embeddingProvider;
     const embeddingModelId = binding?.modelId ?? base.embeddingModel;

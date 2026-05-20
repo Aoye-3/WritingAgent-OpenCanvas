@@ -2,4 +2,4 @@ export {
   createGenerationService,
   type GenerationService,
   type GenerationServiceDeps
-} from "./generation/generationService.js";
+} from "../domains/generation/index.js";

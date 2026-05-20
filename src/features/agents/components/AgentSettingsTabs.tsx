@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "../../i18n/I18nProvider";
-import { getConfiguredModelApis } from "../../settings/settingsClient";
+import { getConfiguredModelApis } from "../../model-config/modelConfigClient";
 import type { ConfiguredModelApiSummary } from "../../settings/types";
 import type { AgentRuntimeConfig, AgentSettings } from "../types";
 

@@ -224,3 +224,5 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `POST /api/settings/save`
   - Compatibility endpoint for saving the active provider config. Internally delegates provider credential persistence to the provider API config store.
   - Writing an API key requires explicit local key write confirmation.
+
+Implementation note: these HTTP contracts are stable while the internals move to domain modules. Provider registry, configured model API bindings, and provider model listing are served by `server/domains/model-config/`; legacy service files re-export that domain for compatibility.

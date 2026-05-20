@@ -4,7 +4,7 @@ import type { AppView } from "../../app/App";
 import { Button, EmptyState, Panel, SelectField, StatusBadge, TextareaField, TextField } from "../../shared/ui";
 import { useI18n } from "../i18n/I18nProvider";
 import { ManagementSidebar } from "../projects/ProjectsView";
-import { getConfiguredModelApis } from "../settings/settingsClient";
+import { getConfiguredModelApis } from "../model-config/modelConfigClient";
 import type { ConfiguredModelApiSummary } from "../settings/types";
 import { knowledgeClient, type KnowledgeBaseDraft, type KnowledgeItemDraft } from "./knowledgeClient";
 import type { KnowledgeBase, KnowledgeItem, KnowledgeItemType, KnowledgeSearchResult } from "./types";

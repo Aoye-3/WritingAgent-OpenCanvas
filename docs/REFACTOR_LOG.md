@@ -1,5 +1,23 @@
 # FacetWrite Refactor Log
 
+## 2026-05-20: Modular Domain Boundary Checkpoint
+Scope: Committed the dirty AgentBackend/model-config baseline, then started the current branch's architecture收束 pass on top of that checkpoint.
+
+Completed:
+- Created checkpoint commit `143540a` for the pre-existing AgentBackend rename and model/API binding baseline before further edits.
+- Added `server/domains/generation/index.ts` as the public generation domain entry while keeping `server/services/generationService.ts` as a compatibility export.
+- Added `server/domains/knowledge/` public entry plus model-config resolver helpers for embedding/rerank binding lookup.
+- Kept model-config ownership under `server/domains/model-config/` and documented `server/services/modelListService.ts` / `server/services/providerApiConfigService.ts` as compatibility exports.
+- Split frontend provider catalog/configured model API calls into `src/features/model-config/modelConfigClient.ts`; Agent and Knowledge settings now consume that client instead of the generic settings client.
+
+Validation:
+- `npm.cmd run typecheck` passed after backend domain boundary changes.
+- `npm.cmd run typecheck` passed after frontend client split.
+
+Open TODO:
+- Run targeted model-config, generation, and knowledge tests, then the full suite.
+- Continue migrating deeper Knowledge CRUD/indexing internals into focused domain modules after this low-risk boundary pass.
+
 ## 2026-05-18: Right-side AI Chat Real Streaming
 Scope: Replaced the collaboration drawer's fake post-hoc chunking with real streaming status/token flow and updated maintained technical docs.
 

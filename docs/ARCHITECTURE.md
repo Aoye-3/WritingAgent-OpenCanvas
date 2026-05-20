@@ -39,8 +39,11 @@ User input
 ## Backend
 - `server/index.ts` starts the HTTP server.
 - `server/app.ts` wires Express middleware, storage, Agent runtime, generation service, and route modules.
-- `server/routes/*` defines API endpoints for health, catalog, agents, threads, projects, Canvas, settings, and generation.
-- `server/services/*` contains Agent definition/catalog behavior, generation orchestration, settings compatibility, and provider API config persistence/validation.
+- `server/routes/*` defines API endpoints for health, catalog, agents, threads, projects, Canvas, settings, and generation. Routes should call domain public APIs or compatibility facades; they should not reach into domain-internal stores or fetchers.
+- `server/domains/model-config/` owns provider references, configured model API bindings, local API key persistence, and remote provider model listing.
+- `server/domains/generation/` is the public domain entry for prompt/run-context building, AgentBackend runner, provider runner, and run recording. `server/services/generationService.ts` remains a compatibility export.
+- `server/domains/knowledge/` is the public domain entry for KnowledgeService creation and model binding resolution for embedding/rerank credentials.
+- `server/services/*` now contains compatibility exports plus legacy service facades. New code should prefer `server/domains/*/index.ts` where a domain exists.
 - `server/knowledge/*` contains the server-owned Knowledge Base runtime. It wraps the Cherry Studio embedjs/libSQL dependency stack behind FacetWrite APIs and keeps vector data under `.facetwrite/knowledge/`.
 - `server/agentBackend/*` contains the AgentBackend sidecar runtime adapter, backend-only auth session handling, SSE parsing, runtime status, read-only config proxy, AgentCard-to-subagent mapping, and token/status forwarding for `/api/generate/stream`.
 - `server/providerRuntime.ts` normalizes provider request behavior for supported provider IDs, including Chat Completions streaming behind the provider profile boundary.
@@ -80,7 +83,7 @@ User input
 - Provider metadata, docs links, base URL defaults, static model references, and model capability flags live in the FacetWrite-owned model registry under `shared/model/`. The registry copies and adapts reference data into this project; runtime code must not import from `reference/sources/cherry-studio`.
 - Provider API credentials are separate from raw provider/model references. Local credentials live in `.facetwrite/provider-apis.json` as configured model API bindings: one callable row per `providerId + modelId + apiKey/baseURL`.
 - The Model Config page is a first-level workspace view. It shows the complete provider model catalog separately from the local API model list. The catalog is for discovery; the local list is the set of bindings that Agents and Knowledge Bases may call.
-- Dynamic model listing is backend-owned under `server/model-list/`: `service.ts` handles fallback flow, `fetchers.ts` holds provider-specific remote strategies, and `utils.ts` owns response parsing and redaction helpers.
+- Dynamic model listing is backend-owned under `server/domains/model-config/model-list/`: `service.ts` handles fallback flow, `fetchers.ts` holds provider-specific remote strategies, and `utils.ts` owns response parsing and redaction helpers. `server/services/modelListService.ts` is only a compatibility export.
 - Dynamic model listing remains a provider catalog operation: request draft key/base URL first, saved binding for that provider second, registry defaults for non-secret fields last. It must not borrow a key from another provider.
 - The TypeScript provider runner resolves the active Agent's `configuredModelApiId` at request time. Legacy `providerId + model` settings are still accepted as fallback, but Agent settings must not store API keys or copied base URLs.
 - Knowledge Bases resolve `embeddingConfigId` and `rerankConfigId` through the same configured model API store, so embedding/rerank credentials are not read from unrelated Agent provider settings.
@@ -115,6 +118,12 @@ User input
 - Knowledge vector path: `.facetwrite/knowledge/<baseId>/vectors.db`.
 - Thread file workspace path: `.facetwrite/threads/<threadId>/user-data/`.
 - Thread rows are the current project identity boundary. Project rename updates `threads.title`; AgentCard names remain type metadata and are displayed as secondary information.
+
+## Domain Dependency Rules
+- `routes -> domains -> repositories/shared/config/security/utils`.
+- `Agent` and `Knowledge` may use `model-config` public resolvers; `model-config` must not depend on Agent, Knowledge, Generation, or UI modules.
+- Frontend feature clients own their feature API calls. `src/features/model-config/modelConfigClient.ts` owns provider catalog and configured model API requests; `src/features/settings/settingsClient.ts` owns settings status, validation/save compatibility, and AgentBackend status/config calls.
+- Compatibility files are allowed only to preserve old imports during branch convergence. New code should import from domain public `index.ts` files or feature-local clients.
 
 ## Important Current Constraints
 - Canvas background drag, context-menu creation, and node resize depend on pointer events reaching the correct React Flow pane or FacetWrite node control. Any future decorative grid, empty state, alignment guide, selection marquee, or overlay should be verified with browser hit testing so it does not become an invisible interaction blocker.

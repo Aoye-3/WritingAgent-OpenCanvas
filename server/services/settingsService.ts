@@ -5,7 +5,7 @@ import { getProviderId, getSystemPrompt } from "../config/providerConfig.js";
 import { createOpenAIChatClient, getProviderProfile } from "../providerRuntime.js";
 import { evaluateSettingsWritePolicy } from "../security/policies/settingsWritePolicy.js";
 import type { ProviderId } from "../types.js";
-import { listProviderApiConfigSummaries, resolveProviderApiConfig, saveProviderApiConfig } from "./providerApiConfigService.js";
+import { listProviderApiConfigSummaries, resolveProviderApiConfig, saveProviderApiConfig } from "../domains/model-config/index.js";
 
 type ValidationState = {
   at?: string;

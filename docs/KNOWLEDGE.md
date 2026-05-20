@@ -32,6 +32,8 @@ Knowledge Base runtime now follows the shared Model Config boundary:
 - local callable model APIs live in `.facetwrite/provider-apis.json` as `providerId + modelId + API` bindings;
 - new Knowledge Bases should store `embeddingConfigId` for embedding models and optional `rerankConfigId` for rerank models;
 - legacy `embeddingProvider`, `embeddingModel`, and `embeddingBaseUrl` fields remain for compatibility and display.
+- backend credential resolution goes through `server/domains/knowledge/modelConfigResolvers.ts`, which calls the `model-config` domain public API instead of reading provider API storage directly.
+- frontend Knowledge settings load configured embedding/rerank candidates through `src/features/model-config/modelConfigClient.ts`.
 
 ## Rerank
 The API stores rerank provider/model/base URL settings and attempts a generic rerank call when enabled. If rerank fails, search falls back to vector similarity order and records `knowledge_rerank_failed`.
