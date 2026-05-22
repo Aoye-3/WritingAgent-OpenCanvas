@@ -136,7 +136,7 @@ export async function createConfiguredModelApi(payload: SaveConfiguredModelApiPa
     modelId,
     modelName: readCleanString(payload.modelName) ?? findModel(providerId, modelId)?.name ?? modelId,
     modelType: readCleanString(payload.modelType) ?? inferModelType(providerId, modelId),
-    apiKey: readCleanString(payload.apiKey),
+    apiKey: readCleanString(payload.apiKey) ?? findReusableProviderApiKey(store, providerId),
     baseURL: readCleanString(payload.baseURL) ?? getProviderProfile(providerId).defaultBaseURL,
     enabled: payload.enabled !== false,
     createdAt: now,
@@ -169,6 +169,7 @@ export async function saveConfiguredModelApi(configId: string, payload: SaveConf
   });
   const nextApiKey = readCleanString(payload.apiKey);
   if (nextApiKey) next.apiKey = nextApiKey;
+  if (!next.apiKey) next.apiKey = findReusableProviderApiKey(store, providerId);
   store.configs[configId] = next;
   store.activeConfigId = configId;
   await writeProviderApiConfigStore(store);
@@ -412,6 +413,10 @@ function createDefaultBinding(providerId: ProviderId): ConfiguredModelApi {
     createdAt: "",
     updatedAt: ""
   });
+}
+
+function findReusableProviderApiKey(store: ProviderApiConfigStore, providerId: ProviderId) {
+  return Object.values(store.configs).find((config) => config.providerId === providerId && readCleanString(config.apiKey))?.apiKey;
 }
 
 function hydrateConfiguredModelApi(config: ConfiguredModelApi): ConfiguredModelApi {

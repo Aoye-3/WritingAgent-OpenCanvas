@@ -1,5 +1,8 @@
 # FacetWrite Architecture
 
+## Naming
+OpenCanvas is the external product name for the AI canvas workspace and should be the primary visible brand. FacetWrite remains a small technical lineage mark in the brand lockup and the internal architecture/code name, so existing modules, API routes, env vars, local data paths, and runtime boundaries intentionally keep the FacetWrite name.
+
 ## Overview
 FacetWrite is a Vite/React workspace and control plane with an Express backend and local SQLite persistence. FacetWrite owns the user workspace, configuration surfaces, interaction windows, Human-in-the-loop approval, and product data boundary. Agent Runtime is the internal AI execution subsystem for Lead Agent, subagents, ToolUse, MCP, and intelligent orchestration. The current Agent Runtime implementation is the AgentBackend adapter.
 
@@ -26,6 +29,7 @@ User input
 - `src/features/agents/hooks/useAgentRuntimeConfig.ts` owns Agent runtime-config loading and settings save. `AgentSettingsView` owns gallery/filter/tab navigation, while tab UI lives in `src/features/agents/components/AgentSettingsTabs.tsx`.
 - `src/features/*` groups product areas: agents, canvas, generation, home, i18n, knowledge, projects, settings, start, tasks, and workspace.
 - `src/shared/ui/` is the lightweight FacetWrite UI primitive layer. It provides shared buttons, fields, chips, tabs, panels, drawers, dialogs, badges, and empty states without owning business data or backend/runtime behavior.
+- `public/assets/ui/` is the local UI and image asset library. Brand asset URLs are centralized in `src/shared/brandAssets.ts` so components avoid hard-coded public paths. See `docs/UI_ASSETS.md`.
 - `src/features/workspace/WorkspaceView.tsx` renders the main writing workspace: structured Agent inputs, document Canvas, collaboration drawer, tool events, version history, and workspace utility surfaces.
 - `src/features/workspace/components/AICollaborationDrawer.tsx` owns chat-side Canvas write proposals, temporary streaming assistant status, temporary response annotations, annotation chips, and highlighted assistant-message text. Annotation chips are shown both in the proposal panel and above the composer so the user can see the active write selection before sending "write" instructions. Annotation state is intentionally client-only and is cleared after write/cancel/page refresh.
 - `src/features/workspace/components/DocumentCanvas.tsx` renders Canvas V2 through `@xyflow/react`. React Flow owns viewport pan, zoom, selection, and node dragging; FacetWrite owns node rendering, node CRUD calls, resize persistence, and Canvas write approval flows.

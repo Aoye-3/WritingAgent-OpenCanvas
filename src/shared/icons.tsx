@@ -54,7 +54,7 @@ function createIcon(Icon: LucideIcon) {
 
 export function BrandIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" role="img" aria-label="FacetWrite">
+    <svg className={className} viewBox="0 0 24 24" role="img" aria-label="OpenCanvas">
       <path d="M6.5 4.5h8.2l2.8 2.8v12.2h-11z" />
       <path d="M14.5 4.7v3.1h3.1" />
       <path d="M9.1 10.2h5.8" />

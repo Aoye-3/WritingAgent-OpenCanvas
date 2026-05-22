@@ -1,5 +1,8 @@
 # FacetWrite Project Brief
 
+## Naming
+OpenCanvas is the external product name for users and should be the primary visible brand. FacetWrite remains a small technical lineage mark in the brand lockup and the internal engineering name used by code, API boundaries, data paths, and existing architecture docs.
+
 ## Product
 FacetWrite is a local-first writing workspace for human-AI collaboration. It combines structured writing tasks, configurable Agent cards, a document Canvas, chat-based collaboration, project/thread history, and local provider settings.
 
@@ -12,6 +15,7 @@ The app is currently an MVP focused on Agent-assisted writing workflows rather t
 
 ## Current Capabilities
 - Start, Home, Projects, Agent Settings, AI Dashboard, Knowledge Settings, and Workspace views.
+- Local UI asset library under `public/assets/ui/`, with shared frontend references in `src/shared/brandAssets.ts`; see `docs/UI_ASSETS.md`.
 - AI Dashboard view for Agent Runtime status, authenticated sidecar visibility, Skills/MCP overview, Agent mapping, and ToolUse bridge progress.
 - Predefined Agent cards for blog posts, summaries, emails, lesson plans, report outlines, and rewrite/polish.
 - Agent settings for model, prompt, tools, knowledge, memory, and quick messages.

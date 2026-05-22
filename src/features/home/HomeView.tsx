@@ -23,13 +23,13 @@ type HomeViewProps = {
 const homeCopy = {
   en: {
     addInput: "Add input",
-    agentHint: "Your most useful agents live here. Open one to enter its layered workspace.",
+    agentHint: "Your most useful agents live here. Open one to turn its output into editable canvas nodes.",
     agents: "Recent agents",
     cancel: "Cancel",
-    create: "Create canvas",
+    create: "Create board",
     createAgent: "Create agent",
     createAgentHint: "Start from an AgentCard",
-    createHint: "Open the document workspace",
+    createHint: "Open the AI canvas workspace",
     knowledge: "Knowledge",
     moveToTrash: "Move to trash",
     pin: "Pin",
@@ -37,7 +37,7 @@ const homeCopy = {
     projectTitle: "Project title",
     projects: "Recent projects",
     promptLabel: "Home prompt input",
-    promptPlaceholder: "Ask FacetWrite to draft, rewrite, plan, or explain...",
+    promptPlaceholder: "Ask OpenCanvas to draft, rewrite, plan, or organize a canvas node...",
     rename: "Rename",
     renameProject: "Rename project",
     rewrite: "Rewrite draft",
@@ -45,21 +45,21 @@ const homeCopy = {
     save: "Save",
     saving: "Saving",
     send: "Send",
-    tip: "FacetWrite tip:",
-    tipText: "Start with an AgentCard, then use the right AI collaboration layer for revisions and explanation.",
-    title: "Welcome back. What work should we shape today?",
+    tip: "OpenCanvas tip:",
+    tipText: "Start with an AgentCard, then save useful AI output as editable canvas nodes.",
+    title: "Welcome back. What should we shape on the canvas today?",
     unpin: "Unpin",
     viewAll: "View all"
   },
   zh: {
     addInput: "添加输入",
-    agentHint: "常用 Agent 会显示在这里，打开即可进入对应分层工作台。",
+    agentHint: "常用 Agent 会显示在这里，打开后可把 AI 输出沉淀为可编辑的画板节点。",
     agents: "近期 Agent",
     cancel: "取消",
-    create: "创建画布",
+    create: "创建画板",
     createAgent: "创建 Agent",
     createAgentHint: "从任务卡开始配置能力",
-    createHint: "打开文档式写作空间",
+    createHint: "打开 AI 画板工作台",
     knowledge: "知识库",
     moveToTrash: "移入回收站",
     pin: "置顶",
@@ -67,7 +67,7 @@ const homeCopy = {
     projectTitle: "项目标题",
     projects: "近期项目",
     promptLabel: "首页提示词输入",
-    promptPlaceholder: "让 FacetWrite 起草、改写、规划或解释...",
+    promptPlaceholder: "让 OpenCanvas 起草、改写、规划或整理一个画板节点...",
     rename: "重命名",
     renameProject: "重命名项目",
     rewrite: "改写草稿",
@@ -75,9 +75,9 @@ const homeCopy = {
     save: "保存",
     saving: "保存中",
     send: "发送",
-    tip: "FacetWrite 小技巧：",
-    tipText: "先用任务卡确定意图，再让右侧 AI 协作层继续改写和解释。",
-    title: "欢迎回来。今天要塑造哪项工作？",
+    tip: "OpenCanvas 小技巧：",
+    tipText: "从 AgentCard 开始，把 AI 输出沉淀为可编辑的画板节点。",
+    title: "欢迎回来。今天要在画板上塑造什么？",
     unpin: "取消置顶",
     viewAll: "查看全部"
   }
@@ -219,7 +219,7 @@ function renderProjectRow(
   const agentTitle = isThread ? agentCards.find((agent) => agent.id === item.agentCardId)?.title[locale] ?? item.agentCardId : item.title;
   const projectTitle = isThread ? item.title || agentTitle : item.title;
   const updatedAt = isThread ? new Date(item.updatedAt).toLocaleString() : item.updatedAt;
-  const assets = isThread ? (locale === "zh" ? "1 项资产" : "1 asset") : item.assets;
+  const assets = isThread ? (locale === "zh" ? "1 个节点" : "1 node") : item.assets;
 
   return (
     <article className="home-project-row" key={isThread ? item.id : item.title}>
@@ -281,8 +281,8 @@ function RenameThreadDialog({ initialTitle, locale, onClose, onRename }: { initi
 
 function fallbackProjects(locale: "en" | "zh") {
   return [
-    { title: locale === "zh" ? "课程说明草稿" : "Course explainer draft", assets: locale === "zh" ? "7 项资产" : "7 assets", updatedAt: locale === "zh" ? "现在" : "now" },
-    { title: locale === "zh" ? "高端客厅文章" : "Premium living room article", assets: locale === "zh" ? "15 项资产" : "15 assets", updatedAt: locale === "zh" ? "7 小时前" : "7 hours ago" },
-    { title: locale === "zh" ? "邮件改写任务" : "Email rewrite task", assets: locale === "zh" ? "2 项资产" : "2 assets", updatedAt: locale === "zh" ? "1 天前" : "1 day ago" }
+    { title: locale === "zh" ? "课程说明画板" : "Course explainer board", assets: locale === "zh" ? "7 个节点" : "7 nodes", updatedAt: locale === "zh" ? "现在" : "now" },
+    { title: locale === "zh" ? "高端客厅文章" : "Premium living room article", assets: locale === "zh" ? "15 个节点" : "15 nodes", updatedAt: locale === "zh" ? "7 小时前" : "7 hours ago" },
+    { title: locale === "zh" ? "邮件改写任务" : "Email rewrite task", assets: locale === "zh" ? "2 个节点" : "2 nodes", updatedAt: locale === "zh" ? "1 天前" : "1 day ago" }
   ];
 }

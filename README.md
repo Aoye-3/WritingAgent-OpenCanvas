@@ -1,6 +1,12 @@
-﻿# FacetWrite
+# OpenCanvas
 
-Local-first AI writing workspace with Agent cards, configurable tools, Canvas writing, project history, and provider settings.
+<sub>FacetWrite architecture</sub>
+
+OpenCanvas is a local-first AI canvas workspace built on the FacetWrite architecture. It combines Agent cards, configurable tools, editable Canvas nodes, project history, provider settings, and an internal Agent Runtime Docker sidecar for richer AI orchestration.
+
+## Naming
+
+`OpenCanvas` is the external product name and should appear as the large primary wordmark in the UI. `FacetWrite` appears only as a small technical lineage mark in the brand lockup and remains the internal engineering name used by code paths, API boundaries, local data folders, Docker project names, and technical documentation where changing names would create unnecessary migration risk.
 
 ## Run
 
@@ -34,7 +40,7 @@ The launcher starts Agent Runtime Docker services when `AGENT_BACKEND_ENABLED=tr
 
 Useful URLs:
 
-- FacetWrite UI: `http://127.0.0.1:5173` by default. If that port is unavailable locally, run Vite on `http://127.0.0.1:3000`.
+- OpenCanvas UI: `http://127.0.0.1:5173` by default. If that port is unavailable locally, run Vite on `http://127.0.0.1:3000`.
 - FacetWrite API health: `http://127.0.0.1:8787/api/health`
 - Agent Runtime status through FacetWrite: `http://127.0.0.1:8787/api/agent-runtime/status`
 - Agent Runtime sidecar health: `http://127.0.0.1:2026/health`
@@ -83,6 +89,7 @@ Client: `http://127.0.0.1:5173`
 - [Project Brief](docs/PROJECT_BRIEF.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Canvas](docs/CANVAS.md)
+- [UI Assets](docs/UI_ASSETS.md)
 - [API](docs/API.md)
 - [Database](docs/DATABASE.md)
 - [Agent And Tools](docs/AGENT.md)

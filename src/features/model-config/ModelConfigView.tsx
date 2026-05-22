@@ -3,7 +3,7 @@ import { AppSidebar } from "../../shared/AppSidebar";
 import { EmptyState, StatusBadge } from "../../shared/ui";
 import { useI18n } from "../i18n/I18nProvider";
 import { ApiConfigPanel } from "./components/ApiConfigPanel";
-import { ModelListPanel } from "./components/ModelListPanel";
+import { ConfiguredApiListPanel } from "./components/ConfiguredApiListPanel";
 import { ProviderListPanel } from "./components/ProviderListPanel";
 import { useModelConfig } from "./hooks/useModelConfig";
 
@@ -35,6 +35,13 @@ export function ModelConfigView({ activeView, onNavigate }: ModelConfigViewProps
 
         {state.selectedProvider ? (
           <div className="model-config-grid">
+            <ConfiguredApiListPanel
+              configs={state.configuredModelApis}
+              providers={state.providers}
+              selectedConfigId={state.selectedConfiguredApi?.id}
+              zh={zh}
+              onSelect={state.selectConfiguredApi}
+            />
             <ProviderListPanel providers={state.providers} selectedProviderId={state.selectedProvider.id} zh={zh} onSelect={state.selectProvider} />
             <ApiConfigPanel
               apiKey={state.apiKey}
@@ -44,6 +51,8 @@ export function ModelConfigView({ activeView, onNavigate }: ModelConfigViewProps
               provider={state.selectedProvider}
               providers={state.providers}
               configuredModelApis={state.configuredModelApis}
+              models={state.filteredModels}
+              query={state.query}
               selectedConfiguredApi={state.selectedConfiguredApi}
               source={state.modelSource[state.selectedProvider.id]}
               zh={zh}
@@ -55,9 +64,10 @@ export function ModelConfigView({ activeView, onNavigate }: ModelConfigViewProps
               onResetURL={() => state.setBaseURL(state.selectedProvider?.apiHost ?? "")}
               onSave={state.save}
               onSelectSaved={state.selectConfiguredApi}
+              onQueryChange={state.setQuery}
+              onUseModel={state.useModel}
               onValidate={state.validate}
             />
-            <ModelListPanel models={state.filteredModels} query={state.query} selectedModel={state.model} zh={zh} onQueryChange={state.setQuery} onUseModel={state.useModel} />
           </div>
         ) : null}
       </section>

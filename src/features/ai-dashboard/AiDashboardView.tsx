@@ -71,7 +71,7 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
               </div>
               <div className="ai-mapping-table">
                 <div className="ai-mapping-head">
-                  <span>FacetWrite Agent</span>
+                  <span>OpenCanvas Agent</span>
                   <span>Runtime subagent</span>
                   <span>Skills</span>
                   <span>Tools</span>
@@ -179,7 +179,7 @@ function ToolBridgeCard({ tool }: { tool: AgentBackendToolBridgeStatus }) {
 type BridgePillState = AgentBackendToolBridgeStatus["bridgeState"] | "mapped_metadata";
 
 function BridgePill({ state, label }: { state: BridgePillState; label?: string }) {
-  const text = label ?? (state === "mapped_metadata" ? "Mapped" : state === "agent_backend_builtin" ? "Built-in" : state === "facetwrite_bridge" ? "FacetWrite bridge" : state === "pending_bridge" ? "Pending bridge" : "Control plane");
+  const text = label ?? (state === "mapped_metadata" ? "Mapped" : state === "agent_backend_builtin" ? "Built-in" : state === "facetwrite_bridge" ? "OpenCanvas bridge" : state === "pending_bridge" ? "Pending bridge" : "Control plane");
   return <span className={`ai-bridge-pill ai-bridge-${state}`}>{text}</span>;
 }
 

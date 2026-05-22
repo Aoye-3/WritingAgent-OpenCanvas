@@ -28,7 +28,10 @@ export function Topbar({
         <span className="brand-mark" aria-hidden="true">
           <BrandIcon />
         </span>
-        <span>FacetWrite</span>
+        <span className="brand-lockup">
+          <strong>OpenCanvas</strong>
+          <small>FacetWrite</small>
+        </span>
       </button>
 
       {activeView === "home" ? (

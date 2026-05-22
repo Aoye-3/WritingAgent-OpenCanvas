@@ -1,5 +1,8 @@
 # FacetWrite Canvas
 
+## Naming
+OpenCanvas is the external product name for the AI canvas workspace and should be the primary visible brand. This document keeps the FacetWrite name for internal Canvas APIs, storage, and runtime ownership because those boundaries are not being renamed in this pass.
+
 ## Purpose
 The Canvas is the visual workspace where generated or user-authored writing artifacts become editable nodes. It is a product surface owned by FacetWrite, not by AgentBackend or the provider runtime.
 

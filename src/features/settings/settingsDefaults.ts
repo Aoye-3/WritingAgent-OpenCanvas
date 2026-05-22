@@ -7,7 +7,7 @@ export const fallbackStatus: SettingsStatus = {
   providerLabel: "DeepSeek",
   baseURL: "https://api.deepseek.com",
   model: "deepseek-v4-flash",
-  systemPrompt: "You are FacetWrite's writing assistant. Generate clear, usable text from the user's prompt.",
+  systemPrompt: "You are OpenCanvas's writing assistant. Generate clear, usable text and organize useful output into canvas-ready content.",
   apiHealth: "offline",
   provider: "mock",
   capabilities: {

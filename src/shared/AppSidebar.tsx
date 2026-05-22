@@ -45,7 +45,10 @@ export function AppSidebar({ activeView, onNavigate, onOpenSettings, className }
     <aside className={className ? `home-sidebar ${className}` : "home-sidebar"} aria-label="App navigation">
       <div className="home-sidebar-brand">
         <span className="brand-mark" aria-hidden="true"><BrandIcon /></span>
-        <span>FacetWrite</span>
+        <span className="brand-lockup">
+          <strong>OpenCanvas</strong>
+          <small>FacetWrite</small>
+        </span>
       </div>
 
       <nav className="home-sidebar-nav">

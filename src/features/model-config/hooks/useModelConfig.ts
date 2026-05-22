@@ -81,10 +81,13 @@ export function useModelConfig(activeView: AppView, zh: boolean) {
     setSelectedConfigId("");
     setMessage("");
     setError("");
-    const configured = configuredModelApis.find((config) => config.providerId === provider.id);
-    setSelectedConfigId(configured?.id ?? "");
-    setBaseURL(configured?.baseURL || provider.apiHost);
-    setModel(configured?.modelId || provider.defaultModel || provider.models[0]?.id || "");
+    const providerBinding = configuredModelApis.find((config) => config.providerId === provider.id && config.keyConfigured)
+      ?? configuredModelApis.find((config) => config.providerId === provider.id);
+    setBaseURL(providerBinding?.baseURL || provider.apiHost);
+    setModel(provider.defaultModel || provider.models[0]?.id || providerBinding?.modelId || "");
+    setMessage(providerBinding?.keyConfigured
+      ? (zh ? "已选供应商。保存新模型绑定时会复用该供应商已保存的 API Key。" : "Provider selected. New model bindings will reuse this provider's saved API key.")
+      : "");
   };
 
   const selectProviderById = (providerId: string) => {
