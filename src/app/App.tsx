@@ -11,6 +11,7 @@ import { ProjectSettingsPanel } from "../features/settings/ProjectSettingsPanel"
 import { StartView } from "../features/start/StartView";
 import { HomeView } from "../features/home/HomeView";
 import { KnowledgeSettingsView } from "../features/knowledge/KnowledgeSettingsView";
+import { ModelConfigView } from "../features/model-config/ModelConfigView";
 import { ProjectsView } from "../features/projects/ProjectsView";
 import { useProjects } from "../features/projects/hooks/useProjects";
 import { WorkspaceView } from "../features/workspace/WorkspaceView";
@@ -19,7 +20,7 @@ import { useGenerationRun } from "./hooks/useGenerationRun";
 import { useProjectTrash } from "./hooks/useProjectTrash";
 import { useThreadSession } from "./hooks/useThreadSession";
 
-export type AppView = "start" | "home" | "workspace" | "projects" | "agentSettings" | "aiDashboard" | "knowledgeSettings";
+export type AppView = "start" | "home" | "workspace" | "projects" | "agentSettings" | "modelConfig" | "aiDashboard" | "knowledgeSettings";
 
 const fallbackAgentCards: AgentCard[] = [
   {
@@ -160,6 +161,12 @@ function AppContent() {
   }, [refreshProjects, refreshRecentThreads]);
 
   useEffect(() => {
+    if (view === "projects") {
+      void refreshProjects();
+    }
+  }, [refreshProjects, view]);
+
+  useEffect(() => {
     const firstAgent = agentCards[0];
     if (!firstAgent || view === "workspace" || activeAgent.id !== fallbackAgentCards[0].id) return;
     setActiveAgent(firstAgent);
@@ -262,6 +269,7 @@ function AppContent() {
         onOpenAgent={openWorkspace}
       />
       <AiDashboardView activeView={view} onNavigate={setView} />
+      <ModelConfigView activeView={view} onNavigate={setView} />
       <KnowledgeSettingsView activeView={view} onNavigate={setView} />
       <WorkspaceView
         activeAgent={activeAgent}

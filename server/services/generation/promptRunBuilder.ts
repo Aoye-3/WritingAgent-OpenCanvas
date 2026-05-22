@@ -7,7 +7,10 @@ import { loadSkillsByRefs } from "../../skillLoader.js";
 import type { SQLiteStorageRepository } from "../../storage.js";
 import type { ToolState } from "../../toolRegistry.js";
 import type { ProviderId } from "../../types.js";
+import type { KnowledgeService } from "../../knowledge/service.js";
+import type { ToolEventRecord } from "../../toolRuntime.js";
 import { isChatMode } from "./mockFallback.js";
+import { resolveConfiguredModelApi } from "../../domains/model-config/index.js";
 
 export type GenerateModelSettings = NonNullable<ReturnType<AgentRuntimeAdapter["resolveAgentCard"]>["settings"]>["model"];
 
@@ -19,13 +22,15 @@ export type GenerationRunContext = {
   mode: "structured" | "chat";
   messages: ChatMessage[];
   effectiveToolState: ToolState;
+  knowledgeEvents: ToolEventRecord[];
 };
 
 export async function buildGenerationRunContext(
   payload: GenerateRequest,
   threadId: string,
   storage: SQLiteStorageRepository,
-  agentRuntime: AgentRuntimeAdapter
+  agentRuntime: AgentRuntimeAdapter,
+  knowledgeService?: KnowledgeService
 ): Promise<GenerationRunContext> {
   const runtimeConfig = await agentRuntime.getAgentRuntimeConfig(payload.agentCardId ?? payload.taskId ?? "");
   const agentCard = runtimeConfig.agentCard;
@@ -41,11 +46,21 @@ export async function buildGenerationRunContext(
     freeTextPrompt: payload.freeTextPrompt,
     toolState: effectiveToolState
   });
-  const modelSettings = resolveModelSettings(runtimeConfig.settings.model, payload.providerId, payload.modelOverrides);
+  const modelSettings = await resolveModelSettings(runtimeConfig.settings.model, payload.providerId, payload.modelOverrides);
+  const userPrompt = userPromptForModel(payload, agentCard.outputContract.type);
+  const knowledge = await buildKnowledgeContext({
+    knowledgeService,
+    enabled: Boolean(runtimeConfig.settings.knowledge.enabled && effectiveToolState.knowledge_base),
+    query: userPrompt,
+    baseIds: runtimeConfig.settings.knowledge.baseIds,
+    documentCount: runtimeConfig.settings.knowledge.documentCount,
+    threshold: runtimeConfig.settings.knowledge.threshold
+  });
   const messages = buildChatMessages(storage, {
     systemPrompt: buildSystemPrompt(payload.systemPrompt?.trim() || getSystemPrompt(payload.locale), prompt),
-    userPrompt: userPromptForModel(payload, agentCard.outputContract.type),
+    userPrompt,
     prompt,
+    knowledgeContext: knowledge.context,
     threadId,
     contextCount: modelSettings.contextCount,
     clearContext: Boolean(effectiveToolState.clear_context)
@@ -58,19 +73,23 @@ export async function buildGenerationRunContext(
     providerId: modelSettings.providerId,
     mode: isChatMode(payload.mode) ? "chat" : "structured",
     messages,
-    effectiveToolState
+    effectiveToolState,
+    knowledgeEvents: knowledge.events
   };
 }
 
-export function resolveModelSettings(
+export async function resolveModelSettings(
   settings: GenerateModelSettings | undefined,
   overrideProviderId?: ProviderId,
   modelOverrides?: GenerateRequest["modelOverrides"]
-): GenerateModelSettings {
-  const providerId = overrideProviderId ?? settings?.providerId ?? getProviderId();
+): Promise<GenerateModelSettings> {
+  const configuredModelApiId = overrideProviderId ? undefined : settings?.configuredModelApiId;
+  const configured = configuredModelApiId ? await resolveConfiguredModelApi(configuredModelApiId) : undefined;
+  const providerId = overrideProviderId ?? configured?.providerId ?? settings?.providerId ?? getProviderId();
   return {
+    configuredModelApiId,
     providerId,
-    model: settings?.model?.trim() || getModel(providerId),
+    model: configured?.modelId || settings?.model?.trim() || getModel(providerId),
     temperature: settings?.temperature ?? 0.7,
     topP: settings?.topP ?? 1,
     contextCount: settings?.contextCount ?? 5,
@@ -91,6 +110,7 @@ export function buildChatMessages(
     systemPrompt: string;
     userPrompt?: string;
     prompt: string;
+    knowledgeContext?: string;
     threadId: string;
     contextCount: number;
     clearContext: boolean;
@@ -100,10 +120,11 @@ export function buildChatMessages(
   if (!input.clearContext && input.contextCount > 0) {
     const history = storage.listMessages(input.threadId).slice(-input.contextCount);
     for (const message of history) {
-      messages.push({ role: message.role, content: message.text });
+    messages.push({ role: message.role, content: message.text });
     }
   }
-  messages.push({ role: "user", content: input.userPrompt?.trim() || input.prompt });
+  const userContent = [input.knowledgeContext, input.userPrompt?.trim() || input.prompt].filter(Boolean).join("\n\n");
+  messages.push({ role: "user", content: userContent });
   return messages;
 }
 
@@ -119,6 +140,54 @@ function userPromptForModel(payload: GenerateRequest, outputType: string) {
   const instruction = payload.chatInstruction?.trim() || payload.freeTextPrompt?.trim();
   if (instruction) return instruction;
   return `Generate the requested ${outputType} from the current AgentCard structured inputs.`;
+}
+
+async function buildKnowledgeContext(input: {
+  knowledgeService?: KnowledgeService;
+  enabled: boolean;
+  query: string;
+  baseIds?: string[];
+  documentCount?: number;
+  threshold?: number;
+}): Promise<{ context?: string; events: ToolEventRecord[] }> {
+  if (!input.knowledgeService || !input.enabled) return { events: [] };
+  try {
+    const results = await input.knowledgeService.search({
+      query: input.query,
+      baseIds: input.baseIds,
+      limit: input.documentCount,
+      threshold: input.threshold
+    });
+    if (results.length === 0) return { events: [] };
+    return {
+      context: [
+        "Knowledge References:",
+        ...results.map((result) => `[${result.id}] ${result.title} (${result.source}, score ${result.score.toFixed(3)})\n${result.content}`)
+      ].join("\n\n"),
+      events: [{
+        eventType: "knowledge_search_completed",
+        payload: {
+          resultCount: results.length,
+          sources: results.map((result) => ({
+            id: result.id,
+            baseId: result.baseId,
+            title: result.title,
+            source: result.source,
+            score: result.score
+          }))
+        }
+      }]
+    };
+  } catch (error) {
+    return {
+      events: [{
+        eventType: "knowledge_search_failed",
+        payload: {
+          message: error instanceof Error ? error.message.slice(0, 240) : "Knowledge search failed"
+        }
+      }]
+    };
+  }
 }
 
 export function userMessageForRun(payload: GenerateRequest, agentTitle: string) {

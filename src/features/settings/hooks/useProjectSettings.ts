@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
-import { getDeerFlowConfigOverview, getDeerFlowRuntimeStatus, getSettingsStatus, saveSettings, shutdownDevServer, validateSettings } from "../settingsClient";
-import { fallbackDeerFlowConfig, fallbackDeerFlowStatus, fallbackStatus, resolvePreset } from "../settingsDefaults";
-import type { DeerFlowConfigOverview, DeerFlowRuntimeStatus, SettingsStatus } from "../types";
+import { getAgentBackendConfigOverview, getAgentBackendRuntimeStatus, getSettingsStatus, saveSettings, shutdownDevServer, validateSettings } from "../settingsClient";
+import { fallbackAgentBackendConfig, fallbackAgentBackendStatus, fallbackStatus, resolvePreset } from "../settingsDefaults";
+import type { AgentBackendConfigOverview, AgentBackendRuntimeStatus, SettingsStatus } from "../types";
 
 export function useProjectSettings(open: boolean, copy: {
   validateSuccess: string;
@@ -13,10 +13,10 @@ export function useProjectSettings(open: boolean, copy: {
   const [apiKey, setApiKey] = useState("");
   const [baseURL, setBaseURL] = useState("https://api.deepseek.com");
   const [model, setModel] = useState("deepseek-v4-flash");
-  const [modelPreset, setModelPreset] = useState("deepseek-v4-flash");
+  const [modelPreset, setModelPreset] = useState("deepseek:deepseek-v4-flash");
   const [systemPrompt, setSystemPrompt] = useState(fallbackStatus.systemPrompt);
-  const [deerFlowStatus, setDeerFlowStatus] = useState<DeerFlowRuntimeStatus>(fallbackDeerFlowStatus);
-  const [deerFlowConfig, setDeerFlowConfig] = useState<DeerFlowConfigOverview>(fallbackDeerFlowConfig);
+  const [agentBackendStatus, setAgentBackendStatus] = useState<AgentBackendRuntimeStatus>(fallbackAgentBackendStatus);
+  const [agentBackendConfig, setAgentBackendConfig] = useState<AgentBackendConfigOverview>(fallbackAgentBackendConfig);
   const [message, setMessage] = useState("");
   const [busyState, setBusyState] = useState<"idle" | "saving" | "validating" | "stopping">("idle");
 
@@ -36,15 +36,15 @@ export function useProjectSettings(open: boolean, copy: {
       .catch((error: unknown) => {
         setStatus({ ...fallbackStatus, lastError: error instanceof Error ? error.message : "Unable to load settings" });
       });
-    Promise.all([getDeerFlowRuntimeStatus(), getDeerFlowConfigOverview()])
+    Promise.all([getAgentBackendRuntimeStatus(), getAgentBackendConfigOverview()])
       .then(([nextStatus, nextConfig]) => {
-        setDeerFlowStatus(nextStatus);
-        setDeerFlowConfig(nextConfig);
+        setAgentBackendStatus(nextStatus);
+        setAgentBackendConfig(nextConfig);
       })
       .catch((error: unknown) => {
-        const messageText = error instanceof Error ? error.message : "Unable to load DeerFlow status";
-        setDeerFlowStatus({ ...fallbackDeerFlowStatus, lastError: messageText });
-        setDeerFlowConfig({ ...fallbackDeerFlowConfig, lastError: messageText });
+        const messageText = error instanceof Error ? error.message : "Unable to load Agent Runtime status";
+        setAgentBackendStatus({ ...fallbackAgentBackendStatus, lastError: messageText });
+        setAgentBackendConfig({ ...fallbackAgentBackendConfig, lastError: messageText });
       });
   }, [open]);
 
@@ -110,8 +110,8 @@ export function useProjectSettings(open: boolean, copy: {
     apiKey,
     baseURL,
     busyState,
-    deerFlowConfig,
-    deerFlowStatus,
+    agentBackendConfig,
+    agentBackendStatus,
     message,
     model,
     modelPreset,

@@ -27,6 +27,31 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `GET /api/skills/catalog`
   - Returns `{ skills }` from local skill discovery.
 
+## Knowledge
+- `GET /api/knowledge/bases`
+  - Returns `{ bases }` with Knowledge Base metadata and indexed item state. Secret provider values are not returned.
+- `POST /api/knowledge/bases`
+  - Creates a local Knowledge Base. Body may include `name`, `description`, `embeddingConfigId`, legacy `embeddingProvider`/`embeddingModel`/`embeddingBaseUrl`, chunk/search settings, and optional `rerankConfigId`.
+  - New callers should choose an existing configured model API whose `modelType` is `embedding`. The backend resolves that binding's provider, model, base URL, and local key at indexing/search time.
+- `GET /api/knowledge/bases/:baseId`
+  - Returns `{ base }` with items.
+- `PATCH /api/knowledge/bases/:baseId`
+  - Updates metadata and runtime settings. Updating embedding settings clears the cached RAG application; callers should reindex when source embeddings need to be rebuilt.
+- `DELETE /api/knowledge/bases/:baseId`
+  - Deletes metadata and the local vector store under `.facetwrite/knowledge/<baseId>/`.
+- `POST /api/knowledge/bases/:baseId/items`
+  - Adds and indexes one item. Supported `type` values are `text`, `note`, `url`, `sitemap`, and `file`.
+  - `text` and `note` use `content`; `url` and `sitemap` use an `http` or `https` `source`; `file` uses `fileBase64` plus `fileName`.
+  - JSON request bodies are capped at 25MB. File payloads are capped at 20MB after base64 decoding and are stored under `.facetwrite/knowledge/uploads/<baseId>/`.
+  - Trusted local file paths are disabled by default. They require `KNOWLEDGE_ALLOW_LOCAL_FILE_PATHS=true` and a matching `KNOWLEDGE_ALLOWED_IMPORT_ROOTS` directory.
+- `DELETE /api/knowledge/bases/:baseId/items/:itemId`
+  - Deletes the item metadata and removes its loader entries from the vector store when available.
+- `POST /api/knowledge/search`
+  - Body: `{ query, baseIds?, limit?, threshold? }`.
+  - Returns `{ results }`, where each result includes `baseId`, `baseName`, `content`, `score`, `source`, `title`, and metadata.
+- `POST /api/knowledge/bases/:baseId/reindex`
+  - Rebuilds the vector store from stored item metadata/content.
+
 ## Agent Cards
 - `GET /api/agent-cards`
   - Returns `{ agentCards }`.
@@ -44,63 +69,67 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - `contextValues`, when present, represents explicit left AgentCard structured inputs and current workspace state such as draft or Canvas node data. It must not contain bottom-bar placeholder content or historical defaults such as course notes or audience profiles.
   - `modelOverrides`, when present, is a per-run override for runtime-safe model controls such as `thinkingMode` and `reasoningEffort`. It does not mutate saved Agent settings.
   - Runs generation, records the result, and returns generation metadata and output.
-  - Uses DeerFlow as the runtime when `DEERFLOW_ENABLED=true`; otherwise uses the current TypeScript provider runtime.
-  - If DeerFlow fails without a user-visible answer, returns only internal/runtime output, or returns an empty stream, the backend records a `deerflow_runtime_failed` tool event and continues with the Provider runtime before considering Mock fallback.
+  - Uses the internal Agent Runtime when `AGENT_BACKEND_ENABLED=true`; otherwise uses the current TypeScript provider runtime. The current Agent Runtime implementation is the AgentBackend adapter.
+  - If Agent Runtime fails without a user-visible answer, returns only internal/runtime output, or returns an empty stream, the backend records a `agent_backend_runtime_failed` tool event and continues with the Provider runtime before considering Mock fallback.
   - Provider-private runtime metadata, including DeepSeek `reasoning_content`, is not part of the public request or response schema. It may be used internally for provider continuation only.
-  - Direct Canvas-write intent in `chatInstruction`, such as `写入`, `保存到画板`, `save to canvas`, or `write this`, may cause the frontend to approve the newly returned pending Canvas write request after this endpoint completes. The API still records the request first; Canvas mutation remains behind the approve path.
+  - Direct Canvas-write intent in `chatInstruction`, such as `鍐欏叆`, `淇濆瓨鍒扮敾鏉縛, `save to canvas`, or `write this`, may cause the frontend to approve the newly returned pending Canvas write request after this endpoint completes. The API still records the request first; Canvas mutation remains behind the approve path.
+  - When Agent knowledge is enabled and `knowledge_base` is active, generation searches selected Knowledge Bases before model execution. Retrieved references are injected into runtime context and recorded as `knowledge_search_completed` tool events.
 - `POST /api/generate/stream`
   - SSE endpoint.
   - Emits `status`, `tool_event`, `token`, `final`, and `error` events.
   - `status` payloads include `{ phase, label }`, where phase is `thinking`, `searching`, `writing`, or `finalizing`. These events are for transient UI state and are not persisted as messages.
   - `token` events are emitted as progressive, user-visible assistant text segments after the backend safety gate has enough text to rule out obvious internal prompt, ToolUse, or reasoning leaks. Segments are intentionally small UI chunks so the right AI collaboration drawer can render a visible typewriter effect even when an upstream provider or runtime flushes a large block at once.
   - `error` payloads include `code` and `message`.
-  - DeerFlow custom subagent events are emitted as `tool_event` records with `eventType` prefixed by `deerflow_`.
-  - Recoverable DeerFlow-to-Provider fallback is emitted as a `tool_event` with `eventType:"deerflow_runtime_failed"` and a redacted payload containing `fallback:"provider"`.
+  - Agent Runtime custom subagent events from the current adapter are emitted as `tool_event` records with `eventType` prefixed by `AgentBackend_`.
+  - Recoverable Agent Runtime-to-Provider fallback is emitted as a `tool_event` with `eventType:"agent_backend_runtime_failed"` and a redacted payload containing `fallback:"provider"`.
   - The `final` payload remains the recorded `GenerateResponse`. Clients should let the chat assistant typewriter queue drain before reconciling temporary streaming text with this final thread state so the drawer does not suddenly replace a large block of content.
 
-## DeerFlow Runtime Configuration
-- `DEERFLOW_ENABLED`
-  - Enables the DeerFlow runtime path when set to `true` or `1`.
-- `DEERFLOW_BASE_URL`
-  - DeerFlow Gateway base URL. Defaults to `http://127.0.0.1:8000`.
-  - For the validated Docker sidecar path, use DeerFlow nginx: `http://127.0.0.1:2026`.
-- `DEERFLOW_ASSISTANT_ID`
-  - DeerFlow assistant ID. Defaults to `lead_agent`.
-- `DEERFLOW_AUTH_EMAIL`
-  - Local DeerFlow account email used by the FacetWrite backend session helper. Never returned by status APIs.
-- `DEERFLOW_AUTH_PASSWORD`
-  - Local DeerFlow account password used by the FacetWrite backend session helper. Never returned by status APIs.
-- `DEERFLOW_AUTO_SETUP`
-  - Enables first-boot admin initialization through DeerFlow `/api/v1/auth/initialize` when set to `true` or `1`. Defaults to `false`.
-- `DEERFLOW_AUTH_TIMEOUT_MS`
-  - Timeout for DeerFlow auth/setup/login requests. Defaults to `5000`.
+## Agent Runtime Configuration
+- `AGENT_BACKEND_ENABLED`
+  - Enables the Agent Runtime path when set to `true` or `1`.
+  - Historical `DEERFLOW_ENABLED` and other `DEERFLOW_*` keys are not compatibility inputs after the AgentBackend rename. Migrate local `.env.local` values to `AGENT_BACKEND_*` and restart the API process.
+- `AGENT_BACKEND_BASE_URL`
+  - Agent Runtime Gateway base URL. Defaults to `http://127.0.0.1:8000`.
+  - For the validated Docker sidecar path, use Agent Runtime nginx: `http://127.0.0.1:2026`.
+- `AGENT_BACKEND_ASSISTANT_ID`
+  - AgentBackend assistant ID. Defaults to `lead_agent`.
+- `AGENT_BACKEND_AUTH_EMAIL`
+  - Local AgentBackend account email used by the FacetWrite backend session helper. Never returned by status APIs.
+- `AGENT_BACKEND_AUTH_PASSWORD`
+  - Local AgentBackend account password used by the FacetWrite backend session helper. Never returned by status APIs.
+- `AGENT_BACKEND_AUTO_SETUP`
+  - Enables first-boot admin initialization through AgentBackend `/api/v1/auth/initialize` when set to `true` or `1`. Defaults to `false`.
+- `AGENT_BACKEND_AUTH_TIMEOUT_MS`
+  - Timeout for AgentBackend auth/setup/login requests. Defaults to `5000`.
 - `FACETWRITE_INTERNAL_BASE_URL`
-  - DeerFlow-to-FacetWrite callback base URL for bridged ToolUse. Docker sidecar default is `http://host.docker.internal:8787`.
+  - Agent Runtime-to-FacetWrite callback base URL for bridged ToolUse. Docker sidecar default is `http://host.docker.internal:8787`.
 - `FACETWRITE_INTERNAL_TOOL_TOKEN`
-  - Optional shared token for DeerFlow internal ToolUse calls. When set, DeerFlow sends it as `x-facetwrite-tool-token`; the value is never exposed by FacetWrite APIs.
-- `GET /api/deerflow/status`
-  - Returns DeerFlow runtime status: enabled, baseUrl, assistantId, reachable, runtimeProvider, authState, and lastError.
+  - Optional shared token for Agent Runtime internal ToolUse calls. When set, the runtime sends it as `x-facetwrite-tool-token`; the value is never exposed by FacetWrite APIs.
+- `GET /api/agent-runtime/status`
+  - Returns Agent Runtime status: enabled, baseUrl, assistantId, reachable, runtimeProvider, authState, and lastError.
   - `authState` is one of `not_configured`, `setup_required`, `authenticated`, or `auth_failed`.
-  - Docker validation on 2026-05-15 confirmed this endpoint reports `reachable:true` and `authState:"authenticated"` against `http://127.0.0.1:2026` after local session setup.
-- `GET /api/deerflow/config`
-  - Returns read-only DeerFlow skills and MCP server overview.
+  - Docker validation on 2026-05-20 confirmed this endpoint reports `enabled:true`, `reachable:true`, `runtimeProvider:"agent-backend"`, and `authState:"authenticated"` against `http://127.0.0.1:2026` after local session setup.
+- `GET /api/agent-runtime/config`
+  - Returns read-only Agent Runtime skills and MCP server overview.
   - Secret-like MCP values such as keys, tokens, passwords, authorization headers, and OAuth client secrets are redacted.
-  - Uses the backend DeerFlow auth session for protected DeerFlow APIs. If auth fails, the route returns safe overview defaults plus `lastError`; it must not expose DeerFlow secrets or MCP environment values.
-- `GET /api/deerflow/dashboard`
-  - Returns a read-only AI Dashboard payload containing runtime status, DeerFlow Skills/MCP overview, Lead Agent metadata, AgentCard-to-DeerFlow subagent mappings, ToolUse bridge status, and integration maturity.
-  - This endpoint must not return API keys, provider secrets, DeerFlow cookies, CSRF tokens, or MCP secret-like values.
-- `POST /api/internal/deerflow/tool-call`
-  - Internal service-to-service endpoint for DeerFlow bridge tools.
-  - Accepts only trusted local/container calls. Requests must include `x-facetwrite-internal: deerflow` or the configured `x-facetwrite-tool-token`.
+  - Uses the backend AgentBackend auth session for protected AgentBackend APIs. If auth fails, the route returns safe overview defaults plus `lastError`; it must not expose AgentBackend secrets or MCP environment values.
+- `GET /api/agent-runtime/dashboard`
+  - Returns a read-only AI Dashboard payload containing runtime status, Agent Runtime Skills/MCP overview, Lead Agent metadata, AgentCard-to-runtime subagent mappings, ToolUse bridge status, and integration maturity.
+  - This endpoint must not return API keys, provider secrets, AgentBackend cookies, CSRF tokens, or MCP secret-like values.
+- `POST /api/internal/agent-runtime/tool-call`
+  - Internal service-to-service endpoint for Agent Runtime bridge tools. `/api/internal/agent-backend/tool-call` remains a compatibility alias.
+  - Accepts only trusted local/container calls. Requests must include `x-facetwrite-internal: agent-runtime` or the configured `x-facetwrite-tool-token`.
   - Body: `{ threadId, toolName, arguments, allowedToolRefs, toolState, selectedCanvasNodeId, contextValues, chatInstruction }`.
   - Reuses FacetWrite ToolUse policy and executors. Unknown tools, disabled tools, or tools not allowed by the active Agent return an `ok:false` result rather than bypassing policy.
   - `canvas_write` creates a pending Canvas write request only; it does not mutate Canvas content.
   - `canvas_write` defaults to non-destructive behavior. A requested `replace` operation is honored only when the user instruction includes an explicit replace/overwrite intent; otherwise it is normalized to append/create.
 
-## DeerFlow Auth Status
-- DeerFlow Docker sidecar health is reachable without auth at `/health`.
-- DeerFlow `/api/skills`, `/api/mcp/config`, and `/api/runs/stream` are protected in the validated Docker runtime.
-- FacetWrite does not bypass this protection. The backend performs DeerFlow setup/login, caches session cookie plus CSRF token in process memory, and retries once after 401/403.
+Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/api/agent-backend/dashboard` remain aliases for the corresponding Agent Runtime endpoints during migration.
+
+## Agent Runtime Auth Status
+- Agent Runtime Docker sidecar health is reachable without auth at `/health`.
+- Agent Runtime `/api/skills`, `/api/mcp/config`, and `/api/runs/stream` are protected in the validated Docker runtime.
+- FacetWrite does not bypass this protection. The backend performs AgentBackend setup/login through the current adapter, caches session cookie plus CSRF token in process memory, and retries once after 401/403.
 - Session cookies, CSRF tokens, auth email/password, and MCP secret-like values are not exposed through FacetWrite APIs.
 
 ## Threads
@@ -132,8 +161,8 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - Returns `{ messages }`.
 - `GET /api/threads/:threadId/state`
   - Returns thread, sanitized messages, sanitized output versions, tool events, Canvas nodes, and pending Canvas write requests.
-  - Internal prompt text, raw ToolUse JSON, provider-private fields such as DeepSeek `reasoning_content`, and DeerFlow replay values must not appear in `messages` or `outputVersions`; they are represented as redacted tool/runtime events when needed.
-  - Runtime fallback events such as `deerflow_runtime_failed` are returned in `toolEvents` so the UI can show when a run switched from DeerFlow to the Provider runtime.
+  - Internal prompt text, raw ToolUse JSON, provider-private fields such as DeepSeek `reasoning_content`, and AgentBackend replay values must not appear in `messages` or `outputVersions`; they are represented as redacted tool/runtime events when needed.
+  - Runtime fallback events such as `agent_backend_runtime_failed` are returned in `toolEvents` so the UI can show when a run switched from AgentBackend to the Provider runtime.
 
 ## Projects
 - `GET /api/projects`
@@ -159,8 +188,43 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 
 ## Settings
 - `GET /api/settings/status`
-  - Returns local provider/configuration status without exposing secret values.
+  - Returns the current effective provider/configuration status without exposing secret values.
+- `GET /api/settings/provider-references`
+  - Returns `{ providers }` from the FacetWrite model registry.
+  - Provider records include id, name, type, API host, optional documentation links, default model, and static model references.
+  - The response must not include API keys or logo/image resources.
+- `GET /api/settings/provider-api-configs`
+  - Compatibility endpoint. Returns provider-grouped summaries derived from configured model API bindings.
+  - Summaries include provider id/label, whether a key exists, a short key hint, base URL, default model, enabled state, and update time. They never include API key plaintext.
+- `GET /api/settings/provider-api-configs/:providerId`
+  - Compatibility endpoint. Returns one provider API summary. Missing local config returns registry defaults plus `keyConfigured:false`.
+- `PUT /api/settings/provider-api-configs/:providerId`
+  - Body: `{ apiKey?, baseURL?, defaultModel?, enabled?, confirmLocalKeyWrite? }`.
+  - Compatibility endpoint. Saves or updates a configured model API binding using `defaultModel` as the bound model. Writing or replacing `apiKey` requires `confirmLocalKeyWrite:true`.
+- `DELETE /api/settings/provider-api-configs/:providerId`
+  - Compatibility endpoint. Deletes configured model API bindings for that provider without touching other providers.
+- `GET /api/settings/configured-model-apis`
+  - Returns `{ activeConfigId?, configs }`, where every config is a local callable `API + model` binding.
+  - Summaries include binding id, provider id/label, model id/name/type, key configured state, key hint, base URL, enabled state, and timestamps. API key plaintext is never returned.
+- `GET /api/settings/configured-model-apis/:configId`
+  - Returns one redacted configured model API summary.
+- `POST /api/settings/configured-model-apis`
+  - Body: `{ providerId, modelId, modelName?, modelType?, apiKey?, baseURL?, enabled?, confirmLocalKeyWrite? }`.
+  - Creates a new local binding in `.facetwrite/provider-apis.json`. Writing `apiKey` requires `confirmLocalKeyWrite:true`.
+- `PUT /api/settings/configured-model-apis/:configId`
+  - Updates one local binding. API key replacement requires `confirmLocalKeyWrite:true`; omitting `apiKey` preserves the existing key.
+- `DELETE /api/settings/configured-model-apis/:configId`
+  - Deletes exactly one local API/model binding.
+- `POST /api/settings/provider-models`
+  - Body: `{ providerId, apiKey?, baseURL? }`.
+  - Fetches a remote model list through the FacetWrite backend using provider-specific strategies for OpenAI-compatible APIs, Ollama, Gemini, OpenRouter, PPIO, AIHubMix, Together, New API, GitHub Models, and Vercel AI Gateway.
+  - API config precedence is request draft `apiKey/baseURL`, then that provider's saved local config, then registry defaults for non-secret fields. It must not use an unrelated global key from another provider.
+  - Returns `{ providerId, models, source, error? }`, where `source` is `"remote"` or `"static"`.
+  - If the remote request fails or the provider has no compatible listing endpoint, the endpoint returns registry static models with a safe error message.
 - `POST /api/settings/validate`
-  - Validates provider settings.
+  - Validates provider settings using request draft values first, then that provider's saved local API config.
 - `POST /api/settings/save`
-  - Saves settings. Writing an API key requires explicit local key write confirmation.
+  - Compatibility endpoint for saving the active provider config. Internally delegates provider credential persistence to the provider API config store.
+  - Writing an API key requires explicit local key write confirmation.
+
+Implementation note: these HTTP contracts are stable while the internals move to domain modules. Provider registry, configured model API bindings, and provider model listing are served by `server/domains/model-config/`; legacy service files re-export that domain for compatibility.

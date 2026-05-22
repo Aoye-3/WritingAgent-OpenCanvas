@@ -397,7 +397,7 @@ Rules:
 
 - Use these primitives for repeated controls before adding feature-local markup.
 - Primitives may own structure, ARIA, variants, sizing, and shared class names.
-- Primitives must not own provider, DeerFlow, Canvas approval, storage, or generation behavior.
+- Primitives must not own provider, AgentBackend, Canvas approval, storage, or generation behavior.
 - Feature components remain responsible for business state, API calls, and product-specific copy.
 - Do not introduce large external component libraries unless a future decision explicitly replaces this boundary.
 

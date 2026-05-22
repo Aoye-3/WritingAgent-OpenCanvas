@@ -1,5 +1,6 @@
 param(
-  [switch] $SkipDeerFlow,
+  [Alias("SkipAgentBackend")]
+  [switch] $SkipAgentRuntime,
   [switch] $NoInstall
 )
 
@@ -86,24 +87,105 @@ function Test-HttpOk {
   }
 }
 
-function Ensure-DeerFlowBridgeEnv {
-  $deerFlowEnvPath = Join-Path $root "Deerflow\.env"
-  if (-not (Test-Path -LiteralPath $deerFlowEnvPath)) {
-    Write-Host "Warning: Deerflow\.env was not found. Docker sidecar startup may fail until DeerFlow provider env is configured." -ForegroundColor Yellow
+function Test-DockerImageAvailable {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string] $Image
+  )
+
+  & docker image inspect $Image *> $null
+  return $LASTEXITCODE -eq 0
+}
+
+function Ensure-AgentRuntimeLocalFile {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string] $RelativePath,
+
+    [string] $ExampleRelativePath = "",
+
+    [switch] $AllowEmptyFallback
+  )
+
+  $agentRuntimePath = Join-Path $root (Join-Path "modules\agent-runtime" $RelativePath)
+  if (Test-Path -LiteralPath $agentRuntimePath) {
+    $existingItem = Get-Item -LiteralPath $agentRuntimePath
+    if (-not $existingItem.PSIsContainer) {
+      return
+    }
+
+    $existingChildren = Get-ChildItem -LiteralPath $agentRuntimePath -Force | Select-Object -First 1
+    if ($existingChildren) {
+      throw "modules\agent-runtime\$RelativePath is a directory with contents. Move or remove it before starting Agent Runtime."
+    }
+
+    Remove-Item -LiteralPath $agentRuntimePath -Force
+    Write-Host "Repaired empty directory at modules\agent-runtime\$RelativePath; Docker had likely created it for a missing file bind mount." -ForegroundColor DarkYellow
+  }
+
+  $legacyPath = Join-Path $root (Join-Path "AgentBackend" $RelativePath)
+  if ($ExampleRelativePath) {
+    $examplePath = Join-Path $root (Join-Path "modules\agent-runtime" $ExampleRelativePath)
+  } else {
+    $examplePath = "$agentRuntimePath.example"
+  }
+  $targetDir = Split-Path -Parent $agentRuntimePath
+  if ($targetDir) {
+    New-Item -ItemType Directory -Force $targetDir | Out-Null
+  }
+
+  if ((Test-Path -LiteralPath $legacyPath) -and -not (Get-Item -LiteralPath $legacyPath).PSIsContainer) {
+    Copy-Item -LiteralPath $legacyPath -Destination $agentRuntimePath
+    Write-Host "Migrated local Agent Runtime file from AgentBackend\$RelativePath to modules\agent-runtime\$RelativePath." -ForegroundColor DarkYellow
     return
   }
 
-  $bridgeBaseUrl = Get-Content -LiteralPath $deerFlowEnvPath |
+  if ((Test-Path -LiteralPath $examplePath) -and -not (Get-Item -LiteralPath $examplePath).PSIsContainer) {
+    Copy-Item -LiteralPath $examplePath -Destination $agentRuntimePath
+    Write-Host "Created modules\agent-runtime\$RelativePath from example. Review provider values before relying on live runtime tools." -ForegroundColor DarkYellow
+    return
+  }
+
+  if ($AllowEmptyFallback) {
+    New-Item -ItemType File -Force $agentRuntimePath | Out-Null
+    Write-Host "Created empty modules\agent-runtime\$RelativePath because no legacy or example file was found." -ForegroundColor DarkYellow
+    return
+  }
+
+  throw "modules\agent-runtime\$RelativePath was not found, and no legacy/example file was available to create it."
+}
+
+function Ensure-AgentRuntimeLocalEnv {
+  Ensure-AgentRuntimeLocalFile -RelativePath ".env" -AllowEmptyFallback
+  Ensure-AgentRuntimeLocalFile -RelativePath "frontend\.env" -AllowEmptyFallback
+}
+
+function Ensure-AgentRuntimeLocalConfig {
+  Ensure-AgentRuntimeLocalFile -RelativePath "config.yaml" -ExampleRelativePath "config.example.yaml"
+  Ensure-AgentRuntimeLocalFile -RelativePath "extensions_config.json" -ExampleRelativePath "extensions_config.example.json"
+}
+
+function Ensure-AgentRuntimeBridgeEnv {
+  Ensure-AgentRuntimeLocalEnv
+  Ensure-AgentRuntimeLocalConfig
+
+  $agentRuntimeEnvPath = Join-Path $root "modules\agent-runtime\.env"
+  if (-not (Test-Path -LiteralPath $agentRuntimeEnvPath)) {
+    Write-Host "Warning: modules\agent-runtime\.env was not found. Docker sidecar startup may fail until Agent Runtime provider env is configured." -ForegroundColor Yellow
+    return
+  }
+
+  $bridgeBaseUrl = Get-Content -LiteralPath $agentRuntimeEnvPath |
     Where-Object { $_ -match "^\s*FACETWRITE_INTERNAL_BASE_URL\s*=" } |
     Select-Object -First 1
 
   if (-not $bridgeBaseUrl) {
-    Add-Content -LiteralPath $deerFlowEnvPath -Value "FACETWRITE_INTERNAL_BASE_URL=http://host.docker.internal:8787"
-    Write-Host "Added FACETWRITE_INTERNAL_BASE_URL to Deerflow\.env for ToolUse bridge callbacks." -ForegroundColor DarkYellow
+    Add-Content -LiteralPath $agentRuntimeEnvPath -Value "FACETWRITE_INTERNAL_BASE_URL=http://host.docker.internal:8787"
+    Write-Host "Added FACETWRITE_INTERNAL_BASE_URL to modules\agent-runtime\.env for ToolUse bridge callbacks." -ForegroundColor DarkYellow
   }
 }
 
-function Start-DeerFlowSidecar {
+function Start-AgentRuntimeSidecar {
   if (-not (Test-CommandAvailable -Name "docker")) {
     throw "Docker was not found. Start Docker Desktop, make sure Docker is available in PATH, then run this launcher again."
   }
@@ -114,28 +196,39 @@ function Start-DeerFlowSidecar {
     throw "Docker daemon is not reachable. Start Docker Desktop and wait until it finishes starting, then run this launcher again."
   }
 
-  Ensure-DeerFlowBridgeEnv
+  Ensure-AgentRuntimeBridgeEnv
 
-  Write-Host "Starting DeerFlow Docker sidecar..." -ForegroundColor Green
-  $env:DEER_FLOW_ROOT = (Join-Path $root "Deerflow")
+  Write-Host "Starting Agent Runtime Docker sidecar..." -ForegroundColor Green
+  $env:AGENT_RUNTIME_ROOT = (Join-Path $root "modules\agent-runtime")
   if (-not $env:HOME -and $env:USERPROFILE) {
     $env:HOME = $env:USERPROFILE
   }
-  & docker compose -p deer-flow-dev -f "Deerflow/docker/docker-compose-dev.yaml" up -d nginx frontend gateway
+
+  $localGatewayImage = Get-ConfigValue -Name "AGENT_RUNTIME_GATEWAY_IMAGE" -DefaultValue "facetwrite-agent-runtime-gateway:latest"
+  $localFrontendImage = Get-ConfigValue -Name "AGENT_RUNTIME_FRONTEND_IMAGE" -DefaultValue "facetwrite-agent-runtime-frontend:latest"
+  $composeFile = "modules/agent-runtime/docker/docker-compose-dev.yaml"
+  if ((Test-DockerImageAvailable -Image $localGatewayImage) -and (Test-DockerImageAvailable -Image $localFrontendImage)) {
+    $composeFile = "modules/agent-runtime/docker/docker-compose-local-images.yaml"
+    Write-Host "Using local Agent Runtime images: $localGatewayImage, $localFrontendImage" -ForegroundColor Cyan
+  } else {
+    Write-Host "Local Agent Runtime images were not found. Docker will build runtime images from configured base images." -ForegroundColor DarkYellow
+  }
+
+  & docker compose -p facetwrite-agent-runtime -f $composeFile up -d nginx frontend gateway
   if ($LASTEXITCODE -ne 0) {
-    throw "DeerFlow Docker Compose startup failed with exit code $LASTEXITCODE."
+    throw "Agent Runtime Docker Compose startup failed with exit code $LASTEXITCODE."
   }
 
   $healthUrl = "http://127.0.0.1:2026/health"
   for ($attempt = 1; $attempt -le 20; $attempt++) {
     if (Test-HttpOk -Url $healthUrl) {
-      Write-Host "DeerFlow sidecar health: $healthUrl" -ForegroundColor Green
+      Write-Host "Agent Runtime sidecar health: $healthUrl" -ForegroundColor Green
       return
     }
     Start-Sleep -Seconds 2
   }
 
-  throw "DeerFlow sidecar did not report healthy within the startup window. Check Docker Desktop containers/logs, then run this launcher again."
+  throw "Agent Runtime sidecar did not report healthy within the startup window. Check Docker Desktop containers/logs, then run this launcher again."
 }
 
 Write-Host ""
@@ -159,15 +252,17 @@ if (-not $NoInstall -and -not (Test-Path -LiteralPath (Join-Path $root "node_mod
   }
 }
 
-$clientPort = 5173
+$clientPortValue = Get-ConfigValue -Name "VITE_PORT" -DefaultValue "3000"
+$clientPort = [int] $clientPortValue
 $apiPortValue = Get-ConfigValue -Name "PORT" -DefaultValue "8787"
 $apiPort = [int] $apiPortValue
 $providerId = Get-ConfigValue -Name "OPENAI_PROVIDER_ID" -DefaultValue "deepseek"
 $model = Get-ConfigValue -Name "OPENAI_MODEL" -DefaultValue "deepseek-v4-flash"
 $baseUrl = Get-ConfigValue -Name "OPENAI_BASE_URL" -DefaultValue "https://api.deepseek.com"
 $apiKeyConfigured = [bool] (Get-ConfigValue -Name "OPENAI_API_KEY")
-$deerFlowEnabled = (Get-ConfigValue -Name "DEERFLOW_ENABLED" -DefaultValue "false") -match "^(true|1)$"
-$deerFlowBaseUrl = Get-ConfigValue -Name "DEERFLOW_BASE_URL" -DefaultValue "http://127.0.0.1:2026"
+$agentBackendEnabled = (Get-ConfigValue -Name "AGENT_BACKEND_ENABLED" -DefaultValue "false") -match "^(true|1)$"
+$agentBackendBaseUrl = Get-ConfigValue -Name "AGENT_BACKEND_BASE_URL" -DefaultValue "http://127.0.0.1:2026"
+$skipRuntime = $SkipAgentRuntime
 
 if (-not (Test-Path -LiteralPath (Join-Path $root ".env.local"))) {
   Write-Host "Warning: .env.local was not found. The API will use mock fallback unless provider settings are configured elsewhere." -ForegroundColor Yellow
@@ -186,24 +281,24 @@ Write-Host "Provider: $providerId"
 Write-Host "Model:    $model"
 Write-Host "Base URL: $baseUrl"
 Write-Host "API key:  $(if ($apiKeyConfigured) { "configured" } else { "missing" })"
-Write-Host "DeerFlow: $(if ($deerFlowEnabled) { "enabled at $deerFlowBaseUrl" } else { "disabled" })"
+Write-Host "Agent Runtime: $(if ($agentBackendEnabled) { "enabled at $agentBackendBaseUrl (AgentBackend adapter)" } else { "disabled" })"
 Write-Host ""
 
-if ($deerFlowEnabled -and -not $SkipDeerFlow) {
-  Start-DeerFlowSidecar
-} elseif ($deerFlowEnabled -and $SkipDeerFlow) {
-  Write-Host "Skipping DeerFlow sidecar startup because -SkipDeerFlow was provided." -ForegroundColor DarkYellow
+if ($agentBackendEnabled -and -not $skipRuntime) {
+  Start-AgentRuntimeSidecar
+} elseif ($agentBackendEnabled -and $skipRuntime) {
+  Write-Host "Skipping Agent Runtime sidecar startup because a skip flag was provided." -ForegroundColor DarkYellow
 }
 
 Write-Host "Starting FacetWrite..." -ForegroundColor Green
 Write-Host "Frontend:        http://127.0.0.1:$clientPort/"
 Write-Host "API health:      http://127.0.0.1:$apiPort/api/health"
-Write-Host "DeerFlow status: http://127.0.0.1:$apiPort/api/deerflow/status"
+Write-Host "Agent Runtime status: http://127.0.0.1:$apiPort/api/agent-runtime/status"
 Write-Host "AI Dashboard:    http://127.0.0.1:$clientPort/"
 Write-Host "Agent cards:     http://127.0.0.1:$apiPort/api/agent-cards"
 Write-Host "Agent status:    http://127.0.0.1:$apiPort/api/settings/status"
 Write-Host ""
-Write-Host "DeerFlowRuntime is the primary acceptance path when enabled; provider/mock fallback is only a safety net." -ForegroundColor DarkYellow
+Write-Host "Agent Runtime is the primary acceptance path when enabled; provider/mock fallback is only a safety net." -ForegroundColor DarkYellow
 Write-Host "Keep this window open while using the app. Press Ctrl+C to stop." -ForegroundColor DarkGray
 Write-Host ""
 

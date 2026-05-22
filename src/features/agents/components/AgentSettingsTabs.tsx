@@ -1,4 +1,7 @@
+import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "../../i18n/I18nProvider";
+import { getConfiguredModelApis } from "../../model-config/modelConfigClient";
+import type { ConfiguredModelApiSummary } from "../../settings/types";
 import type { AgentRuntimeConfig, AgentSettings } from "../types";
 
 export const tabs = ["model", "prompt", "knowledge", "tools", "quick", "memory"] as const;
@@ -27,20 +30,62 @@ function AgentModelTab({ runtimeConfig, settings, onChange }: TabProps) {
   const { locale } = useI18n();
   const setModel = (patch: Partial<AgentSettings["model"]>) => onChange({ ...settings, model: { ...settings.model, ...patch } });
   const providerCapabilities = runtimeConfig?.providerProfile.capabilities;
+  const [configuredApis, setConfiguredApis] = useState<ConfiguredModelApiSummary[]>([]);
+  const chatConfiguredApis = useMemo(
+    () => configuredApis.filter((config) => config.enabled && config.keyConfigured && isChatModelConfig(config)),
+    [configuredApis]
+  );
+  const selectedConfiguredApi = chatConfiguredApis.find((config) => config.id === settings.model.configuredModelApiId)
+    ?? chatConfiguredApis.find((config) => config.providerId === settings.model.providerId && config.modelId === settings.model.model);
+
+  useEffect(() => {
+    getConfiguredModelApis()
+      .then((apiConfigs) => setConfiguredApis(apiConfigs.configs))
+      .catch(() => {
+        setConfiguredApis([]);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (chatConfiguredApis.length === 0) return;
+    if (selectedConfiguredApi) return;
+    const nextConfig = chatConfiguredApis[0];
+    setModel({
+      configuredModelApiId: nextConfig.id,
+      providerId: nextConfig.providerId,
+      model: nextConfig.modelId,
+      responseMode: "normal"
+    });
+  }, [chatConfiguredApis, selectedConfiguredApi]);
 
   return (
     <div className="agent-editor-section">
       <label className="field">
-        <span>Provider</span>
-        <select value={settings.model.providerId} onChange={(event) => setModel({ providerId: event.target.value as AgentSettings["model"]["providerId"], responseMode: "normal" })}>
-          <option value="deepseek">DeepSeek</option>
-          <option value="openai">OpenAI</option>
-          <option value="openai-compatible">OpenAI-compatible</option>
+        <span>{text(locale, "configuredModelApi")}</span>
+        <select
+          value={selectedConfiguredApi?.id ?? ""}
+          onChange={(event) => {
+            const config = chatConfiguredApis.find((candidate) => candidate.id === event.target.value);
+            if (!config) return;
+            setModel({
+              configuredModelApiId: config.id,
+              providerId: config.providerId,
+              model: config.modelId,
+              responseMode: "normal"
+            });
+          }}
+          disabled={chatConfiguredApis.length === 0}
+        >
+          {chatConfiguredApis.length === 0 ? <option value="">{text(locale, "noSavedApis")}</option> : null}
+          {chatConfiguredApis.map((config) => (
+            <option value={config.id} key={config.id}>{config.providerLabel} / {config.modelName} ({config.keyHint ?? "key"})</option>
+          ))}
         </select>
+        {chatConfiguredApis.length === 0 ? <small>{text(locale, "saveProviderApiFirst")}</small> : <small>{text(locale, "modelsFromSavedApi")}</small>}
       </label>
       <label className="field">
         <span>{text(locale, "model")}</span>
-        <input value={settings.model.model} onChange={(event) => setModel({ model: event.target.value })} placeholder="deepseek-chat" />
+        <input value={selectedConfiguredApi?.modelId ?? settings.model.model} readOnly />
       </label>
       {providerCapabilities?.chatPrefixCompletion ? (
         <label className="field">
@@ -277,6 +322,11 @@ function riskLabel(riskLevel: "low" | "medium" | "high", locale: "en" | "zh") {
   return labels[riskLevel][locale];
 }
 
+function isChatModelConfig(config: ConfiguredModelApiSummary) {
+  const type = config.modelType?.toLowerCase();
+  return !type || type === "chat" || type === "vision";
+}
+
 export function tabLabel(tab: SettingsTab, locale: "en" | "zh") {
   const labels: Record<SettingsTab, Record<"en" | "zh", string>> = {
     model: { en: "Model", zh: "模型设置" },
@@ -290,7 +340,7 @@ export function tabLabel(tab: SettingsTab, locale: "en" | "zh") {
 }
 
 function text(locale: "en" | "zh", key: keyof typeof copy.en) {
-  return copy[locale][key];
+  return (copy[locale] as Partial<Record<keyof typeof copy.en, string>>)[key] ?? copy.en[key];
 }
 
 const copy = {
@@ -300,6 +350,7 @@ const copy = {
     approvalRequired: "Approval required",
     autoRunnable: "Auto runnable",
     contextCount: "Context count",
+    configuredModelApi: "Configured API model",
     description: "Description",
     enableKnowledge: "Enable knowledge base",
     externalConfig: "External config",
@@ -310,8 +361,11 @@ const copy = {
     maxToolCalls: "Max tool calls",
     memoryNote: "This stage only saves the toggle and writes memory state into the prompt.",
     missingTools: "AgentCard references missing tools",
+    modelsFromSavedApi: "Agent models are limited to saved local API + model bindings.",
     model: "Model",
     name: "Name",
+    noSavedApis: "No saved API models",
+    noSavedModels: "No saved models",
     noSkills: "No skills are available yet",
     normalMode: "Normal chat",
     outputFormat: "Output format",
@@ -319,6 +373,7 @@ const copy = {
     prefixMode: "Prefix completion",
     referenceScope: "Reference scope",
     responseMode: "Response mode",
+    saveProviderApiFirst: "Save an API + model binding in Model Config before assigning models to Agents.",
     skills: "Skills",
     streaming: "Streaming",
     tokenLimit: "Token limit",
@@ -334,6 +389,7 @@ const copy = {
     approvalRequired: "需要审批",
     autoRunnable: "可自动运行",
     contextCount: "上下文数量",
+    configuredModelApi: "已配置 API 模型",
     description: "描述",
     enableKnowledge: "启用知识库",
     externalConfig: "外部配置",

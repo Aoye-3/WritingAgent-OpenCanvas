@@ -1,10 +1,14 @@
-import type { AgentRuntimeAdapter } from "../../agentRuntimeAdapter.js";
+﻿import type { AgentRuntimeAdapter } from "../../agentRuntimeAdapter.js";
 import type { StreamStatus } from "../../agentRunLoop.js";
 import type { GenerateRequest, GenerateResponse } from "../../contracts/generation.js";
 import type { SQLiteStorageRepository } from "../../storage.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
+import type { KnowledgeService } from "../../knowledge/service.js";
+import type { AgentRuntimePort } from "../../runtime/agentRuntimePort.js";
+import { createAgentBackendRuntimePort } from "../../runtime/agentBackendAdapter/index.js";
 import { randomThreadId, safeId } from "../../utils/ids.js";
-import { runDeerFlowGeneration, type DeerFlowRunnerDeps } from "./deerflowRunner.js";
+import type { AgentBackendRunnerDeps } from "./agentBackendRunner.js";
+import { runAgentRuntimeGeneration } from "./agentRuntimeRunner.js";
 import { mockText } from "./mockFallback.js";
 import { normalizeAgentRunOutput } from "./outputNormalizer.js";
 import { buildGenerationRunContext } from "./promptRunBuilder.js";
@@ -25,13 +29,16 @@ export type GenerationService = {
 };
 
 export type GenerationServiceDeps = {
-  deerflow?: DeerFlowRunnerDeps;
+  agentRuntime?: AgentRuntimePort;
+  /** Compatibility hook for older tests and callers during the Agent Runtime port migration. */
+  agentBackend?: AgentBackendRunnerDeps;
   provider?: ProviderRunnerDeps;
+  knowledge?: KnowledgeService;
 };
 
 const streamLabels = {
-  thinking: "正在思考",
-  finalizing: "正在整理要点"
+  thinking: "Thinking...",
+  finalizing: "Finalizing..."
 } as const;
 
 export function createGenerationService(
@@ -39,32 +46,34 @@ export function createGenerationService(
   agentRuntime: AgentRuntimeAdapter,
   deps: GenerationServiceDeps = {}
 ): GenerationService {
+  const executionRuntime = deps.agentRuntime ?? (deps.agentBackend ? createAgentBackendRuntimePort(deps.agentBackend) : undefined);
+
   async function generateAndRecord(payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
-    const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime);
+    const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge);
     const agentCard = context.runtimeConfig.agentCard;
     await storage.ensureThread(threadId, agentCard.id);
-    const runtimeEvents: ToolEventRecord[] = [];
+    const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
 
     try {
-      const deerFlowRun = await runDeerFlowGeneration({
+      const agentBackendRun = await runAgentRuntimeGeneration({
         payload,
         threadId,
         runtimeConfig: context.runtimeConfig,
         messages: context.messages,
         prompt: context.prompt,
         onToolEvent
-      }, deps.deerflow);
+      }, executionRuntime);
 
-      if (deerFlowRun) {
+      if (agentBackendRun) {
         const normalized = normalizeAgentRunOutput({
-          text: deerFlowRun.text,
+          text: agentBackendRun.text,
           locale: payload.locale,
-          source: "deerflow",
-          events: deerFlowRun.events
+          source: "agent-backend",
+          events: agentBackendRun.events
         });
         if (hasBlockedInternalOutput(normalized.events)) {
-          const event = createRuntimeFallbackEvent("deerflow", new Error("DeerFlow returned internal runtime output"));
+          const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend returned internal runtime output"));
           runtimeEvents.push(...(normalized.events ?? []), event);
           onToolEvent?.(event);
         } else {
@@ -74,7 +83,7 @@ export function createGenerationService(
             threadId,
             agentTitle: agentCard.title[payload.locale],
             text: normalized.text,
-            events: normalized.events,
+            events: [...runtimeEvents, ...(normalized.events ?? [])],
             onToolEvent
           });
           return recordGenerationRun({
@@ -86,17 +95,17 @@ export function createGenerationService(
             mode: context.mode,
             prompt: context.prompt,
             text: normalized.text,
-            provider: "deerflow",
+            provider: "agent-backend",
             usedMock: false,
             toolState: context.effectiveToolState,
             events,
-            finishReason: deerFlowRun.finishReason,
-            usage: deerFlowRun.usage
+            finishReason: agentBackendRun.finishReason,
+            usage: agentBackendRun.usage
           });
         }
       }
     } catch (error) {
-      const event = createRuntimeFallbackEvent("deerflow", error);
+      const event = createRuntimeFallbackEvent("agent-backend", error);
       runtimeEvents.push(event);
       onToolEvent?.(event);
     }
@@ -111,6 +120,7 @@ export function createGenerationService(
         messages: context.messages,
         effectiveToolState: context.effectiveToolState,
         storage,
+        knowledgeService: deps.knowledge,
         onToolEvent
       }, deps.provider);
 
@@ -177,16 +187,16 @@ export function createGenerationService(
     } = {}
   ): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
-    const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime);
+    const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge);
     const agentCard = context.runtimeConfig.agentCard;
     await storage.ensureThread(threadId, agentCard.id);
     const textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
-    const runtimeEvents: ToolEventRecord[] = [];
+    const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
 
     callbacks.onStatus?.({ phase: "thinking", label: streamLabels.thinking });
 
     try {
-      const deerFlowRun = await runDeerFlowGeneration({
+      const agentBackendRun = await runAgentRuntimeGeneration({
         payload,
         threadId,
         runtimeConfig: context.runtimeConfig,
@@ -195,19 +205,19 @@ export function createGenerationService(
         onToolEvent: callbacks.onToolEvent,
         onToken: textGate.push,
         onStatus: callbacks.onStatus
-      }, deps.deerflow);
+      }, executionRuntime);
 
-      if (deerFlowRun) {
+      if (agentBackendRun) {
         textGate.flush();
         callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
         const normalized = normalizeAgentRunOutput({
-          text: deerFlowRun.text,
+          text: agentBackendRun.text,
           locale: payload.locale,
-          source: "deerflow",
-          events: deerFlowRun.events
+          source: "agent-backend",
+          events: agentBackendRun.events
         });
         if (hasBlockedInternalOutput(normalized.events)) {
-          const event = createRuntimeFallbackEvent("deerflow", new Error("DeerFlow returned internal runtime output"));
+          const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend returned internal runtime output"));
           runtimeEvents.push(...(normalized.events ?? []), event);
           callbacks.onToolEvent?.(event);
         } else {
@@ -217,7 +227,7 @@ export function createGenerationService(
             threadId,
             agentTitle: agentCard.title[payload.locale],
             text: normalized.text,
-            events: normalized.events,
+            events: [...runtimeEvents, ...(normalized.events ?? [])],
             onToolEvent: callbacks.onToolEvent
           });
           return recordGenerationRun({
@@ -229,17 +239,17 @@ export function createGenerationService(
             mode: context.mode,
             prompt: context.prompt,
             text: normalized.text,
-            provider: "deerflow",
+            provider: "agent-backend",
             usedMock: false,
             toolState: context.effectiveToolState,
             events,
-            finishReason: deerFlowRun.finishReason,
-            usage: deerFlowRun.usage
+            finishReason: agentBackendRun.finishReason,
+            usage: agentBackendRun.usage
           });
         }
       }
     } catch (error) {
-      const event = createRuntimeFallbackEvent("deerflow", error);
+      const event = createRuntimeFallbackEvent("agent-backend", error);
       runtimeEvents.push(event);
       callbacks.onToolEvent?.(event);
     }
@@ -254,6 +264,7 @@ export function createGenerationService(
         messages: context.messages,
         effectiveToolState: context.effectiveToolState,
         storage,
+        knowledgeService: deps.knowledge,
         onToolEvent: callbacks.onToolEvent,
         onToken: textGate.push,
         onStatus: callbacks.onStatus
@@ -325,9 +336,9 @@ function hasBlockedInternalOutput(events?: ToolEventRecord[]) {
   return events?.some((event) => event.eventType === "internal_output_blocked") ?? false;
 }
 
-function createRuntimeFallbackEvent(source: "deerflow", error: unknown): ToolEventRecord {
+function createRuntimeFallbackEvent(source: "agent-backend", error: unknown): ToolEventRecord {
   return {
-    eventType: `${source}_runtime_failed`,
+    eventType: "agent_backend_runtime_failed",
     payload: {
       source,
       message: safeRuntimeErrorMessage(error),
@@ -345,9 +356,9 @@ function safeRuntimeErrorMessage(error: unknown) {
 }
 
 function formatGenerationFailure(runtimeEvents: ToolEventRecord[], providerMessage: string) {
-  const deerflowMessage = runtimeEvents.find((event) => event.eventType === "deerflow_runtime_failed")?.payload?.message;
-  if (typeof deerflowMessage === "string") {
-    return `DeerFlow failed: ${deerflowMessage}; Provider failed: ${providerMessage}`;
+  const agentBackendMessage = runtimeEvents.find((event) => event.eventType === "agent_backend_runtime_failed")?.payload?.message;
+  if (typeof agentBackendMessage === "string") {
+    return `AgentBackend failed: ${agentBackendMessage}; Provider failed: ${providerMessage}`;
   }
   return providerMessage;
 }
@@ -399,10 +410,9 @@ function hasCanvasWriteIntent(payload: GenerateRequest) {
   const intentKeywords = [
     "canvas",
     "画板",
-    "畫板",
     "写入",
-    "寫入",
-    "保存到",
+    "存到画板",
+    "保存到画板",
     "加入",
     "添加到",
     "放到",

@@ -1,2 +1,2 @@
-export type ProviderId = "deepseek" | "openai" | "openai-compatible";
-export type Provider = ProviderId | "deerflow" | "mock";
+export type ProviderId = string;
+export type Provider = ProviderId | "agent-backend" | "mock";

@@ -1,5 +1,41 @@
 # FacetWrite Refactor Log
 
+## 2026-05-20: Internal Agent Runtime Module Boundary
+Scope: Promoted the previously tracked `AgentBackend/` subtree into a formal internal Agent Runtime module and added a stable FacetWrite runtime port.
+
+Completed:
+- Moved tracked AgentBackend source to `modules/agent-runtime/` while preserving Git rename history.
+- Added `npm run agent-runtime:up/status/down` and kept `agent-backend:*` as compatibility aliases.
+- Added `server/runtime/agentRuntimePort.ts`, `server/runtime/agentBackendAdapter/`, and `server/runtime/index.ts`.
+- Added preferred `/api/agent-runtime/*` and `/api/internal/agent-runtime/tool-call` routes while keeping `/api/agent-backend/*` compatibility aliases.
+- Updated frontend runtime status/dashboard calls to prefer Agent Runtime endpoints.
+- Updated maintained runtime docs and added the new `docs/AGENT_RUNTIME_RUNBOOK.md`.
+
+Validation:
+- `npm.cmd run typecheck` passed after the runtime port and route migration.
+
+Open TODO:
+- Continue deeper storage, Knowledge, Canvas, and collaboration-drawer decomposition after this boundary pass.
+- Run Docker sidecar acceptance with `npm run agent-runtime:up` after Docker is available.
+
+## 2026-05-20: Modular Domain Boundary Checkpoint
+Scope: Committed the dirty AgentBackend/model-config baseline, then started the current branch's architecture收束 pass on top of that checkpoint.
+
+Completed:
+- Created checkpoint commit `143540a` for the pre-existing AgentBackend rename and model/API binding baseline before further edits.
+- Added `server/domains/generation/index.ts` as the public generation domain entry while keeping `server/services/generationService.ts` as a compatibility export.
+- Added `server/domains/knowledge/` public entry plus model-config resolver helpers for embedding/rerank binding lookup.
+- Kept model-config ownership under `server/domains/model-config/` and documented `server/services/modelListService.ts` / `server/services/providerApiConfigService.ts` as compatibility exports.
+- Split frontend provider catalog/configured model API calls into `src/features/model-config/modelConfigClient.ts`; Agent and Knowledge settings now consume that client instead of the generic settings client.
+
+Validation:
+- `npm.cmd run typecheck` passed after backend domain boundary changes.
+- `npm.cmd run typecheck` passed after frontend client split.
+
+Open TODO:
+- Run targeted model-config, generation, and knowledge tests, then the full suite.
+- Continue migrating deeper Knowledge CRUD/indexing internals into focused domain modules after this low-risk boundary pass.
+
 ## 2026-05-18: Right-side AI Chat Real Streaming
 Scope: Replaced the collaboration drawer's fake post-hoc chunking with real streaming status/token flow and updated maintained technical docs.
 
@@ -436,3 +472,4 @@ Next Priority Check:
 - Audit Agent settings save/load after the new Skill catalog UI commit.
 - Verify `canvas_write` cannot be enabled outside policy or applied without approve.
 - Review API response consistency across frontend clients.
+

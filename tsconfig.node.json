@@ -13,5 +13,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["vite.config.ts", "server/**/*.ts"]
+  "include": ["vite.config.ts", "server/**/*.ts", "shared/**/*.ts"]
 }

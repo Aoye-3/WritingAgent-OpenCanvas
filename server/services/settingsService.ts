@@ -1,10 +1,11 @@
 import { lstat, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { SettingsPayload, SettingsStatus } from "../contracts/settings.js";
-import { getBaseURL, getModel, getProviderId, getSystemPrompt } from "../config/providerConfig.js";
+import { getProviderId, getSystemPrompt } from "../config/providerConfig.js";
 import { createOpenAIChatClient, getProviderProfile } from "../providerRuntime.js";
 import { evaluateSettingsWritePolicy } from "../security/policies/settingsWritePolicy.js";
 import type { ProviderId } from "../types.js";
+import { listProviderApiConfigSummaries, resolveProviderApiConfig, saveProviderApiConfig } from "../domains/model-config/index.js";
 
 type ValidationState = {
   at?: string;
@@ -14,12 +15,14 @@ type ValidationState = {
 
 let lastValidation: ValidationState = { ok: false };
 
-export function getSettingsStatus(override?: { apiKey?: string; providerId?: ProviderId; baseURL?: string; model?: string; systemPrompt?: string; error?: string }): SettingsStatus {
-  const providerId = override?.providerId ?? getProviderId();
+export async function getSettingsStatus(override?: { apiKey?: string; providerId?: ProviderId; baseURL?: string; model?: string; systemPrompt?: string; error?: string }): Promise<SettingsStatus> {
+  const summaries = await listProviderApiConfigSummaries();
+  const providerId = override?.providerId ?? summaries.activeProviderId ?? getProviderId();
+  const config = await resolveProviderApiConfig(providerId);
   const profile = getProviderProfile(providerId);
-  const keyConfigured = Boolean(override?.apiKey || process.env.OPENAI_API_KEY);
-  const baseURL = override?.baseURL || getBaseURL(providerId);
-  const model = override?.model || getModel(providerId);
+  const keyConfigured = Boolean(override?.apiKey || config.apiKey);
+  const baseURL = override?.baseURL || config.baseURL;
+  const model = override?.model || config.defaultModel;
   const systemPrompt = override?.systemPrompt || getSystemPrompt();
   const online = keyConfigured && lastValidation.ok && !override?.error;
 
@@ -40,21 +43,23 @@ export function getSettingsStatus(override?: { apiKey?: string; providerId?: Pro
 }
 
 export async function validateSettings(payload: SettingsPayload) {
-  const providerId = payload.providerId ?? getProviderId();
-  const apiKey = payload.apiKey?.trim() || process.env.OPENAI_API_KEY;
-  const baseURL = payload.baseURL?.trim() || getBaseURL(providerId);
-  const model = payload.model?.trim() || getModel(providerId);
+  const summaries = await listProviderApiConfigSummaries();
+  const providerId = payload.providerId ?? summaries.activeProviderId ?? getProviderId();
+  const config = await resolveProviderApiConfig(providerId);
+  const apiKey = payload.apiKey?.trim() || config.apiKey;
+  const baseURL = payload.baseURL?.trim() || config.baseURL;
+  const model = payload.model?.trim() || config.defaultModel;
   const systemPrompt = payload.systemPrompt?.trim() || getSystemPrompt();
 
   try {
     if (!apiKey) {
-      throw new Error("OPENAI_API_KEY is not configured");
+      throw new Error(`${getProviderProfile(providerId).label} API key is not configured`);
     }
 
     await validateProvider({ apiKey, baseURL, model, providerId });
     lastValidation = { at: new Date().toISOString(), ok: true };
     return {
-      ...getSettingsStatus({ apiKey, providerId, baseURL, model, systemPrompt }),
+      ...(await getSettingsStatus({ apiKey, providerId, baseURL, model, systemPrompt })),
       ok: true,
       message: `${getProviderProfile(providerId).label} validation succeeded`
     };
@@ -62,7 +67,7 @@ export async function validateSettings(payload: SettingsPayload) {
     const message = error instanceof Error ? error.message : "Unknown validation error";
     lastValidation = { at: new Date().toISOString(), ok: false, error: message };
     return {
-      ...getSettingsStatus({ apiKey, providerId, baseURL, model, error: message }),
+      ...(await getSettingsStatus({ apiKey, providerId, baseURL, model, error: message })),
       ok: false,
       message
     };
@@ -75,7 +80,8 @@ export async function saveSettings(payload: SettingsPayload) {
     throw new Error(policy.reason ?? "Local settings writes are disabled");
   }
 
-  const providerId = payload.providerId;
+  const summaries = await listProviderApiConfigSummaries();
+  const providerId = payload.providerId ?? summaries.activeProviderId ?? getProviderId();
   const apiKey = payload.apiKey?.trim();
   const baseURL = payload.baseURL?.trim();
   const model = payload.model?.trim();
@@ -85,13 +91,18 @@ export async function saveSettings(payload: SettingsPayload) {
     throw new Error("Saving a new API key requires confirmLocalKeyWrite=true");
   }
 
-  await writeEnvSettings({ apiKey, providerId, baseURL, model, systemPrompt });
-  if (apiKey) process.env.OPENAI_API_KEY = apiKey;
-  if (providerId) process.env.OPENAI_PROVIDER_ID = providerId;
-  if (baseURL) process.env.OPENAI_BASE_URL = baseURL;
-  if (model) process.env.OPENAI_MODEL = model;
-  if (systemPrompt) process.env.AGENT_SYSTEM_PROMPT = systemPrompt;
-  return getSettingsStatus();
+  await saveProviderApiConfig(providerId, {
+    apiKey,
+    baseURL,
+    defaultModel: model,
+    enabled: true,
+    confirmLocalKeyWrite: payload.confirmLocalKeyWrite
+  });
+  if (systemPrompt) {
+    await writeEnvSettings({ systemPrompt });
+    process.env.AGENT_SYSTEM_PROMPT = systemPrompt;
+  }
+  return getSettingsStatus({ providerId });
 }
 
 async function validateProvider(settings: { apiKey: string; providerId: ProviderId; baseURL: string; model: string }) {

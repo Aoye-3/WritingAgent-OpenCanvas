@@ -1,0 +1,87 @@
+# FacetWrite Agent Runtime using local/prebuilt images.
+# This avoids rebuilding from Docker Hub base images when local runtime images
+# already exist, while keeping the same dev volumes and service ports.
+
+services:
+  nginx:
+    image: ${NGINX_IMAGE:-nginx:alpine}
+    container_name: facetwrite-agent-runtime-nginx
+    ports:
+      - "2026:2026"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf.template:ro
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        cp /etc/nginx/nginx.conf.template /etc/nginx/nginx.conf
+        test -e /proc/net/if_inet6 || sed -i '/^[[:space:]]*listen[[:space:]]\+\[::\]:2026;/d' /etc/nginx/nginx.conf
+        exec nginx -g 'daemon off;'
+    depends_on:
+      - frontend
+      - gateway
+    networks:
+      - facetwrite-agent-runtime
+    restart: unless-stopped
+
+  frontend:
+    image: ${AGENT_RUNTIME_FRONTEND_IMAGE:-facetwrite-agent-runtime-frontend:latest}
+    container_name: facetwrite-agent-runtime-frontend
+    command: sh -c "cd frontend && pnpm run dev > /app/logs/frontend.log 2>&1"
+    volumes:
+      - ../frontend/src:/app/frontend/src
+      - ../frontend/public:/app/frontend/public
+      - ../frontend/next.config.js:/app/frontend/next.config.js:ro
+      - ../logs:/app/logs
+      - ${PNPM_STORE_PATH:-~/.local/share/pnpm/store}:/root/.local/share/pnpm/store
+    working_dir: /app
+    environment:
+      - NODE_ENV=development
+      - WATCHPACK_POLLING=true
+      - CI=true
+      - DEER_FLOW_INTERNAL_GATEWAY_BASE_URL=http://gateway:8001
+    env_file:
+      - ../frontend/.env
+    networks:
+      - facetwrite-agent-runtime
+    restart: unless-stopped
+
+  gateway:
+    image: ${AGENT_RUNTIME_GATEWAY_IMAGE:-facetwrite-agent-runtime-gateway:latest}
+    container_name: facetwrite-agent-runtime-gateway
+    command: ["sh", "/usr/local/bin/dev-entrypoint.sh"]
+    volumes:
+      - ./dev-entrypoint.sh:/usr/local/bin/dev-entrypoint.sh:ro
+      - ../backend/:/app/backend/
+      - gateway-venv:/app/backend/.venv
+      - ../config.yaml:/app/config.yaml
+      - ../extensions_config.json:/app/extensions_config.json
+      - ../skills:/app/skills
+      - ../logs:/app/logs
+      - gateway-uv-cache:/root/.cache/uv
+    working_dir: /app
+    environment:
+      - CI=true
+      - DEER_FLOW_PROJECT_ROOT=/app
+      - DEER_FLOW_HOME=/app/backend/.deer-flow
+      - DEER_FLOW_CHANNELS_LANGGRAPH_URL=${DEER_FLOW_CHANNELS_LANGGRAPH_URL:-http://gateway:8001/api}
+      - DEER_FLOW_CHANNELS_GATEWAY_URL=${DEER_FLOW_CHANNELS_GATEWAY_URL:-http://gateway:8001}
+      - DEER_FLOW_HOST_BASE_DIR=${AGENT_RUNTIME_ROOT}/backend/.deer-flow
+      - DEER_FLOW_HOST_SKILLS_PATH=${AGENT_RUNTIME_ROOT}/skills
+      - DEER_FLOW_SANDBOX_HOST=host.docker.internal
+    env_file:
+      - ../.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - facetwrite-agent-runtime
+    restart: unless-stopped
+
+volumes:
+  gateway-venv:
+  gateway-uv-cache:
+
+networks:
+  facetwrite-agent-runtime:
+    driver: bridge

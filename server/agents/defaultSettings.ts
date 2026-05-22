@@ -27,7 +27,11 @@ export function defaultAgentSettings(card: AgentCard): AgentSettings {
     tools: Object.fromEntries(card.toolRefs.map((tool) => [tool, true])) as Partial<Record<ToolRef, boolean>>,
     knowledge: {
       enabled: card.toolRefs.includes("knowledge_base"),
-      scope: "current_workspace"
+      scope: "current_workspace",
+      baseIds: [],
+      documentCount: 6,
+      threshold: 0.2,
+      rerankEnabled: true
     },
     memory: {
       enabled: false

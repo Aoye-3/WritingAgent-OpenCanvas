@@ -6,17 +6,32 @@
   "scripts": {
     "dev:full": "powershell -NoProfile -ExecutionPolicy Bypass -File ./start-facetwrite.ps1",
     "dev": "concurrently \"npm:dev:client\" \"npm:dev:server\"",
-    "dev:client": "vite --host 127.0.0.1 --port 5173",
+    "dev:client": "vite --host 127.0.0.1 --port 3000",
     "dev:server": "tsx watch server/index.ts",
-    "deerflow:up": "docker compose -p deer-flow-dev -f Deerflow/docker/docker-compose-dev.yaml up -d nginx frontend gateway",
-    "deerflow:down": "docker compose -p deer-flow-dev -f Deerflow/docker/docker-compose-dev.yaml down",
-    "deerflow:status": "docker ps --filter name=deer-flow --format \"table {{.Names}}\\t{{.Status}}\\t{{.Ports}}\"",
+    "agent-runtime:up": "powershell -NoProfile -File scripts/agent-runtime.ps1 up",
+    "agent-runtime:up:local": "powershell -NoProfile -File scripts/agent-runtime.ps1 up-local",
+    "agent-runtime:down": "powershell -NoProfile -File scripts/agent-runtime.ps1 down",
+    "agent-runtime:status": "powershell -NoProfile -File scripts/agent-runtime.ps1 status",
+    "agent-backend:up": "npm run agent-runtime:up",
+    "agent-backend:down": "npm run agent-runtime:down",
+    "agent-backend:status": "npm run agent-runtime:status",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "test": "node --import tsx --test server/**/*.test.ts",
     "typecheck": "tsc -b"
   },
   "dependencies": {
+    "@cherrystudio/embedjs": "^0.1.34",
+    "@cherrystudio/embedjs-interfaces": "^0.1.34",
+    "@cherrystudio/embedjs-libsql": "^0.1.34",
+    "@cherrystudio/embedjs-loader-csv": "^0.1.34",
+    "@cherrystudio/embedjs-loader-markdown": "^0.1.34",
+    "@cherrystudio/embedjs-loader-msoffice": "^0.1.34",
+    "@cherrystudio/embedjs-loader-pdf": "^0.1.34",
+    "@cherrystudio/embedjs-loader-sitemap": "^0.1.34",
+    "@cherrystudio/embedjs-loader-web": "^0.1.34",
+    "@cherrystudio/embedjs-ollama": "^0.1.35",
+    "@cherrystudio/embedjs-openai": "^0.1.34",
     "@vitejs/plugin-react": "^5.0.4",
     "@xyflow/react": "^12.10.2",
     "cors": "^2.8.5",
@@ -38,5 +53,11 @@
     "tsx": "^4.20.6",
     "typescript": "~5.9.3",
     "vite": "^7.1.12"
+  },
+  "overrides": {
+    "fast-xml-parser": "^5.7.0",
+    "file-type": "^21.3.1",
+    "js-yaml": "^4.1.1",
+    "mammoth": "^1.11.0"
   }
 }

@@ -118,7 +118,7 @@ test("storage facade sanitizes historical leaked assistant messages and output v
     mode: "chat",
     prompt: "Prompt text",
     output: "You are FacetWrite's writing assistant.\n\n# AgentCard\nAgent: Blog Post",
-    provider: "deerflow",
+    provider: "agent-backend",
     usedMock: false,
     userMessage: "Hello"
   });

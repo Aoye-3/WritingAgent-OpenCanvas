@@ -1,4 +1,4 @@
-import { BrandIcon } from "../../shared/icons";
+import { brandAssets } from "../../shared/brandAssets";
 import { Button } from "../../shared/ui";
 import { useI18n } from "../i18n/I18nProvider";
 
@@ -12,11 +12,10 @@ export function StartView({ active, onStart, onOpenSettings }: StartViewProps) {
   const { locale, setLocale } = useI18n();
 
   return (
-    <main className={`view view-start ${active ? "is-active" : ""}`} aria-label="FacetWrite start page">
+    <main className={`view view-start ${active ? "is-active" : ""}`} aria-label="OpenCanvas start page">
       <header className="start-nav">
         <div className="start-brand">
-          <span className="brand-mark" aria-hidden="true"><BrandIcon /></span>
-          <span>FacetWrite</span>
+          <img className="start-logo-art" src={brandAssets.openCanvasLockup} alt="OpenCanvas, FacetWrite architecture" />
         </div>
         <div className="start-actions">
           <Button type="button" onClick={onOpenSettings}>{locale === "zh" ? "项目设置" : "Settings"}</Button>
@@ -29,12 +28,12 @@ export function StartView({ active, onStart, onOpenSettings }: StartViewProps) {
 
       <section className="start-hero">
         <div className="start-copy">
-          <p className="eyebrow">{locale === "zh" ? "本地优先的文本 Agent 工作台" : "Local-first text agent workspace"}</p>
-          <h1>{locale === "zh" ? "把任务卡、结构化输入和 AI 协作放进同一个写作界面。" : "Agent cards, structured inputs, and AI collaboration in one writing surface."}</h1>
+          <p className="eyebrow">{locale === "zh" ? "本地优先的 AI 画板工作台" : "Local-first AI canvas workspace"}</p>
+          <h1>{locale === "zh" ? "把任务、节点和 AI 协作放进同一个开放画板。" : "Tasks, nodes, and AI collaboration in one open canvas."}</h1>
           <p className="subcopy">
             {locale === "zh"
-              ? "FacetWrite 将 Prompt 构建、文档画板、上下文和右侧协作聊天组合成一个分层式工作台，为后续接入 DeerFlow 风格 Agent 能力打好基础。"
-              : "FacetWrite combines prompt construction, a document canvas, structured inputs, and a collaboration drawer into a layered workspace ready for DeerFlow-inspired agent capabilities."}
+              ? "OpenCanvas 将结构化输入、文档画板、上下文和 Agent Runtime 组合成一个本地优先的 AI 工作台。"
+              : "OpenCanvas combines structured inputs, document canvases, context, and Agent Runtime into a local-first AI workspace."}
           </p>
           <div className="start-cta-row">
             <Button className="start-primary" variant="primary" type="button" onClick={onStart}>Start</Button>

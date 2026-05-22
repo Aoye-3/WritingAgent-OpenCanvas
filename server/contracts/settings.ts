@@ -1,5 +1,6 @@
 import type { getProviderProfile } from "../providerRuntime.js";
 import type { Provider, ProviderId } from "../types.js";
+import { isKnownProviderId } from "../../shared/modelReferences.js";
 
 export type SettingsPayload = {
   providerId?: ProviderId;
@@ -42,7 +43,8 @@ export function parseSettingsPayload(value: unknown): SettingsPayload {
 }
 
 function readProviderId(value: unknown): ProviderId | undefined {
-  return value === "deepseek" || value === "openai" || value === "openai-compatible" ? value : undefined;
+  if (value === "openai-compatible") return value;
+  return isKnownProviderId(value) ? value : undefined;
 }
 
 function readString(value: unknown) {

@@ -9,10 +9,10 @@ export default defineConfig({
         "**/.git/**",
         "**/.facetwrite/**",
         "**/.docker-codex/**",
-        "**/Deerflow/backend/.venv/**",
-        "**/Deerflow/backend/.uv-cache/**",
-        "**/Deerflow/backend/.pytest_cache/**",
-        "**/Deerflow/frontend/node_modules/**"
+        "**/modules/agent-runtime/backend/.venv/**",
+        "**/modules/agent-runtime/backend/.uv-cache/**",
+        "**/modules/agent-runtime/backend/.pytest_cache/**",
+        "**/modules/agent-runtime/frontend/node_modules/**"
       ]
     },
     proxy: {

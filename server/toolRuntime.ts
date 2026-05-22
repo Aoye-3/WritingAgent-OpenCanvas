@@ -1,5 +1,6 @@
 import type { ChatCompletionTool, ChatToolCall } from "./providerRuntime.js";
 import type { CanvasWriteRequestInput } from "./storage.js";
+import type { KnowledgeService } from "./knowledge/service.js";
 import { allowedToolDefinitions, toChatCompletionTool, toolCatalog, type ToolState } from "./tools/catalog.js";
 import { evaluateToolExecutionPolicy, isToolRef } from "./tools/toolPolicyGuard.js";
 
@@ -10,6 +11,7 @@ export type ToolExecutionContext = {
   selectedCanvasNodeId?: string | null;
   contextValues?: Record<string, unknown>;
   chatInstruction?: string;
+  knowledgeService?: KnowledgeService;
   createCanvasWriteRequest?: (input: CanvasWriteRequestInput) => {
     id: string;
     operation: string;
@@ -33,7 +35,9 @@ export type ToolEventRecord = {
     | "tool_call_failed"
     | "tool_loop_stopped"
     | "internal_output_blocked"
-    | `deerflow_${string}`;
+    | "knowledge_search_completed"
+    | "knowledge_search_failed"
+    | `agent_backend_${string}`;
   payload: Record<string, unknown>;
 };
 
@@ -69,6 +73,20 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
   }
 
   if (name === "knowledge_base") {
+    if (context.knowledgeService) {
+      const results = await context.knowledgeService.search({
+        query: readString(args.query) || context.chatInstruction || "",
+        limit: readNumber(args.limit, 6)
+      });
+      if (results.length > 0) {
+        return {
+          ok: true,
+          content: results.map((result) => `[${result.id}] ${result.title}\n${result.content}`).join("\n\n"),
+          payload: { tool: name, entries: results.length, sources: results.map((result) => result.source) }
+        };
+      }
+    }
+
     const entries = Object.entries(context.contextValues ?? {})
       .filter(([, value]) => value !== undefined && value !== null && String(value).trim().length > 0)
       .slice(0, readNumber(args.limit, 6))

@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import type { StoredToolEvent } from "../../agents/types";
 import { useI18n } from "../../i18n/I18nProvider";
 
@@ -11,7 +11,7 @@ const eventLabels: Record<string, { en: string; zh: string }> = {
   prompt_built: { en: "Prompt built", zh: "Prompt 已构建" },
   output_version_created: { en: "Output version", zh: "输出版本" },
   tool_state_applied: { en: "Tool state applied", zh: "工具状态已应用" },
-  deerflow_runtime_failed: { en: "DeerFlow fell back to provider", zh: "DeerFlow 已降级到 Provider" },
+  agent_backend_runtime_failed: { en: "AgentBackend fell back to provider", zh: "AgentBackend 已降级到 Provider" },
   internal_output_blocked: { en: "Internal output blocked", zh: "内部输出已拦截" }
 };
 

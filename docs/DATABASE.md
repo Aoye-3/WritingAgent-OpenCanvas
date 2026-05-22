@@ -20,6 +20,13 @@ Thread-specific local folders are created under:
 
 Thread IDs and node/request IDs are validated before filesystem operations so data stays inside `.facetwrite`.
 
+Knowledge Base vector stores and uploads are created under:
+
+```text
+.facetwrite/knowledge/<baseId>/vectors.db
+.facetwrite/knowledge/uploads/<baseId>/
+```
+
 ## Tables
 - `schema_version`
   - Tracks local schema version and application time.
@@ -51,6 +58,12 @@ Thread IDs and node/request IDs are validated before filesystem operations so da
   - Canvas node state: kind, title, content, position, size, metadata JSON, timestamps.
 - `canvas_write_requests`
   - Pending/approved/rejected Agent write requests for Canvas changes.
+- `knowledge_bases`
+  - Server-owned Knowledge Base metadata: embedding provider/model/base URL, chunk/search settings, optional rerank settings, status, and timestamps.
+- `knowledge_items`
+  - Indexed source metadata for text, note, URL, sitemap, and file items. Vector chunks live in the per-base libSQL vector store.
+- `knowledge_item_events`
+  - Audit trail for base creation, item indexing, indexing failures, search failures, rerank fallback, and deletion.
 
 ## Canvas Write Semantics
 `canvas_write_requests` is the safety buffer between Agent output and user data mutation.
@@ -83,3 +96,10 @@ Schema creation and migration live in `server/db/schema.ts`. The migration is id
 `server/storage.ts` remains the public storage facade. `server/db/sqlite.ts` owns SQLite initialization, and repository classes under `server/repositories/` are being introduced behind the facade without changing table names or local paths.
 
 Future storage refactors should preserve existing table names and local paths unless a migration plan is documented here first.
+
+## Knowledge Notes
+Knowledge Base metadata is stored in FacetWrite's main SQLite database, while embeddings are stored in per-base libSQL vector databases managed by the embedjs runtime.
+
+The main database intentionally does not store provider secrets. Embedding requests use process/runtime provider configuration such as `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL`, and optional Ollama base URL settings.
+
+File uploads are stored outside the main database under `.facetwrite/knowledge/uploads/<baseId>/`. The database keeps source metadata only; vector chunks remain in the per-base libSQL store.

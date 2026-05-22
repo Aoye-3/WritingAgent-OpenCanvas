@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import type { AppView } from "../../app/App";
 import { AppSidebar } from "../../shared/AppSidebar";
 import { EmptyState, Panel, StatusBadge } from "../../shared/ui";
 import { useI18n } from "../i18n/I18nProvider";
-import { fetchDeerFlowDashboard } from "./aiDashboardClient";
-import type { DeerFlowDashboard, DeerFlowToolBridgeStatus } from "./types";
+import { fetchAgentRuntimeDashboard } from "./agentRuntimeClient";
+import type { AgentBackendDashboard, AgentBackendToolBridgeStatus } from "./types";
 
 type AiDashboardViewProps = {
   activeView: AppView;
@@ -13,13 +13,13 @@ type AiDashboardViewProps = {
 
 export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps) {
   const { locale } = useI18n();
-  const [dashboard, setDashboard] = useState<DeerFlowDashboard | null>(null);
+  const [dashboard, setDashboard] = useState<AgentBackendDashboard | null>(null);
   const [error, setError] = useState("");
   const mcpServers = useMemo(() => Object.entries(dashboard?.config.mcpServers ?? {}), [dashboard]);
 
   useEffect(() => {
     if (activeView !== "aiDashboard") return;
-    fetchDeerFlowDashboard()
+    fetchAgentRuntimeDashboard()
       .then((nextDashboard) => {
         setDashboard(nextDashboard);
         setError("");
@@ -36,13 +36,13 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
         <div className="management-header">
           <div>
             <h1>{locale === "zh" ? "AI 仪表盘" : "AI Dashboard"}</h1>
-            <p>{locale === "zh" ? "查看 DeerFlow 执行层、MCP、Skills、Agent 映射和 ToolUse 桥接状态。" : "DeerFlow execution, MCP, Skills, Agent mapping, and ToolUse bridge status."}</p>
+            <p>{locale === "zh" ? "查看内置 Agent Runtime、MCP、Skills、Agent 映射和 ToolUse 桥接状态。" : "Internal Agent Runtime, MCP, Skills, Agent mapping, and ToolUse bridge status."}</p>
           </div>
           {dashboard ? <StatusPill dashboard={dashboard} /> : null}
         </div>
 
         {error ? <p className="settings-message is-error">{error}</p> : null}
-        {!dashboard && !error ? <EmptyState className="empty-management-state" title={locale === "zh" ? "正在读取 AI Runtime 状态..." : "Loading AI runtime status..."} /> : null}
+        {!dashboard && !error ? <EmptyState className="empty-management-state" title={locale === "zh" ? "正在读取 AI runtime 状态..." : "Loading AI runtime status..."} /> : null}
 
         {dashboard ? (
           <>
@@ -55,7 +55,7 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
 
             <Panel className="ai-dashboard-section">
               <div className="ai-section-header">
-                <h2>DeerFlow capabilities</h2>
+                <h2>Agent Runtime capabilities</h2>
                 <span>{dashboard.config.skills.length} Skills / {mcpServers.length} MCP</span>
               </div>
               <div className="ai-capability-grid">
@@ -71,8 +71,8 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
               </div>
               <div className="ai-mapping-table">
                 <div className="ai-mapping-head">
-                  <span>FacetWrite Agent</span>
-                  <span>DeerFlow subagent</span>
+                  <span>OpenCanvas Agent</span>
+                  <span>Runtime subagent</span>
                   <span>Skills</span>
                   <span>Tools</span>
                   <span>Status</span>
@@ -136,14 +136,14 @@ function Metric({ label, value, tone = "neutral" }: { label: string; value: stri
   );
 }
 
-function StatusPill({ dashboard }: { dashboard: DeerFlowDashboard }) {
+function StatusPill({ dashboard }: { dashboard: AgentBackendDashboard }) {
   return <StatusBadge tone={dashboard.runtime.reachable && dashboard.runtime.authState === "authenticated" ? "success" : "neutral"}>{runtimeLabel(dashboard)}</StatusBadge>;
 }
 
-function runtimeLabel(dashboard: DeerFlowDashboard) {
+function runtimeLabel(dashboard: AgentBackendDashboard) {
   if (!dashboard.runtime.enabled) return "TypeScript fallback";
-  if (!dashboard.runtime.reachable) return "DeerFlow unreachable";
-  if (dashboard.runtime.authState === "authenticated") return "DeerFlow online";
+  if (!dashboard.runtime.reachable) return "Agent Runtime unreachable";
+  if (dashboard.runtime.authState === "authenticated") return "Agent Runtime online";
   return dashboard.runtime.authState;
 }
 
@@ -162,7 +162,7 @@ function ChipLine({ values }: { values: string[] }) {
   return <div className="ai-chip-line">{values.length ? values.map((value) => <span className="ai-chip" key={value}>{value}</span>) : <span className="ai-muted">None</span>}</div>;
 }
 
-function ToolBridgeCard({ tool }: { tool: DeerFlowToolBridgeStatus }) {
+function ToolBridgeCard({ tool }: { tool: AgentBackendToolBridgeStatus }) {
   return (
     <article className="ai-tool-card">
       <div>
@@ -176,8 +176,10 @@ function ToolBridgeCard({ tool }: { tool: DeerFlowToolBridgeStatus }) {
   );
 }
 
-function BridgePill({ state, label }: { state: DeerFlowToolBridgeStatus["bridgeState"]; label?: string }) {
-  const text = label ?? (state === "mapped_metadata" ? "Mapped" : state === "pending_bridge" ? "Pending bridge" : "Control plane");
+type BridgePillState = AgentBackendToolBridgeStatus["bridgeState"] | "mapped_metadata";
+
+function BridgePill({ state, label }: { state: BridgePillState; label?: string }) {
+  const text = label ?? (state === "mapped_metadata" ? "Mapped" : state === "agent_backend_builtin" ? "Built-in" : state === "facetwrite_bridge" ? "OpenCanvas bridge" : state === "pending_bridge" ? "Pending bridge" : "Control plane");
   return <span className={`ai-bridge-pill ai-bridge-${state}`}>{text}</span>;
 }
 

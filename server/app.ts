@@ -2,15 +2,20 @@ import cors from "cors";
 import express from "express";
 import { agentCards } from "./agentCards.js";
 import { createAgentRuntimeAdapter } from "./agentRuntimeAdapter.js";
+import { createAgentRuntime } from "./runtime/index.js";
 import { createGenerationService } from "./services/generationService.js";
+import { KnowledgeService } from "./knowledge/service.js";
 import { createStorage } from "./storage.js";
 import { registerAgentRoutes } from "./routes/agentRoutes.js";
 import { registerCatalogRoutes } from "./routes/catalogRoutes.js";
 import { registerCanvasRoutes } from "./routes/canvasRoutes.js";
-import { registerDeerFlowRoutes } from "./routes/deerflowRoutes.js";
+import { registerAgentBackendRoutes } from "./routes/agentBackendRoutes.js";
+import { registerAgentRuntimeRoutes } from "./routes/agentRuntimeRoutes.js";
 import { registerGenerationRoutes } from "./routes/generationRoutes.js";
 import { registerHealthRoutes } from "./routes/healthRoutes.js";
-import { registerInternalDeerFlowRoutes } from "./routes/internalDeerFlowRoutes.js";
+import { registerInternalAgentBackendRoutes } from "./routes/internalAgentBackendRoutes.js";
+import { registerInternalAgentRuntimeRoutes } from "./routes/internalAgentRuntimeRoutes.js";
+import { registerKnowledgeRoutes } from "./routes/knowledgeRoutes.js";
 import { registerProjectRoutes } from "./routes/projectRoutes.js";
 import { registerSettingsRoutes } from "./routes/settingsRoutes.js";
 import { registerThreadRoutes } from "./routes/threadRoutes.js";
@@ -19,16 +24,21 @@ export async function createApp() {
   const app = express();
   const storage = await createStorage();
   const agentRuntime = createAgentRuntimeAdapter(storage);
-  const generationService = createGenerationService(storage, agentRuntime);
+  const executionRuntime = createAgentRuntime();
+  const knowledgeService = new KnowledgeService(storage);
+  const generationService = createGenerationService(storage, agentRuntime, { agentRuntime: executionRuntime, knowledge: knowledgeService });
 
   storage.upsertAgentCards(agentCards);
 
   app.use(cors({ origin: ["http://127.0.0.1:5173", "http://localhost:5173"] }));
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: "25mb" }));
 
   registerHealthRoutes(app);
-  registerInternalDeerFlowRoutes(app, { storage });
-  registerDeerFlowRoutes(app, { agentRuntime });
+  registerInternalAgentRuntimeRoutes(app, { storage, knowledgeService });
+  registerInternalAgentBackendRoutes(app, { storage, knowledgeService });
+  registerAgentRuntimeRoutes(app, { agentRuntime, executionRuntime });
+  registerAgentBackendRoutes(app, { agentRuntime, executionRuntime });
+  registerKnowledgeRoutes(app, { knowledgeService });
   registerCatalogRoutes(app);
   registerAgentRoutes(app, { agentRuntime });
   registerThreadRoutes(app, { storage, agentRuntime });

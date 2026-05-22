@@ -1,4 +1,10 @@
-import type { DeerFlowConfigOverview, DeerFlowRuntimeStatus, SettingsSaveRequest, SettingsStatus, SettingsValidationResponse } from "./types";
+import type {
+  AgentBackendConfigOverview,
+  AgentBackendRuntimeStatus,
+  SettingsSaveRequest,
+  SettingsStatus,
+  SettingsValidationResponse
+} from "./types";
 import { apiGet, apiPost } from "../../shared/apiClient";
 
 export async function getSettingsStatus(): Promise<SettingsStatus> {
@@ -17,10 +23,10 @@ export async function shutdownDevServer(): Promise<{ ok: boolean }> {
   return apiPost<{ ok: boolean }>("/api/settings/shutdown-dev-server");
 }
 
-export async function getDeerFlowRuntimeStatus(): Promise<DeerFlowRuntimeStatus> {
-  return apiGet<DeerFlowRuntimeStatus>("/api/deerflow/status");
+export async function getAgentBackendRuntimeStatus(): Promise<AgentBackendRuntimeStatus> {
+  return apiGet<AgentBackendRuntimeStatus>("/api/agent-runtime/status");
 }
 
-export async function getDeerFlowConfigOverview(): Promise<DeerFlowConfigOverview> {
-  return apiGet<DeerFlowConfigOverview>("/api/deerflow/config");
+export async function getAgentBackendConfigOverview(): Promise<AgentBackendConfigOverview> {
+  return apiGet<AgentBackendConfigOverview>("/api/agent-runtime/config");
 }
