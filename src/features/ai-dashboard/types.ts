@@ -41,3 +41,22 @@ export type AgentBackendDashboard = {
     description: string;
   }>;
 };
+
+export type AgentRuntimeMemoryState = {
+  memory: {
+    content: string;
+    updatedAt?: string;
+  };
+  agentMemory: {
+    enabledAgents: number;
+    totalAgents: number;
+    agents: Array<{
+      agentCardId: string;
+      title: {
+        en: string;
+        zh: string;
+      };
+      enabled: boolean;
+    }>;
+  };
+};

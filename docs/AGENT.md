@@ -86,17 +86,19 @@ Agent Runtime is FacetWrite's internal execution subsystem when `AGENT_BACKEND_E
 - Skills and MCP server overview are read through `/api/agent-runtime/config`; MCP environment and secret-like values are redacted before reaching the frontend.
 - AI runtime status, Agent mapping, and ToolUse bridge progress are exposed through `/api/agent-runtime/dashboard` and shown in the AI Dashboard. `/api/agent-backend/*` remains a compatibility alias.
 - FacetWrite sends per-run bridge context to AgentBackend: allowed tool refs, effective tool state, explicit context values, selected Canvas node id, and current chat instruction.
+- FacetWrite also sends Memory isolation context. `facetwrite_memory_enabled` defaults to false unless the current Agent settings explicitly enable Memory; FacetWrite-managed Memory content is sent only from `.facetwrite/memory/`, never from AgentBackend's legacy global memory store.
 - AgentBackend loads FacetWrite bridge tools from `AgentBackend.tools.facetwrite_bridge` for `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write`.
 - `knowledge_base` bridge calls prefer KnowledgeService RAG results and pass optional selected `baseIds`; explicit runtime context values are only the fallback when no Knowledge result is available.
-- The bridge calls FacetWrite `/api/internal/agent-runtime/tool-call`, so ToolUse policy remains enforced by FacetWrite and `canvas_write` can only create a pending request. `/api/internal/agent-backend/tool-call` remains a compatibility alias.
+- The bridge calls FacetWrite `/api/internal/agent-runtime/tool-call`, so ToolUse policy remains enforced by FacetWrite and `canvas_write` can only create a pending request. `/api/internal/agent-backend/tool-call` remains a compatibility alias; `/api/internal/deerflow/tool-call` is deprecated and exists only to protect already-running legacy sidecars.
 - AgentRuntime does not own FacetWrite product data. Threads, messages, Canvas nodes/edges/write requests, settings, and Knowledge metadata stay in FacetWrite storage; AgentRuntime can affect them only through the backend adapter and internal ToolUse bridge. It must not bypass frontend Canvas context filtering, and it must not call Canvas repositories or storage facades directly.
 - `web_search` is verified separately as a AgentBackend built-in tool, not as a FacetWrite local bridge.
 - Current Docker sidecar acceptance target: `/health`, backend auth, `/api/agent-backend/config`, provider `agent-backend` generation, repeated no-fallback runs, AgentBackend built-in ToolUse, and FacetWrite bridge ToolUse. The 2026-05-20 smoke test confirmed `usedMock:false` and `finishReason:"agent_backend_completed"`.
 
 ## AI Dashboard
-The AI Dashboard is not a second Agent settings page. It is a read-only runtime/control-plane surface.
+The AI Dashboard is primarily a runtime/control-plane surface. FacetWrite-managed Memory is the one editable exception because users need to inspect and correct what the runtime may reuse.
 
 - It shows Agent Runtime reachability, auth state, Lead Agent ID, Skills, MCP servers, AgentCard-to-subagent mapping, and ToolUse bridge status.
+- It shows and edits FacetWrite-managed Memory through `/api/agent-runtime/memory`. Agent settings still decide whether a concrete Agent can use that Memory during a run.
 - It describes FacetWrite capabilities as progressively bridged to runtime ToolUse or MCP capabilities rather than as a competing local Agent runtime.
 - Canvas write behavior remains Human-in-the-loop: Agent Runtime may propose the write through the bridge, but FacetWrite records only a pending request until the user confirms it and the backend approval path applies it.
 

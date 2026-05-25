@@ -49,6 +49,9 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `POST /api/knowledge/search`
   - Body: `{ query, baseIds?, limit?, threshold? }`.
   - Returns `{ results }`, where each result includes `baseId`, `baseName`, `content`, `score`, `source`, `title`, and metadata.
+- `POST /api/knowledge/ask`
+  - Body: `{ query, baseIds?, limit?, threshold?, locale? }`.
+  - Runs a single-turn Knowledge answer for the Knowledge settings test panel. It does not save thread history and must answer from retrieved Knowledge results only.
 - `POST /api/knowledge/bases/:baseId/reindex`
   - Rebuilds the vector store from stored item metadata/content.
 
@@ -116,10 +119,17 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `GET /api/agent-runtime/dashboard`
   - Returns a read-only AI Dashboard payload containing runtime status, Agent Runtime Skills/MCP overview, Lead Agent metadata, AgentCard-to-runtime subagent mappings, ToolUse bridge status, and integration maturity.
   - This endpoint must not return API keys, provider secrets, AgentBackend cookies, CSRF tokens, or MCP secret-like values.
+- `GET /api/agent-runtime/memory`
+  - Returns FacetWrite-managed Memory content plus each AgentCard's saved Memory enablement state.
+- `PUT /api/agent-runtime/memory`
+  - Body: `{ content }`. Saves editable FacetWrite-managed Memory under `.facetwrite/memory/`.
+- `DELETE /api/agent-runtime/memory`
+  - Clears FacetWrite-managed Memory content without deleting AgentBackend's legacy internal memory files.
 - `POST /api/internal/agent-runtime/tool-call`
-  - Internal service-to-service endpoint for Agent Runtime bridge tools. `/api/internal/agent-backend/tool-call` remains a compatibility alias.
-  - Accepts only trusted local/container calls. Requests must include `x-facetwrite-internal: agent-runtime` or the configured `x-facetwrite-tool-token`.
+  - Internal service-to-service endpoint for Agent Runtime bridge tools. `/api/internal/agent-backend/tool-call` remains a compatibility alias. `/api/internal/deerflow/tool-call` is a deprecated compatibility alias for already-running legacy sidecars only.
+  - Accepts only trusted local/container calls. Requests must include `x-facetwrite-internal: agent-runtime`, `agent-backend`, deprecated `deerflow`, or the configured `x-facetwrite-tool-token`.
   - Body: `{ threadId, toolName, arguments, allowedToolRefs, toolState, selectedCanvasNodeId, contextValues, chatInstruction }`.
+  - Response is the direct Tool execution result `{ ok, content, payload }`; runtime bridge clients must not expect `payload.content`.
   - Reuses FacetWrite ToolUse policy and executors. Unknown tools, disabled tools, or tools not allowed by the active Agent return an `ok:false` result rather than bypassing policy.
   - `canvas_write` creates a pending Canvas write request only; it does not mutate Canvas content.
   - `canvas_write` defaults to non-destructive behavior. A requested `replace` operation is honored only when the user instruction includes an explicit replace/overwrite intent; otherwise it is normalized to append/create.

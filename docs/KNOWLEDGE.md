@@ -17,7 +17,7 @@ FacetWrite Knowledge Base is a server-owned RAG capability for local project con
 - `sitemap`: loaded through the Sitemap loader.
 - `file`: loaded from a browser-selected upload encoded as `fileBase64` plus `fileName`. DOCX files are handled through embedjs' local path loader and the installed Microsoft Office loader package.
 
-The current UI is a layered management surface: a left Knowledge Base list, source-type tabs, an upload/import panel, indexed item list, and search test panel. Agent Settings also exposes the runtime Knowledge controls: enablement, all-bases vs selected base ids, retrieval result count, score threshold, and rerank preference.
+The current UI is a layered management surface: a left Knowledge Base list, source-type tabs, an upload/import panel, indexed item list, and single-turn Agent-style retrieval test panel. Agent Settings also exposes the runtime Knowledge controls: enablement, all-bases vs selected base ids, retrieval result count, score threshold, and rerank preference.
 
 ## Generation Flow
 1. Agent settings enable knowledge through `settings.knowledge.enabled`.
@@ -25,6 +25,12 @@ The current UI is a layered management surface: a left Knowledge Base list, sour
 3. Results are injected into the user message as explicit Knowledge References.
 4. The run records a `knowledge_search_completed` tool event with source metadata and scores.
 5. Provider fallback and AgentBackend bridge tools reuse the same `KnowledgeService.search` path. The local `knowledge_base` tool can also receive `baseIds` and prefers RAG results over explicit fallback context values.
+6. Knowledge failures or empty results must be reported as unavailable retrieval, not answered from AgentBackend legacy memory or previous-project context.
+
+## Retrieval Test
+- The Knowledge settings test panel uses `/api/knowledge/ask` for a single-turn answer over current Knowledge results.
+- It does not save chat history.
+- If no results are retrieved, the answer should tell the user to upload/index content instead of inventing from memory.
 
 ## Agent Readiness Checks
 - `server/services/generationService.facade.test.ts` deterministically stubs `KnowledgeService.search` with a unique fact and verifies that the provider runner receives `Knowledge References`, that disabled settings/tool state skip retrieval, and that `baseIds`, `documentCount`, and `threshold` are forwarded.

@@ -88,6 +88,23 @@ test("executes allowed Agent Runtime bridge calls on the preferred endpoint", as
   assert.match(String(result.body.content), /Runtime context/);
 });
 
+test("executes deprecated DeerFlow bridge calls for running legacy sidecars", async () => {
+  const app = createTestApp(fakeStorage(), "agent-runtime");
+
+  const result = await request(app, {
+    threadId: "thread_bridge",
+    toolName: "knowledge_base",
+    arguments: { query: "draft", limit: 2 },
+    allowedToolRefs: ["knowledge_base"],
+    toolState: { knowledge_base: true },
+    contextValues: { draft: "Legacy runtime context" }
+  }, { "x-facetwrite-internal": "deerflow" }, "/api/internal/deerflow/tool-call");
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.match(String(result.body.content), /Legacy runtime context/);
+});
+
 test("returns policy denial for disabled bridge tools", async () => {
   const app = createTestApp(fakeStorage());
 

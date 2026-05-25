@@ -3666,6 +3666,52 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   padding: 16px;
 }
 
+.ai-memory-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+  gap: 16px;
+  padding: 16px;
+}
+
+.ai-memory-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.ai-memory-editor textarea {
+  min-height: 180px;
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.ai-memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.ai-memory-agents {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.ai-memory-agents article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: #f8fafc;
+}
+
 .ai-capability-list {
   padding: 16px;
 }

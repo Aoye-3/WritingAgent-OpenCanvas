@@ -101,12 +101,20 @@ class DynamicContextMiddleware(AgentMiddleware):
         self._agent_name = agent_name
         self._app_config = app_config
 
-    def _build_full_reminder(self) -> str:
+    def _build_full_reminder(self, runtime_context: dict | None = None) -> str:
         from deerflow.agents.lead_agent.prompt import _get_memory_context
 
         # Memory injection is gated by injection_enabled; date is always included.
-        injection_enabled = self._app_config.memory.injection_enabled if self._app_config else True
-        memory_context = _get_memory_context(self._agent_name, app_config=self._app_config) if injection_enabled else ""
+        facetwrite_controls_memory = isinstance(runtime_context, dict) and "facetwrite_memory_enabled" in runtime_context
+        memory_context = ""
+        if facetwrite_controls_memory:
+            memory_enabled = runtime_context.get("facetwrite_memory_enabled") is True
+            memory_content = runtime_context.get("facetwrite_memory_content")
+            if memory_enabled and isinstance(memory_content, str) and memory_content.strip():
+                memory_context = f"<memory>\n{memory_content.strip()}\n</memory>\n"
+        else:
+            injection_enabled = self._app_config.memory.injection_enabled if self._app_config else True
+            memory_context = _get_memory_context(self._agent_name, app_config=self._app_config) if injection_enabled else ""
         current_date = datetime.now().strftime("%Y-%m-%d, %A")
 
         lines: list[str] = ["<system-reminder>"]
@@ -153,7 +161,7 @@ class DynamicContextMiddleware(AgentMiddleware):
         )
         return reminder_msg, user_msg
 
-    def _inject(self, state) -> dict | None:
+    def _inject(self, state, runtime_context: dict | None = None) -> dict | None:
         messages = list(state.get("messages", []))
         if not messages:
             return None
@@ -172,7 +180,7 @@ class DynamicContextMiddleware(AgentMiddleware):
             first_idx = next((i for i, m in enumerate(messages) if _is_user_injection_target(m)), None)
             if first_idx is None:
                 return None
-            full_reminder = self._build_full_reminder()
+            full_reminder = self._build_full_reminder(runtime_context)
             logger.info(
                 "DynamicContextMiddleware: injecting full reminder (len=%d, has_memory=%s) into first HumanMessage id=%r",
                 len(full_reminder),
@@ -197,8 +205,8 @@ class DynamicContextMiddleware(AgentMiddleware):
 
     @override
     def before_agent(self, state, runtime: Runtime) -> dict | None:
-        return self._inject(state)
+        return self._inject(state, runtime.context if runtime else None)
 
     @override
     async def abefore_agent(self, state, runtime: Runtime) -> dict | None:
-        return self._inject(state)
+        return self._inject(state, runtime.context if runtime else None)

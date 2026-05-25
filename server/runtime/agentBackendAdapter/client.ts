@@ -19,6 +19,7 @@ export type AgentBackendRunInput = {
   selectedCanvasNodeId?: string;
   contextValues?: Record<string, unknown>;
   chatInstruction?: string;
+  facetwriteMemoryContent?: string;
   fetchImpl?: typeof fetch;
   config?: AgentBackendRuntimeConfig;
   onToolEvent?: (event: ToolEventRecord) => void;
@@ -39,6 +40,16 @@ const streamLabels = {
   writing: "Writing...",
   finalizing: "Finalizing..."
 } as const;
+
+type AgentBackendRunContext = {
+  model_name?: string;
+  thinking_enabled?: boolean;
+  reasoning_effort?: string;
+  facetwrite_memory_enabled: boolean;
+  facetwrite_memory_scope_id: string;
+  facetwrite_project_id: string;
+  facetwrite_memory_content?: string;
+};
 
 export async function runAgentBackendAgent(input: AgentBackendRunInput): Promise<AgentBackendRunResult> {
   const config = input.config ?? getAgentBackendRuntimeConfig();
@@ -73,7 +84,7 @@ export async function runAgentBackendAgent(input: AgentBackendRunInput): Promise
 }
 
 export function buildRunRequest(input: AgentBackendRunInput, config: AgentBackendRuntimeConfig) {
-  const runtimeContext = buildAgentBackendRunContext(input.settings);
+  const runtimeContext = buildAgentBackendRunContext(input);
   return {
     assistant_id: config.assistantId,
     input: {
@@ -107,13 +118,26 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
   };
 }
 
-function buildAgentBackendRunContext(settings?: AgentSettings) {
-  if (!settings) return {};
+function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId" | "settings" | "facetwriteMemoryContent">): AgentBackendRunContext {
+  const memoryEnabled = Boolean(input.settings?.memory.enabled);
+  const memoryContent = memoryEnabled ? input.facetwriteMemoryContent?.trim() : "";
+  if (!input.settings) {
+    return {
+      facetwrite_memory_enabled: false,
+      facetwrite_memory_scope_id: input.threadId,
+      facetwrite_project_id: "local-project"
+    };
+  }
+  const settings = input.settings;
   const thinkingMode = settings.model.thinkingMode ?? (settings.model.providerId === "deepseek" && settings.model.model === "deepseek-reasoner" ? "enabled" : "disabled");
   return {
     model_name: settings.model.model,
     thinking_enabled: thinkingMode === "enabled",
-    reasoning_effort: normalizeAgentBackendReasoningEffort(settings.model.reasoningEffort)
+    reasoning_effort: normalizeAgentBackendReasoningEffort(settings.model.reasoningEffort),
+    facetwrite_memory_enabled: memoryEnabled,
+    facetwrite_memory_scope_id: input.threadId,
+    facetwrite_project_id: "local-project",
+    ...(memoryContent ? { facetwrite_memory_content: memoryContent } : {})
   };
 }
 

@@ -5,6 +5,7 @@ import type { SQLiteStorageRepository } from "../../storage.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { KnowledgeService } from "../../knowledge/service.js";
 import type { AgentRuntimePort } from "../../runtime/agentRuntimePort.js";
+import type { AgentRuntimeMemoryService } from "../agentRuntimeMemoryService.js";
 import { createAgentBackendRuntimePort } from "../../runtime/agentBackendAdapter/index.js";
 import { randomThreadId, safeId } from "../../utils/ids.js";
 import type { AgentBackendRunnerDeps } from "./agentBackendRunner.js";
@@ -34,6 +35,7 @@ export type GenerationServiceDeps = {
   agentBackend?: AgentBackendRunnerDeps;
   provider?: ProviderRunnerDeps;
   knowledge?: KnowledgeService;
+  memory?: AgentRuntimeMemoryService;
 };
 
 const streamLabels = {
@@ -53,6 +55,7 @@ export function createGenerationService(
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge);
     const agentCard = context.runtimeConfig.agentCard;
     await storage.ensureThread(threadId, agentCard.id);
+    const facetwriteMemoryContent = context.runtimeConfig.settings.memory.enabled ? (await deps.memory?.readMemory())?.content : undefined;
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
 
     try {
@@ -62,6 +65,7 @@ export function createGenerationService(
         runtimeConfig: context.runtimeConfig,
         messages: context.messages,
         prompt: context.prompt,
+        facetwriteMemoryContent,
         onToolEvent
       }, executionRuntime);
 
@@ -190,6 +194,7 @@ export function createGenerationService(
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge);
     const agentCard = context.runtimeConfig.agentCard;
     await storage.ensureThread(threadId, agentCard.id);
+    const facetwriteMemoryContent = context.runtimeConfig.settings.memory.enabled ? (await deps.memory?.readMemory())?.content : undefined;
     const textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
 
@@ -202,6 +207,7 @@ export function createGenerationService(
         runtimeConfig: context.runtimeConfig,
         messages: context.messages,
         prompt: context.prompt,
+        facetwriteMemoryContent,
         onToolEvent: callbacks.onToolEvent,
         onToken: textGate.push,
         onStatus: callbacks.onStatus

@@ -9,7 +9,7 @@ from langchain.tools import tool
 from deerflow.tools.types import Runtime
 
 _DEFAULT_BASE_URL = "http://host.docker.internal:8787"
-_INTERNAL_ENDPOINT = "/api/internal/deerflow/tool-call"
+_INTERNAL_ENDPOINT = "/api/internal/agent-runtime/tool-call"
 _BRIDGED_TOOL_NAMES = ("knowledge_base", "quick_messages", "clear_context", "canvas_write")
 _SECRET_PATTERN = re.compile(r"(?i)(api[_-]?key|authorization|token|password|secret)=?[^\s,;]+")
 
@@ -21,7 +21,7 @@ def _bridge_base_url() -> str:
 def _bridge_headers() -> dict[str, str]:
     headers = {
         "content-type": "application/json",
-        "x-facetwrite-internal": "deerflow",
+        "x-facetwrite-internal": "agent-runtime",
     }
     token = os.getenv("FACETWRITE_INTERNAL_TOOL_TOKEN")
     if token:
@@ -118,6 +118,25 @@ def _format_bridge_response(data: Any) -> str:
     if not isinstance(data, dict):
         return "Error: FacetWrite bridge returned an invalid response."
     ok = data.get("ok")
+    content = data.get("content")
+    if ok is True:
+        if isinstance(content, str):
+            return content
+        payload = data.get("payload")
+        if isinstance(payload, dict):
+            legacy_content = payload.get("content")
+            if isinstance(legacy_content, str):
+                return legacy_content
+            return json.dumps(payload, ensure_ascii=False)
+    if ok is False:
+        if isinstance(content, str):
+            return f"Error: {content}"
+        payload = data.get("payload")
+        if isinstance(payload, dict):
+            legacy_content = payload.get("content")
+            if isinstance(legacy_content, str):
+                return f"Error: {legacy_content}"
+            return f"Error: {json.dumps(payload, ensure_ascii=False)}"
     payload = data.get("payload")
     if ok is True and isinstance(payload, dict):
         content = payload.get("content")

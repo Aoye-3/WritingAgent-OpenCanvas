@@ -13,6 +13,7 @@ type InternalAgentRuntimeRouteDeps = {
 
 export function registerInternalAgentRuntimeRoutes(app: Express, deps: InternalAgentRuntimeRouteDeps) {
   registerInternalToolBridgeRoute(app, "/api/internal/agent-runtime/tool-call", deps, "Agent Runtime");
+  registerInternalToolBridgeRoute(app, "/api/internal/deerflow/tool-call", deps, "Deprecated DeerFlow");
 }
 
 export function registerInternalToolBridgeRoute(
@@ -52,7 +53,7 @@ function isAllowedInternalRequest(request: Request) {
   if (token && providedToken && token === providedToken) return true;
 
   const source = request.header("x-facetwrite-internal");
-  return source === "agent-runtime" || source === "agent-backend";
+  return source === "agent-runtime" || source === "agent-backend" || source === "deerflow";
 }
 
 type BridgeRequest = {
