@@ -48,7 +48,7 @@ export function EditableTextNode({ isResizing, locale, node, onUpdateNode }: Edi
         data-testid="canvas-node-content"
         ref={textareaRef}
         value={content}
-        placeholder={locale === "zh" ? "鍦ㄨ繖閲岀紪杈戣妭鐐瑰唴瀹?.." : "Edit node content..."}
+        placeholder={locale === "zh" ? "在这里编辑节点内容..." : "Edit node content..."}
         onBlur={() => {
           if (content !== node.content) void onUpdateNode(node.id, { content });
         }}
