@@ -8,6 +8,7 @@ import { useAppNavigation } from "../features/app/useAppNavigation";
 import type { GenerateRequest } from "../features/generation/types";
 import { I18nProvider, useI18n } from "../features/i18n/I18nProvider";
 import { ProjectSettingsPanel } from "../features/settings/ProjectSettingsPanel";
+import { getCanvasSettings } from "../features/settings/settingsClient";
 import { StartView } from "../features/start/StartView";
 import { HomeView } from "../features/home/HomeView";
 import { KnowledgeSettingsView } from "../features/knowledge/KnowledgeSettingsView";
@@ -15,12 +16,13 @@ import { ModelConfigView } from "../features/model-config/ModelConfigView";
 import { ProjectsView } from "../features/projects/ProjectsView";
 import { useProjects } from "../features/projects/hooks/useProjects";
 import { WorkspaceView } from "../features/workspace/WorkspaceView";
+import { CanvasNodeSettingsView } from "../features/canvas/CanvasNodeSettingsView";
 import { useCanvasState } from "./hooks/useCanvasState";
 import { useGenerationRun } from "./hooks/useGenerationRun";
 import { useProjectTrash } from "./hooks/useProjectTrash";
 import { useThreadSession } from "./hooks/useThreadSession";
 
-export type AppView = "start" | "home" | "workspace" | "projects" | "agentSettings" | "modelConfig" | "aiDashboard" | "knowledgeSettings";
+export type AppView = "start" | "home" | "workspace" | "projects" | "agentSettings" | "modelConfig" | "aiDashboard" | "knowledgeSettings" | "canvasNodeSettings";
 
 const fallbackAgentCards: AgentCard[] = [
   {
@@ -54,6 +56,7 @@ function AppContent() {
   const [activeProjectTitle, setActiveProjectTitle] = useState(fallbackAgentCards[0].title[locale]);
   const [toolState, setToolState] = useState<GenerateRequest["toolState"]>({ knowledge_base: true, canvas_write: true });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [canvasUndoDepth, setCanvasUndoDepth] = useState(20);
 
   const applyThreadState = (state: ThreadStateResponse) => {
     const agentCard = agentCards.find((card) => card.id === state.thread.agentCardId) ?? fallbackAgentCards[0];
@@ -63,7 +66,7 @@ function AppContent() {
     threadSession.setThreadId(state.thread.id);
     generationRun.setOutputVersions(state.outputVersions);
     generationRun.setToolEvents(state.toolEvents);
-    canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? []);
+    canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? []);
     const latestVersion = state.outputVersions[0];
     generationRun.setActiveVersionId(latestVersion?.id);
     generationRun.setEditableOutput(latestVersion?.content ?? "");
@@ -86,7 +89,8 @@ function AppContent() {
 
   const canvasState = useCanvasState({
     ensureThreadId: () => threadSession.ensureThreadForAgent(activeAgent.id),
-    onRefreshProjectSurfaces: refreshProjectSurfaces
+    onRefreshProjectSurfaces: refreshProjectSurfaces,
+    undoDepth: canvasUndoDepth
   });
 
   const selectedCanvasNode = canvasState.canvasNodes.find((node) => node.id === canvasState.selectedCanvasNodeId);
@@ -103,15 +107,17 @@ function AppContent() {
     if (generationRun.editableOutput.trim()) {
       values.currentDraft = generationRun.editableOutput;
     }
-    if (canvasState.canvasNodes.length > 0 || selectedCanvasNode) {
+    const contextNodes = canvasState.canvasNodes.filter((node) => node.kind !== "note");
+    if (contextNodes.length > 0 || (selectedCanvasNode && selectedCanvasNode.kind !== "note")) {
       values.canvas = {
-        nodes: canvasState.canvasNodes.map((node) => ({
+        nodes: contextNodes.map((node) => ({
           id: node.id,
           kind: node.kind,
           title: node.title,
-          preview: node.content.slice(0, 600)
+          preview: node.content.slice(0, 600),
+          content: node.kind === "reference" ? node.content : undefined
         })),
-        selectedNode: selectedCanvasNode ? {
+        selectedNode: selectedCanvasNode && selectedCanvasNode.kind !== "note" ? {
           id: selectedCanvasNode.id,
           kind: selectedCanvasNode.kind,
           title: selectedCanvasNode.title,
@@ -127,7 +133,7 @@ function AppContent() {
     generationRun.setOutputVersions(state.outputVersions);
     generationRun.setToolEvents(state.toolEvents);
     generationRun.setActiveVersionId(state.outputVersions[0]?.id);
-    canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? []);
+    canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? []);
     setActiveProjectTitle(state.thread.title);
     await refreshProjectSurfaces();
   };
@@ -158,6 +164,7 @@ function AppContent() {
   useEffect(() => {
     refreshRecentThreads();
     refreshProjects();
+    getCanvasSettings().then((settings) => setCanvasUndoDepth(settings.undoDepth)).catch(() => undefined);
   }, [refreshProjects, refreshRecentThreads]);
 
   useEffect(() => {
@@ -271,6 +278,7 @@ function AppContent() {
       <AiDashboardView activeView={view} onNavigate={setView} />
       <ModelConfigView activeView={view} onNavigate={setView} />
       <KnowledgeSettingsView activeView={view} onNavigate={setView} />
+      <CanvasNodeSettingsView activeView={view} onNavigate={setView} />
       <WorkspaceView
         activeAgent={activeAgent}
         activeView={view}
@@ -283,15 +291,19 @@ function AppContent() {
         outputVersions={generationRun.outputVersions}
         activeVersionId={generationRun.activeVersionId}
         canvasNodes={canvasState.canvasNodes}
+        canvasEdges={canvasState.canvasEdges}
         canvasWriteRequests={canvasState.canvasWriteRequests}
         selectedCanvasNodeId={canvasState.selectedCanvasNodeId}
+        canUndoCanvas={canvasState.canUndoCanvas}
         toolEvents={generationRun.toolEvents}
         projectTitle={activeProjectTitle}
         onAgentValuesChange={setAgentValues}
         onProjectTitleChange={handleActiveProjectTitleChange}
         onApproveCanvasWriteRequest={canvasState.handleApproveCanvasWriteRequest}
         onChatSend={generationRun.handleChatSend}
+        onCreateCanvasEdge={canvasState.handleCreateCanvasEdge}
         onCreateCanvasNode={canvasState.handleCreateCanvasNode}
+        onDeleteCanvasEdge={canvasState.handleDeleteCanvasEdge}
         onDeleteCanvasNode={canvasState.handleDeleteCanvasNode}
         onEditableOutputChange={generationRun.setEditableOutput}
         onGenerate={generationRun.handleGenerate}
@@ -313,6 +325,7 @@ function AppContent() {
         onSelectCanvasNode={canvasState.setSelectedCanvasNodeId}
         onToolStateChange={setToolState}
         onUpdateCanvasNode={canvasState.handleUpdateCanvasNode}
+        onUndoCanvas={canvasState.undoCanvas}
         promptPreview={promptPreview}
         toolState={toolState}
       />

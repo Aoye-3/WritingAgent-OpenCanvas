@@ -2,8 +2,8 @@ import { useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
 import { Topbar } from "../../shared/Topbar";
-import type { AgentCard, AgentValues, CanvasNode, CanvasWriteRequest, StoredOutputVersion, StoredToolEvent } from "../agents/types";
-import type { CanvasNodeDraft, CanvasNodePatch } from "../canvas/canvasClient";
+import type { AgentCard, AgentValues, CanvasEdge, CanvasNode, CanvasWriteRequest, StoredOutputVersion, StoredToolEvent } from "../agents/types";
+import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch } from "../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../generation/types";
 import { useI18n } from "../i18n/I18nProvider";
 import { AgentInputDrawer } from "./components/AgentInputDrawer";
@@ -26,13 +26,17 @@ type WorkspaceViewProps = {
   outputVersions: StoredOutputVersion[];
   activeVersionId?: string;
   canvasNodes: CanvasNode[];
+  canvasEdges: CanvasEdge[];
   canvasWriteRequests: CanvasWriteRequest[];
   selectedCanvasNodeId?: string;
+  canUndoCanvas: boolean;
   toolEvents: StoredToolEvent[];
   projectTitle: string;
   onApproveCanvasWriteRequest: (requestId: string) => Promise<void>;
   onChatSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"]) => Promise<void>;
-  onCreateCanvasNode: (draft: CanvasNodeDraft) => Promise<void>;
+  onCreateCanvasEdge: (draft: CanvasEdgeDraft) => Promise<CanvasEdge | undefined>;
+  onCreateCanvasNode: (draft: CanvasNodeDraft) => Promise<unknown>;
+  onDeleteCanvasEdge: (edgeId: string) => Promise<void>;
   onDeleteCanvasNode: (nodeId: string) => Promise<void>;
   onEditableOutputChange: (value: string) => void;
   onGenerate: () => Promise<void>;
@@ -45,7 +49,8 @@ type WorkspaceViewProps = {
   onRestoreVersion: (version: StoredOutputVersion) => void;
   onSelectCanvasNode: (nodeId?: string) => void;
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
-  onUpdateCanvasNode: (nodeId: string, patch: CanvasNodePatch) => Promise<void>;
+  onUpdateCanvasNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
+  onUndoCanvas: () => Promise<void>;
   promptPreview: string;
   agentValues: AgentValues;
   toolState: GenerateRequest["toolState"];
@@ -58,13 +63,17 @@ export function WorkspaceView({
   generation,
   isChatSending,
   canvasNodes,
+  canvasEdges,
   canvasWriteRequests,
   selectedCanvasNodeId,
+  canUndoCanvas,
   toolEvents,
   projectTitle,
   onApproveCanvasWriteRequest,
   onChatSend,
+  onCreateCanvasEdge,
   onCreateCanvasNode,
+  onDeleteCanvasEdge,
   onDeleteCanvasNode,
   onGoHome,
   onOpenSettings,
@@ -75,6 +84,7 @@ export function WorkspaceView({
   onSelectCanvasNode,
   onToolStateChange,
   onUpdateCanvasNode,
+  onUndoCanvas,
   promptPreview,
   agentValues,
   toolState
@@ -83,6 +93,7 @@ export function WorkspaceView({
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [rightDrawerWidth, setRightDrawerWidth] = useState(RIGHT_DRAWER_MIN_WIDTH);
+  const [composerDraft, setComposerDraft] = useState("");
 
   const providerLabel = generation
     ? generation.usedMock
@@ -159,12 +170,18 @@ export function WorkspaceView({
         />
 
         <WorkspaceMainCanvas
+          canUndo={canUndoCanvas}
+          edges={canvasEdges}
           nodes={canvasNodes}
           providerLabel={providerLabel}
           selectedNodeId={selectedCanvasNodeId}
+          onCreateEdge={onCreateCanvasEdge}
           onCreateNode={onCreateCanvasNode}
+          onDeleteEdge={onDeleteCanvasEdge}
           onDeleteNode={onDeleteCanvasNode}
+          onSendMindChainToChat={setComposerDraft}
           onSelectNode={onSelectCanvasNode}
+          onUndo={onUndoCanvas}
           onUpdateNode={onUpdateCanvasNode}
         />
 
@@ -173,12 +190,14 @@ export function WorkspaceView({
           canvasWriteRequests={canvasWriteRequests}
           collapsed={rightCollapsed}
           isSending={isChatSending}
+          inputDraft={composerDraft}
           messages={collaborationMessages}
           modelSettings={activeAgent.settings?.model}
           onApproveWriteRequest={onApproveCanvasWriteRequest}
           onApplyWriteText={onApplyCanvasWriteFromMessage}
           onRejectWriteRequest={onRejectCanvasWriteRequest}
           onSend={onChatSend}
+          onInputDraftConsumed={() => setComposerDraft("")}
           onResizeStart={startRightDrawerResize}
           onToggleCollapsed={() => setRightCollapsed((value) => !value)}
           onToolStateChange={onToolStateChange}

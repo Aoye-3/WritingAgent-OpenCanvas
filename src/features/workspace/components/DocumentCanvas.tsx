@@ -4,71 +4,53 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import {
   Background,
   BackgroundVariant,
+  MarkerType,
   ReactFlow,
   ReactFlowProvider,
   applyNodeChanges,
   useReactFlow,
   useViewport,
-  type Node,
+  type Connection,
+  type Edge,
   type NodeChange,
-  type NodeProps,
   type OnSelectionChangeParams
 } from "@xyflow/react";
-import { flushSync } from "react-dom";
-import type { CanvasNode, CanvasNodeKind } from "../../agents/types";
-import type { CanvasNodeDraft, CanvasNodePatch } from "../../canvas/canvasClient";
+import type { CanvasEdge, CanvasNode, CanvasNodeKind } from "../../agents/types";
+import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch } from "../../canvas/canvasClient";
 import { useI18n } from "../../i18n/I18nProvider";
-import { CloseIcon, ResetIcon, ZoomInIcon, ZoomOutIcon } from "../../../shared/icons";
+import { ResetIcon, ZoomInIcon, ZoomOutIcon } from "../../../shared/icons";
+import { CanvasCurveEdge } from "./canvas/CanvasCurveEdge";
+import { CanvasNodeFrame } from "./canvas/CanvasNodeFrame";
+import { MAX_ZOOM, MIN_ZOOM, canvasNodeKinds, kindLabels } from "./canvas/constants";
+import { readDimension } from "./canvas/nodeLayout";
+import { formatMindChain } from "../../../../shared/canvasMindChain";
+import type { CanvasFlowNode } from "./canvas/types";
 
 type DocumentCanvasProps = {
+  canUndo: boolean;
+  edges: CanvasEdge[];
   nodes: CanvasNode[];
   providerLabel: string;
   selectedNodeId?: string;
-  onCreateNode: (draft: CanvasNodeDraft) => Promise<void>;
+  onCreateEdge: (draft: CanvasEdgeDraft) => Promise<CanvasEdge | undefined>;
+  onCreateNode: (draft: CanvasNodeDraft) => Promise<unknown>;
+  onDeleteEdge: (edgeId: string) => Promise<void>;
   onDeleteNode: (nodeId: string) => Promise<void>;
+  onSendMindChainToChat: (text: string) => void;
   onSelectNode: (nodeId?: string) => void;
-  onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<void>;
+  onUndo: () => Promise<void>;
+  onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
 };
 
-type MenuState = { screenX: number; screenY: number; canvasX: number; canvasY: number };
-type CanvasFlowNodeData = {
-  isResizing: boolean;
-  locale: "en" | "zh";
-  node: CanvasNode;
-  onDeleteNode: (nodeId: string) => Promise<void>;
-  onResizeStateChange: (nodeId?: string) => void;
-  onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<void>;
-};
-type CanvasFlowNode = Node<CanvasFlowNodeData, "canvasNode">;
-type CanvasNodeMetadata = Record<string, unknown> & {
-  canvasLayout?: {
-    sizeMode?: "auto" | "manual";
-  };
-};
-
-const MIN_ZOOM = 0.25;
-const MAX_ZOOM = 3;
-const MIN_NODE_SIZE: Record<CanvasNodeKind, { width: number; height: number }> = {
-  document: { width: 260, height: 180 },
-  note: { width: 220, height: 150 },
-  reference: { width: 240, height: 160 }
-};
-const MAX_NODE_WIDTH = 920;
-const MAX_NODE_HEIGHT = 2400;
-const AUTO_NODE_VERTICAL_CHROME = 112;
-
-const kindLabels: Record<CanvasNodeKind, { en: string; zh: string }> = {
-  document: { en: "Document", zh: "文档" },
-  note: { en: "Note", zh: "便签" },
-  reference: { en: "Reference", zh: "引用" }
-};
+type MenuState = { screenX: number; screenY: number; canvasX: number; canvasY: number; nodeId?: string };
 
 const canvasNodeTypes = {
-  canvasNode: CanvasNodeCard
+  canvasNode: CanvasNodeFrame
 };
 
-const resizeHandles = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
-type ResizeHandle = typeof resizeHandles[number];
+const canvasEdgeTypes = {
+  canvasCurve: CanvasCurveEdge
+};
 
 export function DocumentCanvas(props: DocumentCanvasProps) {
   return (
@@ -78,15 +60,40 @@ export function DocumentCanvas(props: DocumentCanvasProps) {
   );
 }
 
-function DocumentCanvasInner({ nodes, providerLabel, selectedNodeId, onCreateNode, onDeleteNode, onSelectNode, onUpdateNode }: DocumentCanvasProps) {
+function DocumentCanvasInner({
+  canUndo,
+  edges,
+  nodes,
+  providerLabel,
+  selectedNodeId,
+  onCreateEdge,
+  onCreateNode,
+  onDeleteEdge,
+  onDeleteNode,
+  onSendMindChainToChat,
+  onSelectNode,
+  onUndo,
+  onUpdateNode
+}: DocumentCanvasProps) {
   const { locale } = useI18n();
   const reactFlow = useReactFlow<CanvasFlowNode>();
   const viewport = useViewport();
   const [flowNodes, setFlowNodes] = useState<CanvasFlowNode[]>([]);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [resizingNodeId, setResizingNodeId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | undefined>();
   const resizingNodeIdRef = useRef<string | null>(null);
   const selectedNode = useMemo(() => nodes.find((node) => node.id === selectedNodeId), [nodes, selectedNodeId]);
+  const flowEdges = useMemo<Edge[]>(() => edges.map((edge) => ({
+    id: edge.id,
+    source: edge.sourceNodeId,
+    target: edge.targetNodeId,
+    label: edge.label || undefined,
+    markerEnd: { type: MarkerType.ArrowClosed },
+    className: edge.id === selectedEdgeId ? "canvas-edge is-selected" : "canvas-edge",
+    selected: edge.id === selectedEdgeId,
+    type: "canvasCurve"
+  })), [edges, selectedEdgeId]);
 
   const handleResizeStateChange = useCallback((nodeId?: string) => {
     resizingNodeIdRef.current = nodeId ?? null;
@@ -132,21 +139,50 @@ function DocumentCanvasInner({ nodes, providerLabel, selectedNodeId, onCreateNod
     event.preventDefault();
     const point = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
     setMenu({ screenX: event.clientX, screenY: event.clientY, canvasX: point.x, canvasY: point.y });
+    setSelectedEdgeId(undefined);
     onSelectNode(undefined);
+  }, [onSelectNode, reactFlow]);
+
+  const openNodeMenu = useCallback((event: ReactMouseEvent | globalThis.MouseEvent, node: CanvasFlowNode) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const point = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    setMenu({ screenX: event.clientX, screenY: event.clientY, canvasX: point.x, canvasY: point.y, nodeId: node.id });
+    setSelectedEdgeId(undefined);
+    onSelectNode(node.id);
   }, [onSelectNode, reactFlow]);
 
   const closeMenu = useCallback(() => setMenu(null), []);
 
   const handleSelectionChange = useCallback((params: OnSelectionChangeParams<CanvasFlowNode>) => {
-    onSelectNode(params.nodes[0]?.id);
+    const nextEdgeId = params.edges[0]?.id;
+    setSelectedEdgeId(nextEdgeId);
+    onSelectNode(nextEdgeId ? undefined : params.nodes[0]?.id);
   }, [onSelectNode]);
 
   const resetViewport = () => {
     void reactFlow.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 160 });
   };
 
+  const handleConnect = useCallback((connection: Connection) => {
+    if (!connection.source || !connection.target || connection.source === connection.target) return;
+    void onCreateEdge({ sourceNodeId: connection.source, targetNodeId: connection.target });
+  }, [onCreateEdge]);
+
+  const sendMindChain = (nodeId: string) => {
+    const text = formatMindChain(nodeId, nodes, edges, locale);
+    if (text) onSendMindChainToChat(text);
+    setMenu(null);
+  };
+
+  const deleteSelectedEdge = async () => {
+    if (!selectedEdgeId) return;
+    await onDeleteEdge(selectedEdgeId);
+    setSelectedEdgeId(undefined);
+  };
+
   return (
-    <section className="canvas-shell" aria-label="Document canvas workspace">
+    <section className="canvas-shell" aria-label="Document canvas workspace" data-testid="document-canvas">
       <div className="canvas-topline">
         <div>
           <p className="eyebrow">Doc Canvas</p>
@@ -168,10 +204,13 @@ function DocumentCanvasInner({ nodes, providerLabel, selectedNodeId, onCreateNod
             <ResetIcon aria-hidden="true" size={16} />
             {locale === "zh" ? "重置" : "Reset"}
           </button>
+          <button className="button button-secondary button-small" type="button" disabled={!canUndo} onClick={() => void onUndo()}>
+            {locale === "zh" ? "撤销" : "Undo"}
+          </button>
         </div>
       </div>
 
-      <div className="canvas-viewport">
+      <div className="canvas-viewport" data-testid="canvas-viewport">
         <ReactFlow<CanvasFlowNode>
           className="canvas-flow"
           colorMode="light"
@@ -180,11 +219,21 @@ function DocumentCanvasInner({ nodes, providerLabel, selectedNodeId, onCreateNod
           maxZoom={MAX_ZOOM}
           minZoom={MIN_ZOOM}
           nodeTypes={canvasNodeTypes}
+          edgeTypes={canvasEdgeTypes}
           nodes={flowNodes}
+          edges={flowEdges}
+          onConnect={handleConnect}
+          onEdgeClick={(_event, edge) => {
+            closeMenu();
+            setSelectedEdgeId(edge.id);
+            onSelectNode(undefined);
+          }}
+          onEdgeDoubleClick={(_event, edge) => void onDeleteEdge(edge.id)}
           nodesDraggable={!resizingNodeId}
           onMoveStart={closeMenu}
           onNodeDragStart={closeMenu}
           onNodeDragStop={onNodeDragStop}
+          onNodeContextMenu={openNodeMenu}
           onNodesChange={onNodesChange}
           onPaneClick={() => {
             closeMenu();
@@ -208,20 +257,30 @@ function DocumentCanvasInner({ nodes, providerLabel, selectedNodeId, onCreateNod
         ) : null}
 
         {menu ? (
-          <div className="canvas-menu" style={{ left: menu.screenX, top: menu.screenY }}>
-            {(["document", "note", "reference"] as CanvasNodeKind[]).map((kind) => (
-              <button key={kind} type="button" onClick={() => void createNode(kind)}>{kindLabels[kind][locale]}</button>
-            ))}
+          <div className="canvas-menu" data-testid="canvas-menu" style={{ left: menu.screenX, top: menu.screenY }}>
+            {menu.nodeId ? (
+              <button type="button" onClick={() => sendMindChain(menu.nodeId!)}>{locale === "zh" ? "发送思维链" : "Send mind chain"}</button>
+            ) : null}
+            {!menu.nodeId ? canvasNodeKinds.map((kind) => (
+              <button key={kind} type="button" data-testid={`canvas-menu-create-${kind}`} onClick={() => void createNode(kind)}>{kindLabels[kind][locale]}</button>
+            )) : null}
           </div>
         ) : null}
       </div>
 
-      <div className="canvas-selection-bar">
+      <div className="canvas-selection-bar" data-testid="canvas-selection-bar">
         {selectedNode ? (
           <span>{locale === "zh" ? "已选中" : "Selected"}: {selectedNode.title || kindLabels[selectedNode.kind][locale]}</span>
+        ) : selectedEdgeId ? (
+          <span>{locale === "zh" ? "已选中连线" : "Selected edge"}</span>
         ) : (
           <span>{locale === "zh" ? "未选中节点" : "No node selected"}</span>
         )}
+        {selectedEdgeId ? (
+          <button className="button button-secondary button-small" type="button" data-testid="canvas-delete-edge" onClick={() => void deleteSelectedEdge()}>
+            {locale === "zh" ? "删除连线" : "Delete edge"}
+          </button>
+        ) : null}
         <span className="canvas-interaction-hint">
           {locale === "zh" ? "拖拽空白移动画布 · 滚轮平移 · Ctrl + 滚轮缩放" : "Drag blank space to pan · Wheel to pan · Ctrl + wheel to zoom"}
         </span>
@@ -238,7 +297,7 @@ function mapCanvasNodes(
   locale: "en" | "zh",
   onDeleteNode: (nodeId: string) => Promise<void>,
   onResizeStateChange: (nodeId?: string) => void,
-  onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<void>
+  onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>
 ): CanvasFlowNode[] {
   const currentById = new Map(currentNodes.map((node) => [node.id, node]));
   return nodes.map((node) => {
@@ -266,287 +325,4 @@ function mapCanvasNodes(
       }
     };
   });
-}
-
-function readDimension(value: unknown, fallback: number) {
-  const numeric = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(numeric) ? numeric : fallback;
-}
-
-function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
-  const { isResizing, locale, node, onDeleteNode, onResizeStateChange, onUpdateNode } = data;
-  const reactFlow = useReactFlow<CanvasFlowNode>();
-  const viewport = useViewport();
-  const kindClass = isKnownCanvasKind(node.kind) ? `canvas-node-${node.kind}` : "canvas-node-unknown";
-  const minSize = isKnownCanvasKind(node.kind) ? MIN_NODE_SIZE[node.kind] : { width: 220, height: 150 };
-
-  const startResize = (handle: ResizeHandle, event: React.PointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    event.nativeEvent.stopImmediatePropagation();
-    onResizeStateChange(node.id);
-    const liveNode = reactFlow.getNode(node.id);
-    const liveWidth = readDimension(liveNode?.style?.width, node.width);
-    const liveHeight = readDimension(liveNode?.style?.height, node.height);
-    const start = {
-      clientX: event.clientX,
-      clientY: event.clientY,
-      x: liveNode?.position.x ?? node.x,
-      y: liveNode?.position.y ?? node.y,
-      width: liveWidth,
-      height: liveHeight,
-      zoom: viewport.zoom || 1
-    };
-
-    const updateVisualNode = (next: { x: number; y: number; width: number; height: number }) => {
-      flushSync(() => {
-        reactFlow.setNodes((current) => current.map((flowNode) => flowNode.id === node.id ? {
-          ...flowNode,
-          position: { x: next.x, y: next.y },
-          style: { ...flowNode.style, width: next.width, height: next.height },
-          width: next.width,
-          height: next.height
-        } : flowNode));
-      });
-    };
-
-    let latest = { x: start.x, y: start.y, width: start.width, height: start.height };
-
-    const onPointerMove = (moveEvent: PointerEvent) => {
-      moveEvent.preventDefault();
-      latest = computeResize(handle, start, moveEvent.clientX, moveEvent.clientY, minSize);
-      updateVisualNode(latest);
-    };
-
-    const onPointerUp = () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-      void onUpdateNode(node.id, {
-        x: Math.round(latest.x),
-        y: Math.round(latest.y),
-        width: Math.round(latest.width),
-        height: Math.round(latest.height),
-        metadata: withManualCanvasSize(node.metadata)
-      }).finally(() => onResizeStateChange(undefined));
-    };
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-  };
-
-  return (
-    <article className={`canvas-node ${kindClass} ${selected ? "is-selected" : ""}`}>
-      {selected ? <ResizeFrame onResizeStart={startResize} /> : null}
-      <CanvasNodeHeader locale={locale} node={node} onDeleteNode={onDeleteNode} />
-      <CanvasNodeBody isResizing={isResizing} locale={locale} node={node} onUpdateNode={onUpdateNode} />
-    </article>
-  );
-}
-
-function ResizeFrame({ onResizeStart }: { onResizeStart: (handle: ResizeHandle, event: React.PointerEvent<HTMLButtonElement>) => void }) {
-  return (
-    <div className="canvas-node-resize-frame" aria-hidden="true">
-      {resizeHandles.map((handle) => (
-        <button
-          className={`canvas-node-resize-handle canvas-node-resize-${handle} nodrag nopan`}
-          key={handle}
-          type="button"
-          tabIndex={-1}
-          onPointerDownCapture={(event) => onResizeStart(handle, event)}
-        />
-      ))}
-      <span className="canvas-node-resize-line canvas-node-resize-line-n" />
-      <span className="canvas-node-resize-line canvas-node-resize-line-e" />
-      <span className="canvas-node-resize-line canvas-node-resize-line-s" />
-      <span className="canvas-node-resize-line canvas-node-resize-line-w" />
-    </div>
-  );
-}
-
-function computeResize(
-  handle: ResizeHandle,
-  start: { clientX: number; clientY: number; x: number; y: number; width: number; height: number; zoom: number },
-  clientX: number,
-  clientY: number,
-  minSize: { width: number; height: number }
-) {
-  const dx = (clientX - start.clientX) / start.zoom;
-  const dy = (clientY - start.clientY) / start.zoom;
-  const movesLeft = handle.includes("w");
-  const movesRight = handle.includes("e");
-  const movesTop = handle.includes("n");
-  const movesBottom = handle.includes("s");
-  let x = start.x;
-  let y = start.y;
-  let width = start.width;
-  let height = start.height;
-
-  if (movesRight) width = clamp(start.width + dx, minSize.width, MAX_NODE_WIDTH);
-  if (movesBottom) height = clamp(start.height + dy, minSize.height, MAX_NODE_HEIGHT);
-  if (movesLeft) {
-    width = clamp(start.width - dx, minSize.width, MAX_NODE_WIDTH);
-    x = start.x + start.width - width;
-  }
-  if (movesTop) {
-    height = clamp(start.height - dy, minSize.height, MAX_NODE_HEIGHT);
-    y = start.y + start.height - height;
-  }
-
-  return { x, y, width, height };
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function getAutoNodeHeight(kind: CanvasNodeKind, contentScrollHeight: number) {
-  return Math.ceil(clamp(contentScrollHeight + AUTO_NODE_VERTICAL_CHROME, MIN_NODE_SIZE[kind].height, MAX_NODE_HEIGHT));
-}
-
-function readCanvasNodeMetadata(metadata: unknown): CanvasNodeMetadata {
-  return metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata as CanvasNodeMetadata : {};
-}
-
-function hasManualCanvasSize(metadata: unknown) {
-  return readCanvasNodeMetadata(metadata).canvasLayout?.sizeMode === "manual";
-}
-
-function withManualCanvasSize(metadata: unknown): CanvasNodeMetadata {
-  const current = readCanvasNodeMetadata(metadata);
-  const currentLayout = current.canvasLayout && typeof current.canvasLayout === "object" ? current.canvasLayout : {};
-  return {
-    ...current,
-    canvasLayout: {
-      ...currentLayout,
-      sizeMode: "manual"
-    }
-  };
-}
-
-function CanvasNodeHeader({
-  locale,
-  node,
-  onDeleteNode
-}: {
-  locale: "en" | "zh";
-  node: CanvasNode;
-  onDeleteNode: (nodeId: string) => Promise<void>;
-}) {
-  const label = isKnownCanvasKind(node.kind) ? kindLabels[node.kind][locale] : (locale === "zh" ? "未知节点" : "Unknown node");
-  return (
-    <div className="canvas-node-header canvas-node-drag-handle">
-      <span>{label}</span>
-      <button className="icon-button canvas-node-delete nodrag" type="button" aria-label="Delete node" onClick={() => void onDeleteNode(node.id)}>
-        <CloseIcon aria-hidden="true" size={16} />
-      </button>
-    </div>
-  );
-}
-
-function CanvasNodeBody({
-  isResizing,
-  locale,
-  node,
-  onUpdateNode
-}: {
-  isResizing: boolean;
-  locale: "en" | "zh";
-  node: CanvasNode;
-  onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<void>;
-}) {
-  if (!isKnownCanvasKind(node.kind)) {
-    return <FallbackNodeBody locale={locale} node={node} onUpdateNode={onUpdateNode} />;
-  }
-
-  return <EditableTextNode isResizing={isResizing} locale={locale} node={node} onUpdateNode={onUpdateNode} />;
-}
-
-function EditableTextNode({
-  isResizing,
-  locale,
-  node,
-  onUpdateNode
-}: {
-  isResizing: boolean;
-  locale: "en" | "zh";
-  node: CanvasNode;
-  onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<void>;
-}) {
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const [title, setTitle] = useState(node.title);
-  const [content, setContent] = useState(node.content);
-
-  useEffect(() => setTitle(node.title), [node.title]);
-  useEffect(() => setContent(node.content), [node.content]);
-
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    if (content !== node.content || isResizing || hasManualCanvasSize(node.metadata)) return;
-    const previousHeight = textarea.style.height;
-    textarea.style.height = "0px";
-    const nextHeight = getAutoNodeHeight(node.kind, textarea.scrollHeight);
-    textarea.style.height = previousHeight;
-    if (nextHeight > node.height + 12) {
-      void onUpdateNode(node.id, { height: nextHeight });
-    }
-  }, [content, isResizing, node.content, node.height, node.id, node.kind, node.metadata, onUpdateNode]);
-
-  return (
-    <>
-      <input
-        className="canvas-node-title nodrag"
-        onBlur={() => {
-          if (title !== node.title) void onUpdateNode(node.id, { title });
-        }}
-        onChange={(event) => setTitle(event.currentTarget.value)}
-        value={title}
-      />
-      <textarea
-        className="canvas-node-content nodrag nowheel"
-        ref={textareaRef}
-        value={content}
-        placeholder={locale === "zh" ? "在这里编辑节点内容..." : "Edit node content..."}
-        onBlur={() => {
-          if (content !== node.content) void onUpdateNode(node.id, { content });
-        }}
-        onChange={(event) => setContent(event.currentTarget.value)}
-      />
-    </>
-  );
-}
-
-function FallbackNodeBody({
-  locale,
-  node,
-  onUpdateNode
-}: {
-  locale: "en" | "zh";
-  node: CanvasNode;
-  onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<void>;
-}) {
-  return (
-    <>
-      <input
-        className="canvas-node-title nodrag"
-        defaultValue={node.title}
-        onBlur={(event) => void onUpdateNode(node.id, { title: event.currentTarget.value })}
-      />
-      <p className="canvas-node-fallback">
-        {locale === "zh" ? "这个节点类型暂未安装专属渲染器，将以安全文本节点显示。" : "This node type does not have a dedicated renderer yet, so it is shown as a safe text node."}
-      </p>
-      <textarea
-        className="canvas-node-content nodrag nowheel"
-        defaultValue={node.content}
-        placeholder={locale === "zh" ? "在这里编辑节点内容..." : "Edit node content..."}
-        onBlur={(event) => void onUpdateNode(node.id, { content: event.currentTarget.value })}
-      />
-    </>
-  );
-}
-
-function isKnownCanvasKind(kind: string): kind is CanvasNodeKind {
-  return kind === "document" || kind === "note" || kind === "reference";
 }

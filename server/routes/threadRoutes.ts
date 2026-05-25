@@ -147,6 +147,7 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime }: Th
       outputVersions: storage.listOutputVersions(request.params.threadId),
       toolEvents: storage.listToolEvents(request.params.threadId),
       canvasNodes: storage.listCanvasNodes(request.params.threadId),
+      canvasEdges: storage.listCanvasEdges(request.params.threadId),
       canvasWriteRequests: storage.listCanvasWriteRequests(request.params.threadId, "pending")
     });
   });

@@ -1,36 +1,33 @@
 import { useState } from "react";
-import type { CanvasNode, CanvasWriteRequest } from "../../features/agents/types";
-import {
-  approveCanvasWriteRequest,
-  createCanvasWriteRequest,
-  createCanvasNode,
-  deleteCanvasNode,
-  fetchCanvas,
-  rejectCanvasWriteRequest,
-  updateCanvasNode,
-  type CanvasNodeDraft,
-  type CanvasNodePatch,
-  type CanvasWriteRequestDraft
-} from "../../features/canvas/canvasClient";
+import type { CanvasEdge, CanvasNode, CanvasWriteRequest } from "../../features/agents/types";
+import { fetchCanvas } from "../../features/canvas/canvasClient";
+import { useCanvasActions } from "./useCanvasActions";
+import { useCanvasHistory } from "./useCanvasHistory";
 
 type UseCanvasStateOptions = {
   ensureThreadId: () => Promise<string>;
   onRefreshProjectSurfaces: () => Promise<void>;
+  undoDepth: number;
 };
 
-export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces }: UseCanvasStateOptions) {
+export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces, undoDepth }: UseCanvasStateOptions) {
   const [canvasNodes, setCanvasNodes] = useState<CanvasNode[]>([]);
+  const [canvasEdges, setCanvasEdges] = useState<CanvasEdge[]>([]);
   const [canvasWriteRequests, setCanvasWriteRequests] = useState<CanvasWriteRequest[]>([]);
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | undefined>();
+  const canvasHistory = useCanvasHistory(undoDepth);
 
   const resetCanvas = () => {
     setCanvasNodes([]);
+    setCanvasEdges([]);
     setCanvasWriteRequests([]);
     setSelectedCanvasNodeId(undefined);
+    canvasHistory.clearHistory();
   };
 
-  const applyCanvasState = (nodes: CanvasNode[] = [], writeRequests: CanvasWriteRequest[] = []) => {
+  const applyCanvasState = (nodes: CanvasNode[] = [], writeRequests: CanvasWriteRequest[] = [], edges: CanvasEdge[] = []) => {
     setCanvasNodes(nodes);
+    setCanvasEdges(edges);
     setCanvasWriteRequests(writeRequests);
     setSelectedCanvasNodeId(nodes[0]?.id);
   };
@@ -38,70 +35,38 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces }: Use
   const refreshCanvas = async (threadId: string) => {
     const canvas = await fetchCanvas(threadId);
     setCanvasNodes(canvas.nodes);
+    setCanvasEdges(canvas.edges ?? []);
     setCanvasWriteRequests(canvas.writeRequests);
     setSelectedCanvasNodeId((current) => current && canvas.nodes.some((node) => node.id === current) ? current : canvas.nodes[0]?.id);
   };
 
-  const handleCreateCanvasNode = async (draft: CanvasNodeDraft) => {
-    const threadId = await ensureThreadId();
-    const node = await createCanvasNode(threadId, draft);
-    setCanvasNodes((current) => [...current, node]);
-    setSelectedCanvasNodeId(node.id);
-    await onRefreshProjectSurfaces();
-  };
-
-  const handleCreateCanvasWriteRequest = async (draft: CanvasWriteRequestDraft) => {
-    const threadId = await ensureThreadId();
-    const request = await createCanvasWriteRequest(threadId, draft);
-    setCanvasWriteRequests((current) => [request, ...current]);
-    await onRefreshProjectSurfaces();
-    return request;
-  };
-
-  const handleUpdateCanvasNode = async (nodeId: string, patch: CanvasNodePatch) => {
-    const threadId = await ensureThreadId();
-    const node = await updateCanvasNode(threadId, nodeId, patch);
-    setCanvasNodes((current) => current.map((item) => item.id === node.id ? node : item));
-    await onRefreshProjectSurfaces();
-  };
-
-  const handleDeleteCanvasNode = async (nodeId: string) => {
-    const threadId = await ensureThreadId();
-    await deleteCanvasNode(threadId, nodeId);
-    setCanvasNodes((current) => current.filter((node) => node.id !== nodeId));
-    setSelectedCanvasNodeId((current) => current === nodeId ? undefined : current);
-    await onRefreshProjectSurfaces();
-  };
-
-  const handleApproveCanvasWriteRequest = async (requestId: string) => {
-    const threadId = await ensureThreadId();
-    await approveCanvasWriteRequest(threadId, requestId);
-    await refreshCanvas(threadId);
-    await onRefreshProjectSurfaces();
-  };
-
-  const handleRejectCanvasWriteRequest = async (requestId: string) => {
-    const threadId = await ensureThreadId();
-    await rejectCanvasWriteRequest(threadId, requestId);
-    await refreshCanvas(threadId);
-    await onRefreshProjectSurfaces();
-  };
+  const canvasActions = useCanvasActions({
+    canvasEdges,
+    canvasNodes,
+    ensureThreadId,
+    onRefreshCanvas: refreshCanvas,
+    onRefreshProjectSurfaces,
+    popHistory: canvasHistory.popHistory,
+    pushHistory: canvasHistory.pushHistory,
+    setCanvasEdges,
+    setCanvasNodes,
+    setCanvasWriteRequests,
+    setSelectedCanvasNodeId
+  });
 
   return {
     canvasNodes,
+    canvasEdges,
     canvasWriteRequests,
     selectedCanvasNodeId,
+    canUndoCanvas: canvasHistory.canUndo,
     setCanvasNodes,
+    setCanvasEdges,
     setCanvasWriteRequests,
     setSelectedCanvasNodeId,
     resetCanvas,
     applyCanvasState,
     refreshCanvas,
-    handleCreateCanvasNode,
-    handleCreateCanvasWriteRequest,
-    handleUpdateCanvasNode,
-    handleDeleteCanvasNode,
-    handleApproveCanvasWriteRequest,
-    handleRejectCanvasWriteRequest
+    ...canvasActions
   };
 }

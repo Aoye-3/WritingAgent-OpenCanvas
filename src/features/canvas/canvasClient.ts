@@ -1,7 +1,8 @@
-import type { CanvasNode, CanvasNodeKind, CanvasWriteRequest } from "../agents/types";
+import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasWriteRequest } from "../agents/types";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../shared/apiClient";
 
 export type CanvasNodeDraft = {
+  id?: string;
   kind: CanvasNodeKind;
   title?: string;
   content?: string;
@@ -23,8 +24,14 @@ export type CanvasWriteRequestDraft = {
   rationale?: string;
 };
 
-export async function fetchCanvas(threadId: string): Promise<{ nodes: CanvasNode[]; writeRequests: CanvasWriteRequest[] }> {
-  return apiGet<{ nodes: CanvasNode[]; writeRequests: CanvasWriteRequest[] }>(`/api/threads/${encodeURIComponent(threadId)}/canvas`);
+export type CanvasEdgeDraft = {
+  sourceNodeId: string;
+  targetNodeId: string;
+  label?: string;
+};
+
+export async function fetchCanvas(threadId: string): Promise<{ nodes: CanvasNode[]; edges: CanvasEdge[]; writeRequests: CanvasWriteRequest[] }> {
+  return apiGet<{ nodes: CanvasNode[]; edges: CanvasEdge[]; writeRequests: CanvasWriteRequest[] }>(`/api/threads/${encodeURIComponent(threadId)}/canvas`);
 }
 
 export async function createCanvasNode(threadId: string, draft: CanvasNodeDraft): Promise<CanvasNode> {
@@ -37,6 +44,11 @@ export async function createCanvasWriteRequest(threadId: string, draft: CanvasWr
   return payload.request;
 }
 
+export async function createCanvasEdge(threadId: string, draft: CanvasEdgeDraft): Promise<CanvasEdge> {
+  const payload = await apiPost<{ edge: CanvasEdge }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/edges`, draft);
+  return payload.edge;
+}
+
 export async function updateCanvasNode(threadId: string, nodeId: string, patch: CanvasNodePatch): Promise<CanvasNode> {
   const payload = await apiPatch<{ node: CanvasNode }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/nodes/${encodeURIComponent(nodeId)}`, patch);
   return payload.node;
@@ -44,6 +56,10 @@ export async function updateCanvasNode(threadId: string, nodeId: string, patch: 
 
 export async function deleteCanvasNode(threadId: string, nodeId: string): Promise<void> {
   await apiDelete<{ ok: true }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/nodes/${encodeURIComponent(nodeId)}`);
+}
+
+export async function deleteCanvasEdge(threadId: string, edgeId: string): Promise<void> {
+  await apiDelete<{ ok: true }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/edges/${encodeURIComponent(edgeId)}`);
 }
 
 export async function approveCanvasWriteRequest(threadId: string, requestId: string): Promise<void> {

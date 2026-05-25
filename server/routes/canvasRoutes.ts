@@ -16,6 +16,7 @@ export function registerCanvasRoutes(app: Express, { storage }: CanvasRouteDeps)
 
     sendOk(response, {
       nodes: storage.listCanvasNodes(request.params.threadId),
+      edges: storage.listCanvasEdges(request.params.threadId),
       writeRequests: storage.listCanvasWriteRequests(request.params.threadId, "pending")
     });
   });
@@ -33,6 +34,27 @@ export function registerCanvasRoutes(app: Express, { storage }: CanvasRouteDeps)
       sendOk(response, { request: storage.createCanvasWriteRequest(request.params.threadId, request.body ?? {}) });
     } catch (error) {
       sendError(response, 400, "bad_request", errorMessage(error, "Unable to create canvas write request"));
+    }
+  });
+
+  app.post("/api/threads/:threadId/canvas/edges", (request, response) => {
+    try {
+      sendOk(response, { edge: storage.createCanvasEdge(request.params.threadId, request.body ?? {}) });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to create canvas edge"));
+    }
+  });
+
+  app.delete("/api/threads/:threadId/canvas/edges/:edgeId", (request, response) => {
+    try {
+      const deleted = storage.deleteCanvasEdge(request.params.threadId, request.params.edgeId);
+      if (!deleted) {
+        sendError(response, 404, "not_found", "Canvas edge not found");
+        return;
+      }
+      sendOk(response, { ok: true });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to delete canvas edge"));
     }
   });
 

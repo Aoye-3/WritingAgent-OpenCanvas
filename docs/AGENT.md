@@ -48,6 +48,14 @@ Runtime config includes the resolved card/settings, available tools, tool polici
 ## Runtime Context Boundary
 Agent runtime context comes from the left AgentCard structured input drawer and current workspace state such as the draft and selected Canvas node. The bottom workspace utility bar is not a context source and must not inject historical placeholder values such as course notes, audience profiles, or default writing style.
 
+Canvas context is filtered by node kind before it reaches the runtime:
+
+- `note` is user thinking space and is excluded from default AI context.
+- `document` contributes a preview and remains the default target for approved AI Canvas output.
+- `reference` contributes reference content by default.
+
+When a user explicitly sends a directed Canvas mind chain to the right collaboration drawer, the selected chain becomes user-provided chat text. That explicit action may include `note` nodes without changing the default context rule.
+
 Internal AgentCard, Skill, Tool policy, enabled tool state, and output contract text are private runtime context. They may be sent to the model as internal instructions, but assistant messages, stored chat messages, mock fallback text, and Agent Runtime stream output must not expose or reproduce prompt headings such as `# AgentCard`, `# Current User Instruction`, or `# Output Contract`.
 
 ## Output Classification
@@ -78,6 +86,7 @@ Agent Runtime is FacetWrite's internal execution subsystem when `AGENT_BACKEND_E
 - FacetWrite sends per-run bridge context to AgentBackend: allowed tool refs, effective tool state, explicit context values, selected Canvas node id, and current chat instruction.
 - AgentBackend loads FacetWrite bridge tools from `AgentBackend.tools.facetwrite_bridge` for `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write`.
 - The bridge calls FacetWrite `/api/internal/agent-runtime/tool-call`, so ToolUse policy remains enforced by FacetWrite and `canvas_write` can only create a pending request. `/api/internal/agent-backend/tool-call` remains a compatibility alias.
+- AgentRuntime does not own FacetWrite product data. Threads, messages, Canvas nodes/edges/write requests, settings, and Knowledge metadata stay in FacetWrite storage; AgentRuntime can affect them only through the backend adapter and internal ToolUse bridge. It must not bypass frontend Canvas context filtering, and it must not call Canvas repositories or storage facades directly.
 - `web_search` is verified separately as a AgentBackend built-in tool, not as a FacetWrite local bridge.
 - Current Docker sidecar acceptance target: `/health`, backend auth, `/api/agent-backend/config`, provider `agent-backend` generation, repeated no-fallback runs, AgentBackend built-in ToolUse, and FacetWrite bridge ToolUse. The 2026-05-20 smoke test confirmed `usedMock:false` and `finishReason:"agent_backend_completed"`.
 
@@ -115,6 +124,8 @@ A tool can auto-run only when it is enabled, does not require approval, and does
 `server/tools/toolPolicyGuard.ts` is the execution-time gate. It rejects unknown tools, tools not allowed by the active Agent, tools disabled for the current run, and tools that require missing external configuration before the executor branch runs.
 
 `canvas_write` must never directly mutate Canvas content from model output. It can only create a pending request/proposal. The user-facing UI may offer "write all" or "write annotated snippets"; once the user confirms, FacetWrite applies the same backend approve path.
+
+`canvas_write` defaults created nodes to `document` unless the tool request explicitly supplies a valid Canvas node kind. This preserves the rule that AI output appears as editable documents by default.
 
 If the user directly says to write/save/add content to Canvas, the generation hook treats that message as confirmation for newly created write requests from the same run and auto-calls the approve path after the thread state refresh. Existing pending requests from earlier runs are deliberately excluded so stale suggestions cannot be applied accidentally.
 

@@ -193,6 +193,16 @@ export type CanvasNode = {
   updatedAt: string;
 };
 
+export type CanvasEdge = {
+  id: string;
+  threadId: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  label: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CanvasWriteRequest = {
   id: string;
   threadId: string;
@@ -223,5 +233,6 @@ export type ThreadStateResponse = {
   outputVersions: StoredOutputVersion[];
   toolEvents: StoredToolEvent[];
   canvasNodes?: CanvasNode[];
+  canvasEdges?: CanvasEdge[];
   canvasWriteRequests?: CanvasWriteRequest[];
 };

@@ -19,10 +19,21 @@ User input
  -> Thread state refresh in the UI
 ```
 
+Runtime ownership is intentionally split into four layers:
+
+```text
+Frontend React workspace
+ -> Express API/control plane
+ -> FacetWrite storage: SQLite + local files
+ -> AgentRuntime sidecar only through the backend adapter
+```
+
+The frontend owns interaction state and explicit user intent. The Express backend owns policy, orchestration, output normalization, and all product-data writes. SQLite/local files are the source of truth for threads, Canvas, settings, runs, and Knowledge metadata. AgentRuntime is an execution subsystem: it receives sanitized runtime context from FacetWrite and can call back only through the internal ToolUse bridge.
+
 ## Frontend
 - `src/app/App.tsx` is the control-plane composition layer. It owns navigation, active Agent selection, and view wiring, while thread, generation, Canvas, and trash workflows live in focused hooks under `src/app/hooks/`.
 - `src/app/hooks/useThreadSession.ts` owns thread creation, thread restore, and last-thread persistence.
-- `src/app/hooks/useCanvasState.ts` owns Canvas nodes, pending write requests, selected node state, and approve/reject handlers.
+- `src/app/hooks/useCanvasState.ts` is the Canvas state composition hook. Canvas API operation orchestration lives in `useCanvasActions.ts`, session undo ownership lives in `useCanvasHistory.ts`, and pure undo helpers live in `shared/canvasHistory.ts`.
 - `src/app/hooks/useGenerationRun.ts` owns structured generation, chat generation, streaming token/status/tool-event updates, versions, collaboration messages, and direct Canvas-write intent handoff. For chat streaming it creates a temporary assistant message in the right AI collaboration drawer, fills that assistant bubble through a typewriter queue, then reconciles with persisted thread state after the final response. The main Canvas layout is not a streaming transcript surface. When the user explicitly asks to write to Canvas, it auto-approves only the new pending write requests created by that run.
 - `src/app/hooks/useProjectTrash.ts` owns trash, restore, and hard-delete flows.
 - `src/features/settings/hooks/useProjectSettings.ts` owns provider settings state, validation/save actions, and Agent Runtime status loading. `ProjectSettingsPanel` only renders the dialog shell and composes the provider form with the read-only runtime panel.
@@ -32,10 +43,13 @@ User input
 - `public/assets/ui/` is the local UI and image asset library. Brand asset URLs are centralized in `src/shared/brandAssets.ts` so components avoid hard-coded public paths. See `docs/UI_ASSETS.md`.
 - `src/features/workspace/WorkspaceView.tsx` renders the main writing workspace: structured Agent inputs, document Canvas, collaboration drawer, tool events, version history, and workspace utility surfaces.
 - `src/features/workspace/components/AICollaborationDrawer.tsx` owns chat-side Canvas write proposals, temporary streaming assistant status, temporary response annotations, annotation chips, and highlighted assistant-message text. Annotation chips are shown both in the proposal panel and above the composer so the user can see the active write selection before sending "write" instructions. Annotation state is intentionally client-only and is cleared after write/cancel/page refresh.
-- `src/features/workspace/components/DocumentCanvas.tsx` renders Canvas V2 through `@xyflow/react`. React Flow owns viewport pan, zoom, selection, and node dragging; FacetWrite owns node rendering, node CRUD calls, resize persistence, and Canvas write approval flows.
+- `src/features/workspace/components/DocumentCanvas.tsx` renders Canvas V2 through `@xyflow/react`. React Flow owns viewport pan, zoom, selection, and node dragging; FacetWrite owns node rendering, node CRUD calls, resize persistence, and Canvas write approval flows. Shared Canvas submodules under `src/features/workspace/components/canvas/` keep the node frame, node-kind renderers, edge rendering, resize/layout helpers, and node constants separated from the Canvas container.
+- `src/features/canvas/CanvasNodeSettingsView.tsx` is the left-navigation Canvas node type catalog. It explains note, document, and reference semantics without reading current project node content or mutating Canvas state.
 - Canvas hit testing is intentionally split between React Flow pane interactions and FacetWrite node controls. Inputs/buttons use `nodrag`, resize controls use `nodrag nopan`, and any future overlay must be browser-verified so it does not block pane context menus, pan/zoom, node drag, node resize, or node editing. See `docs/CANVAS.md`.
+- Canvas browser coverage lives in Playwright under `tests/e2e/canvas.spec.ts`; stable `data-testid` hooks are allowed for Canvas controls but should not become product behavior.
 - `src/shared/MarkdownText.tsx` preserves Markdown block/inline rendering while optionally wrapping annotated text fragments in highlight marks.
 - Runtime context is sourced from the left AgentCard structured input drawer plus current draft/Canvas state. The bottom workspace utility bar is reserved for future tools and prompt preview; it must not inject course-note, audience-profile, or other hidden context.
+- Canvas node context is kind-aware: notes are excluded by default, documents contribute previews, and references contribute reference content. Explicitly sent mind chains may include notes because they are user-selected context.
 - `src/features/ai-dashboard/AiDashboardView.tsx` renders the AI runtime dashboard for Agent Runtime status, Skills/MCP visibility, Agent mapping, and ToolUse bridge progress.
 - `src/features/knowledge/KnowledgeSettingsView.tsx` renders the local Knowledge Base management console for creating RAG bases, importing text/URL/sitemap/local-file sources, viewing indexing status, and testing retrieval.
 - `src/shared/apiClient.ts` provides shared frontend API helpers used by feature clients.
@@ -65,6 +79,7 @@ User input
 - `server/tools/policies.ts` derives whether each tool is enabled, auto-runnable, externally configured, or approval-gated.
 - `server/tools/toolPolicyGuard.ts` performs runtime checks before a tool call can execute.
 - `server/toolRuntime.ts` executes local ToolUse behavior and creates Canvas write requests when `canvas_write` is called. If a model asks for `replace` without an explicit user replace/overwrite instruction, the runtime normalizes the operation to `append` for a selected node or `create` otherwise.
+- Canvas directed edges are FacetWrite-owned project data stored in `canvas_edges`. They are used to assemble user-triggered mind chains for the right collaboration composer and are not a model-write bypass.
 
 ## Agent Output Boundary
 - Runtime streams may feed temporary UI-only assistant messages, but they are never treated as persisted truth. AgentBackend/provider output must pass through the Agent output normalizer before it is recorded as an assistant message or output version.
@@ -117,11 +132,12 @@ User input
 - `server/storage.ts` is the compatibility facade for local persistence. It preserves the public storage API used by routes and services.
 - `server/db/sqlite.ts` initializes SQLite, enables WAL and foreign keys, and calls schema migration.
 - `server/db/schema.ts` owns schema creation and idempotent migration checks.
-- `server/repositories/*` contains focused repository boundaries introduced behind the facade. Thread listing/trash and Agent settings already delegate through repository classes; run and Canvas behavior remain facade-covered while their repository boundaries continue to mature.
+- `server/repositories/*` contains focused repository boundaries introduced behind the facade. Thread listing/trash, Agent settings, and Canvas persistence delegate through repository classes; `server/storage.ts` remains the compatibility facade used by routes and services.
 - Runtime database path: `.facetwrite/data/facetwrite.db`.
 - Knowledge vector path: `.facetwrite/knowledge/<baseId>/vectors.db`.
 - Thread file workspace path: `.facetwrite/threads/<threadId>/user-data/`.
 - Thread rows are the current project identity boundary. Project rename updates `threads.title`; AgentCard names remain type metadata and are displayed as secondary information.
+- Canvas undo depth is stored in the generic `settings` table under the `canvas` key. The undo stack itself is browser-session state and is not persisted.
 
 ## Domain Dependency Rules
 - `routes -> domains -> repositories/shared/config/security/utils`.
@@ -129,9 +145,14 @@ User input
 - Frontend feature clients own their feature API calls. `src/features/model-config/modelConfigClient.ts` owns provider catalog and configured model API requests; `src/features/settings/settingsClient.ts` owns settings status and validation/save compatibility; runtime status/config calls use `/api/agent-runtime/*`.
 - Compatibility files are allowed only to preserve old imports during branch convergence. New code should import from domain public `index.ts` files or feature-local clients.
 
+## Test Boundaries
+- Server and shared pure helpers are covered by `node --import tsx --test server/**/*.test.ts`, exposed through `npm.cmd test`.
+- Frontend Canvas interaction coverage is Playwright-based. `npm.cmd run test:e2e:canvas` runs `tests/e2e/canvas.spec.ts` against the local Vite/Express dev server and verifies node type creation, session undo, directed edge creation/deletion, and explicit mind-chain drafting.
+- Playwright tests may use stable `data-testid` hooks for interaction targets, but those hooks are test infrastructure only and must not carry product state or business rules.
+
 ## Important Current Constraints
 - Canvas background drag, context-menu creation, and node resize depend on pointer events reaching the correct React Flow pane or FacetWrite node control. Any future decorative grid, empty state, alignment guide, selection marquee, or overlay should be verified with browser hit testing so it does not become an invisible interaction blocker.
 - Canvas writes are never applied directly by the Agent. The Agent can only create a pending write proposal/request. The UI may ask the user to write all content or only annotated snippets, then convert that explicit confirmation into the backend approve/apply flow. Direct user commands such as "鍐欏叆" or "save to canvas" are treated as explicit confirmation for the new request from that same run, not as permission to apply older pending proposals.
-- Agent Runtime-generated write or side-effect proposals must still be converted into FacetWrite confirmation and approval flows before data changes.
+- Agent Runtime-generated write or side-effect proposals must still be converted into FacetWrite confirmation and approval flows before data changes. AgentRuntime does not read or write Canvas storage directly; it receives frontend-filtered context through the backend generation request and can affect Canvas only through the internal ToolUse bridge.
 - Tool definitions, prompt hints, schemas, risk levels, and approval requirements should stay in the Tool catalog/policy layer.
 - Provider details should stay behind provider runtime/profile code rather than being inferred in UI components.

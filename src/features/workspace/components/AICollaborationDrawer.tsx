@@ -27,6 +27,7 @@ type AICollaborationDrawerProps = {
   allowedTools: string[];
   canvasWriteRequests: CanvasWriteRequest[];
   collapsed: boolean;
+  inputDraft: string;
   messages: CollaborationMessage[];
   isSending: boolean;
   modelSettings?: AgentSettings["model"];
@@ -34,6 +35,7 @@ type AICollaborationDrawerProps = {
   onApproveWriteRequest: (requestId: string) => Promise<void>;
   onApplyWriteText: (text: string) => Promise<void>;
   onRejectWriteRequest: (requestId: string) => Promise<void>;
+  onInputDraftConsumed: () => void;
   onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"]) => Promise<void>;
   onToggleCollapsed: () => void;
@@ -57,6 +59,7 @@ export function AICollaborationDrawer({
   allowedTools,
   canvasWriteRequests,
   collapsed,
+  inputDraft,
   messages,
   isSending,
   modelSettings,
@@ -64,6 +67,7 @@ export function AICollaborationDrawer({
   onApproveWriteRequest,
   onApplyWriteText,
   onRejectWriteRequest,
+  onInputDraftConsumed,
   onResizeStart,
   onSend,
   onToggleCollapsed,
@@ -93,6 +97,12 @@ export function AICollaborationDrawer({
     setThinkEnabled(modelSettings?.thinkingMode === "enabled");
     setReasoningEffort(modelSettings?.reasoningEffort ?? "high");
   }, [modelSettings?.providerId, modelSettings?.thinkingMode, modelSettings?.reasoningEffort]);
+
+  useEffect(() => {
+    if (!inputDraft) return;
+    setInput(inputDraft);
+    onInputDraftConsumed();
+  }, [inputDraft, onInputDraftConsumed]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setStatusIndex((index) => index + 1), 1500);
@@ -297,6 +307,7 @@ export function AICollaborationDrawer({
         <AnnotationChipRow annotations={annotations} compact onRemoveAnnotation={removeAnnotation} />
         <textarea
           aria-label="AI collaboration message"
+          data-testid="ai-collaboration-input"
           placeholder={locale === "zh" ? "让 AI 协作修改当前草稿..." : "Ask AI to collaborate on this draft..."}
           rows={3}
           value={input}

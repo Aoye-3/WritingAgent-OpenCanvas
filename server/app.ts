@@ -44,7 +44,7 @@ export async function createApp() {
   registerThreadRoutes(app, { storage, agentRuntime });
   registerProjectRoutes(app, { storage, agentRuntime });
   registerCanvasRoutes(app, { storage });
-  registerSettingsRoutes(app);
+  registerSettingsRoutes(app, { storage });
   registerGenerationRoutes(app, { generationService });
 
   return app;

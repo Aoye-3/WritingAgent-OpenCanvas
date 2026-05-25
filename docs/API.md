@@ -123,6 +123,7 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - Reuses FacetWrite ToolUse policy and executors. Unknown tools, disabled tools, or tools not allowed by the active Agent return an `ok:false` result rather than bypassing policy.
   - `canvas_write` creates a pending Canvas write request only; it does not mutate Canvas content.
   - `canvas_write` defaults to non-destructive behavior. A requested `replace` operation is honored only when the user instruction includes an explicit replace/overwrite intent; otherwise it is normalized to append/create.
+  - Agent Runtime never receives direct storage access. Product data changes must pass through FacetWrite API/service code.
 
 Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/api/agent-backend/dashboard` remain aliases for the corresponding Agent Runtime endpoints during migration.
 
@@ -172,19 +173,28 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
 
 ## Canvas
 - `GET /api/threads/:threadId/canvas`
-  - Returns `{ nodes, writeRequests }` for an active thread.
+  - Returns `{ nodes, edges, writeRequests }` for an active thread.
 - `POST /api/threads/:threadId/canvas/nodes`
-  - Creates a Canvas node. Body accepts the existing node draft fields: `kind`, `title`, `content`, `x`, `y`, `width`, `height`, and `metadata`.
+  - Creates a Canvas node. Body accepts the existing node draft fields: `id`, `kind`, `title`, `content`, `x`, `y`, `width`, `height`, and `metadata`. `id` is optional and is used by session undo restore paths.
 - `POST /api/threads/:threadId/canvas/write-requests`
   - Creates a pending Canvas write request from explicit user action, annotated assistant snippets, or Agent runtime intent. The request is not applied until approved.
 - `PATCH /api/threads/:threadId/canvas/nodes/:nodeId`
   - Updates a Canvas node. Canvas V2 uses this for user-driven title/content edits, node drag position persistence, and node resize geometry persistence.
+  - Updating `kind` converts a node between `document`, `note`, and `reference` without changing content or geometry.
 - `DELETE /api/threads/:threadId/canvas/nodes/:nodeId`
-  - Deletes a Canvas node.
+  - Deletes a Canvas node and removes attached directed edges.
+- `POST /api/threads/:threadId/canvas/edges`
+  - Creates a directed Canvas edge. Body: `{ sourceNodeId, targetNodeId, label? }`. Source and target must be different existing nodes in the same thread.
+- `DELETE /api/threads/:threadId/canvas/edges/:edgeId`
+  - Deletes a directed Canvas edge without changing its nodes.
 - `POST /api/threads/:threadId/canvas/write-requests/:requestId/approve`
   - Applies a pending write request. The frontend can call this immediately after explicit user confirmation in the Canvas write proposal UI.
 - `POST /api/threads/:threadId/canvas/write-requests/:requestId/reject`
   - Rejects a pending write request without changing Canvas nodes.
+- `GET /api/settings/canvas`
+  - Returns `{ undoDepth }`. Default is 20.
+- `PUT /api/settings/canvas`
+  - Saves `{ undoDepth }`. `undoDepth` must be an integer from 1 to 200.
 
 ## Settings
 - `GET /api/settings/status`

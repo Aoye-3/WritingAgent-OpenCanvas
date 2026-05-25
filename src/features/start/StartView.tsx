@@ -36,7 +36,7 @@ export function StartView({ active, onStart, onOpenSettings }: StartViewProps) {
               : "OpenCanvas combines structured inputs, document canvases, context, and Agent Runtime into a local-first AI workspace."}
           </p>
           <div className="start-cta-row">
-            <Button className="start-primary" variant="primary" type="button" onClick={onStart}>Start</Button>
+            <Button className="start-primary" data-testid="start-button" variant="primary" type="button" onClick={onStart}>Start</Button>
             <span>{locale === "zh" ? "当前是本地信息入口，后续可扩展登录与同步。" : "Information entry today, future login expansion later."}</span>
           </div>
         </div>

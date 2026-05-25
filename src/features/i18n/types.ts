@@ -86,6 +86,8 @@ export type TranslationKey =
   | "settings.validateSuccess"
   | "settings.validateFailed"
   | "settings.safeNote"
+  | "settings.canvasDescription"
+  | "settings.canvasUndoDepth"
   | "settings.devServerTitle"
   | "settings.devServerDescription"
   | "settings.stopDevServer"

@@ -72,6 +72,7 @@ textarea:focus-visible,
 .app-shell[data-view="projects"] .management-app[data-active="true"],
 .app-shell[data-view="agentSettings"] .management-app[data-active="true"],
 .app-shell[data-view="modelConfig"] .management-app[data-active="true"],
+.app-shell[data-view="canvasNodeSettings"] .management-app[data-active="true"],
 .app-shell[data-view="knowledgeSettings"] .management-app[data-active="true"] { display: grid; }
 
 .topbar {
@@ -1592,6 +1593,17 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   box-shadow: none;
 }
 
+.canvas-edge .react-flow__edge-path {
+  stroke: #315d8f;
+  stroke-width: 2;
+}
+
+.canvas-edge.is-selected .react-flow__edge-path,
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--color-primary);
+  stroke-width: 3;
+}
+
 .canvas-node {
   position: relative;
   width: 100%;
@@ -1610,6 +1622,63 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 .canvas-node.is-selected {
   border-color: var(--color-border);
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+}
+
+.canvas-node-link-port {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 9;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  pointer-events: auto;
+}
+
+.canvas-node-link-hole {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(49, 93, 143, 0.84);
+  border-radius: 50%;
+  background: var(--color-bg);
+  box-shadow:
+    inset 0 2px 4px rgba(15, 23, 42, 0.18),
+    0 0 0 4px rgba(255, 255, 255, 0.78),
+    0 6px 14px rgba(15, 23, 42, 0.16);
+  transition: border-color 120ms var(--ease-standard), box-shadow 120ms var(--ease-standard);
+}
+
+.canvas-node-link-port:hover .canvas-node-link-hole,
+.canvas-node.is-selected .canvas-node-link-hole {
+  border-color: var(--color-primary);
+  box-shadow:
+    inset 0 2px 5px rgba(15, 23, 42, 0.22),
+    0 0 0 5px rgba(219, 234, 254, 0.95),
+    0 8px 18px rgba(37, 99, 235, 0.22);
+}
+
+.canvas-node-link-handle {
+  position: absolute;
+  top: 50% !important;
+  left: 50% !important;
+  right: auto !important;
+  transform: translate(-50%, -50%) !important;
+  border: 0;
+  background: transparent;
+  opacity: 1;
+}
+
+.canvas-node-link-source {
+  z-index: 11;
+  width: 14px;
+  height: 14px;
+}
+
+.canvas-node-link-target {
+  z-index: 10;
+  width: 32px;
+  height: 32px;
 }
 
 .canvas-node-note {
@@ -4318,5 +4387,99 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+.settings-canvas-panel form {
+  display: grid;
+  gap: 14px;
+}
+
+.canvas-node-settings .management-main {
+  grid-column: 2;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+}
+
+.canvas-type-catalog {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.canvas-type-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  padding: 20px;
+  box-shadow: var(--shadow-soft);
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-height: 280px;
+}
+
+.canvas-type-card-header {
+  display: grid;
+  gap: 6px;
+}
+
+.canvas-type-card-header span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.canvas-type-card h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.canvas-type-card p {
+  margin: 0;
+  color: var(--color-text-muted);
+  line-height: 1.55;
+}
+
+.canvas-type-rules {
+  display: grid;
+  gap: 10px;
+  margin: 4px 0 0;
+}
+
+.canvas-type-rules div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 12px;
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: 10px;
+}
+
+.canvas-type-rules dt {
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.canvas-type-rules dd {
+  margin: 0;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.canvas-kind-note { background: #fffbea; }
+.canvas-kind-document { background: #ffffff; }
+.canvas-kind-reference { background: #f0fdf4; }
+
+@media (max-width: 980px) {
+  .canvas-node-settings .management-main {
+    grid-column: 1;
+  }
+
+  .canvas-type-catalog {
+    grid-template-columns: 1fr;
   }
 }
