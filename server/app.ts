@@ -5,6 +5,7 @@ import { createAgentRuntimeAdapter } from "./agentRuntimeAdapter.js";
 import { createAgentRuntime } from "./runtime/index.js";
 import { createGenerationService } from "./services/generationService.js";
 import { KnowledgeService } from "./knowledge/service.js";
+import { AgentRuntimeMemoryService } from "./services/agentRuntimeMemoryService.js";
 import { createStorage } from "./storage.js";
 import { registerAgentRoutes } from "./routes/agentRoutes.js";
 import { registerCatalogRoutes } from "./routes/catalogRoutes.js";
@@ -26,7 +27,8 @@ export async function createApp() {
   const agentRuntime = createAgentRuntimeAdapter(storage);
   const executionRuntime = createAgentRuntime();
   const knowledgeService = new KnowledgeService(storage);
-  const generationService = createGenerationService(storage, agentRuntime, { agentRuntime: executionRuntime, knowledge: knowledgeService });
+  const memoryService = new AgentRuntimeMemoryService();
+  const generationService = createGenerationService(storage, agentRuntime, { agentRuntime: executionRuntime, knowledge: knowledgeService, memory: memoryService });
 
   storage.upsertAgentCards(agentCards);
 
@@ -36,15 +38,15 @@ export async function createApp() {
   registerHealthRoutes(app);
   registerInternalAgentRuntimeRoutes(app, { storage, knowledgeService });
   registerInternalAgentBackendRoutes(app, { storage, knowledgeService });
-  registerAgentRuntimeRoutes(app, { agentRuntime, executionRuntime });
-  registerAgentBackendRoutes(app, { agentRuntime, executionRuntime });
+  registerAgentRuntimeRoutes(app, { agentRuntime, executionRuntime, memoryService });
+  registerAgentBackendRoutes(app, { agentRuntime, executionRuntime, memoryService });
   registerKnowledgeRoutes(app, { knowledgeService });
   registerCatalogRoutes(app);
   registerAgentRoutes(app, { agentRuntime });
   registerThreadRoutes(app, { storage, agentRuntime });
   registerProjectRoutes(app, { storage, agentRuntime });
   registerCanvasRoutes(app, { storage });
-  registerSettingsRoutes(app);
+  registerSettingsRoutes(app, { storage });
   registerGenerationRoutes(app, { generationService });
 
   return app;

@@ -12,6 +12,7 @@ export type AgentBackendRunnerInput = {
   runtimeConfig: AgentRuntimeConfig;
   messages: ChatMessage[];
   prompt: string;
+  facetwriteMemoryContent?: string;
   onToolEvent?: (event: ToolEventRecord) => void;
   onToken?: (token: string) => void;
   onStatus?: (status: StreamStatus) => void;
@@ -33,6 +34,7 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     settings: input.runtimeConfig.settings,
     messages: input.messages,
     prompt: input.prompt,
+    facetwriteMemoryContent: input.facetwriteMemoryContent,
     allowedToolRefs: input.runtimeConfig.enabledTools,
     toolState: input.payload.toolState,
     selectedCanvasNodeId: input.payload.selectedCanvasNodeId,

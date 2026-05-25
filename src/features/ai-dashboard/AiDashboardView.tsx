@@ -1,10 +1,11 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import type { AppView } from "../../app/App";
 import { AppSidebar } from "../../shared/AppSidebar";
-import { EmptyState, Panel, StatusBadge } from "../../shared/ui";
+import { Button, EmptyState, Panel, StatusBadge } from "../../shared/ui";
 import { useI18n } from "../i18n/I18nProvider";
 import { fetchAgentRuntimeDashboard } from "./agentRuntimeClient";
-import type { AgentBackendDashboard, AgentBackendToolBridgeStatus } from "./types";
+import { clearAgentRuntimeMemory, fetchAgentRuntimeMemory, saveAgentRuntimeMemory } from "./memoryClient";
+import type { AgentBackendDashboard, AgentBackendToolBridgeStatus, AgentRuntimeMemoryState } from "./types";
 
 type AiDashboardViewProps = {
   activeView: AppView;
@@ -14,14 +15,19 @@ type AiDashboardViewProps = {
 export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps) {
   const { locale } = useI18n();
   const [dashboard, setDashboard] = useState<AgentBackendDashboard | null>(null);
+  const [memoryState, setMemoryState] = useState<AgentRuntimeMemoryState | null>(null);
+  const [memoryDraft, setMemoryDraft] = useState("");
+  const [memorySaving, setMemorySaving] = useState(false);
   const [error, setError] = useState("");
   const mcpServers = useMemo(() => Object.entries(dashboard?.config.mcpServers ?? {}), [dashboard]);
 
   useEffect(() => {
     if (activeView !== "aiDashboard") return;
-    fetchAgentRuntimeDashboard()
-      .then((nextDashboard) => {
+    Promise.all([fetchAgentRuntimeDashboard(), fetchAgentRuntimeMemory()])
+      .then(([nextDashboard, nextMemory]) => {
         setDashboard(nextDashboard);
+        setMemoryState(nextMemory);
+        setMemoryDraft(nextMemory.memory.content);
         setError("");
       })
       .catch((nextError: unknown) => {
@@ -105,6 +111,37 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
               </div>
             </Panel>
 
+            {memoryState ? (
+              <Panel className="ai-dashboard-section">
+                <div className="ai-section-header">
+                  <h2>{locale === "zh" ? "Memory 管理" : "Memory management"}</h2>
+                  <span>{memoryState.agentMemory.enabledAgents}/{memoryState.agentMemory.totalAgents} {locale === "zh" ? "Agent 已启用" : "Agents enabled"}</span>
+                </div>
+                <div className="ai-memory-grid">
+                  <div className="ai-memory-editor">
+                    <textarea
+                      aria-label={locale === "zh" ? "FacetWrite Memory" : "FacetWrite Memory"}
+                      value={memoryDraft}
+                      onChange={(event) => setMemoryDraft(event.target.value)}
+                      placeholder={locale === "zh" ? "写入当前项目允许复用的 Memory..." : "Write project-approved memory..."}
+                    />
+                    <div className="ai-memory-actions">
+                      <Button loading={memorySaving} onClick={() => void saveMemory()} variant="primary">{locale === "zh" ? "保存 Memory" : "Save Memory"}</Button>
+                      <Button disabled={!memoryState.memory.content && !memoryDraft} onClick={() => void clearMemory()} variant="secondary">{locale === "zh" ? "清空" : "Clear"}</Button>
+                    </div>
+                  </div>
+                  <div className="ai-memory-agents">
+                    {memoryState.agentMemory.agents.map((agent) => (
+                      <article key={agent.agentCardId}>
+                        <strong>{agent.title[locale]}</strong>
+                        <BridgePill state={agent.enabled ? "mapped_metadata" : "pending_bridge"} label={agent.enabled ? (locale === "zh" ? "已启用" : "Enabled") : (locale === "zh" ? "未启用" : "Off")} />
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              </Panel>
+            ) : null}
+
             <Panel className="ai-dashboard-section">
               <div className="ai-section-header">
                 <h2>Integration maturity</h2>
@@ -125,6 +162,34 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
       </section>
     </main>
   );
+
+  async function saveMemory() {
+    setMemorySaving(true);
+    try {
+      const nextMemory = await saveAgentRuntimeMemory(memoryDraft);
+      setMemoryState(nextMemory);
+      setMemoryDraft(nextMemory.memory.content);
+      setError("");
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Unable to save Agent Runtime memory");
+    } finally {
+      setMemorySaving(false);
+    }
+  }
+
+  async function clearMemory() {
+    setMemorySaving(true);
+    try {
+      const nextMemory = await clearAgentRuntimeMemory();
+      setMemoryState(nextMemory);
+      setMemoryDraft("");
+      setError("");
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Unable to clear Agent Runtime memory");
+    } finally {
+      setMemorySaving(false);
+    }
+  }
 }
 
 function Metric({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "success" | "warning" | "neutral" }) {

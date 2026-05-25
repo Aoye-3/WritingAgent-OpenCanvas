@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "../../i18n/I18nProvider";
+import { knowledgeClient } from "../../knowledge/knowledgeClient";
+import type { KnowledgeBase } from "../../knowledge/types";
 import { getConfiguredModelApis } from "../../model-config/modelConfigClient";
 import type { ConfiguredModelApiSummary } from "../../settings/types";
 import type { AgentRuntimeConfig, AgentSettings } from "../types";
@@ -209,15 +211,94 @@ function AgentPromptTab({ runtimeConfig, settings, onChange }: TabProps) {
 
 function AgentKnowledgeTab({ settings, onChange }: TabProps) {
   const { locale } = useI18n();
+  const [bases, setBases] = useState<KnowledgeBase[]>([]);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const selectedBaseIds = new Set(settings.knowledge.baseIds ?? []);
+  const setKnowledge = (patch: Partial<AgentSettings["knowledge"]>) => {
+    onChange({ ...settings, knowledge: { ...settings.knowledge, ...patch } });
+  };
+
+  useEffect(() => {
+    knowledgeClient.listBases()
+      .then((response) => {
+        setBases(response.bases);
+        setLoadFailed(false);
+      })
+      .catch(() => {
+        setBases([]);
+        setLoadFailed(true);
+      });
+  }, []);
+
+  const toggleBase = (baseId: string, checked: boolean) => {
+    const next = checked
+      ? [...selectedBaseIds, baseId]
+      : (settings.knowledge.baseIds ?? []).filter((item) => item !== baseId);
+    setKnowledge({ baseIds: Array.from(new Set(next)) });
+  };
+
   return (
     <div className="agent-editor-section">
       <label className="toggle-row">
         <span>{text(locale, "enableKnowledge")}</span>
-        <input type="checkbox" checked={settings.knowledge.enabled} onChange={(event) => onChange({ ...settings, knowledge: { ...settings.knowledge, enabled: event.target.checked } })} />
+        <input type="checkbox" checked={settings.knowledge.enabled} onChange={(event) => setKnowledge({ enabled: event.target.checked })} />
       </label>
       <label className="field">
         <span>{text(locale, "referenceScope")}</span>
-        <input value={settings.knowledge.scope} onChange={(event) => onChange({ ...settings, knowledge: { ...settings.knowledge, scope: event.target.value } })} />
+        <input value={settings.knowledge.scope} onChange={(event) => setKnowledge({ scope: event.target.value })} />
+      </label>
+      <div className="field">
+        <span>{text(locale, "knowledgeBases")}</span>
+        <div className="skill-catalog-list" data-testid="agent-knowledge-base-list">
+          <label className="skill-catalog-row">
+            <span>
+              <strong>{text(locale, "allKnowledgeBases")}</strong>
+              <em>{text(locale, "allKnowledgeBasesNote")}</em>
+            </span>
+            <input
+              type="checkbox"
+              checked={(settings.knowledge.baseIds ?? []).length === 0}
+              onChange={(event) => {
+                if (event.target.checked) setKnowledge({ baseIds: [] });
+              }}
+            />
+          </label>
+          {bases.map((base) => (
+            <label className="skill-catalog-row" key={base.id}>
+              <span>
+                <strong>{base.name}</strong>
+                <small>{base.items.length} items - {base.embeddingModel}</small>
+                <em>{base.description || base.id}</em>
+              </span>
+              <input
+                type="checkbox"
+                checked={selectedBaseIds.has(base.id)}
+                onChange={(event) => toggleBase(base.id, event.target.checked)}
+              />
+            </label>
+          ))}
+          {bases.length === 0 ? <p className="agent-editor-note">{loadFailed ? text(locale, "knowledgeLoadFailed") : text(locale, "noKnowledgeBases")}</p> : null}
+        </div>
+      </div>
+      <RangeField
+        label={text(locale, "knowledgeDocumentCount")}
+        min={1}
+        max={12}
+        step={1}
+        value={settings.knowledge.documentCount ?? 6}
+        onChange={(value) => setKnowledge({ documentCount: value })}
+      />
+      <RangeField
+        label={text(locale, "knowledgeThreshold")}
+        min={0}
+        max={1}
+        step={0.05}
+        value={settings.knowledge.threshold ?? 0.2}
+        onChange={(value) => setKnowledge({ threshold: value })}
+      />
+      <label className="toggle-row">
+        <span>{text(locale, "rerankKnowledge")}</span>
+        <input type="checkbox" checked={settings.knowledge.rerankEnabled ?? false} onChange={(event) => setKnowledge({ rerankEnabled: event.target.checked })} />
       </label>
       <p className="agent-editor-note">{text(locale, "knowledgeNote")}</p>
     </div>
@@ -340,12 +421,29 @@ export function tabLabel(tab: SettingsTab, locale: "en" | "zh") {
 }
 
 function text(locale: "en" | "zh", key: keyof typeof copy.en) {
+  if (locale === "zh" && key in zhOverrides) {
+    return zhOverrides[key] ?? copy.en[key];
+  }
   return (copy[locale] as Partial<Record<keyof typeof copy.en, string>>)[key] ?? copy.en[key];
 }
+
+const zhOverrides: Partial<Record<keyof typeof copy.en, string>> = {
+  allKnowledgeBases: "全部知识库",
+  allKnowledgeBasesNote: "保持选中时会检索所有已就绪知识库。",
+  knowledgeBases: "知识库",
+  knowledgeDocumentCount: "检索结果数",
+  knowledgeLoadFailed: "无法加载知识库",
+  knowledgeNote: "启用后，生成会先检索选中的知识库，并在模型运行前注入 Knowledge References。",
+  knowledgeThreshold: "分数阈值",
+  noKnowledgeBases: "还没有知识库。请先在知识库设置中创建。",
+  rerankKnowledge: "启用重排序"
+};
 
 const copy = {
   en: {
     addPhrase: "Add phrase",
+    allKnowledgeBases: "All knowledge bases",
+    allKnowledgeBasesNote: "Leave this selected to search every ready base.",
     allowedTools: "Allowed tools",
     approvalRequired: "Approval required",
     autoRunnable: "Auto runnable",
@@ -356,7 +454,11 @@ const copy = {
     externalConfig: "External config",
     globalMemory: "Global memory",
     identityPrompt: "Identity prompt",
-    knowledgeNote: "This MVP saves knowledge settings and injects prompt hints; retrieval comes later.",
+    knowledgeBases: "Knowledge bases",
+    knowledgeDocumentCount: "Knowledge results",
+    knowledgeLoadFailed: "Unable to load knowledge bases",
+    knowledgeNote: "When enabled, generation searches selected bases and injects matched Knowledge References before the model runs.",
+    knowledgeThreshold: "Score threshold",
     maxTokens: "Max tokens",
     maxToolCalls: "Max tool calls",
     memoryNote: "This stage only saves the toggle and writes memory state into the prompt.",
@@ -364,6 +466,7 @@ const copy = {
     modelsFromSavedApi: "Agent models are limited to saved local API + model bindings.",
     model: "Model",
     name: "Name",
+    noKnowledgeBases: "No knowledge bases yet. Create one in Knowledge settings.",
     noSavedApis: "No saved API models",
     noSavedModels: "No saved models",
     noSkills: "No skills are available yet",
@@ -381,7 +484,8 @@ const copy = {
     thinkModeNote: "Can be combined with tool calls on DeepSeek. The runtime preserves provider-private reasoning state without showing it in chat.",
     toolCallMode: "Tool call mode",
     unknownSkills: "Unknown skill refs",
-    reasoningEffort: "Reasoning effort"
+    reasoningEffort: "Reasoning effort",
+    rerankKnowledge: "Enable rerank"
   },
   zh: {
     addPhrase: "添加短语",
@@ -395,7 +499,7 @@ const copy = {
     externalConfig: "外部配置",
     globalMemory: "全局记忆",
     identityPrompt: "身份提示词",
-    knowledgeNote: "当前 MVP 会保存知识库配置并注入 Prompt，真实检索后续接入。",
+    knowledgeNote: "启用后，生成会先检索选中的知识库，并在模型运行前注入 Knowledge References。",
     maxTokens: "最大 Token 数",
     maxToolCalls: "最大工具调用次数",
     memoryNote: "当前阶段只保存开关并写入 Prompt 状态。",

@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from deerflow.tools.facetwrite_bridge import (
+    _INTERNAL_ENDPOINT,
     _build_payload,
     _bridge_headers,
     _format_bridge_response,
@@ -47,13 +48,18 @@ def test_bridge_headers_do_not_expose_token_in_response_formatting(monkeypatch):
     monkeypatch.setenv("FACETWRITE_INTERNAL_TOOL_TOKEN", "super-secret-token")
 
     headers = _bridge_headers()
+    assert headers["x-facetwrite-internal"] == "agent-runtime"
     assert headers["x-facetwrite-tool-token"] == "super-secret-token"
     assert _redact("token=super-secret-token") == "token=[redacted]"
 
 
+def test_bridge_uses_agent_runtime_endpoint():
+    assert _INTERNAL_ENDPOINT == "/api/internal/agent-runtime/tool-call"
+
+
 def test_format_bridge_response_maps_ok_and_denied_results():
-    assert _format_bridge_response({"ok": True, "payload": {"content": "context"}}) == "context"
-    assert _format_bridge_response({"ok": False, "payload": {"content": "Denied"}}) == "Error: Denied"
+    assert _format_bridge_response({"ok": True, "content": "context", "payload": {"tool": "knowledge_base"}}) == "context"
+    assert _format_bridge_response({"ok": False, "content": "Denied", "payload": {"reason": "policy_denied"}}) == "Error: Denied"
 
 
 def test_format_bridge_response_never_reads_environment_token(monkeypatch):

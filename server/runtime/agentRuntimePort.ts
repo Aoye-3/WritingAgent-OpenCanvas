@@ -11,6 +11,7 @@ export type AgentRuntimeRunInput = {
   runtimeConfig: AgentRuntimeConfig;
   messages: ChatMessage[];
   prompt: string;
+  facetwriteMemoryContent?: string;
   onToolEvent?: (event: ToolEventRecord) => void;
   onToken?: (token: string) => void;
   onStatus?: (status: StreamStatus) => void;

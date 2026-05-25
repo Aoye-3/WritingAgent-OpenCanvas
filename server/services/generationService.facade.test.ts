@@ -6,6 +6,7 @@ import type { AgentRuntimeConfig } from "./agentDefinitionService.js";
 import type { ChatClient } from "../providerRuntime.js";
 import type { SQLiteStorageRepository } from "../storage.js";
 import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
+import type { KnowledgeSearchInput } from "../knowledge/service.js";
 
 function runtimeConfig(): AgentRuntimeConfig {
   const agentCard = agentCards[0];
@@ -38,6 +39,25 @@ function runtimeConfig(): AgentRuntimeConfig {
         jsonOutput: true,
         chatPrefixCompletion: true,
         supportsAssistantPrefix: true
+      }
+    }
+  };
+}
+
+function runtimeConfigWithKnowledge(patch: Partial<AgentRuntimeConfig["settings"]["knowledge"]> = {}): AgentRuntimeConfig {
+  const config = runtimeConfig();
+  return {
+    ...config,
+    settings: {
+      ...config.settings,
+      knowledge: {
+        ...config.settings.knowledge,
+        ...patch
+      },
+      tools: {
+        ...config.settings.tools,
+        knowledge_base: true,
+        clear_context: false
       }
     }
   };
@@ -84,6 +104,24 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
         return { runId: `run_${records.length}`, promptVersionId: "prompt_1", outputVersionId: "output_1" };
       }
     } as unknown as SQLiteStorageRepository
+  };
+}
+
+function fakeKnowledgeService(observedSearches: KnowledgeSearchInput[]) {
+  return {
+    search: async (input: KnowledgeSearchInput) => {
+      observedSearches.push(input);
+      return [{
+        id: 1,
+        baseId: "kb_orchid",
+        baseName: "Orchid Base",
+        content: "The project codename is ORCHID-9137.",
+        score: 0.91,
+        source: "orchid-note",
+        title: "Orchid memo",
+        metadata: {}
+      }];
+    }
   };
 }
 
@@ -290,6 +328,102 @@ test("generation facade passes policy-aware tool context to provider runner", as
   assert.equal((observedToolContext as { toolState: Record<string, boolean> }).toolState.canvas_write, true);
   assert.ok(observedMessages.some((message) => (message as { content?: string }).content === "Old assistant"));
   assert.equal((records[0] as { mode: string }).mode, "chat");
+});
+
+test("generation facade injects Knowledge References into provider messages", async () => {
+  const { storage, records } = fakeStorage();
+  const observedSearches: KnowledgeSearchInput[] = [];
+  let observedMessages: unknown[] = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(runtimeConfigWithKnowledge({
+    enabled: true,
+    baseIds: ["kb_orchid"],
+    documentCount: 2,
+    threshold: 0.4
+  })), {
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: false, baseUrl: "http://AgentBackend", assistantId: "lead_agent" })
+    },
+    knowledge: fakeKnowledgeService(observedSearches) as never,
+    provider: {
+      apiKey: "test-key",
+      createClient: () => ({ createChatCompletion: async () => ({ choices: [] }) } as ChatClient),
+      runAgent: async (input) => {
+        observedMessages = input.messages;
+        return {
+          text: "The codename is ORCHID-9137.",
+          finishReason: "stop",
+          messages: input.messages,
+          events: []
+        };
+      }
+    }
+  });
+
+  await service.generateAndRecord({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "blog-post",
+    chatInstruction: "What is the project codename?",
+    toolState: { knowledge_base: true }
+  });
+
+  const userMessage = observedMessages.at(-1) as { role: string; content: string };
+  assert.equal(userMessage.role, "user");
+  assert.match(userMessage.content, /Knowledge References:/);
+  assert.match(userMessage.content, /ORCHID-9137/);
+  assert.deepEqual(observedSearches[0], {
+    query: "What is the project codename?",
+    baseIds: ["kb_orchid"],
+    limit: 2,
+    threshold: 0.4
+  });
+  assert.ok((records[0] as { events: Array<{ eventType: string; payload: { resultCount?: number } }> }).events.some((event) => event.eventType === "knowledge_search_completed" && event.payload.resultCount === 1));
+});
+
+test("generation facade skips knowledge search when disabled by settings or tool state", async () => {
+  for (const setup of [
+    { knowledgeEnabled: false, toolEnabled: true },
+    { knowledgeEnabled: true, toolEnabled: false }
+  ]) {
+    const { storage } = fakeStorage();
+    const observedSearches: KnowledgeSearchInput[] = [];
+    let observedMessages: unknown[] = [];
+    const service = createGenerationService(storage, fakeAgentRuntime(runtimeConfigWithKnowledge({
+      enabled: setup.knowledgeEnabled,
+      baseIds: ["kb_orchid"]
+    })), {
+      agentBackend: {
+        getRuntimeConfig: () => ({ enabled: false, baseUrl: "http://AgentBackend", assistantId: "lead_agent" })
+      },
+      knowledge: fakeKnowledgeService(observedSearches) as never,
+      provider: {
+        apiKey: "test-key",
+        createClient: () => ({ createChatCompletion: async () => ({ choices: [] }) } as ChatClient),
+        runAgent: async (input) => {
+          observedMessages = input.messages;
+          return {
+            text: "No knowledge context",
+            finishReason: "stop",
+            messages: input.messages,
+            events: []
+          };
+        }
+      }
+    });
+
+    await service.generateAndRecord({
+      mode: "chat",
+      locale: "en",
+      agentCardId: "blog-post",
+      chatInstruction: "What is the project codename?",
+      toolState: { knowledge_base: setup.toolEnabled }
+    });
+
+    const userMessage = observedMessages.at(-1) as { content: string };
+    assert.equal(observedSearches.length, 0);
+    assert.equal(userMessage.content.includes("Knowledge References:"), false);
+    assert.equal(userMessage.content.includes("ORCHID-9137"), false);
+  }
 });
 
 test("generation facade applies per-run model thinking overrides", async () => {

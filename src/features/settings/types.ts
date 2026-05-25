@@ -33,6 +33,10 @@ export type SettingsSaveRequest = {
   confirmLocalKeyWrite?: boolean;
 };
 
+export type CanvasSettings = {
+  undoDepth: number;
+};
+
 export type ProviderApiConfigSummary = {
   providerId: string;
   providerLabel: string;

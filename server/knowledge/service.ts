@@ -1,5 +1,6 @@
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { JsonLoader, LocalPathLoader, RAGApplicationBuilder, TextLoader } from "@cherrystudio/embedjs";
 import { LibSqlDb } from "@cherrystudio/embedjs-libsql";
 import { OllamaEmbeddings } from "@cherrystudio/embedjs-ollama";
@@ -93,9 +94,10 @@ export class KnowledgeService {
   }
 
   async deleteBase(baseId: string) {
+    await closeCachedRag(this.cache.get(baseId));
     this.cache.delete(baseId);
     this.storage.deleteKnowledgeBase(baseId);
-    await rm(path.join(knowledgeRoot, baseId), { recursive: true, force: true });
+    await removeKnowledgeBaseDirectory(path.join(knowledgeRoot, baseId));
   }
 
   async addItem(baseId: string, input: KnowledgeItemInput) {
@@ -305,7 +307,7 @@ export class KnowledgeService {
           apiKey: apiKey ?? "",
           dimensions: base.dimensions,
           configuration: {
-            baseURL: embeddingBaseUrl
+            baseURL: normalizeOpenAiCompatibleBaseUrl(embeddingBaseUrl)
           }
         });
     const app = await new RAGApplicationBuilder()
@@ -355,6 +357,39 @@ function readEmbeddingProvider(value?: string) {
 
 function providerFromBinding(providerId?: string): "openai-compatible" | "ollama" | undefined {
   return providerId === "ollama" ? "ollama" : providerId ? "openai-compatible" : undefined;
+}
+
+export function normalizeOpenAiCompatibleBaseUrl(value: string) {
+  const clean = value.trim().replace(/\/+$/, "");
+  return /\/v\d+(beta)?$/i.test(clean) ? clean : `${clean}/v1`;
+}
+
+async function closeCachedRag(cached: CachedRag | undefined) {
+  const app = cached?.app as unknown as { vectorDatabase?: { client?: { close?: () => void | Promise<void> } } };
+  const client = app?.vectorDatabase?.client;
+  if (typeof client?.close === "function") {
+    await client.close.call(client);
+  }
+}
+
+async function removeKnowledgeBaseDirectory(directory: string) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await rm(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isBusyFileError(error)) throw error;
+      await delay(50 * (attempt + 1));
+    }
+  }
+  if (isBusyFileError(lastError)) return;
+  throw lastError;
+}
+
+function isBusyFileError(error: unknown) {
+  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "EBUSY";
 }
 
 function readInteger(value: unknown, fallback: number) {

@@ -12,12 +12,15 @@ The Canvas has two separate responsibilities:
 - Apply AI-proposed writes only after FacetWrite records a pending write request and the user confirms it.
 
 ## Frontend Architecture
-`src/features/workspace/components/DocumentCanvas.tsx` is the Canvas V2 renderer. It uses `@xyflow/react` as the pan/zoom/drag engine and keeps the existing FacetWrite Canvas API as the persistence boundary.
+`src/features/workspace/components/DocumentCanvas.tsx` is the Canvas V2 container. It uses `@xyflow/react` as the pan/zoom/drag engine and keeps the existing FacetWrite Canvas API as the persistence boundary.
 
 Current frontend responsibilities:
 
 - Map persisted `CanvasNode` records into React Flow nodes.
-- Render node bodies through a kind-based renderer boundary.
+- Compose common node frame behavior from `components/canvas/CanvasNodeFrame.tsx`.
+- Render directed edges through `components/canvas/CanvasCurveEdge.tsx`.
+- Format explicit user-sent mind chains through the shared pure helper in `shared/canvasMindChain.ts`.
+- Render node bodies through the kind-based renderer boundary in `components/canvas/renderers/`.
 - Support viewport pan, wheel pan, Ctrl-wheel zoom, reset, selection, context-menu creation, node dragging, node resizing, title editing, content editing, and deletion.
 - Persist node position after drag stop through `PATCH /api/threads/:threadId/canvas/nodes/:nodeId`.
 - Persist node size after resize stop through the same PATCH endpoint.
@@ -25,12 +28,24 @@ Current frontend responsibilities:
 
 React Flow is only a view/interaction layer. It must not become the source of truth for node persistence.
 
+Common node behavior is intentionally separated from node-kind content rendering. Selection, deletion, resize, drag handle, and the punched-hole link port live in the shared node frame. `note`, `document`, and `reference` rendering live in separate renderer entry points, even when they currently share the same editable text implementation, so future kind-specific behavior does not leak into the common frame.
+
+Canvas state is also split by responsibility. `src/app/hooks/useCanvasState.ts` is the public composition hook, `useCanvasActions.ts` owns API operation orchestration, `useCanvasHistory.ts` owns the session undo stack, and pure history helpers live in `shared/canvasHistory.ts` for backend-compatible unit tests.
+
 ## Node Model
 The current node kinds remain:
 
 ```ts
 type CanvasNodeKind = "document" | "note" | "reference";
 ```
+
+The three kinds now have distinct product/runtime semantics:
+
+- `note`: user sticky note for thinking. It is excluded from default AI context and only reaches the collaboration drawer when the user explicitly sends a mind chain.
+- `document`: AI output document. New AI Canvas output and approved `canvas_write` creates default to this kind; Agents may edit it through the approval path.
+- `reference`: source/reference material. It participates in default AI context.
+
+Nodes can be converted between these three kinds through Canvas node actions that call the existing node PATCH path. Conversion preserves title, content, geometry, metadata, and connections. The Canvas node settings page is intentionally type-only documentation and does not read or mutate current project nodes.
 
 Canvas V2 intentionally does not add `form` nodes yet. Future node kinds should be added in this order:
 
@@ -89,6 +104,24 @@ Agent/provider/AgentBackend intent
 
 Frontend Canvas features such as drag, resize, title edit, and content edit are direct user edits and may call Canvas node CRUD endpoints directly. AI-originated content changes must stay behind the write-request approval path.
 
+## Directed Edges And Mind Chains
+Canvas supports directed node edges stored separately from nodes. A connection from A to B means `A -> B` for mind-chain ordering. Edges are user-authored Canvas structure, not Agent-owned state.
+
+Each node renders a common link port at the top-right corner of the node chrome. The port is styled like a punched hole in a physical board: the background shows through the hole, and clicking/dragging from it starts a directed connection. This port is part of the common node frame, not a document/note/reference renderer.
+
+Edges can be selected on the Canvas. Selecting an edge shows a delete action in the Canvas selection bar; double-click delete remains available as a shortcut.
+
+When the user right-clicks a connected node and chooses to send the mind chain, the frontend walks to the start of the directed chain, follows outgoing edges, and writes an ordered summary into the right AI collaboration composer. This does not auto-send the message. Because this action is explicit user intent, `note` nodes included in that chain may be sent even though notes are excluded from default AI context.
+
+Deleting a node removes attached edges. Deleting an edge does not modify either node.
+
+## Undo
+Canvas keeps a session-local undo stack for user Canvas operations: create, delete, edit, drag, resize, kind conversion, edge create, and edge delete. The stack is not persisted across page refresh.
+
+The default stack depth is 20 operations. Users can change it in Project Settings through the Canvas undo cache setting. The persisted setting is read from `/api/settings/canvas`.
+
+Undo entries should be recorded as inverse operations before the API mutation is applied. The pure inverse-patch and stack-depth helpers live in `shared/canvasHistory.ts`; React state ownership stays in `useCanvasHistory.ts`.
+
 ## API Boundary
 Canvas V2 uses the existing API shape:
 
@@ -96,11 +129,15 @@ Canvas V2 uses the existing API shape:
 - `POST /api/threads/:threadId/canvas/nodes`
 - `PATCH /api/threads/:threadId/canvas/nodes/:nodeId`
 - `DELETE /api/threads/:threadId/canvas/nodes/:nodeId`
+- `POST /api/threads/:threadId/canvas/edges`
+- `DELETE /api/threads/:threadId/canvas/edges/:edgeId`
 - `POST /api/threads/:threadId/canvas/write-requests`
 - `POST /api/threads/:threadId/canvas/write-requests/:requestId/approve`
 - `POST /api/threads/:threadId/canvas/write-requests/:requestId/reject`
+- `GET /api/settings/canvas`
+- `PUT /api/settings/canvas`
 
-No schema migration was required for Canvas V2 because `canvas_nodes` already stores position, size, kind, content, title, and metadata.
+Canvas nodes remain in `canvas_nodes`. Directed edges live in `canvas_edges`. Canvas settings use the generic `settings` table with key `canvas`. The SQL implementation lives in `server/repositories/canvasRepository.ts`; `server/storage.ts` keeps compatibility methods for existing route/service callers.
 
 ## Styling And Hit Testing
 Canvas styles live in `src/app/styles.css`.
@@ -114,6 +151,8 @@ Important class roles:
 - `.canvas-node-resize-frame`: selected-node resize outline rendered outside the actual node box.
 - `.canvas-node-resize-handle`: resize controls.
 - `.canvas-menu`: right-click creation menu.
+- `.canvas-node-link-port`: common top-right punched-hole link control.
+- `.canvas-node-link-handle`: source/target React Flow handles inside the common link port.
 
 Use `nodrag` on inputs and buttons that should not drag the node. Use `nopan` on resize controls so pane pan does not steal pointer events.
 
@@ -132,12 +171,18 @@ Before claiming Canvas work is complete, verify:
 - `npm.cmd run typecheck`
 - `npm.cmd run build`
 - `npm.cmd test`
+- `npm.cmd run test:e2e:canvas`
 - Canvas renders in the workspace.
 - Background right-click menu creates `document`, `note`, and `reference` nodes.
 - Node drag persists `x/y`.
 - Node resize persists `x/y/width/height`.
 - Title/content edit persists after blur.
+- Node kind conversion preserves title, content, position, and size.
 - Delete removes the node.
 - `canvas_write` still creates pending requests only.
+- Directed node edges persist and can be deleted.
+- Sending a mind chain populates the right collaboration composer without auto-sending, and deleted edges no longer pull disconnected nodes into that draft.
+- Note nodes are excluded from default AI context.
+- Canvas undo works for node and edge operations up to the configured cache depth.
 - Approval still applies writes through the backend approve path.
 - QA nodes created during browser tests are deleted.

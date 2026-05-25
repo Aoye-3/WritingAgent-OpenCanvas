@@ -55,6 +55,28 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
 
         <AgentBackendRuntimePanel config={settings.agentBackendConfig} status={settings.agentBackendStatus} />
 
+        <Panel className="settings-canvas-panel" aria-labelledby="settings-canvas-title">
+          <form onSubmit={settings.handleCanvasSettingsSubmit}>
+            <div>
+              <h3 id="settings-canvas-title">Canvas</h3>
+              <p>{t("settings.canvasDescription")}</p>
+            </div>
+            <label className="settings-field">
+              <span>{t("settings.canvasUndoDepth")}</span>
+              <input
+                min={1}
+                max={200}
+                type="number"
+                value={settings.canvasUndoDepth}
+                onChange={(event) => settings.setCanvasUndoDepth(Number(event.currentTarget.value))}
+              />
+            </label>
+            <Button disabled={settings.busyState !== "idle"} type="submit" variant="secondary">
+              {settings.busyState === "saving" ? t("settings.saving") : t("settings.save")}
+            </Button>
+          </form>
+        </Panel>
+
         <ProviderSettingsForm
           apiKey={settings.apiKey}
           baseURL={settings.baseURL}

@@ -37,10 +37,38 @@ test("builds LangGraph-compatible AgentBackend run request", () => {
   assert.deepEqual(request.context.facetwrite_context_values, { currentDraft: "Draft body" });
   assert.equal(request.context.facetwrite_selected_canvas_node_id, "node_123");
   assert.equal(request.context.facetwrite_chat_instruction, "Use the draft");
+  assert.equal(request.context.facetwrite_memory_enabled, false);
+  assert.equal(request.context.facetwrite_memory_scope_id, "thread_1");
+  assert.equal(request.context.facetwrite_project_id, "local-project");
+  assert.equal(request.config.configurable.facetwrite_memory_enabled, false);
   assert.equal(request.metadata.agentCardId, "summary");
   assert.equal(request.metadata.subagent.name, "facetwrite-summary");
   assert.deepEqual(request.stream_mode, ["messages-tuple", "custom", "values"]);
   assert.equal(request.multitask_strategy, "interrupt");
+});
+
+test("passes FacetWrite-managed memory only when Agent memory is enabled", () => {
+  const card = getAgentCard("summary");
+  const settings = defaultAgentSettings(card);
+  const request = buildRunRequest({
+    threadId: "thread_1",
+    agentCard: card,
+    settings: {
+      ...settings,
+      memory: { enabled: true }
+    },
+    messages: [{ role: "user", content: "Use memory" }],
+    prompt: "Use memory",
+    facetwriteMemoryContent: "User prefers project-local references."
+  }, {
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8000",
+    assistantId: "lead_agent"
+  });
+
+  assert.equal(request.context.facetwrite_memory_enabled, true);
+  assert.equal(request.config.configurable.facetwrite_memory_enabled, true);
+  assert.equal(request.context.facetwrite_memory_content, "User prefers project-local references.");
 });
 
 test("does not expose AgentBackend reasoning kwargs as assistant stream text", async () => {

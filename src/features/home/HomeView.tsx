@@ -126,7 +126,7 @@ export function HomeView({
         <div className="home-tip-bar">
           <strong>{copy.tip}</strong>
           <span>{copy.tipText}</span>
-          <Button size="sm" type="button" onClick={() => primaryAgent && onOpenAgent(primaryAgent)}>{copy.create}</Button>
+          <Button data-testid="home-create-board" size="sm" type="button" onClick={() => primaryAgent && onOpenAgent(primaryAgent)}>{copy.create}</Button>
         </div>
 
         <Panel className="home-workspace-card">
@@ -142,7 +142,7 @@ export function HomeView({
             </form>
             <div className="home-quick-actions">
               {quickActions.map((action) => (
-                <button className="home-quick-action" key={action.label} type="button" onClick={() => action.agent && onOpenAgent(action.agent)}>
+                <button className="home-quick-action" data-testid="home-quick-action" key={action.label} type="button" onClick={() => action.agent && onOpenAgent(action.agent)}>
                   <span>{action.label}</span>
                   <small>{action.hint}</small>
                   <b><ArrowRightIcon aria-hidden="true" size={18} /></b>

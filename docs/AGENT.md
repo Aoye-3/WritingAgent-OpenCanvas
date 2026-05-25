@@ -32,13 +32,15 @@ Settings cover:
 - Agent settings store `configuredModelApiId` plus compatibility `providerId + model` fields. They must not store API keys, provider secrets, or copied base URL credentials.
 - Prompt name, description, identity prompt, output type, output format, and selected skills.
 - Tool enablement by ToolRef.
-- Knowledge scope.
+- Knowledge settings: enablement, scope label, selected Knowledge Base ids, retrieval result count, score threshold, optional rerank preference.
 - Memory flag.
 - Quick messages.
 
 Saved settings are merged back onto the base Agent card by the runtime adapter.
 
 Agent settings are the user-controlled configuration surface for concrete Agents. They define intent, model preferences, prompts, Skills, tool refs, memory, knowledge scope, and quick phrases. Agent Runtime is the execution subsystem that consumes these settings through FacetWrite's adapter contract; the current implementation is AgentBackend.
+
+The Agent Settings Knowledge tab loads bases through `GET /api/knowledge/bases` and saves changes through the existing `PUT /api/agent-cards/:agentCardId/settings` path. Selecting no specific base means all ready bases are eligible during generation; selecting one or more base ids constrains retrieval to those bases.
 
 ## Runtime Config
 `GET /api/agent-cards/:agentCardId/runtime-config` is the frontend source for rendering settings safely. It should be preferred over hard-coded settings UI assumptions.
@@ -47,6 +49,14 @@ Runtime config includes the resolved card/settings, available tools, tool polici
 
 ## Runtime Context Boundary
 Agent runtime context comes from the left AgentCard structured input drawer and current workspace state such as the draft and selected Canvas node. The bottom workspace utility bar is not a context source and must not inject historical placeholder values such as course notes, audience profiles, or default writing style.
+
+Canvas context is filtered by node kind before it reaches the runtime:
+
+- `note` is user thinking space and is excluded from default AI context.
+- `document` contributes a preview and remains the default target for approved AI Canvas output.
+- `reference` contributes reference content by default.
+
+When a user explicitly sends a directed Canvas mind chain to the right collaboration drawer, the selected chain becomes user-provided chat text. That explicit action may include `note` nodes without changing the default context rule.
 
 Internal AgentCard, Skill, Tool policy, enabled tool state, and output contract text are private runtime context. They may be sent to the model as internal instructions, but assistant messages, stored chat messages, mock fallback text, and Agent Runtime stream output must not expose or reproduce prompt headings such as `# AgentCard`, `# Current User Instruction`, or `# Output Contract`.
 
@@ -76,15 +86,19 @@ Agent Runtime is FacetWrite's internal execution subsystem when `AGENT_BACKEND_E
 - Skills and MCP server overview are read through `/api/agent-runtime/config`; MCP environment and secret-like values are redacted before reaching the frontend.
 - AI runtime status, Agent mapping, and ToolUse bridge progress are exposed through `/api/agent-runtime/dashboard` and shown in the AI Dashboard. `/api/agent-backend/*` remains a compatibility alias.
 - FacetWrite sends per-run bridge context to AgentBackend: allowed tool refs, effective tool state, explicit context values, selected Canvas node id, and current chat instruction.
+- FacetWrite also sends Memory isolation context. `facetwrite_memory_enabled` defaults to false unless the current Agent settings explicitly enable Memory; FacetWrite-managed Memory content is sent only from `.facetwrite/memory/`, never from AgentBackend's legacy global memory store.
 - AgentBackend loads FacetWrite bridge tools from `AgentBackend.tools.facetwrite_bridge` for `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write`.
-- The bridge calls FacetWrite `/api/internal/agent-runtime/tool-call`, so ToolUse policy remains enforced by FacetWrite and `canvas_write` can only create a pending request. `/api/internal/agent-backend/tool-call` remains a compatibility alias.
+- `knowledge_base` bridge calls prefer KnowledgeService RAG results and pass optional selected `baseIds`; explicit runtime context values are only the fallback when no Knowledge result is available.
+- The bridge calls FacetWrite `/api/internal/agent-runtime/tool-call`, so ToolUse policy remains enforced by FacetWrite and `canvas_write` can only create a pending request. `/api/internal/agent-backend/tool-call` remains a compatibility alias; `/api/internal/deerflow/tool-call` is deprecated and exists only to protect already-running legacy sidecars.
+- AgentRuntime does not own FacetWrite product data. Threads, messages, Canvas nodes/edges/write requests, settings, and Knowledge metadata stay in FacetWrite storage; AgentRuntime can affect them only through the backend adapter and internal ToolUse bridge. It must not bypass frontend Canvas context filtering, and it must not call Canvas repositories or storage facades directly.
 - `web_search` is verified separately as a AgentBackend built-in tool, not as a FacetWrite local bridge.
 - Current Docker sidecar acceptance target: `/health`, backend auth, `/api/agent-backend/config`, provider `agent-backend` generation, repeated no-fallback runs, AgentBackend built-in ToolUse, and FacetWrite bridge ToolUse. The 2026-05-20 smoke test confirmed `usedMock:false` and `finishReason:"agent_backend_completed"`.
 
 ## AI Dashboard
-The AI Dashboard is not a second Agent settings page. It is a read-only runtime/control-plane surface.
+The AI Dashboard is primarily a runtime/control-plane surface. FacetWrite-managed Memory is the one editable exception because users need to inspect and correct what the runtime may reuse.
 
 - It shows Agent Runtime reachability, auth state, Lead Agent ID, Skills, MCP servers, AgentCard-to-subagent mapping, and ToolUse bridge status.
+- It shows and edits FacetWrite-managed Memory through `/api/agent-runtime/memory`. Agent settings still decide whether a concrete Agent can use that Memory during a run.
 - It describes FacetWrite capabilities as progressively bridged to runtime ToolUse or MCP capabilities rather than as a competing local Agent runtime.
 - Canvas write behavior remains Human-in-the-loop: Agent Runtime may propose the write through the bridge, but FacetWrite records only a pending request until the user confirms it and the backend approval path applies it.
 
@@ -102,7 +116,7 @@ The AI Dashboard is not a second Agent settings page. It is a read-only runtime/
 Current tools:
 
 - `web_search`: external, medium risk, requires external config.
-- `knowledge_base`: local context tool, low risk.
+- `knowledge_base`: local Knowledge/context tool, low risk, accepts `query`, `limit`, and optional `baseIds`.
 - `quick_messages`: local editing intent tool, low risk.
 - `clear_context`: local context control tool, low risk.
 - `canvas_write`: local high-risk write proposal tool, requires approval.
@@ -115,6 +129,8 @@ A tool can auto-run only when it is enabled, does not require approval, and does
 `server/tools/toolPolicyGuard.ts` is the execution-time gate. It rejects unknown tools, tools not allowed by the active Agent, tools disabled for the current run, and tools that require missing external configuration before the executor branch runs.
 
 `canvas_write` must never directly mutate Canvas content from model output. It can only create a pending request/proposal. The user-facing UI may offer "write all" or "write annotated snippets"; once the user confirms, FacetWrite applies the same backend approve path.
+
+`canvas_write` defaults created nodes to `document` unless the tool request explicitly supplies a valid Canvas node kind. This preserves the rule that AI output appears as editable documents by default.
 
 If the user directly says to write/save/add content to Canvas, the generation hook treats that message as confirmation for newly created write requests from the same run and auto-calls the approve path after the thread state refresh. Existing pending requests from earlier runs are deliberately excluded so stale suggestions cannot be applied accidentally.
 

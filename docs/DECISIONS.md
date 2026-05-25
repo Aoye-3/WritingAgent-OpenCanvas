@@ -105,6 +105,8 @@ Reason: Users need to see whether AgentBackend is actually online, authenticated
 
 Impact: `/api/agent-backend/dashboard` aggregates runtime status, AgentBackend config overview, AgentCard-to-subagent mapping, ToolUse bridge status, and integration maturity. Writing AgentBackend config remains out of scope.
 
+Update 2026-05-25: FacetWrite-managed Memory is an explicit exception to the read-only dashboard rule. The AI Dashboard may show, edit, and clear `.facetwrite/memory/` content because users need a visible control for what Agents may remember. AgentBackend legacy global memory remains outside the active FacetWrite run path unless FacetWrite passes explicit managed memory content.
+
 ## 2026-05-15: Docker Is The Preferred Local AgentBackend Runtime
 Decision: Run AgentBackend as a Docker sidecar through its Compose nginx entrypoint at `http://127.0.0.1:2026` for local FacetWrite integration work.
 

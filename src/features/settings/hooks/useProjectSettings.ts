@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { getAgentBackendConfigOverview, getAgentBackendRuntimeStatus, getSettingsStatus, saveSettings, shutdownDevServer, validateSettings } from "../settingsClient";
+import { getAgentBackendConfigOverview, getAgentBackendRuntimeStatus, getCanvasSettings, getSettingsStatus, saveCanvasSettings, saveSettings, shutdownDevServer, validateSettings } from "../settingsClient";
 import { fallbackAgentBackendConfig, fallbackAgentBackendStatus, fallbackStatus, resolvePreset } from "../settingsDefaults";
 import type { AgentBackendConfigOverview, AgentBackendRuntimeStatus, SettingsStatus } from "../types";
 
@@ -17,6 +17,7 @@ export function useProjectSettings(open: boolean, copy: {
   const [systemPrompt, setSystemPrompt] = useState(fallbackStatus.systemPrompt);
   const [agentBackendStatus, setAgentBackendStatus] = useState<AgentBackendRuntimeStatus>(fallbackAgentBackendStatus);
   const [agentBackendConfig, setAgentBackendConfig] = useState<AgentBackendConfigOverview>(fallbackAgentBackendConfig);
+  const [canvasUndoDepth, setCanvasUndoDepth] = useState(20);
   const [message, setMessage] = useState("");
   const [busyState, setBusyState] = useState<"idle" | "saving" | "validating" | "stopping">("idle");
 
@@ -46,6 +47,9 @@ export function useProjectSettings(open: boolean, copy: {
         setAgentBackendStatus({ ...fallbackAgentBackendStatus, lastError: messageText });
         setAgentBackendConfig({ ...fallbackAgentBackendConfig, lastError: messageText });
       });
+    getCanvasSettings()
+      .then((canvasSettings) => setCanvasUndoDepth(canvasSettings.undoDepth))
+      .catch(() => setCanvasUndoDepth(20));
   }, [open]);
 
   const handleValidate = async () => {
@@ -106,12 +110,26 @@ export function useProjectSettings(open: boolean, copy: {
     }
   };
 
+  const handleCanvasSettingsSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusyState("saving");
+    setMessage("");
+    try {
+      const saved = await saveCanvasSettings({ undoDepth: canvasUndoDepth });
+      setCanvasUndoDepth(saved.undoDepth);
+      setMessage(copy.saveSuccess);
+    } finally {
+      setBusyState("idle");
+    }
+  };
+
   return {
     apiKey,
     baseURL,
     busyState,
     agentBackendConfig,
     agentBackendStatus,
+    canvasUndoDepth,
     message,
     model,
     modelPreset,
@@ -119,6 +137,7 @@ export function useProjectSettings(open: boolean, copy: {
     status,
     systemPrompt,
     handleSubmit,
+    handleCanvasSettingsSubmit,
     handleShutdownDevServer,
     handleValidate,
     setApiKey,
@@ -126,6 +145,7 @@ export function useProjectSettings(open: boolean, copy: {
     setModel,
     setModelPreset,
     setProviderId,
-    setSystemPrompt
+    setSystemPrompt,
+    setCanvasUndoDepth
   };
 }

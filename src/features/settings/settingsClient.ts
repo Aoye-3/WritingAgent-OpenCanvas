@@ -1,11 +1,12 @@
 import type {
   AgentBackendConfigOverview,
   AgentBackendRuntimeStatus,
+  CanvasSettings,
   SettingsSaveRequest,
   SettingsStatus,
   SettingsValidationResponse
 } from "./types";
-import { apiGet, apiPost } from "../../shared/apiClient";
+import { apiGet, apiPost, apiPut } from "../../shared/apiClient";
 
 export async function getSettingsStatus(): Promise<SettingsStatus> {
   return apiGet<SettingsStatus>("/api/settings/status");
@@ -29,4 +30,12 @@ export async function getAgentBackendRuntimeStatus(): Promise<AgentBackendRuntim
 
 export async function getAgentBackendConfigOverview(): Promise<AgentBackendConfigOverview> {
   return apiGet<AgentBackendConfigOverview>("/api/agent-runtime/config");
+}
+
+export async function getCanvasSettings(): Promise<CanvasSettings> {
+  return apiGet<CanvasSettings>("/api/settings/canvas");
+}
+
+export async function saveCanvasSettings(payload: CanvasSettings): Promise<CanvasSettings> {
+  return apiPut<CanvasSettings>("/api/settings/canvas", payload);
 }

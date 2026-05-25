@@ -1,5 +1,79 @@
 # FacetWrite Refactor Log
 
+## 2026-05-25: DOCX Knowledge Embedding Fix
+Scope: Reproduced the DOCX upload path, fixed the OpenAI-compatible embedding URL used by Knowledge indexing, and verified the user's stuck DOCX item.
+
+Findings:
+- DOCX parsing was healthy: embedjs `LocalPathLoader` could extract chunks from both the repository proposal DOCX and the uploaded consent-form DOCX.
+- The stored SiliconFlow embedding base URL was `https://api.siliconflow.cn`, while OpenAI-compatible embedding calls must target the `/v1` API root.
+- The existing consent-form DOCX item was stuck in `processing` from the earlier failed run; after reindexing with the fixed URL path it completed and became searchable.
+
+Completed:
+- Normalized OpenAI-compatible Knowledge embedding base URLs to append `/v1` when the saved URL does not already end in an API version.
+- Added DOCX Knowledge service tests covering uploaded DOCX indexing, fake OpenAI-compatible embedding requests, search retrieval, URL normalization, and failed indexing status.
+- Made Knowledge base deletion tolerant of Windows/libSQL `EBUSY` vector-file handles after cache close, so cleanup does not fail user-visible deletes or smoke tests.
+- Reindexed `Consent-Form-Template【IICL】.docx`; its item status is now `completed`, base status is `ready`, and search for `Informed consent form` returns DOCX chunks.
+
+Validation:
+- `node --import tsx --test server/knowledge/service.test.ts` passed with 6 tests.
+- `npm.cmd test -- server/knowledge/service.test.ts` passed; the project script also ran the full server suite with 133 tests.
+- `npm.cmd test` passed with 133 server tests.
+- `npm.cmd run typecheck` passed.
+- `npm.cmd run build` passed and retained the existing Vite main-chunk warning.
+- Live DOCX smoke created an in-memory DOCX with a unique `DOCX-SMOKE-*` fact, indexed it through the configured SiliconFlow embedding API, searched the token successfully, and deleted the temporary base.
+- Browser smoke against `http://127.0.0.1:3000/` confirmed Knowledge settings shows the DOCX item and renders search results from the indexed DOCX content.
+
+## 2026-05-25: Knowledge Base Agent Readiness
+Scope: Checked the current Knowledge RAG path for Agent generation, added deterministic coverage for Knowledge injection and ToolUse bridging, and exposed maintained Knowledge selection controls in Agent Settings.
+
+Findings:
+- `promptRunBuilder` already injected KnowledgeService results as `Knowledge References` when Agent knowledge was enabled and the `knowledge_base` tool was active.
+- The missing risk was coverage and configuration visibility: Agent Settings did not expose selected base ids or retrieval parameters, and the ToolUse bridge did not forward `baseIds`.
+- The local API had ready Knowledge Bases, but their item counts were empty during inspection, so they were not sufficient for a live model recall proof.
+
+Completed:
+- Added generation facade tests that stub a unique Knowledge fact, assert provider messages contain `Knowledge References`, assert disabled settings/tool state skip retrieval, and assert `baseIds`, `documentCount`, and `threshold` reach search.
+- Added Tool Runtime tests that prove `knowledge_base` prefers KnowledgeService RAG output over context fallback and forwards selected base ids.
+- Added optional `baseIds` to the `knowledge_base` tool schema and Tool Runtime call path.
+- Expanded Agent Settings Knowledge UI/types to load Knowledge Bases, select all or specific bases, tune result count/threshold, and save through the existing Agent settings endpoint.
+- Updated Knowledge, Agent, and Architecture docs with the current runtime behavior and test boundary.
+
+Validation:
+- `npm.cmd test -- server/services/generationService.facade.test.ts server/toolRuntime.test.ts server/routes/internalAgentBackendRoutes.test.ts` passed; this project script also runs the full `server/**/*.test.ts` suite.
+- `npm.cmd test` passed with 130 server tests.
+- `npm.cmd run typecheck` passed.
+- `npm.cmd run build` passed and retained the existing Vite main-chunk warning.
+- Playwright smoke against `http://127.0.0.1:3000/` confirmed Agent Settings -> Knowledge renders the base list, can select a base, saves through the UI, and `runtime-config` returns the selected `knowledge.baseIds`; the smoke restored the original Agent settings after verification.
+
+Open TODO:
+- Live Agent recall smoke still requires a ready Knowledge Base with indexed items plus configured embedding/chat APIs; empty bases only validate UI/API plumbing.
+- Keep the thread routes test helper's bad-port retry; Node/Undici can reject randomly assigned browser-blocked ports when tests use `listen(0)`.
+
+## 2026-05-25: Canvas Health Check And E2E Coverage
+Scope: Confirmed the current branch was already pushed, ran a focused code-health scan, and tightened Canvas browser regression coverage without expanding into large refactors.
+
+Findings:
+- `git push origin HEAD` returned `Everything up-to-date`; `codex/canvas-node-settings` was already synchronized with `origin`.
+- The largest remaining maintainability hotspots are still `src/app/styles.css`, `server/storage.ts`, `server/domains/model-config/providerApiConfigService.ts`, `server/knowledge/service.ts`, and several feature-level UI containers. These are known decomposition candidates, not blockers for this pass.
+- Current source/test/doc scan found no remaining mojibake patterns in maintained `src/`, `server/`, `shared/`, `docs/`, or `tests` files touched by this pass.
+- Production build still emits the existing Vite chunk-size warning for the main JS bundle; no code-splitting change was made in this narrow health pass.
+
+Completed:
+- Removed mojibake fallback label matching from Canvas E2E and kept the selectors tied to real English/Chinese labels.
+- Added Canvas E2E coverage for title/content blur persistence, node kind conversion preserving content and geometry, and directed mind-chain behavior after an edge is deleted.
+- Updated Canvas documentation to describe the expanded browser regression coverage.
+
+Validation:
+- `npm.cmd run test:e2e:canvas` passed with 3 tests after the E2E update.
+
+Open TODO:
+- Treat `src/app/styles.css` size and the large storage/knowledge/model-config service files as future scoped refactors, not opportunistic cleanup.
+- Consider route-level code splitting or explicit chunk configuration in a separate frontend performance pass.
+- Continue replacing historical mojibake labels in older UI fallback data when those files are already being touched for product work.
+
+Next Priority Check:
+- Run the full verification sequence before committing this pass: `npm.cmd test`, `npm.cmd run typecheck`, `npm.cmd run build`, and `npm.cmd run test:e2e:canvas`.
+
 ## 2026-05-20: Internal Agent Runtime Module Boundary
 Scope: Promoted the previously tracked `AgentBackend/` subtree into a formal internal Agent Runtime module and added a stable FacetWrite runtime port.
 

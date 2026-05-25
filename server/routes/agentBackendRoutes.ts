@@ -1,9 +1,10 @@
 import type { Express } from "express";
 import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
 import type { AgentRuntimePort } from "../runtime/agentRuntimePort.js";
+import type { AgentRuntimeMemoryService } from "../services/agentRuntimeMemoryService.js";
 import { sendOk } from "../utils/http.js";
 
-export function registerAgentBackendRoutes(app: Express, deps: { agentRuntime: AgentRuntimeAdapter; executionRuntime: AgentRuntimePort }) {
+export function registerAgentBackendRoutes(app: Express, deps: { agentRuntime: AgentRuntimeAdapter; executionRuntime: AgentRuntimePort; memoryService?: AgentRuntimeMemoryService }) {
   app.get("/api/agent-backend/status", async (_request, response) => {
     sendOk(response, await deps.executionRuntime.getStatus());
   });

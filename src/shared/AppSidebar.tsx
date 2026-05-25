@@ -1,6 +1,6 @@
 import type { AppView } from "../app/App";
 import { useI18n } from "../features/i18n/I18nProvider";
-import { AgentIcon, BookIcon, BrandIcon, DocumentIcon, HomeIcon, ModelConfigIcon, RuntimeIcon } from "./icons";
+import { AgentIcon, BookIcon, BrandIcon, CanvasNodesIcon, DocumentIcon, HomeIcon, ModelConfigIcon, RuntimeIcon } from "./icons";
 import { Button } from "./ui";
 
 type AppSidebarProps = {
@@ -10,19 +10,11 @@ type AppSidebarProps = {
   className?: string;
 };
 
-const navItems: Array<{ view: AppView; icon: typeof HomeIcon; labelKey: keyof typeof labelsEn }> = [
-  { view: "home", icon: HomeIcon, labelKey: "home" },
-  { view: "projects", icon: DocumentIcon, labelKey: "projects" },
-  { view: "agentSettings", icon: AgentIcon, labelKey: "agentSettings" },
-  { view: "modelConfig", icon: ModelConfigIcon, labelKey: "modelConfig" },
-  { view: "aiDashboard", icon: RuntimeIcon, labelKey: "aiDashboard" },
-  { view: "knowledgeSettings", icon: BookIcon, labelKey: "knowledgeSettings" }
-];
-
 const labelsEn = {
   home: "Home",
   projects: "Projects",
   agentSettings: "Agent settings",
+  canvasNodeSettings: "Canvas nodes",
   modelConfig: "Model config",
   aiDashboard: "AI Dashboard",
   knowledgeSettings: "Knowledge settings"
@@ -32,10 +24,21 @@ const labelsZh: typeof labelsEn = {
   home: "首页",
   projects: "项目",
   agentSettings: "Agent 设置",
+  canvasNodeSettings: "Canvas 节点",
   modelConfig: "模型配置",
   aiDashboard: "AI 仪表盘",
   knowledgeSettings: "知识库设置"
 };
+
+const navItems: Array<{ view: AppView; icon: typeof HomeIcon; labelKey: keyof typeof labelsEn }> = [
+  { view: "home", icon: HomeIcon, labelKey: "home" },
+  { view: "projects", icon: DocumentIcon, labelKey: "projects" },
+  { view: "agentSettings", icon: AgentIcon, labelKey: "agentSettings" },
+  { view: "canvasNodeSettings", icon: CanvasNodesIcon, labelKey: "canvasNodeSettings" },
+  { view: "modelConfig", icon: ModelConfigIcon, labelKey: "modelConfig" },
+  { view: "aiDashboard", icon: RuntimeIcon, labelKey: "aiDashboard" },
+  { view: "knowledgeSettings", icon: BookIcon, labelKey: "knowledgeSettings" }
+];
 
 export function AppSidebar({ activeView, onNavigate, onOpenSettings, className }: AppSidebarProps) {
   const { locale, setLocale } = useI18n();

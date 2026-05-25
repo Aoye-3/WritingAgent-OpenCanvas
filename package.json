@@ -18,6 +18,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "test": "node --import tsx --test server/**/*.test.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:canvas": "playwright test tests/e2e/canvas.spec.ts",
     "typecheck": "tsc -b"
   },
   "dependencies": {

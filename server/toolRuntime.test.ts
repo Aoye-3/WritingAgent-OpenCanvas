@@ -115,6 +115,59 @@ test("canvas_write creates a pending request instead of writing directly", async
   assert.match(result.content, /ready for user confirmation/i);
 });
 
+test("executes local knowledge tool from KnowledgeService before context fallback", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_knowledge_service",
+      type: "function",
+      function: { name: "knowledge_base", arguments: JSON.stringify({ query: "codename", limit: 2 }) }
+    },
+    {
+      contextValues: { currentDraft: "Fallback draft text" },
+      knowledgeService: {
+        search: async () => [{
+          id: 1,
+          baseId: "kb_orchid",
+          baseName: "Orchid Base",
+          title: "Orchid memo",
+          content: "The project codename is ORCHID-9137.",
+          source: "orchid-note",
+          score: 0.91,
+          metadata: {}
+        }]
+      } as never
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.match(result.content, /ORCHID-9137/);
+  assert.equal(result.content.includes("Fallback draft text"), false);
+  assert.deepEqual(result.payload, { tool: "knowledge_base", entries: 1, sources: ["orchid-note"] });
+});
+
+test("passes selected knowledge bases to the local knowledge tool", async () => {
+  let observedBaseIds: string[] | undefined;
+  const result = await executeToolCall(
+    {
+      id: "call_knowledge_base_scope",
+      type: "function",
+      function: { name: "knowledge_base", arguments: JSON.stringify({ query: "codename", limit: 3, baseIds: ["kb_orchid"] }) }
+    },
+    {
+      knowledgeService: {
+        search: async (input: { baseIds?: string[] }) => {
+          observedBaseIds = input.baseIds;
+          return [];
+        }
+      } as never
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(observedBaseIds, ["kb_orchid"]);
+  assert.match(result.content, /No local context/);
+});
+
 test("canvas_write normalizes replace unless the user explicitly asks to replace", async () => {
   const result = await executeToolCall(
     {

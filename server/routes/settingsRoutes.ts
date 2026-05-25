@@ -16,8 +16,13 @@ import {
 import { getSettingsStatus, saveSettings, validateSettings } from "../services/settingsService.js";
 import { scheduleDevServerShutdown } from "../services/devServerControl.js";
 import { errorMessage, sendError, sendOk } from "../utils/http.js";
+import type { SQLiteStorageRepository } from "../storage.js";
 
-export function registerSettingsRoutes(app: Express) {
+type SettingsRouteDeps = {
+  storage: SQLiteStorageRepository;
+};
+
+export function registerSettingsRoutes(app: Express, { storage }: SettingsRouteDeps) {
   app.get("/api/settings/status", async (_request, response) => {
     sendOk(response, await getSettingsStatus());
   });
@@ -102,6 +107,18 @@ export function registerSettingsRoutes(app: Express) {
     }
   });
 
+  app.get("/api/settings/canvas", async (_request, response) => {
+    sendOk(response, storage.getCanvasSettings());
+  });
+
+  app.put("/api/settings/canvas", async (request, response) => {
+    try {
+      sendOk(response, storage.saveCanvasSettings(parseCanvasSettingsPayload(request.body)));
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to save Canvas settings"));
+    }
+  });
+
   app.post("/api/settings/shutdown-dev-server", (_request, response) => {
     try {
       scheduleDevServerShutdown();
@@ -110,6 +127,14 @@ export function registerSettingsRoutes(app: Express) {
       sendError(response, 500, "internal_error", errorMessage(error, "Unable to stop development server"));
     }
   });
+}
+
+function parseCanvasSettingsPayload(value: unknown) {
+  if (!value || typeof value !== "object") return {};
+  const body = value as Record<string, unknown>;
+  return {
+    undoDepth: typeof body.undoDepth === "number" ? body.undoDepth : undefined
+  };
 }
 
 function parseProviderModelsPayload(value: unknown) {

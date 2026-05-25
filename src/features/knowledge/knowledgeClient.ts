@@ -50,5 +50,8 @@ export const knowledgeClient = {
   },
   async search(input: { query: string; baseIds?: string[]; limit?: number; threshold?: number }) {
     return apiPost<{ results: KnowledgeSearchResult[] }>("/api/knowledge/search", input);
+  },
+  async ask(input: { query: string; baseIds?: string[]; limit?: number; threshold?: number; locale?: "en" | "zh" }) {
+    return apiPost<{ answer: string; results: KnowledgeSearchResult[]; provider: string; model?: string; usage?: unknown }>("/api/knowledge/ask", input);
   }
 };

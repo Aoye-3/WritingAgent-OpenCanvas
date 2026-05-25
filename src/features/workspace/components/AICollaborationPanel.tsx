@@ -8,6 +8,7 @@ type AICollaborationPanelProps = {
   allowedTools: string[];
   canvasWriteRequests: CanvasWriteRequest[];
   collapsed: boolean;
+  inputDraft: string;
   isSending: boolean;
   messages: CollaborationMessage[];
   modelSettings?: AgentSettings["model"];
@@ -16,6 +17,7 @@ type AICollaborationPanelProps = {
   onRejectWriteRequest: (requestId: string) => Promise<void>;
   onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"]) => Promise<void>;
+  onInputDraftConsumed: () => void;
   onToggleCollapsed: () => void;
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
   toolEvents: StoredToolEvent[];
