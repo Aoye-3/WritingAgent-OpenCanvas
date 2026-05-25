@@ -6,9 +6,17 @@ import { errorMessage, sendError, sendOk } from "../utils/http.js";
 
 type KnowledgeRouteDeps = {
   knowledgeService: KnowledgeService;
+  resolveChatConfig?: () => Promise<ConfiguredModelApi>;
+  createChatClient?: (config: ConfiguredModelApi) => {
+    createChatCompletion: ReturnType<typeof createOpenAIChatClient>["createChatCompletion"];
+  };
 };
 
-export function registerKnowledgeRoutes(app: Express, { knowledgeService }: KnowledgeRouteDeps) {
+export function registerKnowledgeRoutes(app: Express, {
+  knowledgeService,
+  resolveChatConfig = resolveKnowledgeChatConfig,
+  createChatClient = (config) => createOpenAIChatClient({ apiKey: config.apiKey ?? "", baseURL: config.baseURL })
+}: KnowledgeRouteDeps) {
   app.get("/api/knowledge/bases", async (_request, response) => {
     sendOk(response, { bases: await knowledgeService.listBases() });
   });
@@ -103,26 +111,10 @@ export function registerKnowledgeRoutes(app: Express, { knowledgeService }: Know
         return;
       }
 
-      const config = await resolveKnowledgeChatConfig();
+      const config = await resolveChatConfig();
       const profile = getProviderProfile(config.providerId);
-      const client = createOpenAIChatClient({ apiKey: config.apiKey ?? "", baseURL: config.baseURL });
-      const messages: ChatMessage[] = [
-        {
-          role: "system",
-          content: locale === "zh"
-            ? "你是知识库检索测试 Agent。只能依据 Knowledge References 回答；如果引用里没有答案，明确说没有检索到足够信息。回答要简洁，并在末尾列出使用的引用编号。"
-            : "You are a knowledge retrieval test Agent. Answer only from the Knowledge References. If the references do not contain the answer, say that there is not enough retrieved information. Keep the answer concise and list used reference numbers at the end."
-        },
-        {
-          role: "user",
-          content: [
-            "Knowledge References:",
-            ...results.map((result) => `[${result.id}] ${result.title} (${result.source}, score ${result.score.toFixed(3)})\n${result.content}`),
-            "",
-            `Question: ${query}`
-          ].join("\n\n")
-        }
-      ];
+      const client = createChatClient(config);
+      const messages = buildKnowledgeAskMessages(query, results, locale);
       const completion = await client.createChatCompletion(normalizeChatRequest(profile, {
         modelSettings: {
           configuredModelApiId: config.id,
@@ -162,6 +154,32 @@ export function registerKnowledgeRoutes(app: Express, { knowledgeService }: Know
       sendError(response, 400, "bad_request", errorMessage(error, "Unable to reindex knowledge base"));
     }
   });
+}
+
+export function buildKnowledgeAskMessages(query: string, results: Array<{
+  id: number;
+  title: string;
+  source: string;
+  score: number;
+  content: string;
+}>, locale: "zh" | "en"): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: locale === "zh"
+        ? "你是知识库检索测试 Agent。只能依据 Knowledge References 回答；如果引用里没有答案，明确说明没有检索到足够信息。回答要简洁，并在末尾列出使用的引用编号。"
+        : "You are a knowledge retrieval test Agent. Answer only from the Knowledge References. If the references do not contain the answer, say that there is not enough retrieved information. Keep the answer concise and list used reference numbers at the end."
+    },
+    {
+      role: "user",
+      content: [
+        "Knowledge References:",
+        ...results.map((result) => `[${result.id}] ${result.title} (${result.source}, score ${result.score.toFixed(3)})\n${result.content}`),
+        "",
+        `Question: ${query}`
+      ].join("\n\n")
+    }
+  ];
 }
 
 async function resolveKnowledgeChatConfig(): Promise<ConfiguredModelApi> {
