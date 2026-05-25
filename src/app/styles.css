@@ -3275,6 +3275,48 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   gap: 10px;
 }
 
+.knowledge-chat-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.knowledge-chat-message {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.knowledge-chat-user {
+  background: var(--color-primary-soft);
+  border-color: rgba(37, 99, 235, 0.22);
+}
+
+.knowledge-chat-agent {
+  background: #ffffff;
+}
+
+.knowledge-chat-message strong {
+  display: block;
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.knowledge-chat-message p {
+  margin: 6px 0 0;
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.knowledge-chat-message small {
+  display: block;
+  margin-top: 8px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
 .knowledge-base-row,
 .knowledge-item-row,
 .knowledge-result {

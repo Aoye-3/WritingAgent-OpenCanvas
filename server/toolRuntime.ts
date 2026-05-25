@@ -76,6 +76,7 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
     if (context.knowledgeService) {
       const results = await context.knowledgeService.search({
         query: readString(args.query) || context.chatInstruction || "",
+        baseIds: readStringArray(args.baseIds),
         limit: readNumber(args.limit, 6)
       });
       if (results.length > 0) {
@@ -200,6 +201,10 @@ function readString(value: unknown) {
 
 function readNumber(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
 }
 
 function readCanvasOperation(value: unknown) {

@@ -17,63 +17,57 @@ async function withThreadRoutes() {
   return { app, storage };
 }
 
-async function request(app: express.Express, path: string, body: unknown) {
-  const server = app.listen(0, "127.0.0.1");
-  try {
-    await new Promise<void>((resolve) => server.once("listening", resolve));
-    const address = server.address();
-    assert.equal(typeof address, "object");
-    assert.ok(address);
-    const response = await fetch(`http://127.0.0.1:${(address as AddressInfo).port}${path}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    return {
-      status: response.status,
-      body: await response.json() as Record<string, unknown>
-    };
-  } finally {
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+async function localJsonRequest(app: express.Express, path: string, options: RequestInit = {}) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const server = app.listen(0, "127.0.0.1");
+    try {
+      await new Promise<void>((resolve) => server.once("listening", resolve));
+      const address = server.address();
+      assert.equal(typeof address, "object");
+      assert.ok(address);
+      const response = await fetch(`http://127.0.0.1:${(address as AddressInfo).port}${path}`, options);
+      return {
+        status: response.status,
+        body: await response.json() as Record<string, unknown>
+      };
+    } catch (error) {
+      lastError = error;
+      if (!isBadPortFetchError(error)) {
+        throw error;
+      }
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
   }
+  throw lastError;
+}
+
+function isBadPortFetchError(error: unknown) {
+  return error instanceof TypeError
+    && error.message === "fetch failed"
+    && error.cause instanceof Error
+    && error.cause.message === "bad port";
+}
+
+async function request(app: express.Express, path: string, body: unknown) {
+  return localJsonRequest(app, path, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
 }
 
 async function post(app: express.Express, path: string, body: unknown) {
-  const server = app.listen(0, "127.0.0.1");
-  try {
-    await new Promise<void>((resolve) => server.once("listening", resolve));
-    const address = server.address();
-    assert.equal(typeof address, "object");
-    assert.ok(address);
-    const response = await fetch(`http://127.0.0.1:${(address as AddressInfo).port}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    return {
-      status: response.status,
-      body: await response.json() as Record<string, unknown>
-    };
-  } finally {
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-  }
+  return localJsonRequest(app, path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
 }
 
 async function get(app: express.Express, path: string) {
-  const server = app.listen(0, "127.0.0.1");
-  try {
-    await new Promise<void>((resolve) => server.once("listening", resolve));
-    const address = server.address();
-    assert.equal(typeof address, "object");
-    assert.ok(address);
-    const response = await fetch(`http://127.0.0.1:${(address as AddressInfo).port}${path}`);
-    return {
-      status: response.status,
-      body: await response.json() as Record<string, unknown>
-    };
-  } finally {
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-  }
+  return localJsonRequest(app, path);
 }
 
 test("renames an active thread title", async () => {

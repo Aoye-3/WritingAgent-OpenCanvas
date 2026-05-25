@@ -177,10 +177,11 @@ Before claiming Canvas work is complete, verify:
 - Node drag persists `x/y`.
 - Node resize persists `x/y/width/height`.
 - Title/content edit persists after blur.
+- Node kind conversion preserves title, content, position, and size.
 - Delete removes the node.
 - `canvas_write` still creates pending requests only.
 - Directed node edges persist and can be deleted.
-- Sending a mind chain populates the right collaboration composer without auto-sending.
+- Sending a mind chain populates the right collaboration composer without auto-sending, and deleted edges no longer pull disconnected nodes into that draft.
 - Note nodes are excluded from default AI context.
 - Canvas undo works for node and edge operations up to the configured cache depth.
 - Approval still applies writes through the backend approve path.

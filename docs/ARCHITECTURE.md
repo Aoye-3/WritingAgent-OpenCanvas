@@ -52,6 +52,7 @@ The frontend owns interaction state and explicit user intent. The Express backen
 - Canvas node context is kind-aware: notes are excluded by default, documents contribute previews, and references contribute reference content. Explicitly sent mind chains may include notes because they are user-selected context.
 - `src/features/ai-dashboard/AiDashboardView.tsx` renders the AI runtime dashboard for Agent Runtime status, Skills/MCP visibility, Agent mapping, and ToolUse bridge progress.
 - `src/features/knowledge/KnowledgeSettingsView.tsx` renders the local Knowledge Base management console for creating RAG bases, importing text/URL/sitemap/local-file sources, viewing indexing status, and testing retrieval.
+- Agent Settings renders Knowledge runtime controls from the same Knowledge API: users can enable Knowledge, search all bases or selected base ids, and tune retrieval count/threshold without adding new API endpoints.
 - `src/shared/apiClient.ts` provides shared frontend API helpers used by feature clients.
 
 ## Backend
@@ -94,8 +95,8 @@ The frontend owns interaction state and explicit user intent. The Express backen
 - FacetWrite uses Cherry Studio's Apache-licensed embedjs package family as the RAG engine: `RAGApplicationBuilder`, `LibSqlDb`, OpenAI/Ollama embeddings, Web loader, Sitemap loader, local path loader, JSON loader, and text loader.
 - FacetWrite does not copy Cherry Studio application code into runtime paths. The checked-out Cherry Studio source remains reference material under `reference/sources/cherry-studio/`.
 - Knowledge vector stores live under `.facetwrite/knowledge/<baseId>/vectors.db`; FacetWrite's main SQLite DB stores only metadata, item state, source audit, and events.
-- During generation, `promptRunBuilder` performs retrieval when Agent knowledge is enabled and the `knowledge_base` tool is active. Results are injected as explicit Knowledge References and recorded as `knowledge_search_completed` tool events.
-- The local `knowledge_base` tool and AgentBackend internal bridge call the same KnowledgeService search path. If search fails or no bases exist, the tool safely falls back to explicit runtime context values.
+- During generation, `promptRunBuilder` performs retrieval when Agent knowledge is enabled and the `knowledge_base` tool is active. Results are injected as explicit Knowledge References and recorded as `knowledge_search_completed` tool events. Agent settings can constrain retrieval with `knowledge.baseIds`, `knowledge.documentCount`, and `knowledge.threshold`.
+- The local `knowledge_base` tool and AgentBackend internal bridge call the same KnowledgeService search path, including optional selected base ids. If search fails or no results exist, the tool safely falls back to explicit runtime context values.
 
 ## Provider Adapter Boundary
 - Provider-specific wire fields stay behind `server/providerRuntime.ts` and the provider profile capability model.
@@ -147,7 +148,8 @@ The frontend owns interaction state and explicit user intent. The Express backen
 
 ## Test Boundaries
 - Server and shared pure helpers are covered by `node --import tsx --test server/**/*.test.ts`, exposed through `npm.cmd test`.
-- Frontend Canvas interaction coverage is Playwright-based. `npm.cmd run test:e2e:canvas` runs `tests/e2e/canvas.spec.ts` against the local Vite/Express dev server and verifies node type creation, session undo, directed edge creation/deletion, and explicit mind-chain drafting.
+- Agent Knowledge readiness is covered by deterministic server tests: generation facade tests prove unique Knowledge facts reach provider messages as `Knowledge References`, and Tool Runtime tests prove the `knowledge_base` bridge prefers RAG results and forwards selected base ids.
+- Frontend Canvas interaction coverage is Playwright-based. `npm.cmd run test:e2e:canvas` runs `tests/e2e/canvas.spec.ts` against the local Vite/Express dev server and verifies node type creation, session undo, blur persistence, kind conversion preservation, directed edge creation/deletion, and explicit mind-chain drafting.
 - Playwright tests may use stable `data-testid` hooks for interaction targets, but those hooks are test infrastructure only and must not carry product state or business rules.
 
 ## Important Current Constraints

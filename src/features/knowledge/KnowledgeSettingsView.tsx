@@ -54,6 +54,7 @@ export function KnowledgeSettingsView({ activeView, onNavigate }: { activeView: 
   const [activeLayer, setActiveLayer] = useState<KnowledgeLayer>("file");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<KnowledgeSearchResult[]>([]);
+  const [chatTurn, setChatTurn] = useState<{ question: string; answer: string; provider: string; model?: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [configuredApis, setConfiguredApis] = useState<ConfiguredModelApiSummary[]>([]);
@@ -202,18 +203,22 @@ export function KnowledgeSettingsView({ activeView, onNavigate }: { activeView: 
     }
   }
 
-  async function searchKnowledge() {
+  async function askKnowledge() {
     if (!query.trim()) return;
     setLoading(true);
+    setChatTurn(null);
+    setResults([]);
     try {
-      const response = await knowledgeClient.search({
+      const response = await knowledgeClient.ask({
         query,
-        baseIds: selectedBase ? [selectedBase.id] : undefined
+        baseIds: selectedBase ? [selectedBase.id] : undefined,
+        locale
       });
       setResults(response.results);
-      setMessage(response.results.length ? "" : zh ? "没有找到匹配结果" : "No matching results");
+      setChatTurn({ question: query, answer: response.answer, provider: response.provider, model: response.model });
+      setMessage("");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to search knowledge");
+      setMessage(error instanceof Error ? error.message : "Unable to answer from knowledge");
     } finally {
       setLoading(false);
     }
@@ -239,6 +244,7 @@ export function KnowledgeSettingsView({ activeView, onNavigate }: { activeView: 
     setActiveLayer(type);
     setItemDraft({ ...defaultItemDraft, type });
     setResults([]);
+    setChatTurn(null);
     setMessage("");
   }
 
@@ -353,18 +359,31 @@ export function KnowledgeSettingsView({ activeView, onNavigate }: { activeView: 
                   </div>
                   <div className="knowledge-items">
                     {visibleItems.map((item) => (
-                      <KnowledgeItemRow item={item} key={item.id} onDelete={() => deleteItem(selectedBase.id, item.id)} />
+                      <KnowledgeItemRow item={item} key={item.id} onDelete={() => deleteItem(selectedBase.id, item.id)} zh={zh} />
                     ))}
                     {visibleItems.length === 0 ? <EmptyState title={zh ? "暂无条目" : "No items"}>{zh ? "从上方导入当前类型的知识源。" : "Import this source type above."}</EmptyState> : null}
                   </div>
                 </Panel>
 
                 <Panel className="knowledge-panel">
-                  <h2><Search size={18} />{zh ? "检索测试" : "Search Test"}</h2>
+                  <h2><Search size={18} />{zh ? "Agent 检索测试" : "Agent Retrieval Test"}</h2>
                   <div className="knowledge-search-row">
-                    <TextField label={zh ? "查询" : "Query"} value={query} onChange={(event) => setQuery(event.target.value)} />
-                    <Button loading={loading} onClick={searchKnowledge} variant="primary">{zh ? "搜索" : "Search"}</Button>
+                    <TextField label={zh ? "问题" : "Question"} value={query} onChange={(event) => setQuery(event.target.value)} />
+                    <Button loading={loading} onClick={askKnowledge} variant="primary">{zh ? "发送" : "Ask"}</Button>
                   </div>
+                  {chatTurn ? (
+                    <div className="knowledge-chat-turn">
+                      <article className="knowledge-chat-message knowledge-chat-user">
+                        <strong>{zh ? "你" : "You"}</strong>
+                        <p>{chatTurn.question}</p>
+                      </article>
+                      <article className="knowledge-chat-message knowledge-chat-agent">
+                        <strong>{zh ? "Agent" : "Agent"}</strong>
+                        <p>{chatTurn.answer}</p>
+                        <small>{chatTurn.model ? `${chatTurn.provider} / ${chatTurn.model}` : chatTurn.provider}</small>
+                      </article>
+                    </div>
+                  ) : null}
                   <div className="knowledge-results">
                     {results.map((result) => (
                       <article className="knowledge-result" key={`${result.baseId}-${result.id}-${result.source}`}>
@@ -386,17 +405,19 @@ export function KnowledgeSettingsView({ activeView, onNavigate }: { activeView: 
   );
 }
 
-function KnowledgeItemRow({ item, onDelete }: { item: KnowledgeItem; onDelete: () => void }) {
+function KnowledgeItemRow({ item, onDelete, zh }: { item: KnowledgeItem; onDelete: () => void; zh: boolean }) {
+  const failedMessage = item.errorMessage || (zh ? "入库未完成，请删除后重新上传。" : "Import did not complete. Delete and upload again.");
+
   return (
     <div className="knowledge-item-row">
       <FileText size={30} />
       <span>
         <strong>{item.title}</strong>
         <small>{item.source}</small>
-        {item.errorMessage ? <small className="knowledge-error">{item.errorMessage}</small> : null}
+        {item.status === "completed" ? null : <small className="knowledge-error">{failedMessage}</small>}
       </span>
       <div className="knowledge-actions">
-        {item.status === "completed" ? <CheckCircle2 className="knowledge-ok-icon" size={17} /> : <StatusBadge tone={item.status === "failed" ? "danger" : "warning"}>{item.status}</StatusBadge>}
+        {item.status === "completed" ? <CheckCircle2 className="knowledge-ok-icon" size={17} /> : <StatusBadge tone="danger">{zh ? "入库失败" : "failed"}</StatusBadge>}
         <Button size="sm" onClick={onDelete} variant="ghost"><Trash2 size={14} /></Button>
       </div>
     </div>

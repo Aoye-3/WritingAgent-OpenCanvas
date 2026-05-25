@@ -32,13 +32,15 @@ Settings cover:
 - Agent settings store `configuredModelApiId` plus compatibility `providerId + model` fields. They must not store API keys, provider secrets, or copied base URL credentials.
 - Prompt name, description, identity prompt, output type, output format, and selected skills.
 - Tool enablement by ToolRef.
-- Knowledge scope.
+- Knowledge settings: enablement, scope label, selected Knowledge Base ids, retrieval result count, score threshold, optional rerank preference.
 - Memory flag.
 - Quick messages.
 
 Saved settings are merged back onto the base Agent card by the runtime adapter.
 
 Agent settings are the user-controlled configuration surface for concrete Agents. They define intent, model preferences, prompts, Skills, tool refs, memory, knowledge scope, and quick phrases. Agent Runtime is the execution subsystem that consumes these settings through FacetWrite's adapter contract; the current implementation is AgentBackend.
+
+The Agent Settings Knowledge tab loads bases through `GET /api/knowledge/bases` and saves changes through the existing `PUT /api/agent-cards/:agentCardId/settings` path. Selecting no specific base means all ready bases are eligible during generation; selecting one or more base ids constrains retrieval to those bases.
 
 ## Runtime Config
 `GET /api/agent-cards/:agentCardId/runtime-config` is the frontend source for rendering settings safely. It should be preferred over hard-coded settings UI assumptions.
@@ -85,6 +87,7 @@ Agent Runtime is FacetWrite's internal execution subsystem when `AGENT_BACKEND_E
 - AI runtime status, Agent mapping, and ToolUse bridge progress are exposed through `/api/agent-runtime/dashboard` and shown in the AI Dashboard. `/api/agent-backend/*` remains a compatibility alias.
 - FacetWrite sends per-run bridge context to AgentBackend: allowed tool refs, effective tool state, explicit context values, selected Canvas node id, and current chat instruction.
 - AgentBackend loads FacetWrite bridge tools from `AgentBackend.tools.facetwrite_bridge` for `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write`.
+- `knowledge_base` bridge calls prefer KnowledgeService RAG results and pass optional selected `baseIds`; explicit runtime context values are only the fallback when no Knowledge result is available.
 - The bridge calls FacetWrite `/api/internal/agent-runtime/tool-call`, so ToolUse policy remains enforced by FacetWrite and `canvas_write` can only create a pending request. `/api/internal/agent-backend/tool-call` remains a compatibility alias.
 - AgentRuntime does not own FacetWrite product data. Threads, messages, Canvas nodes/edges/write requests, settings, and Knowledge metadata stay in FacetWrite storage; AgentRuntime can affect them only through the backend adapter and internal ToolUse bridge. It must not bypass frontend Canvas context filtering, and it must not call Canvas repositories or storage facades directly.
 - `web_search` is verified separately as a AgentBackend built-in tool, not as a FacetWrite local bridge.
@@ -111,7 +114,7 @@ The AI Dashboard is not a second Agent settings page. It is a read-only runtime/
 Current tools:
 
 - `web_search`: external, medium risk, requires external config.
-- `knowledge_base`: local context tool, low risk.
+- `knowledge_base`: local Knowledge/context tool, low risk, accepts `query`, `limit`, and optional `baseIds`.
 - `quick_messages`: local editing intent tool, low risk.
 - `clear_context`: local context control tool, low risk.
 - `canvas_write`: local high-risk write proposal tool, requires approval.

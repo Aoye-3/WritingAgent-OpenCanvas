@@ -50,7 +50,12 @@ export const toolCatalog: ToolDefinition[] = [
       type: "object",
       properties: {
         query: { type: "string", description: "What to retrieve from local context" },
-        limit: { type: "integer", description: "Maximum number of context entries to return" }
+        limit: { type: "integer", description: "Maximum number of context entries to return" },
+        baseIds: {
+          type: "array",
+          description: "Optional Knowledge Base ids to search",
+          items: { type: "string" }
+        }
       },
       required: ["query", "limit"],
       additionalProperties: false
