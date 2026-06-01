@@ -97,3 +97,64 @@ Client: `http://127.0.0.1:5173`
 - [Refactor Log](docs/REFACTOR_LOG.md)
 - [Security](docs/SECURITY.md)
 - [Reference Archive](docs/reference/README.md)
+
+## Future Development Roadmap
+
+OpenCanvas 的长期方向是一个本地优先的 FigJam + Agent 画板工作区：画板既是视觉创作空间，也是 Agent 可理解、可建议、可调度工具的工作文件。它应当像 PS/Figma 文件一样保存完整项目状态，包括画板节点、连接关系、资源、工作流信息、Agent 对话、ToolUse 事件和写入审批记录。
+
+功能实现层面先对标 FigJam 画板：稳定的无限画布、主工具栏、对象快捷栏、节点/连线/文本/资源操作、多人协作前的本地文件体验。创新点不在于重新发明画板，而在于 Agent 工具调度与人机协作上下文管理：Agent 能理解当前选区、显式发送的思维链、工作流阶段、Role 节点关系和写入审批状态，并在可审计、可确认的边界内调用画板工具。
+
+### Current Foundation
+
+The project already has the core local foundation:
+
+- Local-first workspace: Vite/React frontend, Express API, SQLite/local file persistence, and Agent Runtime sidecar.
+- Canvas V2: React Flow-based pan/zoom/drag canvas with document, note, reference, and role nodes.
+- Canvas structure: directed edges, node resize/edit/delete, right-click creation, session undo, workflow stage, Role nodes, and Role suggestions.
+- Agent Runtime: AgentBackend adapter, Lead Agent/subagent mapping, ToolUse bridge, Knowledge, Memory controls, runtime dashboard, and provider fallback.
+- Human-in-the-loop writes: Agent-originated Canvas changes go through pending write requests and approval before mutation.
+
+### Development Phases
+
+1. **Board File Model**
+   - Treat each project/thread as an OpenCanvas board file.
+   - Define a durable board snapshot shape that groups Canvas nodes, edges, workflow state, assets, Agent conversations, tool events, write approvals, and version metadata.
+   - Keep SQLite as the local source of truth first; add import/export only after the board shape is stable.
+
+2. **FigJam-Style Canvas Toolbar**
+   - Benchmark the core board interaction model against FigJam while keeping OpenCanvas local-first and Agent-aware.
+   - Add a floating board toolbar for core creation modes: select, hand/pan, text, note/card, shape, table/grid, connector, role node, asset/image, and insert.
+   - Reuse existing Canvas node creation and edge APIs instead of inventing parallel creation paths.
+   - Make toolbar modes visible UI state only; persisted truth remains Canvas nodes, edges, metadata, and workflow records.
+
+3. **Contextual Quick Bar**
+   - Add a selection quick bar that appears near the selected object.
+   - For text/document/note/reference nodes, expose local actions such as text style, size, list/link, node kind, workflow stage, and delete.
+   - For role nodes, expose role label/prompt editing and suggestion actions.
+   - For edges, expose delete and future line style controls.
+   - Keep quick-bar actions as direct user edits; Agent-originated edits still use approval-aware paths.
+
+4. **Agent-Callable Board Tools**
+   - Treat Agent tool orchestration and human-AI context management as the main product innovation beyond the FigJam-like board surface.
+   - Expand the current `canvas_write` idea into board-aware tool intents such as create node, append content, connect nodes, propose layout cleanup, create Role suggestion, and summarize selected chain.
+   - Continue routing all tool execution through FacetWrite tool policy and the Agent Runtime bridge.
+   - Low-risk additive operations may become confirmable suggestions; destructive replace/delete operations must remain approval-gated.
+   - Agent context should stay filtered by explicit selection, sent mind chain, workflow stage, and connected Role nodes.
+
+5. **Local Assets, Versions, And Export**
+   - Add board asset records for images and attachments stored under the local `.facetwrite` workspace.
+   - Add board snapshots/version history so a user can restore prior board states.
+   - Add local export/import for portable OpenCanvas board files after the data model is stable.
+
+6. **Online Collaboration**
+   - Add online collaboration only after the local board model and Agent tool boundary are stable.
+   - Introduce accounts/workspaces, shared board sync, presence cursors, comments, permissions, and share links.
+   - Use a conflict-safe collaboration layer for concurrent Canvas edits while preserving local-first/offline behavior where possible.
+   - Keep Agent actions auditable in multiplayer sessions: participants should be able to see what the Agent proposed, who approved it, and what changed.
+
+### Product Principles
+
+- Local-first before cloud sync.
+- Reuse existing Canvas APIs, storage, Agent Runtime adapter, and Tool policy before creating new boundaries.
+- Agent actions must be inspectable, reversible where practical, and approval-gated when destructive.
+- The board UI should prioritize real creation workflows: fast toolbar access, reliable selection, clean quick actions, and no hidden context surprises.
