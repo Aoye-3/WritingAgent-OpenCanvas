@@ -116,3 +116,93 @@ test("saves canvas settings with default undo depth", async () => {
   assert.deepEqual(storage.getCanvasSettings(), { undoDepth: 32 });
   assert.throws(() => storage.saveCanvasSettings({ undoDepth: 0 }), /undo depth/i);
 });
+
+test("stores role nodes as first-class canvas nodes", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;
+  await storage.ensureThread(threadId, "blog-post");
+
+  const role = storage.createCanvasNode(threadId, {
+    kind: "role",
+    title: "Evidence",
+    metadata: { workflowRole: { roleId: "evidence", label: "Evidence", prompt: "Check sources." } }
+  });
+  const draft = storage.createCanvasNode(threadId, { kind: "document", title: "Draft", content: "Body" });
+  const edge = storage.createCanvasEdge(threadId, { sourceNodeId: role.id, targetNodeId: draft.id });
+
+  assert.equal(role.kind, "role");
+  assert.deepEqual((role.metadata as { workflowRole: unknown }).workflowRole, { roleId: "evidence", label: "Evidence", prompt: "Check sources." });
+  assert.equal(edge.sourceNodeId, role.id);
+  assert.equal(edge.targetNodeId, draft.id);
+});
+
+test("canvas workflow stage is thread-scoped and inherited by new nodes", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;
+  await storage.ensureThread(threadId, "blog-post");
+
+  assert.equal(storage.getCanvasWorkflow(threadId).stage, "inspiration");
+  const workflow = storage.updateCanvasWorkflow(threadId, { stage: "structure" });
+  const node = storage.createCanvasNode(threadId, { kind: "document", title: "Outline", content: "Draft outline" });
+
+  assert.equal(workflow.stage, "structure");
+  assert.deepEqual((node.metadata as { workflow?: unknown }).workflow, { stage: "structure" });
+});
+
+test("legacy node role metadata migrates to role nodes and role edges", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;
+  await storage.ensureThread(threadId, "blog-post");
+  storage.updateCanvasWorkflow(threadId, {
+    roles: [{ id: "claims", label: "Claims", prompt: "Challenge unsupported claims." }]
+  });
+  const node = storage.createCanvasNode(threadId, {
+    kind: "document",
+    title: "Draft",
+    content: "Text",
+    metadata: { workflow: { stage: "writing", roles: ["claims"] } }
+  });
+
+  const migrated = storage.migrateCanvasWorkflowRoleNodes(threadId);
+  const nodes = storage.listCanvasNodes(threadId);
+  const roleNode = nodes.find((candidate) => candidate.kind === "role");
+  const migratedTarget = nodes.find((candidate) => candidate.id === node.id);
+
+  assert.equal(migrated.createdRoleNodes, 1);
+  assert.equal(roleNode?.title, "Claims");
+  assert.deepEqual((roleNode?.metadata as { workflowRole: unknown }).workflowRole, { roleId: "claims", label: "Claims", prompt: "Challenge unsupported claims." });
+  assert.deepEqual((migratedTarget?.metadata as { workflow: { stage: string; roles?: string[] } }).workflow, { stage: "writing" });
+  assert.equal(storage.listCanvasEdges(threadId).some((edge) => edge.sourceNodeId === roleNode?.id && edge.targetNodeId === node.id), true);
+});
+
+test("canvas workflow suggestions are anchored to role nodes and retain target nodes", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;
+  await storage.ensureThread(threadId, "blog-post");
+  const node = storage.createCanvasNode(threadId, { kind: "document", title: "Draft", content: "Opening" });
+  const role = storage.createCanvasNode(threadId, {
+    kind: "role",
+    title: "Style",
+    metadata: { workflowRole: { roleId: "style", label: "Style", prompt: "Improve wording." } }
+  });
+  storage.createCanvasEdge(threadId, { sourceNodeId: role.id, targetNodeId: node.id });
+  const suggestion = storage.createCanvasWorkflowSuggestion(threadId, {
+    roleNodeId: role.id,
+    targetNodeId: node.id,
+    roleId: "style",
+    content: "Add a sharper hook.",
+    rationale: "The first sentence is flat."
+  });
+  const accepted = storage.acceptCanvasWorkflowSuggestion(threadId, suggestion.id);
+  const ignored = storage.createCanvasWorkflowSuggestion(threadId, { roleNodeId: role.id, targetNodeId: node.id, roleId: "style", content: "Cite the source." });
+  const converted = storage.convertCanvasWorkflowSuggestionToNode(threadId, ignored.id, { kind: "note" });
+
+  assert.equal(suggestion.nodeId, role.id);
+  assert.equal(suggestion.roleNodeId, role.id);
+  assert.equal(suggestion.targetNodeId, node.id);
+  assert.equal(accepted?.status, "accepted");
+  assert.match(storage.listCanvasNodes(threadId).find((candidate) => candidate.id === node.id)?.content ?? "", /Opening\n\nAdd a sharper hook\./);
+  assert.equal(converted?.suggestion.status, "accepted");
+  assert.equal(converted?.node.kind, "note");
+  assert.equal(storage.ignoreCanvasWorkflowSuggestion(threadId, ignored.id)?.status, "ignored");
+});

@@ -105,7 +105,7 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `AGENT_BACKEND_AUTH_TIMEOUT_MS`
   - Timeout for AgentBackend auth/setup/login requests. Defaults to `5000`.
 - `FACETWRITE_INTERNAL_BASE_URL`
-  - Agent Runtime-to-FacetWrite callback base URL for bridged ToolUse. Docker sidecar default is `http://host.docker.internal:8787`.
+  - Agent Runtime-to-FacetWrite callback base URL for bridged ToolUse. Docker sidecar default is `http://host.docker.internal:8837`.
 - `FACETWRITE_INTERNAL_TOOL_TOKEN`
   - Optional shared token for Agent Runtime internal ToolUse calls. When set, the runtime sends it as `x-facetwrite-tool-token`; the value is never exposed by FacetWrite APIs.
 - `GET /api/agent-runtime/status`
@@ -171,7 +171,7 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
 - `GET /api/threads/:threadId/messages`
   - Returns `{ messages }`.
 - `GET /api/threads/:threadId/state`
-  - Returns thread, sanitized messages, sanitized output versions, tool events, Canvas nodes, and pending Canvas write requests.
+  - Returns thread, sanitized messages, sanitized output versions, tool events, Canvas nodes, Canvas edges, Canvas Workflow state, Canvas Workflow suggestions, and pending Canvas write requests.
   - Internal prompt text, raw ToolUse JSON, provider-private fields such as DeepSeek `reasoning_content`, and AgentBackend replay values must not appear in `messages` or `outputVersions`; they are represented as redacted tool/runtime events when needed.
   - Runtime fallback events such as `agent_backend_runtime_failed` are returned in `toolEvents` so the UI can show when a run switched from AgentBackend to the Provider runtime.
 
@@ -183,14 +183,15 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
 
 ## Canvas
 - `GET /api/threads/:threadId/canvas`
-  - Returns `{ nodes, edges, writeRequests }` for an active thread.
+  - Returns `{ nodes, edges, writeRequests, workflow, suggestions }` for an active thread.
 - `POST /api/threads/:threadId/canvas/nodes`
   - Creates a Canvas node. Body accepts the existing node draft fields: `id`, `kind`, `title`, `content`, `x`, `y`, `width`, `height`, and `metadata`. `id` is optional and is used by session undo restore paths.
+  - New nodes inherit the current Canvas Workflow stage into `metadata.workflow.stage` unless the request supplies explicit workflow metadata.
 - `POST /api/threads/:threadId/canvas/write-requests`
   - Creates a pending Canvas write request from explicit user action, annotated assistant snippets, or Agent runtime intent. The request is not applied until approved.
 - `PATCH /api/threads/:threadId/canvas/nodes/:nodeId`
   - Updates a Canvas node. Canvas V2 uses this for user-driven title/content edits, node drag position persistence, and node resize geometry persistence.
-  - Updating `kind` converts a node between `document`, `note`, and `reference` without changing content or geometry.
+  - Updating `kind` converts a node between supported Canvas kinds. `role` is a workflow function node; AI write requests should continue to default to `document`.
 - `DELETE /api/threads/:threadId/canvas/nodes/:nodeId`
   - Deletes a Canvas node and removes attached directed edges.
 - `POST /api/threads/:threadId/canvas/edges`
@@ -201,6 +202,18 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
   - Applies a pending write request. The frontend can call this immediately after explicit user confirmation in the Canvas write proposal UI.
 - `POST /api/threads/:threadId/canvas/write-requests/:requestId/reject`
   - Rejects a pending write request without changing Canvas nodes.
+- `PUT /api/threads/:threadId/canvas/workflow`
+  - Updates project-level Canvas Workflow state. Body may include `{ stage, roles }`. `stage` must be one of `inspiration`, `research`, `structure`, `writing`, `polish`, or `publish`. Returns `{ workflow }`.
+- `PATCH /api/threads/:threadId/canvas/nodes/:nodeId/workflow`
+  - Updates one content node's workflow stage metadata. Body may include `{ stage }`. Legacy `{ roles }` input may still be migrated, but Role membership is no longer read from content node metadata.
+- `POST /api/threads/:threadId/canvas/suggestions`
+  - Creates a Role-anchored suggestion. Body: `{ roleNodeId, targetNodeId, roleId?, content, rationale? }`. The Role node must be connected to the target content node by a directed `Role -> target` edge. Returns `{ suggestion }`.
+- `POST /api/threads/:threadId/canvas/suggestions/:suggestionId/accept`
+  - Marks a pending suggestion accepted and appends its content to the target content node body. Returns `{ suggestion }`; clients should refresh Canvas state to read updated node content.
+- `POST /api/threads/:threadId/canvas/suggestions/:suggestionId/ignore`
+  - Marks a pending suggestion ignored without changing node content. Returns `{ suggestion }`.
+- `POST /api/threads/:threadId/canvas/suggestions/:suggestionId/convert-to-node`
+  - Creates a new Canvas node from suggestion content, defaults to `note` unless a valid `kind` is supplied, and marks the suggestion accepted. Returns `{ suggestion, node }`.
 - `GET /api/settings/canvas`
   - Returns `{ undoDepth }`. Default is 20.
 - `PUT /api/settings/canvas`

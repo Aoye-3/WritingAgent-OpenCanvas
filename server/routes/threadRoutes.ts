@@ -140,6 +140,7 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime }: Th
       return;
     }
 
+    storage.migrateCanvasWorkflowRoleNodes(request.params.threadId);
     sendOk(response, {
       thread,
       messages: storage.listMessages(request.params.threadId),
@@ -148,7 +149,9 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime }: Th
       toolEvents: storage.listToolEvents(request.params.threadId),
       canvasNodes: storage.listCanvasNodes(request.params.threadId),
       canvasEdges: storage.listCanvasEdges(request.params.threadId),
-      canvasWriteRequests: storage.listCanvasWriteRequests(request.params.threadId, "pending")
+      canvasWriteRequests: storage.listCanvasWriteRequests(request.params.threadId, "pending"),
+      canvasWorkflow: storage.getCanvasWorkflow(request.params.threadId),
+      canvasWorkflowSuggestions: storage.listCanvasWorkflowSuggestions(request.params.threadId)
     });
   });
 }

@@ -11,6 +11,7 @@ import type { Provider } from "./types.js";
 import type { ToolEventRecord } from "./toolRuntime.js";
 import { sanitizeVisibleText } from "./services/generation/outputNormalizer.js";
 import type { KnowledgeBase, KnowledgeBaseInput, KnowledgeEventInput, KnowledgeItem, KnowledgeItemInput, KnowledgeItemStatus } from "./knowledge/types.js";
+import type { CanvasWorkflowRole, CanvasWorkflowStage, CanvasWorkflowSuggestionStatus } from "../shared/canvasWorkflow.js";
 
 export type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
@@ -75,7 +76,7 @@ export type StoredToolEvent = {
   createdAt: string;
 };
 
-export type CanvasNodeKind = "document" | "note" | "reference";
+export type CanvasNodeKind = "document" | "note" | "reference" | "role";
 export type CanvasWriteOperation = "create" | "replace" | "append";
 export type CanvasWriteRequestStatus = "pending" | "approved" | "rejected";
 
@@ -151,6 +152,52 @@ export type CanvasEdgeInput = {
 
 export type CanvasSettings = {
   undoDepth: number;
+};
+
+export type CanvasWorkflow = {
+  threadId: string;
+  stage: CanvasWorkflowStage;
+  stages: CanvasWorkflowStage[];
+  roles: CanvasWorkflowRole[];
+  updatedAt: string;
+};
+
+export type CanvasWorkflowInput = {
+  stage?: CanvasWorkflowStage;
+  roles?: CanvasWorkflowRole[];
+};
+
+export type CanvasNodeWorkflowPatch = {
+  stage?: CanvasWorkflowStage;
+  roles?: string[];
+};
+
+export type CanvasWorkflowSuggestion = {
+  id: string;
+  threadId: string;
+  nodeId: string;
+  roleNodeId: string;
+  targetNodeId: string;
+  roleId: string;
+  content: string;
+  rationale: string;
+  status: CanvasWorkflowSuggestionStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CanvasWorkflowSuggestionInput = {
+  nodeId?: string;
+  roleNodeId?: string;
+  targetNodeId?: string;
+  roleId: string;
+  content: string;
+  rationale?: string;
+};
+
+export type CanvasSuggestionToNodeInput = {
+  kind?: CanvasNodeKind;
+  title?: string;
 };
 
 const appRoot = path.resolve(process.cwd(), ".facetwrite");
@@ -327,6 +374,8 @@ export class SQLiteStorageRepository {
 
     this.withTransaction(() => {
       this.db.prepare(`DELETE FROM canvas_edges WHERE thread_id = ?`).run(threadId);
+      this.db.prepare(`DELETE FROM canvas_workflow_suggestions WHERE thread_id = ?`).run(threadId);
+      this.db.prepare(`DELETE FROM canvas_workflows WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM canvas_write_requests WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM canvas_nodes WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM thread_inputs WHERE thread_id = ?`).run(threadId);
@@ -392,6 +441,42 @@ export class SQLiteStorageRepository {
 
   saveCanvasSettings(input: Partial<CanvasSettings>): CanvasSettings {
     return this.canvas.saveCanvasSettings(input);
+  }
+
+  getCanvasWorkflow(threadId: string): CanvasWorkflow {
+    return this.canvas.getCanvasWorkflow(threadId);
+  }
+
+  updateCanvasWorkflow(threadId: string, input: CanvasWorkflowInput): CanvasWorkflow {
+    return this.canvas.updateCanvasWorkflow(threadId, input);
+  }
+
+  updateCanvasNodeWorkflow(threadId: string, nodeId: string, patch: CanvasNodeWorkflowPatch) {
+    return this.canvas.updateCanvasNodeWorkflow(threadId, nodeId, patch);
+  }
+
+  migrateCanvasWorkflowRoleNodes(threadId: string) {
+    return this.canvas.migrateCanvasWorkflowRoleNodes(threadId);
+  }
+
+  listCanvasWorkflowSuggestions(threadId: string, nodeId?: string) {
+    return this.canvas.listCanvasWorkflowSuggestions(threadId, nodeId);
+  }
+
+  createCanvasWorkflowSuggestion(threadId: string, input: CanvasWorkflowSuggestionInput) {
+    return this.canvas.createCanvasWorkflowSuggestion(threadId, input);
+  }
+
+  acceptCanvasWorkflowSuggestion(threadId: string, suggestionId: string) {
+    return this.canvas.acceptCanvasWorkflowSuggestion(threadId, suggestionId);
+  }
+
+  ignoreCanvasWorkflowSuggestion(threadId: string, suggestionId: string) {
+    return this.canvas.ignoreCanvasWorkflowSuggestion(threadId, suggestionId);
+  }
+
+  convertCanvasWorkflowSuggestionToNode(threadId: string, suggestionId: string, input: CanvasSuggestionToNodeInput = {}) {
+    return this.canvas.convertCanvasWorkflowSuggestionToNode(threadId, suggestionId, input);
   }
 
   listKnowledgeBases() {

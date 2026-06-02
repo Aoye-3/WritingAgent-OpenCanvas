@@ -1,8 +1,8 @@
 import { Handle, Position, useReactFlow, useViewport, type NodeProps } from "@xyflow/react";
 import { flushSync } from "react-dom";
-import type { CanvasNode } from "../../../agents/types";
-import { CloseIcon } from "../../../../shared/icons";
-import { MIN_NODE_SIZE, kindLabels } from "./constants";
+import type { CanvasNode, CanvasWorkflowRole, CanvasWorkflowStage } from "../../../agents/types";
+import { TrashIcon } from "../../../../shared/icons";
+import { MIN_NODE_SIZE, kindLabels, workflowStageLabels } from "./constants";
 import { computeResize, isKnownCanvasKind, readDimension, withManualCanvasSize } from "./nodeLayout";
 import { CanvasNodeRenderer } from "./renderers/CanvasNodeRenderer";
 import type { CanvasFlowNode, CanvasLocale, ResizeHandle } from "./types";
@@ -76,8 +76,20 @@ export function CanvasNodeFrame({ data, selected }: NodeProps<CanvasFlowNode>) {
     <article className={`canvas-node ${kindClass} ${selected ? "is-selected" : ""}`} data-testid="canvas-node">
       <NodeLinkPort />
       {selected ? <ResizeFrame onResizeStart={startResize} /> : null}
-      <CanvasNodeHeader locale={locale} node={node} onDeleteNode={onDeleteNode} />
+      <CanvasNodeHeader locale={locale} node={node} />
+      <CanvasNodeWorkflowBadges locale={locale} node={node} />
       <CanvasNodeRenderer isResizing={isResizing} locale={locale} node={node} onUpdateNode={onUpdateNode} />
+      <CanvasNodeSuggestions
+        locale={locale}
+        roles={data.workflow?.roles ?? []}
+        suggestions={data.suggestions}
+        onAcceptSuggestion={data.onAcceptSuggestion}
+        onConvertSuggestionToNode={data.onConvertSuggestionToNode}
+        onIgnoreSuggestion={data.onIgnoreSuggestion}
+      />
+      <button className="icon-button canvas-node-delete nodrag" type="button" aria-label="Delete node" onClick={() => void onDeleteNode(node.id)}>
+        <TrashIcon aria-hidden="true" size={15} />
+      </button>
     </article>
   );
 }
@@ -115,20 +127,69 @@ function ResizeFrame({ onResizeStart }: { onResizeStart: (handle: ResizeHandle, 
 
 function CanvasNodeHeader({
   locale,
-  node,
-  onDeleteNode
+  node
 }: {
   locale: CanvasLocale;
   node: CanvasNode;
-  onDeleteNode: (nodeId: string) => Promise<void>;
 }) {
-  const label = isKnownCanvasKind(node.kind) ? kindLabels[node.kind][locale] : (locale === "zh" ? "鏈煡鑺傜偣" : "Unknown node");
+  const label = isKnownCanvasKind(node.kind) ? kindLabels[node.kind]?.[locale] ?? node.kind : (locale === "zh" ? "鏈煡鑺傜偣" : "Unknown node");
   return (
     <div className="canvas-node-header canvas-node-drag-handle">
       <span>{label}</span>
-      <button className="icon-button canvas-node-delete nodrag" type="button" aria-label="Delete node" onClick={() => void onDeleteNode(node.id)}>
-        <CloseIcon aria-hidden="true" size={16} />
-      </button>
     </div>
   );
+}
+
+function CanvasNodeWorkflowBadges({ locale, node }: { locale: CanvasLocale; node: CanvasNode }) {
+  if (node.kind === "role") return null;
+  const workflow = readNodeWorkflow(node);
+  const stageLabel = workflow.stage ? workflowStageLabels[workflow.stage][locale] : undefined;
+  if (!stageLabel) return null;
+  return (
+    <div className="canvas-node-workflow-badges nodrag">
+      {stageLabel ? <span className="canvas-node-stage-badge">{stageLabel}</span> : null}
+    </div>
+  );
+}
+
+function CanvasNodeSuggestions({
+  locale,
+  roles,
+  suggestions,
+  onAcceptSuggestion,
+  onConvertSuggestionToNode,
+  onIgnoreSuggestion
+}: {
+  locale: CanvasLocale;
+  roles: CanvasWorkflowRole[];
+  suggestions: CanvasFlowNode["data"]["suggestions"];
+  onAcceptSuggestion: (suggestionId: string) => Promise<void>;
+  onConvertSuggestionToNode: (suggestionId: string) => Promise<void>;
+  onIgnoreSuggestion: (suggestionId: string) => Promise<void>;
+}) {
+  const pending = suggestions.filter((suggestion) => suggestion.status === "pending");
+  if (pending.length === 0) return null;
+  return (
+    <div className="canvas-node-suggestions nodrag">
+      {pending.map((suggestion) => (
+        <div className="canvas-node-suggestion" key={suggestion.id}>
+          <strong>{roles.find((role) => role.id === suggestion.roleId)?.label ?? suggestion.roleId}</strong>
+          <p>{suggestion.content}</p>
+          <div className="canvas-node-suggestion-actions">
+            <button type="button" onClick={() => void onAcceptSuggestion(suggestion.id)}>{locale === "zh" ? "接受" : "Accept"}</button>
+            <button type="button" onClick={() => void onIgnoreSuggestion(suggestion.id)}>{locale === "zh" ? "忽略" : "Ignore"}</button>
+            <button type="button" onClick={() => void onConvertSuggestionToNode(suggestion.id)}>{locale === "zh" ? "转节点" : "To node"}</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function readNodeWorkflow(node: CanvasNode): { stage?: CanvasWorkflowStage; roles: string[] } {
+  const metadata = node.metadata as { workflow?: { stage?: CanvasWorkflowStage; roles?: unknown } } | undefined;
+  return {
+    stage: metadata?.workflow?.stage,
+    roles: Array.isArray(metadata?.workflow?.roles) ? metadata.workflow.roles.filter((role): role is string => typeof role === "string") : []
+  };
 }

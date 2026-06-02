@@ -1,6 +1,4 @@
 param(
-  [Alias("SkipAgentBackend")]
-  [switch] $SkipAgentRuntime,
   [switch] $NoInstall
 )
 
@@ -180,7 +178,7 @@ function Ensure-AgentRuntimeBridgeEnv {
     Select-Object -First 1
 
   if (-not $bridgeBaseUrl) {
-    Add-Content -LiteralPath $agentRuntimeEnvPath -Value "FACETWRITE_INTERNAL_BASE_URL=http://host.docker.internal:8787"
+    Add-Content -LiteralPath $agentRuntimeEnvPath -Value "FACETWRITE_INTERNAL_BASE_URL=http://host.docker.internal:8837"
     Write-Host "Added FACETWRITE_INTERNAL_BASE_URL to modules\agent-runtime\.env for ToolUse bridge callbacks." -ForegroundColor DarkYellow
   }
 }
@@ -254,7 +252,7 @@ if (-not $NoInstall -and -not (Test-Path -LiteralPath (Join-Path $root "node_mod
 
 $clientPortValue = Get-ConfigValue -Name "VITE_PORT" -DefaultValue "3000"
 $clientPort = [int] $clientPortValue
-$apiPortValue = Get-ConfigValue -Name "PORT" -DefaultValue "8787"
+$apiPortValue = Get-ConfigValue -Name "PORT" -DefaultValue "8837"
 $apiPort = [int] $apiPortValue
 $providerId = Get-ConfigValue -Name "OPENAI_PROVIDER_ID" -DefaultValue "deepseek"
 $model = Get-ConfigValue -Name "OPENAI_MODEL" -DefaultValue "deepseek-v4-flash"
@@ -262,10 +260,13 @@ $baseUrl = Get-ConfigValue -Name "OPENAI_BASE_URL" -DefaultValue "https://api.de
 $apiKeyConfigured = [bool] (Get-ConfigValue -Name "OPENAI_API_KEY")
 $agentBackendEnabled = (Get-ConfigValue -Name "AGENT_BACKEND_ENABLED" -DefaultValue "false") -match "^(true|1)$"
 $agentBackendBaseUrl = Get-ConfigValue -Name "AGENT_BACKEND_BASE_URL" -DefaultValue "http://127.0.0.1:2026"
-$skipRuntime = $SkipAgentRuntime
 
 if (-not (Test-Path -LiteralPath (Join-Path $root ".env.local"))) {
   Write-Host "Warning: .env.local was not found. The API will use mock fallback unless provider settings are configured elsewhere." -ForegroundColor Yellow
+}
+
+if (-not $agentBackendEnabled) {
+  throw "Agent Runtime is required for the local launcher. Set AGENT_BACKEND_ENABLED=true in .env.local before starting FacetWrite."
 }
 
 if (Test-PortInUse -Port $clientPort) {
@@ -284,11 +285,7 @@ Write-Host "API key:  $(if ($apiKeyConfigured) { "configured" } else { "missing"
 Write-Host "Agent Runtime: $(if ($agentBackendEnabled) { "enabled at $agentBackendBaseUrl (AgentBackend adapter)" } else { "disabled" })"
 Write-Host ""
 
-if ($agentBackendEnabled -and -not $skipRuntime) {
-  Start-AgentRuntimeSidecar
-} elseif ($agentBackendEnabled -and $skipRuntime) {
-  Write-Host "Skipping Agent Runtime sidecar startup because a skip flag was provided." -ForegroundColor DarkYellow
-}
+Start-AgentRuntimeSidecar
 
 Write-Host "Starting FacetWrite..." -ForegroundColor Green
 Write-Host "Frontend:        http://127.0.0.1:$clientPort/"
@@ -302,4 +299,4 @@ Write-Host "Agent Runtime is the primary acceptance path when enabled; provider/
 Write-Host "Keep this window open while using the app. Press Ctrl+C to stop." -ForegroundColor DarkGray
 Write-Host ""
 
-& npm.cmd run dev
+& npm.cmd run dev:services

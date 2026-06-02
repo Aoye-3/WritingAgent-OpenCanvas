@@ -148,6 +148,27 @@ export function migrateStorageSchema(db: DatabaseSync) {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS canvas_workflows (
+      thread_id TEXT PRIMARY KEY,
+      stage TEXT NOT NULL,
+      roles_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS canvas_workflow_suggestions (
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL,
+      node_id TEXT NOT NULL,
+      role_node_id TEXT NOT NULL DEFAULT '',
+      target_node_id TEXT NOT NULL DEFAULT '',
+      role_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      rationale TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS knowledge_bases (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -210,6 +231,12 @@ export function migrateStorageSchema(db: DatabaseSync) {
   }
   if (!columnExists(db, "knowledge_bases", "rerank_config_id")) {
     db.exec(`ALTER TABLE knowledge_bases ADD COLUMN rerank_config_id TEXT`);
+  }
+  if (!columnExists(db, "canvas_workflow_suggestions", "role_node_id")) {
+    db.exec(`ALTER TABLE canvas_workflow_suggestions ADD COLUMN role_node_id TEXT NOT NULL DEFAULT ''`);
+  }
+  if (!columnExists(db, "canvas_workflow_suggestions", "target_node_id")) {
+    db.exec(`ALTER TABLE canvas_workflow_suggestions ADD COLUMN target_node_id TEXT NOT NULL DEFAULT ''`);
   }
 }
 

@@ -1,17 +1,24 @@
 import type { Dispatch, SetStateAction } from "react";
-import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasWriteRequest } from "../../features/agents/types";
+import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../features/agents/types";
 import {
+  acceptCanvasWorkflowSuggestion,
   approveCanvasWriteRequest,
+  convertCanvasWorkflowSuggestionToNode,
   createCanvasEdge,
   createCanvasNode,
   createCanvasWriteRequest,
   deleteCanvasEdge,
   deleteCanvasNode,
+  ignoreCanvasWorkflowSuggestion,
   rejectCanvasWriteRequest,
   updateCanvasNode,
+  updateCanvasNodeWorkflow,
+  updateCanvasWorkflow,
   type CanvasEdgeDraft,
   type CanvasNodeDraft,
+  type CanvasNodeWorkflowPatch,
   type CanvasNodePatch,
+  type CanvasWorkflowPatch,
   type CanvasWriteRequestDraft
 } from "../../features/canvas/canvasClient";
 import { createInverseCanvasNodePatch, type CanvasHistoryEntry } from "../../../shared/canvasHistory";
@@ -26,6 +33,8 @@ type UseCanvasActionsOptions = {
   pushHistory: (entry: CanvasHistoryEntry) => void;
   setCanvasEdges: Dispatch<SetStateAction<CanvasEdge[]>>;
   setCanvasNodes: Dispatch<SetStateAction<CanvasNode[]>>;
+  setCanvasWorkflow: Dispatch<SetStateAction<CanvasWorkflow | undefined>>;
+  setCanvasWorkflowSuggestions: Dispatch<SetStateAction<CanvasWorkflowSuggestion[]>>;
   setCanvasWriteRequests: Dispatch<SetStateAction<CanvasWriteRequest[]>>;
   setSelectedCanvasNodeId: Dispatch<SetStateAction<string | undefined>>;
 };
@@ -42,6 +51,8 @@ export function useCanvasActions({
   pushHistory,
   setCanvasEdges,
   setCanvasNodes,
+  setCanvasWorkflow,
+  setCanvasWorkflowSuggestions,
   setCanvasWriteRequests,
   setSelectedCanvasNodeId
 }: UseCanvasActionsOptions) {
@@ -111,6 +122,23 @@ export function useCanvasActions({
     return handleUpdateCanvasNode(nodeId, { kind });
   };
 
+  const handleUpdateCanvasWorkflow = async (patch: CanvasWorkflowPatch) => {
+    const threadId = await ensureThreadId();
+    const workflow = await updateCanvasWorkflow(threadId, patch);
+    setCanvasWorkflow(workflow);
+    await onRefreshCanvas(threadId);
+    await onRefreshProjectSurfaces();
+    return workflow;
+  };
+
+  const handleUpdateCanvasNodeWorkflow = async (nodeId: string, patch: CanvasNodeWorkflowPatch) => {
+    const threadId = await ensureThreadId();
+    const node = await updateCanvasNodeWorkflow(threadId, nodeId, patch);
+    setCanvasNodes((current) => current.map((item) => item.id === node.id ? node : item));
+    await onRefreshProjectSurfaces();
+    return node;
+  };
+
   const undoCanvas = async () => {
     const entry = popHistory();
     if (!entry) return;
@@ -154,15 +182,41 @@ export function useCanvasActions({
     await onRefreshProjectSurfaces();
   };
 
+  const handleAcceptCanvasWorkflowSuggestion = async (suggestionId: string) => {
+    const threadId = await ensureThreadId();
+    await acceptCanvasWorkflowSuggestion(threadId, suggestionId);
+    await onRefreshCanvas(threadId);
+    await onRefreshProjectSurfaces();
+  };
+
+  const handleIgnoreCanvasWorkflowSuggestion = async (suggestionId: string) => {
+    const threadId = await ensureThreadId();
+    const suggestion = await ignoreCanvasWorkflowSuggestion(threadId, suggestionId);
+    setCanvasWorkflowSuggestions((current) => current.map((item) => item.id === suggestion.id ? suggestion : item));
+    await onRefreshProjectSurfaces();
+  };
+
+  const handleConvertCanvasWorkflowSuggestionToNode = async (suggestionId: string, kind: CanvasNodeKind = "note") => {
+    const threadId = await ensureThreadId();
+    await convertCanvasWorkflowSuggestionToNode(threadId, suggestionId, kind);
+    await onRefreshCanvas(threadId);
+    await onRefreshProjectSurfaces();
+  };
+
   return {
+    handleAcceptCanvasWorkflowSuggestion,
     handleApproveCanvasWriteRequest,
     handleConvertCanvasNode,
+    handleConvertCanvasWorkflowSuggestionToNode,
     handleCreateCanvasEdge,
     handleCreateCanvasNode,
     handleCreateCanvasWriteRequest,
     handleDeleteCanvasEdge,
     handleDeleteCanvasNode,
+    handleIgnoreCanvasWorkflowSuggestion,
     handleRejectCanvasWriteRequest,
+    handleUpdateCanvasNodeWorkflow,
+    handleUpdateCanvasWorkflow,
     handleUpdateCanvasNode,
     undoCanvas
   };

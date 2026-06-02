@@ -18,8 +18,8 @@ FacetWrite treats Agent Runtime as the primary AI execution subsystem when `AGEN
 
 ## Ports And URLs
 
-- FacetWrite app/API: `http://127.0.0.1:8787` for backend service-to-service callbacks.
-- FacetWrite Vite UI: `http://127.0.0.1:5173` by default. If Windows refuses the 5173 bind during local testing, run Vite on `http://127.0.0.1:3000` and keep the backend on `8787`.
+- FacetWrite app/API: `http://127.0.0.1:8837` for backend service-to-service callbacks.
+- FacetWrite Vite UI: `http://127.0.0.1:3000` by default. The backend default avoids Windows' common excluded range around `8787`.
 - Agent Runtime nginx sidecar: `http://127.0.0.1:2026`.
 - Agent Runtime gateway container service: exposed through nginx for FacetWrite runtime use.
 
@@ -42,7 +42,7 @@ AGENT_BACKEND_AUTH_TIMEOUT_MS=5000
 Agent Runtime Docker environment for FacetWrite ToolUse bridge:
 
 ```bash
-FACETWRITE_INTERNAL_BASE_URL=http://host.docker.internal:8787
+FACETWRITE_INTERNAL_BASE_URL=http://host.docker.internal:8837
 FACETWRITE_INTERNAL_TOOL_TOKEN=<optional shared token>
 ```
 
@@ -72,9 +72,13 @@ docker info
 docker compose version
 ```
 
-2. Start FacetWrite with `AGENT_BACKEND_ENABLED=true` and backend reachable on `127.0.0.1:8787`.
+2. Start FacetWrite through the hard-bound local launcher. It requires `AGENT_BACKEND_ENABLED=true`, starts Agent Runtime Compose, waits for `http://127.0.0.1:2026/health`, then starts the FacetWrite frontend and API:
 
-3. Start Agent Runtime Compose through the npm wrapper, which injects `AGENT_RUNTIME_ROOT` and uses project name `facetwrite-agent-runtime`:
+```bash
+npm run dev
+```
+
+3. For Runtime-only maintenance, use the npm wrapper, which injects `AGENT_RUNTIME_ROOT` and uses project name `facetwrite-agent-runtime`:
 
 ```bash
 npm run agent-runtime:up
@@ -98,8 +102,8 @@ curl http://127.0.0.1:2026/health
 FacetWrite status:
 
 ```bash
-curl http://127.0.0.1:8787/api/agent-runtime/status
-curl http://127.0.0.1:8787/api/agent-runtime/dashboard
+curl http://127.0.0.1:8837/api/agent-runtime/status
+curl http://127.0.0.1:8837/api/agent-runtime/dashboard
 ```
 
 Expected status includes:
@@ -155,7 +159,7 @@ Canvas acceptance:
 - `http://127.0.0.1:2026/health` returns 502 and gateway logs mention `/app/config.yaml` is a directory: an earlier compose run created a missing bind-mounted file path as an empty directory. The launcher now repairs empty `modules/agent-runtime/config.yaml` and `modules/agent-runtime/extensions_config.json` directories by migrating the legacy files or examples, then recreates the gateway container.
 - Agent Runtime `/api/skills`, `/api/mcp/config`, or `/api/runs/stream` returns 401/403: check `AGENT_BACKEND_AUTH_EMAIL`, `AGENT_BACKEND_AUTH_PASSWORD`, `AGENT_BACKEND_AUTO_SETUP`, and setup/login status.
 - FacetWrite status is reachable but auth is not authenticated: wait for setup-status rate limits to cool down, then retry backend auth.
-- Bridge calls fail from Docker: confirm `FACETWRITE_INTERNAL_BASE_URL=http://host.docker.internal:8787`, FacetWrite backend is listening, and any configured token matches.
+- Bridge calls fail from Docker: confirm `FACETWRITE_INTERNAL_BASE_URL=http://host.docker.internal:8837`, FacetWrite backend is listening, and any configured token matches.
 - DeepSeek tool calls fail with `reasoning_content` errors: use AgentBackend `AgentBackend.models.patched_deepseek:PatchedChatDeepSeek` for the current DeepSeek-compatible model so reasoning metadata is preserved across tool-call turns.
 - `canvas_write` appears applied before user confirmation/approval: this is a blocker; the runtime bridge must only create a pending request.
 
@@ -163,7 +167,7 @@ Canvas acceptance:
 
 - `npm run agent-runtime:up` starts `facetwrite-agent-runtime-nginx`, `facetwrite-agent-runtime-gateway`, and `facetwrite-agent-runtime-frontend`.
 - `http://127.0.0.1:2026/health` returns HTTP 200.
-- `http://127.0.0.1:8787/api/agent-runtime/status` returns `enabled:true`, `reachable:true`, `runtimeProvider:"agent-backend"`, and `authState:"authenticated"`.
+- `http://127.0.0.1:8837/api/agent-runtime/status` returns `enabled:true`, `reachable:true`, `runtimeProvider:"agent-backend"`, and `authState:"authenticated"`.
 - A direct `/api/generate` smoke test returned `provider:"agent-backend"`, `usedMock:false`, and `finishReason:"agent_backend_completed"`.
 - Verification passed with `npm run typecheck` and `npm run test` after the env/script/compose corrections.
 

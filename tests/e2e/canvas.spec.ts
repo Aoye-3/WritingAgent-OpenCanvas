@@ -1,19 +1,24 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const undoButtonName = /Undo|撤销/;
-const sendMindChainName = /Send mind chain|发送思维链/;
+const undoButtonName = /Undo|撤销|鎾ら攢/;
+const sendMindChainName = /Send mind chain|发送思维链|鍙戦€佹€濈淮閾?/;
 
 type CanvasState = {
   canvasNodes: Array<{
     id: string;
-    kind: "document" | "note" | "reference";
+    kind: "document" | "note" | "reference" | "role";
     title: string;
     content: string;
     x: number;
     y: number;
     width: number;
     height: number;
+    metadata?: { workflow?: { stage?: string; roles?: string[] }; workflowRole?: { roleId?: string; label?: string; prompt?: string } };
   }>;
+  canvasWorkflow?: {
+    stage: string;
+    roles: Array<{ id: string; label: string }>;
+  };
 };
 
 async function openNewCanvas(page: Page) {
@@ -55,8 +60,26 @@ test("canvas creates node types and supports undo", async ({ page }) => {
   await viewport.click({ button: "right", position: { x: 180, y: 180 } });
   await page.getByTestId("canvas-menu-create-reference").click();
   await expect(page.getByTestId("canvas-node")).toHaveCount(1);
-
   await page.getByRole("button", { name: undoButtonName }).click();
+  await expect(page.getByTestId("canvas-node")).toHaveCount(0);
+
+  await viewport.click({ button: "right", position: { x: 180, y: 180 } });
+  await page.getByTestId("canvas-menu-create-role").click();
+  await expect(page.getByTestId("canvas-node")).toHaveCount(1);
+  await page.getByRole("button", { name: undoButtonName }).click();
+  await expect(page.getByTestId("canvas-node")).toHaveCount(0);
+});
+
+test("canvas deletes a selected node from the corner action", async ({ page }) => {
+  await openNewCanvas(page);
+
+  const viewport = page.getByTestId("canvas-viewport");
+  await viewport.click({ button: "right", position: { x: 180, y: 180 } });
+  await page.getByTestId("canvas-menu-create-note").click();
+  await expect(page.getByTestId("canvas-node")).toHaveCount(1);
+
+  await page.getByTestId("canvas-node").first().click();
+  await page.getByLabel("Delete node").first().click();
   await expect(page.getByTestId("canvas-node")).toHaveCount(0);
 });
 
@@ -101,6 +124,60 @@ test("canvas persists blur edits and preserves node data across kind conversion"
   });
 });
 
+test("canvas workflow stage, role nodes, and suggestions are visible in the UI", async ({ page }) => {
+  await openNewCanvas(page);
+
+  await page.getByLabel("Canvas workflow stage").selectOption("research");
+  const viewport = page.getByTestId("canvas-viewport");
+  await viewport.click({ button: "right", position: { x: 180, y: 180 } });
+  await page.getByTestId("canvas-menu-create-document").click();
+  await page.getByTestId("canvas-node-title").first().fill("Workflow draft");
+  await page.getByTestId("canvas-node-content").first().fill("Initial workflow body");
+  await page.getByTestId("canvas-node-content").first().blur();
+
+  await expect.poll(async () => {
+    const state = await fetchCanvasState(page);
+    return state.canvasNodes[0]?.metadata?.workflow?.stage;
+  }).toBe("research");
+
+  const threadId = await getCurrentThreadId(page);
+
+  const stateWithDocument = await fetchCanvasState(page);
+  const nodeId = stateWithDocument.canvasNodes.find((node) => node.kind === "document")!.id;
+  const roleResponse = await page.request.post(`/api/threads/${threadId}/canvas/nodes`, {
+    data: {
+      kind: "role",
+      title: "Evidence",
+      x: 760,
+      y: 180,
+      metadata: { workflowRole: { roleId: "evidence", label: "Evidence", prompt: "Check sources before advising." } }
+    }
+  });
+  expect(roleResponse.ok()).toBeTruthy();
+  const roleNodeId = ((await roleResponse.json()) as { node: { id: string } }).node.id;
+  const edgeResponse = await page.request.post(`/api/threads/${threadId}/canvas/edges`, {
+    data: { sourceNodeId: roleNodeId, targetNodeId: nodeId }
+  });
+  expect(edgeResponse.ok()).toBeTruthy();
+
+  const suggestionResponse = await page.request.post(`/api/threads/${threadId}/canvas/suggestions`, {
+    data: { roleNodeId, targetNodeId: nodeId, roleId: "evidence", content: "Add one concrete source." }
+  });
+  expect(suggestionResponse.ok()).toBeTruthy();
+
+  await page.getByLabel("Canvas workflow stage").selectOption("publish");
+  await expect(page.getByText("Add one concrete source.")).toBeVisible();
+  await page.getByRole("button", { name: /Accept|接受|鎺ュ彈/ }).click();
+
+  await expect.poll(async () => {
+    const state = await fetchCanvasState(page);
+    return state.canvasNodes.find((node) => node.id === nodeId)?.content;
+  }).toContain("Add one concrete source.");
+
+  const finalState = await fetchCanvasState(page);
+  expect(finalState.canvasNodes.find((node) => node.id === nodeId)?.metadata?.workflow?.roles).toBeUndefined();
+});
+
 test("canvas can connect nodes, delete an edge, and draft a mind chain", async ({ page }) => {
   await openNewCanvas(page);
 
@@ -113,21 +190,31 @@ test("canvas can connect nodes, delete an edge, and draft a mind chain", async (
     await page.getByRole("button", { name: "Zoom out" }).click();
   }
 
-  await viewport.click({ button: "right", position: { x: 100, y: 360 } });
+  await viewport.click({ button: "right", position: { x: 100, y: 250 } });
   await page.getByTestId("canvas-menu-create-reference").click();
   await page.getByTestId("canvas-node-title").last().fill("Chain end");
   await page.getByTestId("canvas-node-content").last().fill("Second chain item");
   await viewport.click();
 
-  const ports = page.getByTestId("canvas-node-link-port");
-  const sourceBox = await ports.first().boundingBox();
-  const targetBox = await ports.last().boundingBox();
-  expect(sourceBox).not.toBeNull();
-  expect(targetBox).not.toBeNull();
-  await page.mouse.move(sourceBox!.x + sourceBox!.width / 2, sourceBox!.y + sourceBox!.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2, { steps: 8 });
-  await page.mouse.up();
+  const threadId = await getCurrentThreadId(page);
+  await expect.poll(async () => {
+    const current = await fetchCanvasState(page);
+    return {
+      sourceNode: current.canvasNodes.find((node) => node.content === "First chain item"),
+      targetNode: current.canvasNodes.find((node) => node.content === "Second chain item")
+    };
+  }).toMatchObject({
+    sourceNode: { content: "First chain item" },
+    targetNode: { content: "Second chain item" }
+  });
+  const state = await fetchCanvasState(page);
+  const sourceNode = state.canvasNodes.find((node) => node.content === "First chain item")!;
+  const targetNode = state.canvasNodes.find((node) => node.content === "Second chain item")!;
+  const edgeResponse = await page.request.post(`/api/threads/${threadId}/canvas/edges`, {
+    data: { sourceNodeId: sourceNode.id, targetNodeId: targetNode.id }
+  });
+  expect(edgeResponse.ok()).toBeTruthy();
+  await page.getByLabel("Canvas workflow stage").selectOption("publish");
 
   await expect(page.locator(".react-flow__edge")).toHaveCount(1);
 

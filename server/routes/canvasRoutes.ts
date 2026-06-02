@@ -14,11 +14,82 @@ export function registerCanvasRoutes(app: Express, { storage }: CanvasRouteDeps)
       return;
     }
 
+    storage.migrateCanvasWorkflowRoleNodes(request.params.threadId);
     sendOk(response, {
       nodes: storage.listCanvasNodes(request.params.threadId),
       edges: storage.listCanvasEdges(request.params.threadId),
-      writeRequests: storage.listCanvasWriteRequests(request.params.threadId, "pending")
+      writeRequests: storage.listCanvasWriteRequests(request.params.threadId, "pending"),
+      workflow: storage.getCanvasWorkflow(request.params.threadId),
+      suggestions: storage.listCanvasWorkflowSuggestions(request.params.threadId)
     });
+  });
+
+  app.put("/api/threads/:threadId/canvas/workflow", (request, response) => {
+    try {
+      sendOk(response, { workflow: storage.updateCanvasWorkflow(request.params.threadId, request.body ?? {}) });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to update canvas workflow"));
+    }
+  });
+
+  app.patch("/api/threads/:threadId/canvas/nodes/:nodeId/workflow", (request, response) => {
+    try {
+      const node = storage.updateCanvasNodeWorkflow(request.params.threadId, request.params.nodeId, request.body ?? {});
+      if (!node) {
+        sendError(response, 404, "not_found", "Canvas node not found");
+        return;
+      }
+      sendOk(response, { node });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to update canvas node workflow"));
+    }
+  });
+
+  app.post("/api/threads/:threadId/canvas/suggestions", (request, response) => {
+    try {
+      sendOk(response, { suggestion: storage.createCanvasWorkflowSuggestion(request.params.threadId, request.body ?? {}) });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to create canvas workflow suggestion"));
+    }
+  });
+
+  app.post("/api/threads/:threadId/canvas/suggestions/:suggestionId/accept", (request, response) => {
+    try {
+      const suggestion = storage.acceptCanvasWorkflowSuggestion(request.params.threadId, request.params.suggestionId);
+      if (!suggestion) {
+        sendError(response, 404, "not_found", "Canvas workflow suggestion not found");
+        return;
+      }
+      sendOk(response, { suggestion });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to accept canvas workflow suggestion"));
+    }
+  });
+
+  app.post("/api/threads/:threadId/canvas/suggestions/:suggestionId/ignore", (request, response) => {
+    try {
+      const suggestion = storage.ignoreCanvasWorkflowSuggestion(request.params.threadId, request.params.suggestionId);
+      if (!suggestion) {
+        sendError(response, 404, "not_found", "Canvas workflow suggestion not found");
+        return;
+      }
+      sendOk(response, { suggestion });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to ignore canvas workflow suggestion"));
+    }
+  });
+
+  app.post("/api/threads/:threadId/canvas/suggestions/:suggestionId/convert-to-node", (request, response) => {
+    try {
+      const result = storage.convertCanvasWorkflowSuggestionToNode(request.params.threadId, request.params.suggestionId, request.body ?? {});
+      if (!result) {
+        sendError(response, 404, "not_found", "Canvas workflow suggestion not found");
+        return;
+      }
+      sendOk(response, result);
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to convert canvas workflow suggestion"));
+    }
   });
 
   app.post("/api/threads/:threadId/canvas/nodes", (request, response) => {

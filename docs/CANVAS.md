@@ -33,10 +33,16 @@ Common node behavior is intentionally separated from node-kind content rendering
 Canvas state is also split by responsibility. `src/app/hooks/useCanvasState.ts` is the public composition hook, `useCanvasActions.ts` owns API operation orchestration, `useCanvasHistory.ts` owns the session undo stack, and pure history helpers live in `shared/canvasHistory.ts` for backend-compatible unit tests.
 
 ## Node Model
-The current node kinds remain:
+The current content node kinds remain:
 
 ```ts
 type CanvasNodeKind = "document" | "note" | "reference";
+```
+
+Role is now also a first-class Canvas function node:
+
+```ts
+type CanvasNodeKind = "document" | "note" | "reference" | "role";
 ```
 
 The three kinds now have distinct product/runtime semantics:
@@ -44,6 +50,7 @@ The three kinds now have distinct product/runtime semantics:
 - `note`: user sticky note for thinking. It is excluded from default AI context and only reaches the collaboration drawer when the user explicitly sends a mind chain.
 - `document`: AI output document. New AI Canvas output and approved `canvas_write` creates default to this kind; Agents may edit it through the approval path.
 - `reference`: source/reference material. It participates in default AI context.
+- `role`: workflow control node. It stores `metadata.workflowRole` and affects content only through directed edges.
 
 Nodes can be converted between these three kinds through Canvas node actions that call the existing node PATCH path. Conversion preserves title, content, geometry, metadata, and connections. The Canvas node settings page is intentionally type-only documentation and does not read or mutate current project nodes.
 
@@ -70,6 +77,47 @@ Dragging updates `x/y`. Resizing may update all four fields because resizing fro
 Text nodes start in an automatic layout mode: when content enters or changes through persisted Canvas state, the frontend measures the text area and grows the node height so the content is visible as a full information block. Once the user resizes the node, the frontend writes `metadata.canvasLayout.sizeMode = "manual"` with the resize patch and stops automatic height changes for that node. Manual nodes keep internal scrolling if the user chooses a smaller reading frame.
 
 The UI clamps node size with frontend minimum/maximum dimensions. These constraints are presentation rules, not database constraints.
+
+## Canvas Workflow
+Canvas Workflow is a layer on top of Canvas V2. Stage remains project-level state, while Role is represented as an independent Canvas function node. Workflow control capabilities should be modeled as nodes and relationships when they need spatial behavior or targeted influence, instead of being stacked into ordinary content-node UI.
+
+Workflow responsibilities are deliberately split:
+
+- Canvas Spatial layer owns React Flow, node and edge rendering, drag, zoom, resize, selection, and connection behavior. It must not decide writing-stage rules.
+- Canvas Workflow layer owns the project stage, node stage metadata, Role function nodes, Role-to-content edges, and suggestions.
+- Agent Orchestration layer converts Workflow state into runtime context and approval-aware operations.
+- Suggestion UI layer renders node suggestions and exposes accept, ignore, and convert-to-node actions.
+
+The project/thread has exactly one current writing stage:
+
+```ts
+type CanvasWorkflowStage = "inspiration" | "research" | "structure" | "writing" | "polish" | "publish";
+```
+
+The frontend displays this as both a top summary and a Canvas status node. A new Canvas node inherits the current project stage into `metadata.workflow.stage`. Users can override an individual node stage without changing the project stage.
+
+Roles are suggestion perspectives, not Agent cards and not content-node decorations. A Role is a `role` Canvas node whose role data lives in `metadata.workflowRole`:
+
+```ts
+{
+  roleId: string;
+  label: string;
+  prompt: string;
+  description?: string;
+}
+```
+
+A Role applies only through a directed edge from the Role node to a content node:
+
+```text
+Role node -> document | note | reference
+```
+
+Reverse edges, content-to-content edges, and Role-to-Role edges do not grant a Role perspective. Ordinary content nodes keep `metadata.workflow.stage`, but new logic must not use `metadata.workflow.roles` as the source of Role membership. Legacy `metadata.workflow.roles` is migrated into Role nodes plus Role-to-content edges, then removed from the content node while preserving `workflow.stage`.
+
+Suggestions are anchored to the Role node that produced the perspective while retaining the target content node id. Pending suggestions render below the Role node. Accepting a suggestion appends it to the target content node and marks it accepted. Ignoring marks it ignored. Converting creates a new Canvas node from the suggestion content and marks it accepted. These are low-risk Canvas operations; destructive replace, overwrite, and delete behavior remains outside the suggestion path.
+
+Pure Workflow types and filters live in `shared/canvasWorkflow.ts` so frontend context selection, backend storage behavior, and tests use the same stage/Role vocabulary.
 
 ## Resize Behavior
 Canvas V2 uses a custom eight-handle resize frame rather than the default React Flow `NodeResizer`.
@@ -113,6 +161,8 @@ Edges can be selected on the Canvas. Selecting an edge shows a delete action in 
 
 When the user right-clicks a connected node and chooses to send the mind chain, the frontend walks to the start of the directed chain, follows outgoing edges, and writes an ordered summary into the right AI collaboration composer. This does not auto-send the message. Because this action is explicit user intent, `note` nodes included in that chain may be sent even though notes are excluded from default AI context.
 
+Agent context uses Workflow filters before the runtime sees Canvas data. The default order is selected/specified chain, current or user-specified stage, then Role nodes connected to the selected/filtered content nodes. Only prompts from `Role -> content` edges enter the runtime as advice perspectives. The Agent should not default to reading the entire Canvas. If no explicit chain is sent, the frontend still excludes notes and narrows by the current workflow stage.
+
 Deleting a node removes attached edges. Deleting an edge does not modify either node.
 
 ## Undo
@@ -134,10 +184,16 @@ Canvas V2 uses the existing API shape:
 - `POST /api/threads/:threadId/canvas/write-requests`
 - `POST /api/threads/:threadId/canvas/write-requests/:requestId/approve`
 - `POST /api/threads/:threadId/canvas/write-requests/:requestId/reject`
+- `PUT /api/threads/:threadId/canvas/workflow`
+- `PATCH /api/threads/:threadId/canvas/nodes/:nodeId/workflow`
+- `POST /api/threads/:threadId/canvas/suggestions`
+- `POST /api/threads/:threadId/canvas/suggestions/:suggestionId/accept`
+- `POST /api/threads/:threadId/canvas/suggestions/:suggestionId/ignore`
+- `POST /api/threads/:threadId/canvas/suggestions/:suggestionId/convert-to-node`
 - `GET /api/settings/canvas`
 - `PUT /api/settings/canvas`
 
-Canvas nodes remain in `canvas_nodes`. Directed edges live in `canvas_edges`. Canvas settings use the generic `settings` table with key `canvas`. The SQL implementation lives in `server/repositories/canvasRepository.ts`; `server/storage.ts` keeps compatibility methods for existing route/service callers.
+Canvas nodes remain in `canvas_nodes`. Directed edges live in `canvas_edges`. Workflow state lives in `canvas_workflows`, and node suggestions live in `canvas_workflow_suggestions`. Canvas settings use the generic `settings` table with key `canvas`. The SQL implementation lives in `server/repositories/canvasRepository.ts`; `server/storage.ts` keeps compatibility methods for existing route/service callers.
 
 ## Styling And Hit Testing
 Canvas styles live in `src/app/styles.css`.
@@ -173,7 +229,7 @@ Before claiming Canvas work is complete, verify:
 - `npm.cmd test`
 - `npm.cmd run test:e2e:canvas`
 - Canvas renders in the workspace.
-- Background right-click menu creates `document`, `note`, and `reference` nodes.
+- Background right-click menu creates `document`, `note`, `reference`, and `role` nodes.
 - Node drag persists `x/y`.
 - Node resize persists `x/y/width/height`.
 - Title/content edit persists after blur.
@@ -183,6 +239,11 @@ Before claiming Canvas work is complete, verify:
 - Directed node edges persist and can be deleted.
 - Sending a mind chain populates the right collaboration composer without auto-sending, and deleted edges no longer pull disconnected nodes into that draft.
 - Note nodes are excluded from default AI context.
+- New nodes inherit the current Canvas Workflow stage.
+- Node stage override persists in node metadata.
+- Role nodes can be created from the Canvas menu and connected to content nodes.
+- Pending Role suggestions render below the Role node, and accept/ignore/convert actions update their status.
+- Agent context is filtered by selected chain, workflow stage, and connected Role nodes before runtime execution.
 - Canvas undo works for node and edge operations up to the configured cache depth.
 - Approval still applies writes through the backend approve path.
 - QA nodes created during browser tests are deleted.

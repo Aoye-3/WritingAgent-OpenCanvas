@@ -1,6 +1,6 @@
 export type CanvasHistoryNode = {
   id: string;
-  kind: "document" | "note" | "reference";
+  kind: "document" | "note" | "reference" | "role";
   title: string;
   content: string;
   x: number;

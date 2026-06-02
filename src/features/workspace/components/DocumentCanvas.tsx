@@ -7,6 +7,7 @@ import {
   MarkerType,
   ReactFlow,
   ReactFlowProvider,
+  SelectionMode,
   applyNodeChanges,
   useReactFlow,
   useViewport,
@@ -15,13 +16,13 @@ import {
   type NodeChange,
   type OnSelectionChangeParams
 } from "@xyflow/react";
-import type { CanvasEdge, CanvasNode, CanvasNodeKind } from "../../agents/types";
+import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasWorkflow, CanvasWorkflowStage, CanvasWorkflowSuggestion } from "../../agents/types";
 import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch } from "../../canvas/canvasClient";
 import { useI18n } from "../../i18n/I18nProvider";
 import { ResetIcon, ZoomInIcon, ZoomOutIcon } from "../../../shared/icons";
 import { CanvasCurveEdge } from "./canvas/CanvasCurveEdge";
 import { CanvasNodeFrame } from "./canvas/CanvasNodeFrame";
-import { MAX_ZOOM, MIN_ZOOM, canvasNodeKinds, kindLabels } from "./canvas/constants";
+import { MAX_ZOOM, MIN_ZOOM, canvasNodeKinds, kindLabels, workflowStageLabels } from "./canvas/constants";
 import { readDimension } from "./canvas/nodeLayout";
 import { formatMindChain } from "../../../../shared/canvasMindChain";
 import type { CanvasFlowNode } from "./canvas/types";
@@ -31,15 +32,22 @@ type DocumentCanvasProps = {
   edges: CanvasEdge[];
   nodes: CanvasNode[];
   providerLabel: string;
+  workflow?: CanvasWorkflow;
+  suggestions: CanvasWorkflowSuggestion[];
   selectedNodeId?: string;
+  onAcceptSuggestion: (suggestionId: string) => Promise<void>;
+  onConvertSuggestionToNode: (suggestionId: string, kind?: CanvasNodeKind) => Promise<void>;
   onCreateEdge: (draft: CanvasEdgeDraft) => Promise<CanvasEdge | undefined>;
   onCreateNode: (draft: CanvasNodeDraft) => Promise<unknown>;
   onDeleteEdge: (edgeId: string) => Promise<void>;
   onDeleteNode: (nodeId: string) => Promise<void>;
+  onIgnoreSuggestion: (suggestionId: string) => Promise<void>;
   onSendMindChainToChat: (text: string) => void;
   onSelectNode: (nodeId?: string) => void;
   onUndo: () => Promise<void>;
   onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
+  onUpdateNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflowStage; roles?: string[] }) => Promise<unknown>;
+  onUpdateWorkflow: (patch: { stage?: CanvasWorkflowStage; roles?: CanvasWorkflow["roles"] }) => Promise<unknown>;
 };
 
 type MenuState = { screenX: number; screenY: number; canvasX: number; canvasY: number; nodeId?: string };
@@ -65,15 +73,22 @@ function DocumentCanvasInner({
   edges,
   nodes,
   providerLabel,
+  workflow,
+  suggestions,
   selectedNodeId,
+  onAcceptSuggestion,
+  onConvertSuggestionToNode,
   onCreateEdge,
   onCreateNode,
   onDeleteEdge,
   onDeleteNode,
+  onIgnoreSuggestion,
   onSendMindChainToChat,
   onSelectNode,
   onUndo,
-  onUpdateNode
+  onUpdateNode,
+  onUpdateNodeWorkflow,
+  onUpdateWorkflow
 }: DocumentCanvasProps) {
   const { locale } = useI18n();
   const reactFlow = useReactFlow<CanvasFlowNode>();
@@ -101,20 +116,36 @@ function DocumentCanvasInner({
   }, []);
 
   useEffect(() => {
-    setFlowNodes((current) => mapCanvasNodes(nodes, current, selectedNodeId, resizingNodeId, locale, onDeleteNode, handleResizeStateChange, onUpdateNode));
-  }, [handleResizeStateChange, locale, nodes, onDeleteNode, onUpdateNode, resizingNodeId, selectedNodeId]);
+    setFlowNodes((current) => mapCanvasNodes({
+      nodes,
+      currentNodes: current,
+      selectedNodeId,
+      resizingNodeId,
+      locale,
+      workflow,
+      suggestions,
+      onAcceptSuggestion,
+      onConvertSuggestionToNode,
+      onDeleteNode,
+      onIgnoreSuggestion,
+      onResizeStateChange: handleResizeStateChange,
+      onUpdateNode
+    }));
+  }, [handleResizeStateChange, locale, nodes, onAcceptSuggestion, onConvertSuggestionToNode, onDeleteNode, onIgnoreSuggestion, onUpdateNode, resizingNodeId, selectedNodeId, suggestions, workflow]);
 
   const createNode = async (kind: CanvasNodeKind) => {
     if (!menu) return;
     setMenu(null);
+    const roleId = `role_${Date.now().toString(36)}`;
     await onCreateNode({
       kind,
-      title: kindLabels[kind][locale],
+      title: kindLabels[kind]?.[locale] ?? kind,
       content: "",
       x: Math.round(menu.canvasX),
       y: Math.round(menu.canvasY),
-      width: kind === "document" ? 520 : 300,
-      height: kind === "document" ? 260 : 190
+      width: kind === "document" ? 520 : kind === "role" ? 280 : 300,
+      height: kind === "document" ? 260 : kind === "role" ? 190 : 190,
+      metadata: kind === "role" ? { workflowRole: { roleId, label: "Role", prompt: "" } } : undefined
     });
   };
 
@@ -186,6 +217,7 @@ function DocumentCanvasInner({
       <div className="canvas-topline">
         <div>
           <p className="eyebrow">Doc Canvas</p>
+          {workflow ? <p className="canvas-workflow-summary">{locale === "zh" ? "当前环节" : "Current stage"}: {workflowStageLabels[workflow.stage][locale]}</p> : null}
           <h2>{locale === "zh" ? "文档画板" : "Document canvas"}</h2>
         </div>
         <div className="canvas-controls" aria-label="Canvas controls">
@@ -193,6 +225,16 @@ function DocumentCanvasInner({
             <span className="status-dot" />
             {providerLabel}
           </span>
+          {workflow ? (
+            <select
+              className="canvas-stage-select"
+              aria-label="Canvas workflow stage"
+              value={workflow.stage}
+              onChange={(event) => void onUpdateWorkflow({ stage: event.target.value as CanvasWorkflowStage })}
+            >
+              {workflow.stages.map((stage) => <option key={stage} value={stage}>{workflowStageLabels[stage][locale]}</option>)}
+            </select>
+          ) : null}
           <button className="icon-button canvas-zoom-button" type="button" aria-label="Zoom out" onClick={() => void reactFlow.zoomOut({ duration: 120 })}>
             <ZoomOutIcon aria-hidden="true" size={18} />
           </button>
@@ -211,6 +253,12 @@ function DocumentCanvasInner({
       </div>
 
       <div className="canvas-viewport" data-testid="canvas-viewport">
+        {workflow ? (
+          <div className="canvas-status-node" data-testid="canvas-status-node">
+            <span>{locale === "zh" ? "写作环节" : "Writing stage"}</span>
+            <strong>{workflowStageLabels[workflow.stage][locale]}</strong>
+          </div>
+        ) : null}
         <ReactFlow<CanvasFlowNode>
           className="canvas-flow"
           colorMode="light"
@@ -241,10 +289,12 @@ function DocumentCanvasInner({
           }}
           onPaneContextMenu={openMenu}
           onSelectionChange={handleSelectionChange}
-          panOnDrag={!resizingNodeId}
+          panActivationKeyCode="Space"
+          panOnDrag={false}
           panOnScroll
           proOptions={{ hideAttribution: true }}
           selectionOnDrag={!resizingNodeId}
+          selectionMode={SelectionMode.Partial}
         >
           <Background color="#dbe7f7" gap={28} size={1} variant={BackgroundVariant.Lines} />
         </ReactFlow>
@@ -262,7 +312,7 @@ function DocumentCanvasInner({
               <button type="button" onClick={() => sendMindChain(menu.nodeId!)}>{locale === "zh" ? "发送思维链" : "Send mind chain"}</button>
             ) : null}
             {!menu.nodeId ? canvasNodeKinds.map((kind) => (
-              <button key={kind} type="button" data-testid={`canvas-menu-create-${kind}`} onClick={() => void createNode(kind)}>{kindLabels[kind][locale]}</button>
+              <button key={kind} type="button" data-testid={`canvas-menu-create-${kind}`} onClick={() => void createNode(kind)}>{kindLabels[kind]?.[locale] ?? kind}</button>
             )) : null}
           </div>
         ) : null}
@@ -282,26 +332,49 @@ function DocumentCanvasInner({
           </button>
         ) : null}
         <span className="canvas-interaction-hint">
-          {locale === "zh" ? "拖拽空白移动画布 · 滚轮平移 · Ctrl + 滚轮缩放" : "Drag blank space to pan · Wheel to pan · Ctrl + wheel to zoom"}
+          {locale === "zh" ? "点击选中 · 拖拽空白框选 · 空格 + 拖拽移动画布 · Ctrl + 滚轮缩放" : "Click to select · Drag blank space to marquee select · Space + drag to pan · Ctrl + wheel to zoom"}
         </span>
       </div>
+      {selectedNode && workflow && selectedNode.kind !== "role" ? (
+        <CanvasSelectedNodeWorkflow locale={locale} node={selectedNode} workflow={workflow} onUpdateNodeWorkflow={onUpdateNodeWorkflow} />
+      ) : null}
     </section>
   );
 }
 
-function mapCanvasNodes(
-  nodes: CanvasNode[],
-  currentNodes: CanvasFlowNode[],
-  selectedNodeId: string | undefined,
-  resizingNodeId: string | null,
-  locale: "en" | "zh",
-  onDeleteNode: (nodeId: string) => Promise<void>,
-  onResizeStateChange: (nodeId?: string) => void,
-  onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>
-): CanvasFlowNode[] {
+function mapCanvasNodes({
+  nodes,
+  currentNodes,
+  selectedNodeId,
+  resizingNodeId,
+  locale,
+  workflow,
+  suggestions,
+  onAcceptSuggestion,
+  onConvertSuggestionToNode,
+  onDeleteNode,
+  onIgnoreSuggestion,
+  onResizeStateChange,
+  onUpdateNode
+}: {
+  nodes: CanvasNode[];
+  currentNodes: CanvasFlowNode[];
+  selectedNodeId?: string;
+  resizingNodeId: string | null;
+  locale: "en" | "zh";
+  workflow?: CanvasWorkflow;
+  suggestions: CanvasWorkflowSuggestion[];
+  onAcceptSuggestion: (suggestionId: string) => Promise<void>;
+  onConvertSuggestionToNode: (suggestionId: string, kind?: CanvasNodeKind) => Promise<void>;
+  onDeleteNode: (nodeId: string) => Promise<void>;
+  onIgnoreSuggestion: (suggestionId: string) => Promise<void>;
+  onResizeStateChange: (nodeId?: string) => void;
+  onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
+}): CanvasFlowNode[] {
   const currentById = new Map(currentNodes.map((node) => [node.id, node]));
   return nodes.map((node) => {
     const current = currentById.get(node.id);
+    const nodeSuggestions = suggestions.filter((suggestion) => suggestion.nodeId === node.id);
     const preserveLiveGeometry = current?.dragging || node.id === resizingNodeId;
     const liveWidth = readDimension(current?.style?.width, node.width);
     const liveHeight = readDimension(current?.style?.height, node.height);
@@ -319,10 +392,52 @@ function mapCanvasNodes(
         isResizing: node.id === resizingNodeId,
         locale,
         node,
+        suggestions: nodeSuggestions,
+        workflow,
+        onAcceptSuggestion,
+        onConvertSuggestionToNode,
         onDeleteNode,
+        onIgnoreSuggestion,
         onResizeStateChange,
         onUpdateNode
       }
     };
   });
+}
+
+function CanvasSelectedNodeWorkflow({
+  locale,
+  node,
+  workflow,
+  onUpdateNodeWorkflow
+}: {
+  locale: "en" | "zh";
+  node: CanvasNode;
+  workflow: CanvasWorkflow;
+  onUpdateNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflowStage; roles?: string[] }) => Promise<unknown>;
+}) {
+  const nodeWorkflow = readNodeWorkflow(node);
+
+  return (
+    <div className="canvas-selected-workflow" data-testid="canvas-selected-workflow">
+      <label>
+        <span>{locale === "zh" ? "节点环节" : "Node stage"}</span>
+        <select
+          aria-label="Selected node workflow stage"
+          value={nodeWorkflow.stage ?? workflow.stage}
+          onChange={(event) => void onUpdateNodeWorkflow(node.id, { stage: event.target.value as CanvasWorkflowStage })}
+        >
+          {workflow.stages.map((stage) => <option key={stage} value={stage}>{workflowStageLabels[stage][locale]}</option>)}
+        </select>
+      </label>
+    </div>
+  );
+}
+
+function readNodeWorkflow(node: CanvasNode): { stage?: CanvasWorkflowStage; roles: string[] } {
+  const metadata = node.metadata as { workflow?: { stage?: CanvasWorkflowStage; roles?: unknown } } | undefined;
+  return {
+    stage: metadata?.workflow?.stage,
+    roles: Array.isArray(metadata?.workflow?.roles) ? metadata.workflow.roles.filter((role): role is string => typeof role === "string") : []
+  };
 }

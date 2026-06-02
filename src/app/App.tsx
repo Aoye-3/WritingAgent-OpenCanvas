@@ -21,6 +21,7 @@ import { useCanvasState } from "./hooks/useCanvasState";
 import { useGenerationRun } from "./hooks/useGenerationRun";
 import { useProjectTrash } from "./hooks/useProjectTrash";
 import { useThreadSession } from "./hooks/useThreadSession";
+import { buildCanvasWorkflowContext } from "../../shared/canvasWorkflow";
 
 export type AppView = "start" | "home" | "workspace" | "projects" | "agentSettings" | "modelConfig" | "aiDashboard" | "knowledgeSettings" | "canvasNodeSettings";
 
@@ -66,7 +67,7 @@ function AppContent() {
     threadSession.setThreadId(state.thread.id);
     generationRun.setOutputVersions(state.outputVersions);
     generationRun.setToolEvents(state.toolEvents);
-    canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? []);
+    canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? [], state.canvasWorkflow, state.canvasWorkflowSuggestions ?? []);
     const latestVersion = state.outputVersions[0];
     generationRun.setActiveVersionId(latestVersion?.id);
     generationRun.setEditableOutput(latestVersion?.content ?? "");
@@ -107,16 +108,43 @@ function AppContent() {
     if (generationRun.editableOutput.trim()) {
       values.currentDraft = generationRun.editableOutput;
     }
-    const contextNodes = canvasState.canvasNodes.filter((node) => node.kind !== "note");
+    const chainNodeIds = selectedCanvasNode?.kind === "role"
+      ? canvasState.canvasEdges
+        .filter((edge) => edge.sourceNodeId === selectedCanvasNode.id)
+        .map((edge) => edge.targetNodeId)
+      : selectedCanvasNode ? [selectedCanvasNode.id] : undefined;
+    const workflowContext = canvasState.canvasWorkflow ? buildCanvasWorkflowContext({
+      workflow: canvasState.canvasWorkflow,
+      nodes: canvasState.canvasNodes
+        .filter((node) => node.kind !== "note")
+        .map((node) => ({
+          id: node.id,
+          kind: node.kind,
+          title: node.title,
+          content: node.content,
+          metadata: node.metadata
+        })),
+      edges: canvasState.canvasEdges,
+      chainNodeIds
+    }) : undefined;
+    const contextNodeIds = new Set(workflowContext?.nodes.map((node) => node.id));
+    const contextNodes = canvasState.canvasWorkflow
+      ? canvasState.canvasNodes.filter((node) => contextNodeIds.has(node.id))
+      : canvasState.canvasNodes.filter((node) => node.kind !== "note");
     if (contextNodes.length > 0 || (selectedCanvasNode && selectedCanvasNode.kind !== "note")) {
       values.canvas = {
         nodes: contextNodes.map((node) => ({
           id: node.id,
           kind: node.kind,
           title: node.title,
+          workflow: (node.metadata as { workflow?: unknown } | undefined)?.workflow,
           preview: node.content.slice(0, 600),
           content: node.kind === "reference" ? node.content : undefined
         })),
+        workflow: canvasState.canvasWorkflow ? {
+          stage: canvasState.canvasWorkflow.stage,
+          roles: workflowContext?.roles ?? []
+        } : undefined,
         selectedNode: selectedCanvasNode && selectedCanvasNode.kind !== "note" ? {
           id: selectedCanvasNode.id,
           kind: selectedCanvasNode.kind,
@@ -133,7 +161,7 @@ function AppContent() {
     generationRun.setOutputVersions(state.outputVersions);
     generationRun.setToolEvents(state.toolEvents);
     generationRun.setActiveVersionId(state.outputVersions[0]?.id);
-    canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? []);
+    canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? [], state.canvasWorkflow, state.canvasWorkflowSuggestions ?? []);
     setActiveProjectTitle(state.thread.title);
     await refreshProjectSurfaces();
   };
@@ -293,6 +321,8 @@ function AppContent() {
         canvasNodes={canvasState.canvasNodes}
         canvasEdges={canvasState.canvasEdges}
         canvasWriteRequests={canvasState.canvasWriteRequests}
+        canvasWorkflow={canvasState.canvasWorkflow}
+        canvasWorkflowSuggestions={canvasState.canvasWorkflowSuggestions}
         selectedCanvasNodeId={canvasState.selectedCanvasNodeId}
         canUndoCanvas={canvasState.canUndoCanvas}
         toolEvents={generationRun.toolEvents}
@@ -303,8 +333,11 @@ function AppContent() {
         onChatSend={generationRun.handleChatSend}
         onCreateCanvasEdge={canvasState.handleCreateCanvasEdge}
         onCreateCanvasNode={canvasState.handleCreateCanvasNode}
+        onAcceptCanvasWorkflowSuggestion={canvasState.handleAcceptCanvasWorkflowSuggestion}
+        onConvertCanvasWorkflowSuggestionToNode={canvasState.handleConvertCanvasWorkflowSuggestionToNode}
         onDeleteCanvasEdge={canvasState.handleDeleteCanvasEdge}
         onDeleteCanvasNode={canvasState.handleDeleteCanvasNode}
+        onIgnoreCanvasWorkflowSuggestion={canvasState.handleIgnoreCanvasWorkflowSuggestion}
         onEditableOutputChange={generationRun.setEditableOutput}
         onGenerate={generationRun.handleGenerate}
         onGoHome={() => setView("home")}
@@ -325,6 +358,8 @@ function AppContent() {
         onSelectCanvasNode={canvasState.setSelectedCanvasNodeId}
         onToolStateChange={setToolState}
         onUpdateCanvasNode={canvasState.handleUpdateCanvasNode}
+        onUpdateCanvasNodeWorkflow={canvasState.handleUpdateCanvasNodeWorkflow}
+        onUpdateCanvasWorkflow={canvasState.handleUpdateCanvasWorkflow}
         onUndoCanvas={canvasState.undoCanvas}
         promptPreview={promptPreview}
         toolState={toolState}

@@ -33,7 +33,7 @@ export function EditableTextNode({ isResizing, locale, node, onUpdateNode }: Edi
   }, [content, isResizing, node.content, node.height, node.id, node.kind, node.metadata, onUpdateNode]);
 
   return (
-    <>
+    <div className="canvas-text-node-body">
       <input
         className="canvas-node-title nodrag"
         data-testid="canvas-node-title"
@@ -54,6 +54,6 @@ export function EditableTextNode({ isResizing, locale, node, onUpdateNode }: Edi
         }}
         onChange={(event) => setContent(event.currentTarget.value)}
       />
-    </>
+    </div>
   );
 }

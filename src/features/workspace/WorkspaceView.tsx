@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
 import { Topbar } from "../../shared/Topbar";
-import type { AgentCard, AgentValues, CanvasEdge, CanvasNode, CanvasWriteRequest, StoredOutputVersion, StoredToolEvent } from "../agents/types";
+import type { AgentCard, AgentValues, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, StoredOutputVersion, StoredToolEvent } from "../agents/types";
 import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch } from "../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../generation/types";
 import { useI18n } from "../i18n/I18nProvider";
@@ -28,16 +28,21 @@ type WorkspaceViewProps = {
   canvasNodes: CanvasNode[];
   canvasEdges: CanvasEdge[];
   canvasWriteRequests: CanvasWriteRequest[];
+  canvasWorkflow?: CanvasWorkflow;
+  canvasWorkflowSuggestions: CanvasWorkflowSuggestion[];
   selectedCanvasNodeId?: string;
   canUndoCanvas: boolean;
   toolEvents: StoredToolEvent[];
   projectTitle: string;
   onApproveCanvasWriteRequest: (requestId: string) => Promise<void>;
+  onAcceptCanvasWorkflowSuggestion: (suggestionId: string) => Promise<void>;
   onChatSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"]) => Promise<void>;
+  onConvertCanvasWorkflowSuggestionToNode: (suggestionId: string, kind?: CanvasNodeKind) => Promise<void>;
   onCreateCanvasEdge: (draft: CanvasEdgeDraft) => Promise<CanvasEdge | undefined>;
   onCreateCanvasNode: (draft: CanvasNodeDraft) => Promise<unknown>;
   onDeleteCanvasEdge: (edgeId: string) => Promise<void>;
   onDeleteCanvasNode: (nodeId: string) => Promise<void>;
+  onIgnoreCanvasWorkflowSuggestion: (suggestionId: string) => Promise<void>;
   onEditableOutputChange: (value: string) => void;
   onGenerate: () => Promise<void>;
   onGoHome: () => void;
@@ -50,6 +55,8 @@ type WorkspaceViewProps = {
   onSelectCanvasNode: (nodeId?: string) => void;
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
   onUpdateCanvasNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
+  onUpdateCanvasNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflow["stage"]; roles?: string[] }) => Promise<unknown>;
+  onUpdateCanvasWorkflow: (patch: { stage?: CanvasWorkflow["stage"]; roles?: CanvasWorkflow["roles"] }) => Promise<unknown>;
   onUndoCanvas: () => Promise<void>;
   promptPreview: string;
   agentValues: AgentValues;
@@ -65,16 +72,21 @@ export function WorkspaceView({
   canvasNodes,
   canvasEdges,
   canvasWriteRequests,
+  canvasWorkflow,
+  canvasWorkflowSuggestions,
   selectedCanvasNodeId,
   canUndoCanvas,
   toolEvents,
   projectTitle,
   onApproveCanvasWriteRequest,
+  onAcceptCanvasWorkflowSuggestion,
   onChatSend,
+  onConvertCanvasWorkflowSuggestionToNode,
   onCreateCanvasEdge,
   onCreateCanvasNode,
   onDeleteCanvasEdge,
   onDeleteCanvasNode,
+  onIgnoreCanvasWorkflowSuggestion,
   onGoHome,
   onOpenSettings,
   onAgentValuesChange,
@@ -84,6 +96,8 @@ export function WorkspaceView({
   onSelectCanvasNode,
   onToolStateChange,
   onUpdateCanvasNode,
+  onUpdateCanvasNodeWorkflow,
+  onUpdateCanvasWorkflow,
   onUndoCanvas,
   promptPreview,
   agentValues,
@@ -174,15 +188,22 @@ export function WorkspaceView({
           edges={canvasEdges}
           nodes={canvasNodes}
           providerLabel={providerLabel}
+          workflow={canvasWorkflow}
+          suggestions={canvasWorkflowSuggestions}
           selectedNodeId={selectedCanvasNodeId}
+          onAcceptSuggestion={onAcceptCanvasWorkflowSuggestion}
+          onConvertSuggestionToNode={onConvertCanvasWorkflowSuggestionToNode}
           onCreateEdge={onCreateCanvasEdge}
           onCreateNode={onCreateCanvasNode}
           onDeleteEdge={onDeleteCanvasEdge}
           onDeleteNode={onDeleteCanvasNode}
+          onIgnoreSuggestion={onIgnoreCanvasWorkflowSuggestion}
           onSendMindChainToChat={setComposerDraft}
           onSelectNode={onSelectCanvasNode}
           onUndo={onUndoCanvas}
           onUpdateNode={onUpdateCanvasNode}
+          onUpdateNodeWorkflow={onUpdateCanvasNodeWorkflow}
+          onUpdateWorkflow={onUpdateCanvasWorkflow}
         />
 
         <AICollaborationPanel

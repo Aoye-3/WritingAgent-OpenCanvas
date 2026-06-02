@@ -5,11 +5,26 @@ import type {
   CanvasNode,
   CanvasNodeInput,
   CanvasNodePatch,
+  CanvasNodeWorkflowPatch,
   CanvasSettings,
+  CanvasSuggestionToNodeInput,
+  CanvasWorkflow,
+  CanvasWorkflowInput,
+  CanvasWorkflowSuggestion,
+  CanvasWorkflowSuggestionInput,
   CanvasWriteRequest,
   CanvasWriteRequestInput,
   CanvasWriteRequestStatus
 } from "../storage.js";
+import {
+  canvasWorkflowStages,
+  defaultCanvasWorkflow,
+  isCanvasWorkflowStage,
+  mergeCanvasWorkflowRoles,
+  nextCanvasWorkflowNodeMetadata,
+  readWorkflowMetadata,
+  readWorkflowRoleMetadata
+} from "../../shared/canvasWorkflow.js";
 import { sanitizeVisibleText } from "../services/generation/outputNormalizer.js";
 import {
   cleanText,
@@ -129,6 +144,8 @@ export class CanvasRepository {
     validateId(threadId, "threadId");
     const kind = validateNodeKind(input.kind);
     const now = nowIso();
+    const workflow = this.getCanvasWorkflow(threadId);
+    const rawMetadata = (input.metadata ?? {}) as Record<string, unknown>;
     const node: CanvasNode = {
       id: input.id ? cleanCanvasRecordId(input.id, "nodeId") : randomId("node"),
       threadId,
@@ -139,7 +156,7 @@ export class CanvasRepository {
       y: readFiniteNumber(input.y, 120),
       width: readFiniteNumber(input.width, 320),
       height: readFiniteNumber(input.height, 220),
-      metadata: input.metadata ?? {},
+      metadata: kind === "role" ? cleanWorkflowRoleNodeMetadata(rawMetadata) : nextCanvasWorkflowNodeMetadata(workflow, rawMetadata),
       createdAt: now,
       updatedAt: now
     };
@@ -329,6 +346,198 @@ export class CanvasRepository {
     return settings;
   }
 
+  getCanvasWorkflow(threadId: string): CanvasWorkflow {
+    validateId(threadId, "threadId");
+    type Row = { stage: string; rolesJson: string; updatedAt: string };
+    const row = this.db
+      .prepare(`SELECT stage, roles_json as rolesJson, updated_at as updatedAt FROM canvas_workflows WHERE thread_id = ?`)
+      .get(threadId) as Row | undefined;
+    const defaults = defaultCanvasWorkflow();
+    if (!row) {
+      return { threadId, stage: defaults.stage, stages: defaults.stages, roles: defaults.roles, updatedAt: "" };
+    }
+    return {
+      threadId,
+      stage: isCanvasWorkflowStage(row.stage) ? row.stage : defaults.stage,
+      stages: [...canvasWorkflowStages],
+      roles: readWorkflowRoles(parseJson(row.rolesJson), defaults.roles),
+      updatedAt: row.updatedAt
+    };
+  }
+
+  updateCanvasWorkflow(threadId: string, input: CanvasWorkflowInput): CanvasWorkflow {
+    validateId(threadId, "threadId");
+    const current = this.getCanvasWorkflow(threadId);
+    const stage = input.stage === undefined ? current.stage : assertWorkflowStage(input.stage);
+    const roles = input.roles === undefined ? current.roles : readWorkflowRoles(input.roles, []);
+    const now = nowIso();
+    this.db
+      .prepare(
+        `INSERT INTO canvas_workflows (thread_id, stage, roles_json, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(thread_id) DO UPDATE SET stage = excluded.stage, roles_json = excluded.roles_json, updated_at = excluded.updated_at`
+      )
+      .run(threadId, stage, JSON.stringify(roles), now);
+    this.deps.touchThread(threadId, now);
+    return { threadId, stage, stages: [...canvasWorkflowStages], roles, updatedAt: now };
+  }
+
+  updateCanvasNodeWorkflow(threadId: string, nodeId: string, patch: CanvasNodeWorkflowPatch) {
+    validateId(threadId, "threadId");
+    validateId(nodeId, "nodeId");
+    const existing = this.getCanvasNode(threadId, nodeId);
+    if (!existing) return undefined;
+    const currentMetadata = (existing.metadata && typeof existing.metadata === "object" ? existing.metadata : {}) as Record<string, unknown>;
+    const workflow = this.getCanvasWorkflow(threadId);
+    const withStage = patch.stage === undefined
+      ? currentMetadata
+      : nextCanvasWorkflowNodeMetadata({ stage: assertWorkflowStage(patch.stage) }, currentMetadata);
+    const metadata = patch.roles === undefined ? withStage : mergeCanvasWorkflowRoles(withStage, patch.roles, workflow.roles);
+    return this.updateCanvasNode(threadId, nodeId, { metadata });
+  }
+
+  migrateCanvasWorkflowRoleNodes(threadId: string) {
+    validateId(threadId, "threadId");
+    const workflow = this.getCanvasWorkflow(threadId);
+    const roleDefinitions = new Map(workflow.roles.map((role) => [role.id, role]));
+    const now = nowIso();
+    let createdRoleNodes = 0;
+    let createdEdges = 0;
+    let updatedNodes = 0;
+
+    this.deps.withTransaction(() => {
+      const nodes = this.listCanvasNodes(threadId);
+      const roleNodesByRoleId = new Map<string, CanvasNode>();
+      for (const node of nodes) {
+        if (node.kind !== "role") continue;
+        const role = readWorkflowRoleMetadata(node.metadata);
+        if (role && !roleNodesByRoleId.has(role.roleId)) roleNodesByRoleId.set(role.roleId, node);
+      }
+
+      for (const node of nodes) {
+        if (node.kind === "role") continue;
+        const metadata = readWorkflowMetadata(node.metadata);
+        if (metadata.roles.length === 0) continue;
+
+        for (const roleId of metadata.roles) {
+          const definition = roleDefinitions.get(roleId) ?? { id: roleId, label: roleId, prompt: "" };
+          let roleNode = roleNodesByRoleId.get(roleId);
+          if (!roleNode) {
+            roleNode = this.createCanvasNode(threadId, {
+              kind: "role",
+              title: definition.label,
+              content: "",
+              x: node.x - 180,
+              y: node.y,
+              width: 260,
+              height: 180,
+              metadata: { workflowRole: { roleId: definition.id, label: definition.label, prompt: definition.prompt } }
+            });
+            roleNodesByRoleId.set(roleId, roleNode);
+            createdRoleNodes += 1;
+          }
+
+          const hasEdge = this.listCanvasEdges(threadId).some((edge) => edge.sourceNodeId === roleNode!.id && edge.targetNodeId === node.id);
+          if (!hasEdge) {
+            this.createCanvasEdge(threadId, { sourceNodeId: roleNode.id, targetNodeId: node.id });
+            createdEdges += 1;
+          }
+        }
+
+        this.db
+          .prepare(`UPDATE canvas_nodes SET metadata_json = ?, updated_at = ? WHERE id = ? AND thread_id = ?`)
+          .run(JSON.stringify(stripLegacyWorkflowRoles(node.metadata)), now, node.id, threadId);
+        updatedNodes += 1;
+      }
+    });
+
+    if (createdRoleNodes > 0 || createdEdges > 0 || updatedNodes > 0) this.deps.touchThread(threadId, now);
+    return { createdRoleNodes, createdEdges, updatedNodes };
+  }
+
+  listCanvasWorkflowSuggestions(threadId: string, nodeId?: string) {
+    validateId(threadId, "threadId");
+    if (nodeId) validateId(nodeId, "nodeId");
+    const sql = `SELECT id,
+                        thread_id as threadId,
+                        node_id as nodeId,
+                        role_node_id as roleNodeId,
+                        target_node_id as targetNodeId,
+                        role_id as roleId,
+                        content,
+                        rationale,
+                        status,
+                        created_at as createdAt,
+                        updated_at as updatedAt
+                 FROM canvas_workflow_suggestions
+                 WHERE thread_id = ?${nodeId ? " AND node_id = ?" : ""}
+                 ORDER BY created_at ASC`;
+    return this.db.prepare(sql).all(...(nodeId ? [threadId, nodeId] : [threadId])) as CanvasWorkflowSuggestion[];
+  }
+
+  createCanvasWorkflowSuggestion(threadId: string, input: CanvasWorkflowSuggestionInput) {
+    validateId(threadId, "threadId");
+    const roleNodeId = cleanText(input.roleNodeId ?? input.nodeId);
+    const targetNodeId = cleanText(input.targetNodeId);
+    validateId(roleNodeId, "roleNodeId");
+    validateId(targetNodeId, "targetNodeId");
+    const roleNode = this.getCanvasNode(threadId, roleNodeId);
+    const targetNode = this.getCanvasNode(threadId, targetNodeId);
+    if (!roleNode || roleNode.kind !== "role") throw new Error("Canvas workflow suggestion role node must exist");
+    if (!targetNode || targetNode.kind === "role") throw new Error("Canvas workflow suggestion target node must exist");
+    const hasRoleEdge = this.listCanvasEdges(threadId).some((edge) => edge.sourceNodeId === roleNodeId && edge.targetNodeId === targetNodeId);
+    if (!hasRoleEdge) throw new Error("Canvas workflow suggestion requires a Role to target edge");
+    const content = cleanText(input.content);
+    if (!content) throw new Error("Canvas workflow suggestion content is required");
+    const roleMetadata = readWorkflowRoleMetadata(roleNode.metadata);
+    const now = nowIso();
+    const suggestion: CanvasWorkflowSuggestion = {
+      id: randomId("suggestion"),
+      threadId,
+      nodeId: roleNodeId,
+      roleNodeId,
+      targetNodeId,
+      roleId: cleanText(input.roleId) || roleMetadata?.roleId || roleNodeId,
+      content,
+      rationale: cleanText(input.rationale),
+      status: "pending",
+      createdAt: now,
+      updatedAt: now
+    };
+    this.db
+      .prepare(
+        `INSERT INTO canvas_workflow_suggestions
+          (id, thread_id, node_id, role_node_id, target_node_id, role_id, content, rationale, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(suggestion.id, threadId, suggestion.nodeId, suggestion.roleNodeId, suggestion.targetNodeId, suggestion.roleId, suggestion.content, suggestion.rationale, suggestion.status, now, now);
+    this.deps.touchThread(threadId, now);
+    return suggestion;
+  }
+
+  acceptCanvasWorkflowSuggestion(threadId: string, suggestionId: string) {
+    return this.applySuggestionStatus(threadId, suggestionId, "accepted", true);
+  }
+
+  ignoreCanvasWorkflowSuggestion(threadId: string, suggestionId: string) {
+    return this.applySuggestionStatus(threadId, suggestionId, "ignored", false);
+  }
+
+  convertCanvasWorkflowSuggestionToNode(threadId: string, suggestionId: string, input: CanvasSuggestionToNodeInput = {}) {
+    validateId(threadId, "threadId");
+    validateId(suggestionId, "suggestionId");
+    const suggestion = this.getCanvasWorkflowSuggestion(threadId, suggestionId);
+    if (!suggestion) return undefined;
+    const node = this.createCanvasNode(threadId, {
+      kind: validateNodeKind(input.kind ?? "note"),
+      title: input.title ?? "Role suggestion",
+      content: suggestion.content,
+      metadata: { workflow: { stage: this.getCanvasWorkflow(threadId).stage } }
+    });
+    const accepted = this.applySuggestionStatus(threadId, suggestionId, "accepted", false);
+    return accepted ? { suggestion: accepted, node } : undefined;
+  }
+
   private getCanvasNode(threadId: string, nodeId: string) {
     validateId(nodeId, "nodeId");
     return this.listCanvasNodes(threadId).find((node) => node.id === nodeId);
@@ -337,6 +546,32 @@ export class CanvasRepository {
   private getCanvasWriteRequest(threadId: string, requestId: string) {
     validateId(requestId, "requestId");
     return this.listCanvasWriteRequests(threadId).find((request) => request.id === requestId);
+  }
+
+  private getCanvasWorkflowSuggestion(threadId: string, suggestionId: string) {
+    validateId(suggestionId, "suggestionId");
+    return this.listCanvasWorkflowSuggestions(threadId).find((suggestion) => suggestion.id === suggestionId);
+  }
+
+  private applySuggestionStatus(threadId: string, suggestionId: string, status: "accepted" | "ignored", appendContent: boolean) {
+    validateId(threadId, "threadId");
+    validateId(suggestionId, "suggestionId");
+    const suggestion = this.getCanvasWorkflowSuggestion(threadId, suggestionId);
+    if (!suggestion) return undefined;
+    const now = nowIso();
+    this.deps.withTransaction(() => {
+      this.db
+        .prepare(`UPDATE canvas_workflow_suggestions SET status = ?, updated_at = ? WHERE id = ? AND thread_id = ?`)
+        .run(status, now, suggestionId, threadId);
+      if (appendContent) {
+        const node = this.getCanvasNode(threadId, suggestion.targetNodeId || suggestion.nodeId);
+        if (node) {
+          this.updateCanvasNode(threadId, node.id, { content: node.content ? `${node.content}\n\n${suggestion.content}` : suggestion.content });
+        }
+      }
+    });
+    this.deps.touchThread(threadId, now);
+    return { ...suggestion, status, updatedAt: now };
   }
 
   private updateCanvasWriteRequestStatus(threadId: string, requestId: string, status: CanvasWriteRequestStatus, updatedAt = nowIso()) {
@@ -358,4 +593,54 @@ function readCanvasUndoDepth(value: unknown, fallback: number) {
 function cleanCanvasRecordId(value: string, label: string) {
   validateId(value, label);
   return value;
+}
+
+function assertWorkflowStage(stage: unknown) {
+  if (!isCanvasWorkflowStage(stage)) throw new Error("Invalid Canvas workflow stage");
+  return stage;
+}
+
+function readWorkflowRoles(value: unknown, fallback: CanvasWorkflow["roles"]) {
+  if (!Array.isArray(value)) return fallback;
+  const seen = new Set<string>();
+  return value.flatMap((role) => {
+    if (!role || typeof role !== "object") return [];
+    const id = cleanText((role as { id?: unknown }).id);
+    if (!id || seen.has(id)) return [];
+    seen.add(id);
+    return [{
+      id,
+      label: cleanText((role as { label?: unknown }).label) || id,
+      prompt: cleanText((role as { prompt?: unknown }).prompt)
+    }];
+  });
+}
+
+function cleanWorkflowRoleNodeMetadata(metadata: Record<string, unknown>) {
+  const existing = readWorkflowRoleMetadata(metadata);
+  const raw = metadata.workflowRole && typeof metadata.workflowRole === "object" && !Array.isArray(metadata.workflowRole)
+    ? metadata.workflowRole as Record<string, unknown>
+    : {};
+  const roleId = cleanText(raw.roleId) || existing?.roleId || "role";
+  const label = cleanText(raw.label) || existing?.label || roleId;
+  const prompt = cleanText(raw.prompt) || existing?.prompt || "";
+  const description = cleanText(raw.description) || existing?.description || "";
+  return {
+    ...metadata,
+    workflowRole: description
+      ? { roleId, label, prompt, description }
+      : { roleId, label, prompt }
+  };
+}
+
+function stripLegacyWorkflowRoles(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return {};
+  const next = { ...(metadata as Record<string, unknown>) };
+  const workflow = next.workflow;
+  if (workflow && typeof workflow === "object" && !Array.isArray(workflow)) {
+    const cleanWorkflow = { ...(workflow as Record<string, unknown>) };
+    delete cleanWorkflow.roles;
+    next.workflow = cleanWorkflow;
+  }
+  return next;
 }

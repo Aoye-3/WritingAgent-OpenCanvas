@@ -178,9 +178,25 @@ export type StoredToolEvent = {
   createdAt: string;
 };
 
-export type CanvasNodeKind = "document" | "note" | "reference";
+export type CanvasNodeKind = "document" | "note" | "reference" | "role";
 export type CanvasWriteOperation = "create" | "replace" | "append";
 export type CanvasWriteRequestStatus = "pending" | "approved" | "rejected";
+export type CanvasWorkflowStage = "inspiration" | "research" | "structure" | "writing" | "polish" | "publish";
+export type CanvasWorkflowSuggestionStatus = "pending" | "accepted" | "ignored";
+
+export type CanvasWorkflowRole = {
+  id: string;
+  label: string;
+  prompt: string;
+};
+
+export type CanvasWorkflow = {
+  threadId: string;
+  stage: CanvasWorkflowStage;
+  stages: CanvasWorkflowStage[];
+  roles: CanvasWorkflowRole[];
+  updatedAt: string;
+};
 
 export type CanvasNode = {
   id: string;
@@ -221,6 +237,20 @@ export type CanvasWriteRequest = {
   updatedAt: string;
 };
 
+export type CanvasWorkflowSuggestion = {
+  id: string;
+  threadId: string;
+  nodeId: string;
+  roleNodeId: string;
+  targetNodeId: string;
+  roleId: string;
+  content: string;
+  rationale: string;
+  status: CanvasWorkflowSuggestionStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type StoredMessage = {
   id: string;
   threadId: string;
@@ -239,4 +269,6 @@ export type ThreadStateResponse = {
   canvasNodes?: CanvasNode[];
   canvasEdges?: CanvasEdge[];
   canvasWriteRequests?: CanvasWriteRequest[];
+  canvasWorkflow?: CanvasWorkflow;
+  canvasWorkflowSuggestions?: CanvasWorkflowSuggestion[];
 };

@@ -1,5 +1,5 @@
-import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasWriteRequest } from "../agents/types";
-import { apiDelete, apiGet, apiPatch, apiPost } from "../../shared/apiClient";
+import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasWorkflow, CanvasWorkflowRole, CanvasWorkflowStage, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../agents/types";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "../../shared/apiClient";
 
 export type CanvasNodeDraft = {
   id?: string;
@@ -14,6 +14,16 @@ export type CanvasNodeDraft = {
 };
 
 export type CanvasNodePatch = Partial<CanvasNodeDraft>;
+
+export type CanvasWorkflowPatch = {
+  stage?: CanvasWorkflowStage;
+  roles?: CanvasWorkflowRole[];
+};
+
+export type CanvasNodeWorkflowPatch = {
+  stage?: CanvasWorkflowStage;
+  roles?: string[];
+};
 
 export type CanvasWriteRequestDraft = {
   operation: "create" | "replace" | "append";
@@ -30,8 +40,8 @@ export type CanvasEdgeDraft = {
   label?: string;
 };
 
-export async function fetchCanvas(threadId: string): Promise<{ nodes: CanvasNode[]; edges: CanvasEdge[]; writeRequests: CanvasWriteRequest[] }> {
-  return apiGet<{ nodes: CanvasNode[]; edges: CanvasEdge[]; writeRequests: CanvasWriteRequest[] }>(`/api/threads/${encodeURIComponent(threadId)}/canvas`);
+export async function fetchCanvas(threadId: string): Promise<{ nodes: CanvasNode[]; edges: CanvasEdge[]; writeRequests: CanvasWriteRequest[]; workflow: CanvasWorkflow; suggestions: CanvasWorkflowSuggestion[] }> {
+  return apiGet<{ nodes: CanvasNode[]; edges: CanvasEdge[]; writeRequests: CanvasWriteRequest[]; workflow: CanvasWorkflow; suggestions: CanvasWorkflowSuggestion[] }>(`/api/threads/${encodeURIComponent(threadId)}/canvas`);
 }
 
 export async function createCanvasNode(threadId: string, draft: CanvasNodeDraft): Promise<CanvasNode> {
@@ -52,6 +62,30 @@ export async function createCanvasEdge(threadId: string, draft: CanvasEdgeDraft)
 export async function updateCanvasNode(threadId: string, nodeId: string, patch: CanvasNodePatch): Promise<CanvasNode> {
   const payload = await apiPatch<{ node: CanvasNode }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/nodes/${encodeURIComponent(nodeId)}`, patch);
   return payload.node;
+}
+
+export async function updateCanvasWorkflow(threadId: string, patch: CanvasWorkflowPatch): Promise<CanvasWorkflow> {
+  const payload = await apiPut<{ workflow: CanvasWorkflow }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/workflow`, patch);
+  return payload.workflow;
+}
+
+export async function updateCanvasNodeWorkflow(threadId: string, nodeId: string, patch: CanvasNodeWorkflowPatch): Promise<CanvasNode> {
+  const payload = await apiPatch<{ node: CanvasNode }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/nodes/${encodeURIComponent(nodeId)}/workflow`, patch);
+  return payload.node;
+}
+
+export async function acceptCanvasWorkflowSuggestion(threadId: string, suggestionId: string): Promise<CanvasWorkflowSuggestion> {
+  const payload = await apiPost<{ suggestion: CanvasWorkflowSuggestion }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/suggestions/${encodeURIComponent(suggestionId)}/accept`);
+  return payload.suggestion;
+}
+
+export async function ignoreCanvasWorkflowSuggestion(threadId: string, suggestionId: string): Promise<CanvasWorkflowSuggestion> {
+  const payload = await apiPost<{ suggestion: CanvasWorkflowSuggestion }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/suggestions/${encodeURIComponent(suggestionId)}/ignore`);
+  return payload.suggestion;
+}
+
+export async function convertCanvasWorkflowSuggestionToNode(threadId: string, suggestionId: string, kind: CanvasNodeKind = "note"): Promise<{ suggestion: CanvasWorkflowSuggestion; node: CanvasNode }> {
+  return apiPost<{ suggestion: CanvasWorkflowSuggestion; node: CanvasNode }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/suggestions/${encodeURIComponent(suggestionId)}/convert-to-node`, { kind });
 }
 
 export async function deleteCanvasNode(threadId: string, nodeId: string): Promise<void> {

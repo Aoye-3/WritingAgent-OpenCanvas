@@ -1,5 +1,21 @@
 # FacetWrite Technical Decisions
 
+## 2026-05-30: Canvas Role Controls Are Function Nodes
+Decision: Model Canvas Workflow Roles as first-class `role` Canvas nodes that apply only through directed `Role -> content` edges. Stage remains a single project/thread state and does not become a normal duplicable node.
+
+Reason: Role is an influence relationship, not another property to pile onto every document, note, and reference node. Keeping Role as a function node preserves Canvas spatial reuse, drag/resize/delete/undo behavior, and prevents ordinary content nodes from becoming large containers for workflow controls.
+
+Impact: Role data lives in `canvas_nodes.metadata.workflowRole`; Role effect is computed from `canvas_edges`; suggestions are anchored to the Role node while retaining `targetNodeId`; Agent context filtering reads connected Role prompts only after chain and stage filtering. New Workflow control capabilities should follow the same nodeized/relationship-driven bias when they need targeted influence, rather than adding more controls to content-node UI. Legacy `metadata.workflow.roles` is migrated into Role nodes and edges, then removed from content node metadata while preserving node stage.
+
+## 2026-05-28: Canvas Workflow Is A Separate Layer Over Canvas V2
+Decision: Add Canvas Workflow as a project-level writing-stage, node-stage, Role, and suggestion layer over the existing Canvas V2 spatial model, without adding new node kinds in v1.
+
+Reason: The Canvas needs writing-process awareness so Agents can work on the relevant chain, stage, and Role perspective without reading the entire board. Keeping Workflow separate from React Flow spatial behavior prevents the Canvas UI, Agent orchestration, and suggestion lifecycle from becoming one tangled module.
+
+Impact: Project stage and Role library live in `canvas_workflows`, node stage/Role membership lives in `canvas_nodes.metadata.workflow`, and suggestions live in `canvas_workflow_suggestions`. Pure vocabulary and filters live in `shared/canvasWorkflow.ts`. Agent runtime context must be filtered by selected/specified chain, workflow stage, and Role ids before execution; destructive writes still use the existing approval boundary.
+
+Update 2026-05-30: Role membership moved out of ordinary content-node metadata. Role is now a first-class `role` Canvas node and applies through directed `Role -> content` edges only. Content nodes keep stage metadata; legacy Role arrays are migration input, not the new source of truth.
+
 ## 2026-05-20: AgentBackend Is An Internal Agent Runtime Module
 Decision: Treat AgentBackend as the current implementation of FacetWrite's internal Agent Runtime subsystem. Its source is tracked under `modules/agent-runtime/`, while the FacetWrite backend talks to it through `server/runtime/agentRuntimePort.ts` and the `server/runtime/agentBackendAdapter/` implementation.
 
