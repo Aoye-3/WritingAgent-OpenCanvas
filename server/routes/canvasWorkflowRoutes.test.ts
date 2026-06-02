@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
 import type { AddressInfo } from "node:net";
+import { createCanvasDomainService } from "../domains/canvas/index.js";
 import { registerCanvasRoutes } from "./canvasRoutes.js";
 
 async function request(app: express.Express, path: string, options: { method?: string; body?: unknown } = {}) {
@@ -27,7 +28,7 @@ test("canvas response includes workflow and node suggestions", async () => {
   const app = express();
   app.use(express.json());
   const storage = fakeCanvasStorage();
-  registerCanvasRoutes(app, { storage: storage as never });
+  registerCanvasRoutes(app, { canvasService: createCanvasDomainService(storage as never) });
 
   const response = await request(app, `/api/threads/${threadId}/canvas`);
 
@@ -41,7 +42,7 @@ test("canvas workflow route updates stage and node workflow metadata", async () 
   const app = express();
   app.use(express.json());
   const storage = fakeCanvasStorage();
-  registerCanvasRoutes(app, { storage: storage as never });
+  registerCanvasRoutes(app, { canvasService: createCanvasDomainService(storage as never) });
 
   const workflow = await request(app, `/api/threads/${threadId}/canvas/workflow`, { method: "PUT", body: { stage: "research" } });
   const nodeWorkflow = await request(app, `/api/threads/${threadId}/canvas/nodes/node_1/workflow`, {
@@ -60,7 +61,7 @@ test("canvas workflow suggestion routes create, accept, ignore, and convert sugg
   const app = express();
   app.use(express.json());
   const storage = fakeCanvasStorage();
-  registerCanvasRoutes(app, { storage: storage as never });
+  registerCanvasRoutes(app, { canvasService: createCanvasDomainService(storage as never) });
 
   const created = await request(app, `/api/threads/${threadId}/canvas/suggestions`, {
     method: "POST",

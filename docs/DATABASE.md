@@ -7,7 +7,9 @@ FacetWrite stores local runtime data in SQLite:
 .facetwrite/data/facetwrite.db
 ```
 
-SQLite uses WAL mode and foreign keys are enabled in `server/storage.ts`.
+SQLite initialization lives in `server/db/sqlite.ts`. It enables WAL mode and foreign keys before schema migration.
+
+The default app root is `.facetwrite`. Tests and e2e runs may override it with `FACETWRITE_APP_ROOT`; Playwright uses `.facetwrite-test/e2e` when it starts its own dev server.
 
 Thread-specific local folders are created under:
 
@@ -18,7 +20,7 @@ Thread-specific local folders are created under:
   outputs/
 ```
 
-Thread IDs and node/request IDs are validated before filesystem operations so data stays inside `.facetwrite`.
+Thread IDs and node/request IDs are validated before filesystem operations so data stays inside the resolved app root.
 
 Knowledge Base vector stores and uploads are created under:
 
@@ -101,9 +103,13 @@ Recent projects and Projects search prefer the custom thread title for the prima
 ## Migration Notes
 Schema creation and migration live in `server/db/schema.ts`. The migration is idempotent and currently ensures `threads.deleted_at` exists for trash/restore behavior plus the Canvas Workflow tables.
 
-`server/storage.ts` remains the public storage facade. `server/db/sqlite.ts` owns SQLite initialization, and repository classes under `server/repositories/` are being introduced behind the facade without changing table names or local paths.
+`server/storage.ts` remains the public storage facade. `server/db/sqlite.ts` owns SQLite initialization, `server/storageTypes.ts` owns shared record shapes, `server/storagePaths.ts` owns app-root/thread-directory resolution, and repository classes under `server/repositories/` handle focused persistence areas behind the facade without changing table names or local paths.
+
+Current focused repositories include Thread listing/trash, Agent settings, Run/message/output/tool-event records, Knowledge metadata, and Canvas persistence. Routes should still use domain services or the compatibility facade, not repository internals.
 
 Future storage refactors should preserve existing table names and local paths unless a migration plan is documented here first.
+
+Every new table, column, or index should have a named migration step in `server/db/schema.ts` and a test that covers upgrading an old local database shape.
 
 ## Knowledge Notes
 Knowledge Base metadata is stored in FacetWrite's main SQLite database, while embeddings are stored in per-base libSQL vector databases managed by the embedjs runtime.

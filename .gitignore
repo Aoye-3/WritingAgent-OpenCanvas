@@ -13,9 +13,12 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 *.log
+test-results/
+*-qa.png
 .devserver.pid
 .superpowers/
 .facetwrite/
+.facetwrite-test/
 .docker-codex/
 reference/
 AgentBackend/

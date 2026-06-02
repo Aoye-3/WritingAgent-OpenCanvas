@@ -16,7 +16,8 @@ The Canvas has two separate responsibilities:
 
 Current frontend responsibilities:
 
-- Map persisted `CanvasNode` records into React Flow nodes.
+- Map persisted `CanvasNode` records into React Flow nodes through `components/canvas/flowMapping.ts`.
+- Keep status node, context menu, selection bar, and selected-node workflow chrome in `components/canvas/CanvasChrome.tsx`.
 - Compose common node frame behavior from `components/canvas/CanvasNodeFrame.tsx`.
 - Render directed edges through `components/canvas/CanvasCurveEdge.tsx`.
 - Format explicit user-sent mind chains through the shared pure helper in `shared/canvasMindChain.ts`.
@@ -30,7 +31,9 @@ React Flow is only a view/interaction layer. It must not become the source of tr
 
 Common node behavior is intentionally separated from node-kind content rendering. Selection, deletion, resize, drag handle, and the punched-hole link port live in the shared node frame. `note`, `document`, and `reference` rendering live in separate renderer entry points, even when they currently share the same editable text implementation, so future kind-specific behavior does not leak into the common frame.
 
-Canvas state is also split by responsibility. `src/app/hooks/useCanvasState.ts` is the public composition hook, `useCanvasActions.ts` owns API operation orchestration, `useCanvasHistory.ts` owns the session undo stack, and pure history helpers live in `shared/canvasHistory.ts` for backend-compatible unit tests.
+Canvas state is also split by responsibility. `src/app/hooks/useCanvasState.ts` is the public composition hook, `useCanvasActions.ts` owns API operation orchestration, `useCanvasHistory.ts` owns the session undo stack, and pure history helpers live in `shared/canvasHistory.ts` for backend-compatible unit tests. Small action-state helpers live under `src/app/hooks/canvasActions/` so failure-prone state transitions can be tested without rendering React Flow.
+
+Future FigJam-style toolbar modes and contextual quick-bar actions should reuse these Canvas API and state boundaries. Direct user edits may call Canvas CRUD endpoints; Agent-originated edits must continue through approval-aware write request paths.
 
 ## Node Model
 The current content node kinds remain:
@@ -193,7 +196,7 @@ Canvas V2 uses the existing API shape:
 - `GET /api/settings/canvas`
 - `PUT /api/settings/canvas`
 
-Canvas nodes remain in `canvas_nodes`. Directed edges live in `canvas_edges`. Workflow state lives in `canvas_workflows`, and node suggestions live in `canvas_workflow_suggestions`. Canvas settings use the generic `settings` table with key `canvas`. The SQL implementation lives in `server/repositories/canvasRepository.ts`; `server/storage.ts` keeps compatibility methods for existing route/service callers.
+Canvas nodes remain in `canvas_nodes`. Directed edges live in `canvas_edges`. Workflow state lives in `canvas_workflows`, and node suggestions live in `canvas_workflow_suggestions`. Canvas settings use the generic `settings` table with key `canvas`. Canvas routes call `server/domains/canvas/`; the domain service calls the storage facade; the SQL implementation lives in `server/repositories/canvasRepository.ts`. `server/storage.ts` keeps compatibility methods for existing route/service callers.
 
 ## Styling And Hit Testing
 Canvas styles live in `src/app/styles.css`.
@@ -228,6 +231,7 @@ Before claiming Canvas work is complete, verify:
 - `npm.cmd run build`
 - `npm.cmd test`
 - `npm.cmd run test:e2e:canvas`
+- Lightweight frontend tests cover API client errors, Canvas action state transitions, and React Flow mapping without starting a dev server.
 - Canvas renders in the workspace.
 - Background right-click menu creates `document`, `note`, `reference`, and `role` nodes.
 - Node drag persists `x/y`.

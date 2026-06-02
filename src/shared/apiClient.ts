@@ -40,6 +40,8 @@ async function apiRequest<T>(url: string, options: RequestOptions = {}): Promise
     method: options.method ?? "GET",
     headers: options.body === undefined ? undefined : { "Content-Type": "application/json" },
     body: options.body === undefined ? undefined : JSON.stringify(options.body)
+  }).catch((error: unknown) => {
+    throw new ApiError("Network request failed", 0, "network_error", error instanceof Error ? error.message : undefined);
   });
 
   const payload = await readJson(response);

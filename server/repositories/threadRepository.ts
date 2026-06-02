@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentCard } from "../agentCards.js";
-import type { ProjectSummary, StoredThread } from "../storage.js";
+import type { ProjectSummary, StoredThread } from "../storageTypes.js";
 import { nowIso } from "./storageRepositoryUtils.js";
 
 export class ThreadRepository {

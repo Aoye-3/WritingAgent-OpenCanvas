@@ -15,7 +15,7 @@ import type {
   CanvasWriteRequest,
   CanvasWriteRequestInput,
   CanvasWriteRequestStatus
-} from "../storage.js";
+} from "../storageTypes.js";
 import {
   canvasWorkflowStages,
   defaultCanvasWorkflow,

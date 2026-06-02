@@ -7,6 +7,7 @@ import { createGenerationService } from "./services/generationService.js";
 import { KnowledgeService } from "./knowledge/service.js";
 import { AgentRuntimeMemoryService } from "./services/agentRuntimeMemoryService.js";
 import { createStorage } from "./storage.js";
+import { createCanvasDomainService } from "./domains/canvas/index.js";
 import { registerAgentRoutes } from "./routes/agentRoutes.js";
 import { registerCatalogRoutes } from "./routes/catalogRoutes.js";
 import { registerCanvasRoutes } from "./routes/canvasRoutes.js";
@@ -28,6 +29,7 @@ export async function createApp() {
   const executionRuntime = createAgentRuntime();
   const knowledgeService = new KnowledgeService(storage);
   const memoryService = new AgentRuntimeMemoryService();
+  const canvasService = createCanvasDomainService(storage);
   const generationService = createGenerationService(storage, agentRuntime, { agentRuntime: executionRuntime, knowledge: knowledgeService, memory: memoryService });
 
   storage.upsertAgentCards(agentCards);
@@ -45,7 +47,7 @@ export async function createApp() {
   registerAgentRoutes(app, { agentRuntime });
   registerThreadRoutes(app, { storage, agentRuntime });
   registerProjectRoutes(app, { storage, agentRuntime });
-  registerCanvasRoutes(app, { storage });
+  registerCanvasRoutes(app, { canvasService });
   registerSettingsRoutes(app, { storage });
   registerGenerationRoutes(app, { generationService });
 

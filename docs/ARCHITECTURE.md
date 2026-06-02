@@ -43,7 +43,7 @@ The frontend owns interaction state and explicit user intent. The Express backen
 - `public/assets/ui/` is the local UI and image asset library. Brand asset URLs are centralized in `src/shared/brandAssets.ts` so components avoid hard-coded public paths. See `docs/UI_ASSETS.md`.
 - `src/features/workspace/WorkspaceView.tsx` renders the main writing workspace: structured Agent inputs, document Canvas, collaboration drawer, tool events, version history, and workspace utility surfaces.
 - `src/features/workspace/components/AICollaborationDrawer.tsx` owns chat-side Canvas write proposals, temporary streaming assistant status, temporary response annotations, annotation chips, and highlighted assistant-message text. Annotation chips are shown both in the proposal panel and above the composer so the user can see the active write selection before sending "write" instructions. Annotation state is intentionally client-only and is cleared after write/cancel/page refresh.
-- `src/features/workspace/components/DocumentCanvas.tsx` renders Canvas V2 through `@xyflow/react`. React Flow owns viewport pan, zoom, selection, and node dragging; FacetWrite owns node rendering, node CRUD calls, resize persistence, and Canvas write approval flows. Shared Canvas submodules under `src/features/workspace/components/canvas/` keep the node frame, node-kind renderers, edge rendering, resize/layout helpers, and node constants separated from the Canvas container.
+- `src/features/workspace/components/DocumentCanvas.tsx` renders Canvas V2 through `@xyflow/react`. React Flow owns viewport pan, zoom, selection, and node dragging; FacetWrite owns node rendering, node CRUD calls, resize persistence, and Canvas write approval flows. Shared Canvas submodules under `src/features/workspace/components/canvas/` keep the node frame, node-kind renderers, edge rendering, resize/layout helpers, node constants, status/context/selection chrome, and flow-node mapping separated from the Canvas container.
 - Canvas Workflow is layered over Canvas V2 without becoming the spatial engine. `shared/canvasWorkflow.ts` owns stage, Role-node, suggestion, and context-filtering pure helpers; `useCanvasState.ts`/`useCanvasActions.ts` own frontend state and API orchestration; `DocumentCanvas.tsx` and `CanvasNodeFrame.tsx` only render workflow controls, function nodes, badges, and suggestions through passed data/callbacks. Workflow control features that need targeted influence should be nodeized and relationship-driven, not added as more controls on ordinary content nodes.
 - `src/features/canvas/CanvasNodeSettingsView.tsx` is the left-navigation Canvas node type catalog. It explains note, document, and reference semantics without reading current project node content or mutating Canvas state.
 - Canvas hit testing is intentionally split between React Flow pane interactions and FacetWrite node controls. Inputs/buttons use `nodrag`, resize controls use `nodrag nopan`, and any future overlay must be browser-verified so it does not block pane context menus, pan/zoom, node drag, node resize, or node editing. See `docs/CANVAS.md`.
@@ -61,6 +61,7 @@ The frontend owns interaction state and explicit user intent. The Express backen
 - `server/app.ts` wires Express middleware, storage, Agent runtime, generation service, and route modules.
 - `server/routes/*` defines API endpoints for health, catalog, agents, threads, projects, Canvas, settings, and generation. Routes should call domain public APIs or compatibility facades; they should not reach into domain-internal stores or fetchers.
 - `server/domains/model-config/` owns provider references, configured model API bindings, local API key persistence, and remote provider model listing.
+- `server/domains/canvas/` is the public Canvas domain entry for route-level Canvas operations. Canvas routes depend on this service instead of reaching directly into storage repositories.
 - `server/domains/generation/` is the public domain entry for prompt/run-context building, Agent Runtime runner, provider runner, and run recording. `server/services/generationService.ts` remains a compatibility export.
 - `server/domains/knowledge/` is the public domain entry for KnowledgeService creation and model binding resolution for embedding/rerank credentials.
 - `server/services/*` now contains compatibility exports plus legacy service facades. New code should prefer `server/domains/*/index.ts` where a domain exists.
@@ -133,10 +134,12 @@ The frontend owns interaction state and explicit user intent. The Express backen
 - Current validation target: sidecar health, backend auth, config overview, one Task-card generation, five repeated AgentBackend generations, and both AgentBackend built-in ToolUse plus FacetWrite bridge ToolUse against the Docker sidecar. The latest 2026-05-20 smoke test confirmed `provider:"agent-backend"`, `usedMock:false`, and `finishReason:"agent_backend_completed"`.
 
 ## Storage
-- `server/storage.ts` is the compatibility facade for local persistence. It preserves the public storage API used by routes and services.
+- `server/storage.ts` is the compatibility facade for local persistence. It preserves the public storage API used by routes and services while delegating focused behavior to repository and path modules.
 - `server/db/sqlite.ts` initializes SQLite, enables WAL and foreign keys, and calls schema migration.
 - `server/db/schema.ts` owns schema creation and idempotent migration checks.
-- `server/repositories/*` contains focused repository boundaries introduced behind the facade. Thread listing/trash, Agent settings, and Canvas persistence delegate through repository classes; `server/storage.ts` remains the compatibility facade used by routes and services.
+- `server/storageTypes.ts` owns shared storage and Canvas record shapes so repositories can depend on data contracts without importing the storage facade.
+- `server/storagePaths.ts` owns local app-root resolution and thread workspace directory creation. `FACETWRITE_APP_ROOT` can point tests or e2e runs at an isolated local workspace.
+- `server/repositories/*` contains focused repository boundaries introduced behind the facade. Thread listing/trash, Agent settings, Run/message/output/tool-event persistence, Knowledge metadata, and Canvas persistence delegate through repository classes; `server/storage.ts` remains the compatibility facade used by routes and services.
 - Runtime database path: `.facetwrite/data/facetwrite.db`.
 - Knowledge vector path: `.facetwrite/knowledge/<baseId>/vectors.db`.
 - Thread file workspace path: `.facetwrite/threads/<threadId>/user-data/`.
@@ -146,13 +149,15 @@ The frontend owns interaction state and explicit user intent. The Express backen
 
 ## Domain Dependency Rules
 - `routes -> domains -> repositories/shared/config/security/utils`.
+- Canvas routes must call the Canvas domain service. Agent Runtime bridges and adapters must not import Canvas repositories directly; Agent-originated Canvas changes go through Tool policy and pending write requests.
 - `Agent` and `Knowledge` may use `model-config` public resolvers; `model-config` must not depend on Agent, Knowledge, Generation, or UI modules.
 - Frontend feature clients own their feature API calls. `src/features/model-config/modelConfigClient.ts` owns provider catalog and configured model API requests; `src/features/settings/settingsClient.ts` owns settings status and validation/save compatibility; runtime status/config calls use `/api/agent-runtime/*`.
 - Compatibility files are allowed only to preserve old imports during branch convergence. New code should import from domain public `index.ts` files or feature-local clients.
 
 ## Test Boundaries
-- Server and shared pure helpers are covered by `node --import tsx --test server/**/*.test.ts`, exposed through `npm.cmd test`.
+- Server, shared pure helpers, lightweight frontend pure-state tests, and architecture boundary checks are covered by `npm.cmd test`.
 - Agent Knowledge readiness is covered by deterministic server tests: generation facade tests prove unique Knowledge facts reach provider messages as `Knowledge References`, and Tool Runtime tests prove the `knowledge_base` bridge prefers RAG results and forwards selected base ids.
+- Architecture guard tests check that frontend files do not import server modules, Agent Runtime code does not import Canvas persistence directly, Canvas routes go through the Canvas domain service, and generated QA artifacts stay ignored.
 - Frontend Canvas interaction coverage is Playwright-based. `npm.cmd run test:e2e:canvas` runs `tests/e2e/canvas.spec.ts` against the local Vite/Express dev server and verifies node type creation, session undo, blur persistence, kind conversion preservation, directed edge creation/deletion, and explicit mind-chain drafting.
 - Playwright tests may use stable `data-testid` hooks for interaction targets, but those hooks are test infrastructure only and must not carry product state or business rules.
 

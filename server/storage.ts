@@ -1,208 +1,66 @@
 import { mkdir, rm } from "node:fs/promises";
-import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentCard, AgentSettings } from "./agentCards.js";
 import { createFacetWriteDatabase, runSqliteTransaction } from "./db/sqlite.js";
 import { AgentSettingsRepository } from "./repositories/agentSettingsRepository.js";
 import { CanvasRepository } from "./repositories/canvasRepository.js";
-import { cleanText, nowIso, parseJson, randomId, validateId } from "./repositories/storageRepositoryUtils.js";
+import { KnowledgeRepository } from "./repositories/knowledgeRepository.js";
+import { RunRepository } from "./repositories/runRepository.js";
+import { cleanText, nowIso, parseJson, validateId } from "./repositories/storageRepositoryUtils.js";
 import { ThreadRepository } from "./repositories/threadRepository.js";
-import type { Provider } from "./types.js";
-import type { ToolEventRecord } from "./toolRuntime.js";
-import { sanitizeVisibleText } from "./services/generation/outputNormalizer.js";
-import type { KnowledgeBase, KnowledgeBaseInput, KnowledgeEventInput, KnowledgeItem, KnowledgeItemInput, KnowledgeItemStatus } from "./knowledge/types.js";
-import type { CanvasWorkflowRole, CanvasWorkflowStage, CanvasWorkflowSuggestionStatus } from "../shared/canvasWorkflow.js";
+import type { KnowledgeBase, KnowledgeBaseInput, KnowledgeEventInput, KnowledgeItemInput, KnowledgeItemStatus } from "./knowledge/types.js";
+import { createThreadDirectoryManager, resolveFacetWritePaths } from "./storagePaths.js";
+import type {
+  CanvasEdgeInput,
+  CanvasNodeInput,
+  CanvasNodePatch,
+  CanvasNodeWorkflowPatch,
+  CanvasSettings,
+  CanvasSuggestionToNodeInput,
+  CanvasWorkflow,
+  CanvasWorkflowInput,
+  CanvasWorkflowSuggestionInput,
+  CanvasWriteRequestInput,
+  CanvasWriteRequestStatus,
+  JsonValue,
+  RunRecordInput,
+  StoredStructuredValues
+} from "./storageTypes.js";
+export type {
+  CanvasEdge,
+  CanvasEdgeInput,
+  CanvasNode,
+  CanvasNodeInput,
+  CanvasNodeKind,
+  CanvasNodePatch,
+  CanvasNodeWorkflowPatch,
+  CanvasSettings,
+  CanvasSuggestionToNodeInput,
+  CanvasWorkflow,
+  CanvasWorkflowInput,
+  CanvasWorkflowSuggestion,
+  CanvasWorkflowSuggestionInput,
+  CanvasWriteOperation,
+  CanvasWriteRequest,
+  CanvasWriteRequestInput,
+  CanvasWriteRequestStatus,
+  JsonValue,
+  ProjectSummary,
+  RunRecordInput,
+  StoredMessage,
+  StoredOutputVersion,
+  StoredStructuredValues,
+  StoredThread,
+  StoredToolEvent
+} from "./storageTypes.js";
 
-export type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
+export { resolveFacetWritePaths } from "./storagePaths.js";
 
-export type RunRecordInput = {
-  threadId: string;
-  agentCardId: string;
-  mode: "structured" | "chat";
-  prompt: string;
-  output: string;
-  provider: Provider;
-  usedMock: boolean;
-  errorMessage?: string;
-  userMessage?: string;
-  toolState?: Record<string, unknown>;
-  events?: ToolEventRecord[];
-  finishReason?: string;
-  usage?: unknown;
-};
-
-export type StoredMessage = {
-  id: string;
-  threadId: string;
-  role: "user" | "assistant";
-  text: string;
-  usedMock: boolean;
-  createdAt: string;
-};
-
-export type StoredThread = {
-  id: string;
-  agentCardId: string;
-  title: string;
-  updatedAt: string;
-  deletedAt?: string | null;
-  assetCount?: number;
-};
-
-export type ProjectSummary = StoredThread & {
-  agentTitle: string;
-  provider?: string;
-};
-
-export type StoredStructuredValues = Record<string, string | string[]>;
-
-export type StoredOutputVersion = {
-  id: string;
-  threadId: string;
-  runId: string;
-  content: string;
-  mode: "structured" | "chat";
-  provider: Provider;
-  usedMock: boolean;
-  createdAt: string;
-};
-
-export type StoredToolEvent = {
-  id: string;
-  threadId: string;
-  runId: string;
-  eventType: string;
-  payload: JsonValue;
-  createdAt: string;
-};
-
-export type CanvasNodeKind = "document" | "note" | "reference" | "role";
-export type CanvasWriteOperation = "create" | "replace" | "append";
-export type CanvasWriteRequestStatus = "pending" | "approved" | "rejected";
-
-export type CanvasNode = {
-  id: string;
-  threadId: string;
-  kind: CanvasNodeKind;
-  title: string;
-  content: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  metadata: JsonValue;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type CanvasWriteRequest = {
-  id: string;
-  threadId: string;
-  operation: CanvasWriteOperation;
-  targetNodeId?: string;
-  nodeKind: CanvasNodeKind;
-  title: string;
-  content: string;
-  rationale: string;
-  status: CanvasWriteRequestStatus;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type CanvasEdge = {
-  id: string;
-  threadId: string;
-  sourceNodeId: string;
-  targetNodeId: string;
-  label: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type CanvasNodeInput = {
-  id?: string;
-  kind: CanvasNodeKind;
-  title?: string;
-  content?: string;
-  x?: number;
-  y?: number;
-  width?: number;
-  height?: number;
-  metadata?: JsonValue;
-};
-
-export type CanvasNodePatch = Partial<Omit<CanvasNodeInput, "kind">> & {
-  kind?: CanvasNodeKind;
-};
-
-export type CanvasWriteRequestInput = {
-  operation: CanvasWriteOperation;
-  targetNodeId?: string;
-  nodeKind?: CanvasNodeKind;
-  title?: string;
-  content: string;
-  rationale?: string;
-};
-
-export type CanvasEdgeInput = {
-  sourceNodeId: string;
-  targetNodeId: string;
-  label?: string;
-};
-
-export type CanvasSettings = {
-  undoDepth: number;
-};
-
-export type CanvasWorkflow = {
-  threadId: string;
-  stage: CanvasWorkflowStage;
-  stages: CanvasWorkflowStage[];
-  roles: CanvasWorkflowRole[];
-  updatedAt: string;
-};
-
-export type CanvasWorkflowInput = {
-  stage?: CanvasWorkflowStage;
-  roles?: CanvasWorkflowRole[];
-};
-
-export type CanvasNodeWorkflowPatch = {
-  stage?: CanvasWorkflowStage;
-  roles?: string[];
-};
-
-export type CanvasWorkflowSuggestion = {
-  id: string;
-  threadId: string;
-  nodeId: string;
-  roleNodeId: string;
-  targetNodeId: string;
-  roleId: string;
-  content: string;
-  rationale: string;
-  status: CanvasWorkflowSuggestionStatus;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type CanvasWorkflowSuggestionInput = {
-  nodeId?: string;
-  roleNodeId?: string;
-  targetNodeId?: string;
-  roleId: string;
-  content: string;
-  rationale?: string;
-};
-
-export type CanvasSuggestionToNodeInput = {
-  kind?: CanvasNodeKind;
-  title?: string;
-};
-
-const appRoot = path.resolve(process.cwd(), ".facetwrite");
-const dbDir = path.join(appRoot, "data");
-const dbPath = path.join(dbDir, "facetwrite.db");
+const storagePaths = resolveFacetWritePaths();
+const appRoot = storagePaths.appRoot;
+const dbDir = storagePaths.dbDir;
+const dbPath = storagePaths.dbPath;
+const threadDirectoryManager = createThreadDirectoryManager(appRoot);
 const maxThreadTitleLength = 120;
 
 export class SQLiteStorageRepository {
@@ -210,12 +68,21 @@ export class SQLiteStorageRepository {
   private threads: ThreadRepository;
   private agentSettings: AgentSettingsRepository;
   private canvas: CanvasRepository;
+  private knowledge: KnowledgeRepository;
+  private runs: RunRepository;
 
   constructor() {
     this.db = createFacetWriteDatabase(dbPath);
     this.threads = new ThreadRepository(this.db);
     this.agentSettings = new AgentSettingsRepository(this.db, (work) => this.withTransaction(work));
     this.canvas = new CanvasRepository(this.db, {
+      withTransaction: (work) => this.withTransaction(work),
+      touchThread: (threadId, updatedAt) => this.touchThread(threadId, updatedAt)
+    });
+    this.knowledge = new KnowledgeRepository(this.db, {
+      withTransaction: (work) => this.withTransaction(work)
+    });
+    this.runs = new RunRepository(this.db, {
       withTransaction: (work) => this.withTransaction(work),
       touchThread: (threadId, updatedAt) => this.touchThread(threadId, updatedAt)
     });
@@ -247,66 +114,11 @@ export class SQLiteStorageRepository {
   }
 
   recordRun(input: RunRecordInput) {
-    const runId = randomId("run");
-    const promptVersionId = randomId("prompt");
-    const outputVersionId = randomId("output");
-    const now = nowIso();
-
-    this.withTransaction(() => {
-      this.db
-        .prepare(
-          `INSERT INTO runs (id, thread_id, agent_card_id, mode, provider, used_mock, status, error_message, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(runId, input.threadId, input.agentCardId, input.mode, input.provider, input.usedMock ? 1 : 0, "completed", input.errorMessage ?? null, now);
-
-      if (input.userMessage) {
-        this.addMessage(input.threadId, "user", input.userMessage, false, now);
-      }
-      this.addMessage(input.threadId, "assistant", input.output, input.usedMock, now);
-
-      this.db
-        .prepare(`INSERT INTO prompt_versions (id, thread_id, run_id, prompt, created_at) VALUES (?, ?, ?, ?, ?)`)
-        .run(promptVersionId, input.threadId, runId, input.prompt, now);
-      this.db
-        .prepare(`INSERT INTO output_versions (id, thread_id, run_id, content, created_at) VALUES (?, ?, ?, ?, ?)`)
-        .run(outputVersionId, input.threadId, runId, input.output, now);
-
-      this.recordToolEvent(input.threadId, runId, "run_completed", {
-        mode: input.mode,
-        provider: input.provider,
-        usedMock: input.usedMock,
-        finishReason: input.finishReason,
-        usage: input.usage
-      }, now);
-      this.recordToolEvent(input.threadId, runId, "prompt_built", { promptVersionId }, now);
-      this.recordToolEvent(input.threadId, runId, "output_version_created", { outputVersionId }, now);
-
-      if (input.toolState && Object.keys(input.toolState).length > 0) {
-        this.recordToolEvent(input.threadId, runId, "tool_state_applied", input.toolState, now);
-      }
-
-      for (const event of input.events ?? []) {
-        this.recordToolEvent(input.threadId, runId, event.eventType, event.payload, now);
-      }
-
-      this.db.prepare(`UPDATE threads SET updated_at = ? WHERE id = ?`).run(now, input.threadId);
-    });
-
-    return { runId, promptVersionId, outputVersionId };
+    return this.runs.recordRun(input);
   }
 
   listMessages(threadId: string) {
-    type StoredMessageRow = Omit<StoredMessage, "usedMock"> & { usedMock: number };
-    const rows = this.db
-      .prepare(`SELECT id, thread_id as threadId, role, text, used_mock as usedMock, created_at as createdAt FROM messages WHERE thread_id = ? ORDER BY created_at ASC`)
-      .all(threadId) as StoredMessageRow[];
-
-    return rows.map((row) => ({
-      ...row,
-      text: row.role === "assistant" ? sanitizeVisibleText(row.text) : row.text,
-      usedMock: Boolean(row.usedMock)
-    }));
+    return this.runs.listMessages(threadId);
   }
 
   getThread(threadId: string) {
@@ -480,227 +292,51 @@ export class SQLiteStorageRepository {
   }
 
   listKnowledgeBases() {
-    const rows = this.db
-      .prepare(
-        `SELECT id,
-                name,
-                description,
-                embedding_config_id as embeddingConfigId,
-                embedding_provider as embeddingProvider,
-                embedding_model as embeddingModel,
-                embedding_base_url as embeddingBaseUrl,
-                dimensions,
-                chunk_size as chunkSize,
-                chunk_overlap as chunkOverlap,
-                document_count as documentCount,
-                threshold,
-                rerank_enabled as rerankEnabled,
-                rerank_config_id as rerankConfigId,
-                rerank_provider as rerankProvider,
-                rerank_model as rerankModel,
-                rerank_base_url as rerankBaseUrl,
-                status,
-                created_at as createdAt,
-                updated_at as updatedAt
-         FROM knowledge_bases
-         ORDER BY updated_at DESC`
-      )
-      .all() as KnowledgeBaseRow[];
-    return rows.map(mapKnowledgeBaseRow);
+    return this.knowledge.listKnowledgeBases();
   }
 
   getKnowledgeBase(baseId: string) {
-    validateId(baseId, "baseId");
-    const row = this.db
-      .prepare(
-        `SELECT id,
-                name,
-                description,
-                embedding_config_id as embeddingConfigId,
-                embedding_provider as embeddingProvider,
-                embedding_model as embeddingModel,
-                embedding_base_url as embeddingBaseUrl,
-                dimensions,
-                chunk_size as chunkSize,
-                chunk_overlap as chunkOverlap,
-                document_count as documentCount,
-                threshold,
-                rerank_enabled as rerankEnabled,
-                rerank_config_id as rerankConfigId,
-                rerank_provider as rerankProvider,
-                rerank_model as rerankModel,
-                rerank_base_url as rerankBaseUrl,
-                status,
-                created_at as createdAt,
-                updated_at as updatedAt
-         FROM knowledge_bases
-         WHERE id = ?`
-      )
-      .get(baseId) as KnowledgeBaseRow | undefined;
-    return row ? mapKnowledgeBaseRow(row) : undefined;
+    return this.knowledge.getKnowledgeBase(baseId);
   }
 
   createKnowledgeBase(input: Required<Omit<KnowledgeBaseInput, "dimensions" | "embeddingConfigId" | "rerankConfigId" | "rerankProvider" | "rerankModel" | "rerankBaseUrl">> & Pick<KnowledgeBaseInput, "dimensions" | "embeddingConfigId" | "rerankConfigId" | "rerankProvider" | "rerankModel" | "rerankBaseUrl">) {
-    const now = nowIso();
-    const base: KnowledgeBase = {
-      id: randomId("kb"),
-      name: cleanText(input.name) || "Knowledge Base",
-      description: cleanText(input.description),
-      embeddingConfigId: cleanText(input.embeddingConfigId),
-      embeddingProvider: input.embeddingProvider,
-      embeddingModel: cleanText(input.embeddingModel),
-      embeddingBaseUrl: cleanText(input.embeddingBaseUrl),
-      dimensions: input.dimensions,
-      chunkSize: input.chunkSize,
-      chunkOverlap: input.chunkOverlap,
-      documentCount: input.documentCount,
-      threshold: input.threshold,
-      rerankEnabled: input.rerankEnabled,
-      rerankConfigId: cleanText(input.rerankConfigId),
-      rerankProvider: cleanText(input.rerankProvider),
-      rerankModel: cleanText(input.rerankModel),
-      rerankBaseUrl: cleanText(input.rerankBaseUrl),
-      status: "ready",
-      createdAt: now,
-      updatedAt: now
-    };
-    this.db
-      .prepare(
-        `INSERT INTO knowledge_bases
-          (id, name, description, embedding_config_id, embedding_provider, embedding_model, embedding_base_url, dimensions, chunk_size, chunk_overlap, document_count, threshold, rerank_enabled, rerank_config_id, rerank_provider, rerank_model, rerank_base_url, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(base.id, base.name, base.description, base.embeddingConfigId ?? null, base.embeddingProvider, base.embeddingModel, base.embeddingBaseUrl, base.dimensions ?? null, base.chunkSize, base.chunkOverlap, base.documentCount, base.threshold, base.rerankEnabled ? 1 : 0, base.rerankConfigId ?? null, base.rerankProvider ?? null, base.rerankModel ?? null, base.rerankBaseUrl ?? null, base.status, now, now);
-    return base;
+    return this.knowledge.createKnowledgeBase(input);
   }
 
   updateKnowledgeBase(baseId: string, patch: KnowledgeBaseInput) {
-    const existing = this.getKnowledgeBase(baseId);
-    if (!existing) return undefined;
-    const now = nowIso();
-    const next: KnowledgeBase = {
-      ...existing,
-      name: patch.name === undefined ? existing.name : cleanText(patch.name) || existing.name,
-      description: patch.description === undefined ? existing.description : cleanText(patch.description),
-      embeddingConfigId: patch.embeddingConfigId === undefined ? existing.embeddingConfigId : cleanText(patch.embeddingConfigId) || undefined,
-      embeddingProvider: patch.embeddingProvider ?? existing.embeddingProvider,
-      embeddingModel: patch.embeddingModel === undefined ? existing.embeddingModel : cleanText(patch.embeddingModel) || existing.embeddingModel,
-      embeddingBaseUrl: patch.embeddingBaseUrl === undefined ? existing.embeddingBaseUrl : cleanText(patch.embeddingBaseUrl) || existing.embeddingBaseUrl,
-      dimensions: patch.dimensions ?? existing.dimensions,
-      chunkSize: readPositiveInteger(patch.chunkSize, existing.chunkSize),
-      chunkOverlap: readNonNegativeInteger(patch.chunkOverlap, existing.chunkOverlap),
-      documentCount: readPositiveInteger(patch.documentCount, existing.documentCount),
-      threshold: readThreshold(patch.threshold, existing.threshold),
-      rerankEnabled: patch.rerankEnabled ?? existing.rerankEnabled,
-      rerankConfigId: patch.rerankConfigId === undefined ? existing.rerankConfigId : cleanText(patch.rerankConfigId) || undefined,
-      rerankProvider: patch.rerankProvider === undefined ? existing.rerankProvider : cleanText(patch.rerankProvider) || undefined,
-      rerankModel: patch.rerankModel === undefined ? existing.rerankModel : cleanText(patch.rerankModel) || undefined,
-      rerankBaseUrl: patch.rerankBaseUrl === undefined ? existing.rerankBaseUrl : cleanText(patch.rerankBaseUrl) || undefined,
-      updatedAt: now
-    };
-    this.db
-      .prepare(
-        `UPDATE knowledge_bases
-         SET name = ?, description = ?, embedding_config_id = ?, embedding_provider = ?, embedding_model = ?, embedding_base_url = ?, dimensions = ?, chunk_size = ?, chunk_overlap = ?, document_count = ?, threshold = ?, rerank_enabled = ?, rerank_config_id = ?, rerank_provider = ?, rerank_model = ?, rerank_base_url = ?, updated_at = ?
-         WHERE id = ?`
-      )
-      .run(next.name, next.description, next.embeddingConfigId ?? null, next.embeddingProvider, next.embeddingModel, next.embeddingBaseUrl, next.dimensions ?? null, next.chunkSize, next.chunkOverlap, next.documentCount, next.threshold, next.rerankEnabled ? 1 : 0, next.rerankConfigId ?? null, next.rerankProvider ?? null, next.rerankModel ?? null, next.rerankBaseUrl ?? null, now, baseId);
-    return next;
+    return this.knowledge.updateKnowledgeBase(baseId, patch);
   }
 
   setKnowledgeBaseStatus(baseId: string, status: KnowledgeBase["status"]) {
-    validateId(baseId, "baseId");
-    this.db.prepare(`UPDATE knowledge_bases SET status = ?, updated_at = ? WHERE id = ?`).run(status, nowIso(), baseId);
+    this.knowledge.setKnowledgeBaseStatus(baseId, status);
   }
 
   deleteKnowledgeBase(baseId: string) {
-    validateId(baseId, "baseId");
-    this.withTransaction(() => {
-      this.db.prepare(`DELETE FROM knowledge_item_events WHERE base_id = ?`).run(baseId);
-      this.db.prepare(`DELETE FROM knowledge_items WHERE base_id = ?`).run(baseId);
-      this.db.prepare(`DELETE FROM knowledge_bases WHERE id = ?`).run(baseId);
-    });
+    this.knowledge.deleteKnowledgeBase(baseId);
   }
 
   listKnowledgeItems(baseId: string) {
-    validateId(baseId, "baseId");
-    const rows = this.db
-      .prepare(
-        `SELECT id,
-                base_id as baseId,
-                type,
-                title,
-                source,
-                content_text as contentText,
-                unique_id as uniqueId,
-                unique_ids_json as uniqueIdsJson,
-                status,
-                error_message as errorMessage,
-                created_at as createdAt,
-                updated_at as updatedAt
-         FROM knowledge_items
-         WHERE base_id = ?
-         ORDER BY created_at DESC`
-      )
-      .all(baseId) as KnowledgeItemRow[];
-    return rows.map(mapKnowledgeItemRow);
+    return this.knowledge.listKnowledgeItems(baseId);
   }
 
   getKnowledgeItem(baseId: string, itemId: string) {
-    validateId(itemId, "itemId");
-    return this.listKnowledgeItems(baseId).find((item) => item.id === itemId);
+    return this.knowledge.getKnowledgeItem(baseId, itemId);
   }
 
   createKnowledgeItem(baseId: string, input: KnowledgeItemInput) {
-    validateId(baseId, "baseId");
-    const now = nowIso();
-    const item: KnowledgeItem = {
-      id: randomId("kbi"),
-      baseId,
-      type: input.type,
-      title: cleanText(input.title) || cleanText(input.fileName) || cleanText(input.source) || "Knowledge item",
-      source: cleanText(input.source) || cleanText(input.fileName) || "manual",
-      contentText: input.content,
-      uniqueIds: [],
-      status: "pending",
-      createdAt: now,
-      updatedAt: now
-    };
-    this.db
-      .prepare(
-        `INSERT INTO knowledge_items
-          (id, base_id, type, title, source, content_text, unique_id, unique_ids_json, status, error_message, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(item.id, baseId, item.type, item.title, item.source, item.contentText ?? null, null, JSON.stringify([]), item.status, null, now, now);
-    return item;
+    return this.knowledge.createKnowledgeItem(baseId, input);
   }
 
   updateKnowledgeItemIndex(input: { baseId: string; itemId: string; status: KnowledgeItemStatus; uniqueId?: string; uniqueIds?: string[]; errorMessage?: string }) {
-    validateId(input.baseId, "baseId");
-    validateId(input.itemId, "itemId");
-    this.db
-      .prepare(
-        `UPDATE knowledge_items
-         SET status = ?, unique_id = ?, unique_ids_json = ?, error_message = ?, updated_at = ?
-         WHERE id = ? AND base_id = ?`
-      )
-      .run(input.status, input.uniqueId ?? null, JSON.stringify(input.uniqueIds ?? []), input.errorMessage ?? null, nowIso(), input.itemId, input.baseId);
+    this.knowledge.updateKnowledgeItemIndex(input);
   }
 
   deleteKnowledgeItem(baseId: string, itemId: string) {
-    validateId(baseId, "baseId");
-    validateId(itemId, "itemId");
-    this.withTransaction(() => {
-      this.db.prepare(`DELETE FROM knowledge_item_events WHERE base_id = ? AND item_id = ?`).run(baseId, itemId);
-      this.db.prepare(`DELETE FROM knowledge_items WHERE base_id = ? AND id = ?`).run(baseId, itemId);
-    });
+    this.knowledge.deleteKnowledgeItem(baseId, itemId);
   }
 
   recordKnowledgeEvent(input: KnowledgeEventInput) {
-    this.db
-      .prepare(`INSERT INTO knowledge_item_events (id, base_id, item_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(randomId("kbe"), input.baseId, input.itemId ?? null, input.eventType, JSON.stringify(input.payload), nowIso());
+    this.knowledge.recordKnowledgeEvent(input);
   }
 
   getAgentSettings(agentCardId: string) {
@@ -712,67 +348,15 @@ export class SQLiteStorageRepository {
   }
 
   listOutputVersions(threadId: string) {
-    type StoredOutputVersionRow = Omit<StoredOutputVersion, "usedMock"> & { usedMock: number };
-    const rows = this.db
-      .prepare(
-        `SELECT output_versions.id,
-                output_versions.thread_id as threadId,
-                output_versions.run_id as runId,
-                output_versions.content,
-                output_versions.created_at as createdAt,
-                runs.mode,
-                runs.provider,
-                runs.used_mock as usedMock
-         FROM output_versions
-         JOIN runs ON runs.id = output_versions.run_id
-         WHERE output_versions.thread_id = ?
-         ORDER BY output_versions.created_at DESC`
-      )
-      .all(threadId) as StoredOutputVersionRow[];
-
-    return rows.map((row) => ({
-      ...row,
-      content: sanitizeVisibleText(row.content),
-      usedMock: Boolean(row.usedMock)
-    }));
+    return this.runs.listOutputVersions(threadId);
   }
 
   listToolEvents(threadId: string) {
-    type StoredToolEventRow = Omit<StoredToolEvent, "payload"> & { payloadJson: string };
-    const rows = this.db
-      .prepare(
-        `SELECT id,
-                thread_id as threadId,
-                run_id as runId,
-                event_type as eventType,
-                payload_json as payloadJson,
-                created_at as createdAt
-         FROM tool_events
-         WHERE thread_id = ?
-         ORDER BY created_at DESC`
-      )
-      .all(threadId) as StoredToolEventRow[];
-
-    return rows.map((row) => ({
-      id: row.id,
-      threadId: row.threadId,
-      runId: row.runId,
-      eventType: row.eventType,
-      payload: parseJson(row.payloadJson),
-      createdAt: row.createdAt
-    }));
+    return this.runs.listToolEvents(threadId);
   }
 
   recordToolEvent(threadId: string, runId: string, eventType: string, payload: JsonValue, createdAt = nowIso()) {
-    this.db
-      .prepare(`INSERT INTO tool_events (id, thread_id, run_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(randomId("tool"), threadId, runId, eventType, JSON.stringify(payload), createdAt);
-  }
-
-  private addMessage(threadId: string, role: "user" | "assistant", text: string, usedMock: boolean, createdAt = nowIso()) {
-    this.db
-      .prepare(`INSERT INTO messages (id, thread_id, role, text, used_mock, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(randomId("msg"), threadId, role, text, usedMock ? 1 : 0, createdAt);
+    this.runs.recordToolEvent(threadId, runId, eventType, payload, createdAt);
   }
 
   private withTransaction<T>(work: () => T) {
@@ -790,28 +374,11 @@ export async function createStorage() {
 }
 
 export async function ensureThreadDirs(threadId: string) {
-  validateId(threadId, "threadId");
-  const threadRoot = path.join(threadDataRoot(threadId), "user-data");
-  const resolved = path.resolve(threadRoot);
-  if (!resolved.startsWith(appRoot)) {
-    throw new Error("Thread data must stay inside the local app workspace");
-  }
-
-  await Promise.all([
-    mkdir(path.join(resolved, "workspace"), { recursive: true }),
-    mkdir(path.join(resolved, "uploads"), { recursive: true }),
-    mkdir(path.join(resolved, "outputs"), { recursive: true })
-  ]);
+  await threadDirectoryManager.ensureThreadDirs(threadId);
 }
 
 function threadDataRoot(threadId: string) {
-  validateId(threadId, "threadId");
-  const root = path.join(appRoot, "threads", threadId);
-  const resolved = path.resolve(root);
-  if (!resolved.startsWith(appRoot)) {
-    throw new Error("Thread data must stay inside the local app workspace");
-  }
-  return resolved;
+  return threadDirectoryManager.threadDataRoot(threadId);
 }
 
 function cleanStructuredValues(value: unknown): StoredStructuredValues {
@@ -831,55 +398,3 @@ function cleanStructuredValues(value: unknown): StoredStructuredValues {
   return values;
 }
 
-type KnowledgeBaseRow = Omit<KnowledgeBase, "dimensions" | "embeddingConfigId" | "rerankEnabled" | "rerankConfigId" | "rerankProvider" | "rerankModel" | "rerankBaseUrl"> & {
-  dimensions: number | null;
-  embeddingConfigId: string | null;
-  rerankEnabled: number;
-  rerankConfigId: string | null;
-  rerankProvider: string | null;
-  rerankModel: string | null;
-  rerankBaseUrl: string | null;
-};
-
-type KnowledgeItemRow = Omit<KnowledgeItem, "contentText" | "uniqueId" | "uniqueIds" | "errorMessage"> & {
-  contentText: string | null;
-  uniqueId: string | null;
-  uniqueIdsJson: string;
-  errorMessage: string | null;
-};
-
-function mapKnowledgeBaseRow(row: KnowledgeBaseRow): KnowledgeBase {
-  return {
-    ...row,
-    dimensions: row.dimensions ?? undefined,
-    embeddingConfigId: row.embeddingConfigId ?? undefined,
-    rerankEnabled: Boolean(row.rerankEnabled),
-    rerankConfigId: row.rerankConfigId ?? undefined,
-    rerankProvider: row.rerankProvider ?? undefined,
-    rerankModel: row.rerankModel ?? undefined,
-    rerankBaseUrl: row.rerankBaseUrl ?? undefined
-  };
-}
-
-function mapKnowledgeItemRow(row: KnowledgeItemRow): KnowledgeItem {
-  const uniqueIds = parseJson(row.uniqueIdsJson);
-  return {
-    ...row,
-    contentText: row.contentText ?? undefined,
-    uniqueId: row.uniqueId ?? undefined,
-    uniqueIds: Array.isArray(uniqueIds) ? uniqueIds.filter((value): value is string => typeof value === "string") : [],
-    errorMessage: row.errorMessage ?? undefined
-  };
-}
-
-function readPositiveInteger(value: unknown, fallback: number) {
-  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
-}
-
-function readNonNegativeInteger(value: unknown, fallback: number) {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : fallback;
-}
-
-function readThreshold(value: unknown, fallback: number) {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1 ? value : fallback;
-}

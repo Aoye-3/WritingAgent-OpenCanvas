@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CanvasNodeKind, CanvasWriteOperation, JsonValue } from "../storage.js";
+import type { CanvasNodeKind, CanvasWriteOperation, JsonValue } from "../storageTypes.js";
 
 export function randomId(prefix: string) {
   return `${prefix}_${randomUUID()}`;

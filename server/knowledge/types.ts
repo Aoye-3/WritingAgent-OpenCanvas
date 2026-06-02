@@ -1,4 +1,4 @@
-import type { JsonValue } from "../storage.js";
+import type { JsonValue } from "../storageTypes.js";
 
 export type KnowledgeItemType = "text" | "file" | "url" | "sitemap" | "note";
 export type KnowledgeItemStatus = "pending" | "processing" | "completed" | "failed";

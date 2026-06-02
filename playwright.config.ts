@@ -17,7 +17,7 @@ export default defineConfig({
     }
   ],
   webServer: {
-    command: "npm.cmd run dev",
+    command: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$env:FACETWRITE_APP_ROOT='.facetwrite-test/e2e'; npm.cmd run dev\"",
     url: "http://127.0.0.1:3000",
     reuseExistingServer: true,
     timeout: 120_000

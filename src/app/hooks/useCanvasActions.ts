@@ -22,6 +22,7 @@ import {
   type CanvasWriteRequestDraft
 } from "../../features/canvas/canvasClient";
 import { createInverseCanvasNodePatch, type CanvasHistoryEntry } from "../../../shared/canvasHistory";
+import { removeCanvasNodeFromState } from "./canvasActions/state";
 
 type UseCanvasActionsOptions = {
   canvasEdges: CanvasEdge[];
@@ -91,9 +92,9 @@ export function useCanvasActions({
     const previous = canvasNodes.find((node) => node.id === nodeId);
     const attachedEdges = canvasEdges.filter((edge) => edge.sourceNodeId === nodeId || edge.targetNodeId === nodeId);
     await deleteCanvasNode(threadId, nodeId);
-    setCanvasNodes((current) => current.filter((node) => node.id !== nodeId));
-    setCanvasEdges((current) => current.filter((edge) => edge.sourceNodeId !== nodeId && edge.targetNodeId !== nodeId));
-    setSelectedCanvasNodeId((current) => current === nodeId ? undefined : current);
+    setCanvasNodes((current) => removeCanvasNodeFromState({ nodeId, nodes: current, edges: canvasEdges }).nodes);
+    setCanvasEdges((current) => removeCanvasNodeFromState({ nodeId, nodes: canvasNodes, edges: current }).edges);
+    setSelectedCanvasNodeId((current) => removeCanvasNodeFromState({ nodeId, nodes: canvasNodes, edges: canvasEdges, selectedNodeId: current }).selectedNodeId);
     if (previous && options.recordHistory !== false) pushHistory({ kind: "restoreNode", node: previous, edges: attachedEdges });
     await onRefreshProjectSurfaces();
   };
