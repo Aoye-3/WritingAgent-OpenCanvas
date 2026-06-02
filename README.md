@@ -1,18 +1,32 @@
+<p align="center">
+  <img src="public/assets/ui/brand/opencanvas-icon.png" alt="OpenCanvas icon" width="96" height="96" />
+</p>
+
 # OpenCanvas
 
-<sub>FacetWrite architecture</sub>
+**Language:** English | [中文](README.zh-CN.md)
 
-OpenCanvas is a local-first AI canvas workspace built on the FacetWrite architecture. It combines Agent cards, configurable tools, editable Canvas nodes, project history, provider settings, and an internal Agent Runtime Docker sidecar for richer AI orchestration.
+OpenCanvas is a local-first AI canvas workspace built on the FacetWrite architecture. It combines a FigJam-like board, editable writing nodes, Agent cards, configurable tools, project history, provider settings, Knowledge, Memory, and an internal Agent Runtime sidecar for richer AI orchestration.
+
+OpenCanvas benchmarks the familiar board experience first: an infinite canvas, nodes, edges, a floating toolbar, contextual object actions, and local board-file behavior. The product innovation is the Agent layer on top: tool orchestration plus human-AI collaboration context management, where the Agent understands selection, explicit mind chains, workflow stages, Role nodes, and approval state before acting.
+
+## Product Shape
+
+- **Local-first canvas:** Vite/React frontend, Express API, SQLite/local file persistence, and local workspace files under `.facetwrite/`.
+- **Canvas V2:** React Flow-based board with document, note, reference, and role nodes; directed edges; resize/edit/delete; right-click creation; workflow stages; Role suggestions; session undo.
+- **Agent Runtime:** AgentBackend sidecar for Lead Agent/subagent orchestration, ToolUse bridge, runtime dashboard, Knowledge, Memory controls, and provider fallback.
+- **Human-in-the-loop writes:** Agent-originated Canvas changes create pending write requests first. Canvas content changes only after user confirmation or the same-run explicit approval path.
+- **Board direction:** OpenCanvas should evolve toward a PS/Figma-like board file that stores nodes, edges, assets, workflow state, Agent conversations, tool events, and write approvals.
 
 ## Naming
 
-`OpenCanvas` is the external product name and should appear as the large primary wordmark in the UI. `FacetWrite` appears only as a small technical lineage mark in the brand lockup and remains the internal engineering name used by code paths, API boundaries, local data folders, Docker project names, and technical documentation where changing names would create unnecessary migration risk.
+`OpenCanvas` is the external product name and should appear as the primary UI wordmark. `FacetWrite` is the technical lineage/internal engineering name used by code paths, API boundaries, local data folders, Docker project names, and technical documentation where renaming would create unnecessary migration risk.
 
 ## Run
 
-### Recommended: FacetWrite + Agent Runtime
+### Recommended: OpenCanvas + Agent Runtime
 
-Use this path for local development and acceptance. FacetWrite runs the frontend/backend, while the internal Agent Runtime module runs as the primary AI execution subsystem through Docker Compose. The current internal runtime implementation is AgentBackend. Provider and mock fallback should only be treated as a safety net.
+Use this path for local development and acceptance. OpenCanvas runs the frontend/backend, while the internal Agent Runtime module runs as the primary AI execution subsystem through Docker Compose. The current internal runtime implementation is AgentBackend. Provider and mock fallback should only be treated as runtime safety nets.
 
 Prerequisites:
 
@@ -20,9 +34,7 @@ Prerequisites:
 - Node.js 22+
 - npm dependencies installed by the launcher if `node_modules/` is missing
 - `.env.local` configured with `AGENT_BACKEND_ENABLED=true` and `AGENT_BACKEND_BASE_URL=http://127.0.0.1:2026`
-- `modules/agent-runtime/.env` configured with provider values and `FACETWRITE_INTERNAL_BASE_URL=http://host.docker.internal:8787`
-
-Use `AGENT_BACKEND_*` for the current AgentBackend adapter. Older `DEERFLOW_*` keys are historical and will leave Agent Runtime disabled until they are migrated and the API process is restarted.
+- `modules/agent-runtime/.env` configured with provider values and `FACETWRITE_INTERNAL_BASE_URL=http://host.docker.internal:8837`
 
 Start everything:
 
@@ -33,16 +45,16 @@ Start everything:
 Or through npm:
 
 ```bash
-npm run dev:full
+npm run dev
 ```
 
-The launcher starts Agent Runtime Docker services when `AGENT_BACKEND_ENABLED=true`, waits for `http://127.0.0.1:2026/health`, then starts FacetWrite.
+The launcher requires `AGENT_BACKEND_ENABLED=true`, starts Agent Runtime Docker services, waits for `http://127.0.0.1:2026/health`, then starts OpenCanvas. Local startup is intentionally hard-bound to Agent Runtime; provider/mock fallback is only for runtime failure handling inside the app, not for skipping the sidecar during normal launcher flow.
 
 Useful URLs:
 
 - OpenCanvas UI: `http://127.0.0.1:5173` by default. If that port is unavailable locally, run Vite on `http://127.0.0.1:3000`.
-- FacetWrite API health: `http://127.0.0.1:8787/api/health`
-- Agent Runtime status through FacetWrite: `http://127.0.0.1:8787/api/agent-runtime/status`
+- FacetWrite API health: `http://127.0.0.1:8837/api/health`
+- Agent Runtime status through FacetWrite: `http://127.0.0.1:8837/api/agent-runtime/status`
 - Agent Runtime sidecar health: `http://127.0.0.1:2026/health`
 
 Useful commands:
@@ -53,8 +65,6 @@ npm run agent-runtime:status
 npm run agent-runtime:down
 ```
 
-The legacy `agent-backend:*` commands remain as aliases. The new commands use the `facetwrite-agent-runtime` Compose project and `facetwrite-agent-runtime-*` container names. The local acceptance compose does not mount the host Docker socket or local CLI credential directories into Agent Runtime by default.
-
 If Docker Hub is unavailable, configure FacetWrite-owned runtime image overrides in `modules/agent-runtime/.env`:
 
 ```bash
@@ -64,25 +74,21 @@ DOCKER_CLI_IMAGE=<reachable docker:cli mirror or local tag>
 UV_IMAGE=<reachable ghcr.io/astral-sh/uv:0.7.20 mirror or local tag>
 ```
 
-Acceptance checks:
+### Low-Level Service Debugging
+
+```bash
+npm install
+npm run dev:services
+```
+
+This starts only the Vite frontend and FacetWrite API and is reserved for narrow frontend/backend debugging. Normal local startup should use `npm run dev` or `.\start-facetwrite.ps1` so Agent Runtime is started and checked first.
+
+## Acceptance Checks
 
 - `/api/agent-runtime/status` returns `reachable:true`, `authState:"authenticated"`, and `runtimeProvider:"agent-backend"`.
 - A Summary or Blog generation returns `provider:"agent-backend"`.
 - No `agent_backend_runtime_failed` event appears during the primary runtime check.
 - `canvas_write` creates a pending write proposal/request only; Canvas content changes only after explicit user confirmation through the approval path.
-
-See [Agent Runtime Runbook](docs/AGENT_RUNTIME_RUNBOOK.md) for the full Docker Desktop and Linux Docker Compose checklist.
-
-### FacetWrite Only
-
-```bash
-npm install
-npm run dev
-```
-
-This starts only the Vite frontend and FacetWrite API. If `AGENT_BACKEND_ENABLED=true` but the sidecar is not running, generation will fall back to the provider runtime.
-
-Client: `http://127.0.0.1:5173`
 
 ## Technical Docs
 
@@ -98,61 +104,15 @@ Client: `http://127.0.0.1:5173`
 - [Security](docs/SECURITY.md)
 - [Reference Archive](docs/reference/README.md)
 
-## Future Development Roadmap
+## Roadmap
 
-OpenCanvas 的长期方向是一个本地优先的 FigJam + Agent 画板工作区：画板既是视觉创作空间，也是 Agent 可理解、可建议、可调度工具的工作文件。它应当像 PS/Figma 文件一样保存完整项目状态，包括画板节点、连接关系、资源、工作流信息、Agent 对话、ToolUse 事件和写入审批记录。
+1. **Board file model:** Treat each project/thread as an OpenCanvas board file that groups nodes, edges, workflow state, assets, Agent conversations, tool events, write approvals, and version metadata.
+2. **FigJam-style board tools:** Expand the floating toolbar and contextual quick bar for select, pan, text, note/card, document, shape, table/grid, connector, Role node, assets, and future insert tools.
+3. **Agent-callable board tools:** Extend the current `canvas_write` idea into board-aware tool intents such as creating nodes, appending content, connecting nodes, proposing layout cleanup, creating Role suggestions, and summarizing selected chains.
+4. **Local assets and export:** Add board asset records, snapshots/version history, and portable `.opencanvas` import/export after the data model is stable.
+5. **Online collaboration:** Add accounts/workspaces, sync, presence, comments, permissions, and share links only after the local board model and Agent tool boundary are stable.
 
-功能实现层面先对标 FigJam 画板：稳定的无限画布、主工具栏、对象快捷栏、节点/连线/文本/资源操作、多人协作前的本地文件体验。创新点不在于重新发明画板，而在于 Agent 工具调度与人机协作上下文管理：Agent 能理解当前选区、显式发送的思维链、工作流阶段、Role 节点关系和写入审批状态，并在可审计、可确认的边界内调用画板工具。
-
-### Current Foundation
-
-The project already has the core local foundation:
-
-- Local-first workspace: Vite/React frontend, Express API, SQLite/local file persistence, and Agent Runtime sidecar.
-- Canvas V2: React Flow-based pan/zoom/drag canvas with document, note, reference, and role nodes.
-- Canvas structure: directed edges, node resize/edit/delete, right-click creation, session undo, workflow stage, Role nodes, and Role suggestions.
-- Agent Runtime: AgentBackend adapter, Lead Agent/subagent mapping, ToolUse bridge, Knowledge, Memory controls, runtime dashboard, and provider fallback.
-- Human-in-the-loop writes: Agent-originated Canvas changes go through pending write requests and approval before mutation.
-
-### Development Phases
-
-1. **Board File Model**
-   - Treat each project/thread as an OpenCanvas board file.
-   - Define a durable board snapshot shape that groups Canvas nodes, edges, workflow state, assets, Agent conversations, tool events, write approvals, and version metadata.
-   - Keep SQLite as the local source of truth first; add import/export only after the board shape is stable.
-
-2. **FigJam-Style Canvas Toolbar**
-   - Benchmark the core board interaction model against FigJam while keeping OpenCanvas local-first and Agent-aware.
-   - Add a floating board toolbar for core creation modes: select, hand/pan, text, note/card, shape, table/grid, connector, role node, asset/image, and insert.
-   - Reuse existing Canvas node creation and edge APIs instead of inventing parallel creation paths.
-   - Make toolbar modes visible UI state only; persisted truth remains Canvas nodes, edges, metadata, and workflow records.
-
-3. **Contextual Quick Bar**
-   - Add a selection quick bar that appears near the selected object.
-   - For text/document/note/reference nodes, expose local actions such as text style, size, list/link, node kind, workflow stage, and delete.
-   - For role nodes, expose role label/prompt editing and suggestion actions.
-   - For edges, expose delete and future line style controls.
-   - Keep quick-bar actions as direct user edits; Agent-originated edits still use approval-aware paths.
-
-4. **Agent-Callable Board Tools**
-   - Treat Agent tool orchestration and human-AI context management as the main product innovation beyond the FigJam-like board surface.
-   - Expand the current `canvas_write` idea into board-aware tool intents such as create node, append content, connect nodes, propose layout cleanup, create Role suggestion, and summarize selected chain.
-   - Continue routing all tool execution through FacetWrite tool policy and the Agent Runtime bridge.
-   - Low-risk additive operations may become confirmable suggestions; destructive replace/delete operations must remain approval-gated.
-   - Agent context should stay filtered by explicit selection, sent mind chain, workflow stage, and connected Role nodes.
-
-5. **Local Assets, Versions, And Export**
-   - Add board asset records for images and attachments stored under the local `.facetwrite` workspace.
-   - Add board snapshots/version history so a user can restore prior board states.
-   - Add local export/import for portable OpenCanvas board files after the data model is stable.
-
-6. **Online Collaboration**
-   - Add online collaboration only after the local board model and Agent tool boundary are stable.
-   - Introduce accounts/workspaces, shared board sync, presence cursors, comments, permissions, and share links.
-   - Use a conflict-safe collaboration layer for concurrent Canvas edits while preserving local-first/offline behavior where possible.
-   - Keep Agent actions auditable in multiplayer sessions: participants should be able to see what the Agent proposed, who approved it, and what changed.
-
-### Product Principles
+## Product Principles
 
 - Local-first before cloud sync.
 - Reuse existing Canvas APIs, storage, Agent Runtime adapter, and Tool policy before creating new boundaries.
