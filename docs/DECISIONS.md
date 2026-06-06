@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-06-06: Visual Board Objects Stay Separate From Semantic Nodes And Edges
+
+Decision: Store free arrows, shapes, lightweight tables, and local asset cards in `canvas_objects`, while preserving `canvas_nodes` for writing/workflow nodes and `canvas_edges` for mind-chain and Role relationships.
+
+Reason: FigJam-style visual annotations must not silently affect Agent context, Role influence, or directed mind-chain ordering.
+
+Impact: The floating toolbar can create saved visual objects, but Agent selection actions remain proposal-oriented and Agent-originated content writes continue through the existing approval boundary.
+
 ## 2026-05-30: Canvas Role Controls Are Function Nodes
 Decision: Model Canvas Workflow Roles as first-class `role` Canvas nodes that apply only through directed `Role -> content` edges. Stage remains a single project/thread state and does not become a normal duplicable node.
 

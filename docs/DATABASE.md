@@ -58,6 +58,8 @@ Knowledge Base vector stores and uploads are created under:
   - Per-Agent quick message text.
 - `canvas_nodes`
   - Canvas node state: kind, title, content, position, size, metadata JSON, timestamps.
+- `canvas_objects`
+  - Saved non-semantic board artifacts. `kind` is `arrow`, `shape`, `table`, or `asset`; geometry and type-specific data are stored as JSON.
 - `canvas_workflows`
   - One project-level Canvas Workflow row per thread with current stage, Role library JSON, and update timestamp.
 - `canvas_workflow_suggestions`
@@ -94,6 +96,8 @@ Canvas Workflow stores the project/thread current writing stage in `canvas_workf
 Canvas Workflow suggestions are separate rows in `canvas_workflow_suggestions` because they have their own status lifecycle. Suggestions are anchored to the Role node (`role_node_id`) but keep the target content node (`target_node_id`). Accepting appends suggestion content to the target node and marks the suggestion accepted. Ignoring changes only suggestion status. Converting creates a new node from the suggestion and marks it accepted.
 
 Canvas pan, drag, resize, and hit testing are presentation-only. React Flow viewport state, selected node state, visual grid, resize handles, and future decorative overlays should not introduce persistence changes or new node state; they must remain separate from `canvas_nodes` unless they represent an explicit saved user artifact.
+
+Free arrows, shapes, tables, and asset cards are explicit saved user artifacts and therefore live in `canvas_objects`. They never create `canvas_edges` implicitly. Asset bytes live under `.facetwrite/threads/<threadId>/user-data/uploads/`; SQLite stores only safe metadata and the thread-relative path.
 
 ## Thread And Project Title Semantics
 The current project list is backed by `threads`; there is no separate project table-level rename. Renaming a project updates `threads.title` and `updated_at` for active, non-trashed threads only.

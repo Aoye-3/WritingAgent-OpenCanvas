@@ -1,4 +1,5 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentCard, AgentSettings } from "./agentCards.js";
 import { createFacetWriteDatabase, runSqliteTransaction } from "./db/sqlite.js";
@@ -14,6 +15,8 @@ import type {
   CanvasEdgeInput,
   CanvasNodeInput,
   CanvasNodePatch,
+  CanvasObjectInput,
+  CanvasObjectPatch,
   CanvasNodeWorkflowPatch,
   CanvasSettings,
   CanvasSuggestionToNodeInput,
@@ -33,6 +36,10 @@ export type {
   CanvasNodeInput,
   CanvasNodeKind,
   CanvasNodePatch,
+  CanvasObject,
+  CanvasObjectInput,
+  CanvasObjectKind,
+  CanvasObjectPatch,
   CanvasNodeWorkflowPatch,
   CanvasSettings,
   CanvasSuggestionToNodeInput,
@@ -186,6 +193,7 @@ export class SQLiteStorageRepository {
 
     this.withTransaction(() => {
       this.db.prepare(`DELETE FROM canvas_edges WHERE thread_id = ?`).run(threadId);
+      this.db.prepare(`DELETE FROM canvas_objects WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM canvas_workflow_suggestions WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM canvas_workflows WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM canvas_write_requests WHERE thread_id = ?`).run(threadId);
@@ -253,6 +261,57 @@ export class SQLiteStorageRepository {
 
   saveCanvasSettings(input: Partial<CanvasSettings>): CanvasSettings {
     return this.canvas.saveCanvasSettings(input);
+  }
+
+  listCanvasObjects(threadId: string) {
+    return this.canvas.listCanvasObjects(threadId);
+  }
+
+  createCanvasObject(threadId: string, input: CanvasObjectInput) {
+    return this.canvas.createCanvasObject(threadId, input);
+  }
+
+  async createCanvasAsset(threadId: string, input: { fileName: string; fileBase64: string }) {
+    validateId(threadId, "threadId");
+    const fileName = cleanText(input.fileName);
+    const extension = path.extname(fileName).toLowerCase();
+    if (![".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".docx", ".txt", ".md"].includes(extension)) {
+      throw new Error("Unsupported Canvas asset file type");
+    }
+    const buffer = Buffer.from(input.fileBase64, "base64");
+    if (buffer.byteLength === 0 || buffer.byteLength > 20 * 1024 * 1024) throw new Error("Canvas asset must be between 1 byte and 20MB");
+    await ensureThreadDirs(threadId);
+    const storedName = `${Date.now().toString(36)}-${fileName.replace(/[^A-Za-z0-9._-]/g, "_")}`;
+    const relativePath = path.join("uploads", storedName).replace(/\\/g, "/");
+    const fullPath = resolveThreadRelativePath(threadId, relativePath);
+    await writeFile(fullPath, buffer);
+    return this.canvas.createCanvasObject(threadId, {
+      kind: "asset",
+      geometry: { x: 160, y: 160, width: extension.match(/\.(png|jpe?g|gif|webp)$/) ? 320 : 260, height: 180 },
+      data: { name: fileName, extension, size: buffer.byteLength, relativePath, previewable: Boolean(extension.match(/\.(png|jpe?g|gif|webp)$/)) }
+    });
+  }
+
+  async readCanvasAsset(threadId: string, objectId: string) {
+    const object = this.canvas.listCanvasObjects(threadId).find((item) => item.id === objectId && item.kind === "asset");
+    const relativePath = object && typeof object.data === "object" && !Array.isArray(object.data) ? (object.data as { relativePath?: unknown }).relativePath : undefined;
+    if (typeof relativePath !== "string") return undefined;
+    const extension = typeof (object!.data as { extension?: unknown }).extension === "string" ? (object!.data as { extension: string }).extension : "";
+    return { content: await readFile(resolveThreadRelativePath(threadId, relativePath)), extension };
+  }
+
+  updateCanvasObject(threadId: string, objectId: string, patch: CanvasObjectPatch) {
+    return this.canvas.updateCanvasObject(threadId, objectId, patch);
+  }
+
+  async deleteCanvasObject(threadId: string, objectId: string) {
+    const object = this.canvas.listCanvasObjects(threadId).find((item) => item.id === objectId);
+    const deleted = this.canvas.deleteCanvasObject(threadId, objectId);
+    if (deleted && object?.kind === "asset" && object.data && typeof object.data === "object" && !Array.isArray(object.data)) {
+      const relativePath = (object.data as { relativePath?: unknown }).relativePath;
+      if (typeof relativePath === "string") await rm(resolveThreadRelativePath(threadId, relativePath), { force: true });
+    }
+    return deleted;
   }
 
   getCanvasWorkflow(threadId: string): CanvasWorkflow {
@@ -379,6 +438,13 @@ export async function ensureThreadDirs(threadId: string) {
 
 function threadDataRoot(threadId: string) {
   return threadDirectoryManager.threadDataRoot(threadId);
+}
+
+function resolveThreadRelativePath(threadId: string, relativePath: string) {
+  const root = path.resolve(threadDataRoot(threadId), "user-data");
+  const resolved = path.resolve(root, relativePath);
+  if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error("Canvas asset path must stay inside the thread workspace");
+  return resolved;
 }
 
 function cleanStructuredValues(value: unknown): StoredStructuredValues {

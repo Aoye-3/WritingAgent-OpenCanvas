@@ -1,5 +1,19 @@
 # FacetWrite API
 
+## Canvas Objects And Assets
+
+- `GET /api/threads/:threadId/canvas`
+  - Includes `objects` alongside nodes, semantic edges, workflow, suggestions, and pending write requests.
+- `POST /api/threads/:threadId/canvas/objects`
+- `PATCH /api/threads/:threadId/canvas/objects/:objectId`
+- `DELETE /api/threads/:threadId/canvas/objects/:objectId`
+  - CRUD for saved `arrow`, `shape`, `table`, and `asset` objects.
+- `POST /api/threads/:threadId/canvas/assets`
+  - Body: `{ fileName, fileBase64 }`.
+  - Accepts PNG/JPEG/GIF/WebP, PDF, DOCX, TXT, and MD up to 20MB.
+- `GET /api/threads/:threadId/canvas/assets/:objectId/content`
+  - Returns the thread-local asset bytes for preview/download.
+
 ## Response Shape
 Successful responses return the route payload directly. Errors use:
 

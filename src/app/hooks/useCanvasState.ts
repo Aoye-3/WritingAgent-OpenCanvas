@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { CanvasEdge, CanvasNode, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../features/agents/types";
+import type { CanvasEdge, CanvasNode, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../features/agents/types";
 import { fetchCanvas } from "../../features/canvas/canvasClient";
 import { useCanvasActions } from "./useCanvasActions";
 import { useCanvasHistory } from "./useCanvasHistory";
@@ -14,6 +14,7 @@ type UseCanvasStateOptions = {
 export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces, undoDepth }: UseCanvasStateOptions) {
   const [canvasNodes, setCanvasNodes] = useState<CanvasNode[]>([]);
   const [canvasEdges, setCanvasEdges] = useState<CanvasEdge[]>([]);
+  const [canvasObjects, setCanvasObjects] = useState<CanvasObject[]>([]);
   const [canvasWriteRequests, setCanvasWriteRequests] = useState<CanvasWriteRequest[]>([]);
   const [canvasWorkflow, setCanvasWorkflow] = useState<CanvasWorkflow | undefined>(() => createDefaultCanvasWorkflow());
   const [canvasWorkflowSuggestions, setCanvasWorkflowSuggestions] = useState<CanvasWorkflowSuggestion[]>([]);
@@ -23,6 +24,7 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces, undoD
   const resetCanvas = () => {
     setCanvasNodes([]);
     setCanvasEdges([]);
+    setCanvasObjects([]);
     setCanvasWriteRequests([]);
     setCanvasWorkflow(createDefaultCanvasWorkflow());
     setCanvasWorkflowSuggestions([]);
@@ -35,10 +37,12 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces, undoD
     writeRequests: CanvasWriteRequest[] = [],
     edges: CanvasEdge[] = [],
     workflow?: CanvasWorkflow,
-    suggestions: CanvasWorkflowSuggestion[] = []
+    suggestions: CanvasWorkflowSuggestion[] = [],
+    objects: CanvasObject[] = []
   ) => {
     setCanvasNodes(nodes);
     setCanvasEdges(edges);
+    setCanvasObjects(objects);
     setCanvasWriteRequests(writeRequests);
     setCanvasWorkflow(workflow ?? createDefaultCanvasWorkflow());
     setCanvasWorkflowSuggestions(suggestions);
@@ -49,6 +53,7 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces, undoD
     const canvas = await fetchCanvas(threadId);
     setCanvasNodes(canvas.nodes);
     setCanvasEdges(canvas.edges ?? []);
+    setCanvasObjects(canvas.objects ?? []);
     setCanvasWriteRequests(canvas.writeRequests);
     setCanvasWorkflow(canvas.workflow);
     setCanvasWorkflowSuggestions(canvas.suggestions ?? []);
@@ -58,6 +63,7 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces, undoD
   const canvasActions = useCanvasActions({
     canvasEdges,
     canvasNodes,
+    canvasObjects,
     ensureThreadId,
     onRefreshCanvas: refreshCanvas,
     onRefreshProjectSurfaces,
@@ -65,6 +71,7 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces, undoD
     pushHistory: canvasHistory.pushHistory,
     setCanvasEdges,
     setCanvasNodes,
+    setCanvasObjects,
     setCanvasWorkflow,
     setCanvasWorkflowSuggestions,
     setCanvasWriteRequests,
@@ -74,6 +81,7 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces, undoD
   return {
     canvasNodes,
     canvasEdges,
+    canvasObjects,
     canvasWriteRequests,
     canvasWorkflow,
     canvasWorkflowSuggestions,
@@ -81,6 +89,7 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces, undoD
     canUndoCanvas: canvasHistory.canUndo,
     setCanvasNodes,
     setCanvasEdges,
+    setCanvasObjects,
     setCanvasWorkflow,
     setCanvasWorkflowSuggestions,
     setCanvasWriteRequests,

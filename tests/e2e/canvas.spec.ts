@@ -70,6 +70,27 @@ test("canvas creates node types and supports undo", async ({ page }) => {
   await expect(page.getByTestId("canvas-node")).toHaveCount(0);
 });
 
+test("floating toolbar creates visual objects and opens selection Agent actions", async ({ page }) => {
+  await openNewCanvas(page);
+  const viewport = page.getByTestId("canvas-viewport");
+
+  await page.getByRole("button", { name: "Shape" }).click();
+  await viewport.click({ position: { x: 420, y: 300 } });
+  await expect(page.getByTestId("canvas-object-shape")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Arrow" }).click();
+  const box = await viewport.boundingBox();
+  expect(box).toBeTruthy();
+  await page.mouse.move(box!.x + 260, box!.y + 420);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + 540, box!.y + 500);
+  await page.mouse.up();
+  await expect(page.getByTestId("canvas-free-arrow")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Agent tool" }).click();
+  await expect(page.getByTestId("canvas-agent-tool-menu")).toBeVisible();
+});
+
 test("canvas deletes a selected node from the corner action", async ({ page }) => {
   await openNewCanvas(page);
 

@@ -17,6 +17,13 @@ export type CanvasHistoryEdge = {
   label: string;
 };
 
+export type CanvasHistoryObject = {
+  id: string;
+  kind: "arrow" | "shape" | "table" | "asset";
+  geometry: Record<string, unknown>;
+  data: Record<string, unknown>;
+};
+
 export type CanvasHistoryNodePatch = Partial<{
   kind: CanvasHistoryNode["kind"];
   title: string;
@@ -33,7 +40,10 @@ export type CanvasHistoryEntry =
   | { kind: "restoreNode"; node: CanvasHistoryNode; edges: CanvasHistoryEdge[] }
   | { kind: "updateNode"; nodeId: string; patch: CanvasHistoryNodePatch }
   | { kind: "deleteEdge"; edgeId: string }
-  | { kind: "restoreEdge"; edge: CanvasHistoryEdge };
+  | { kind: "restoreEdge"; edge: CanvasHistoryEdge }
+  | { kind: "deleteObject"; objectId: string }
+  | { kind: "restoreObject"; object: CanvasHistoryObject }
+  | { kind: "updateObject"; objectId: string; geometry: Record<string, unknown>; data: Record<string, unknown> };
 
 export function limitCanvasHistoryDepth(entries: CanvasHistoryEntry[], undoDepth: number) {
   return entries.slice(0, Math.max(1, undoDepth));

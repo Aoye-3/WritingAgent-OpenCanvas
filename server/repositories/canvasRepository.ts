@@ -5,6 +5,9 @@ import type {
   CanvasNode,
   CanvasNodeInput,
   CanvasNodePatch,
+  CanvasObject,
+  CanvasObjectInput,
+  CanvasObjectPatch,
   CanvasNodeWorkflowPatch,
   CanvasSettings,
   CanvasSuggestionToNodeInput,
@@ -346,6 +349,67 @@ export class CanvasRepository {
     return settings;
   }
 
+  listCanvasObjects(threadId: string) {
+    validateId(threadId, "threadId");
+    type Row = Omit<CanvasObject, "geometry" | "data"> & { geometryJson: string; dataJson: string };
+    const rows = this.db.prepare(
+      `SELECT id, thread_id as threadId, kind, geometry_json as geometryJson, data_json as dataJson,
+              created_at as createdAt, updated_at as updatedAt
+       FROM canvas_objects WHERE thread_id = ? ORDER BY created_at ASC`
+    ).all(threadId) as Row[];
+    return rows.map(({ geometryJson, dataJson, ...row }) => ({ ...row, geometry: parseJson(geometryJson), data: parseJson(dataJson) }));
+  }
+
+  createCanvasObject(threadId: string, input: CanvasObjectInput) {
+    validateId(threadId, "threadId");
+    const kind = validateCanvasObjectKind(input.kind);
+    const now = nowIso();
+    const object: CanvasObject = {
+      id: input.id ? cleanCanvasRecordId(input.id, "objectId") : randomId("object"),
+      threadId,
+      kind,
+      geometry: input.geometry ?? {},
+      data: input.data ?? {},
+      createdAt: now,
+      updatedAt: now
+    };
+    this.db.prepare(
+      `INSERT INTO canvas_objects (id, thread_id, kind, geometry_json, data_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(object.id, threadId, kind, JSON.stringify(object.geometry), JSON.stringify(object.data), now, now);
+    this.deps.touchThread(threadId, now);
+    return object;
+  }
+
+  updateCanvasObject(threadId: string, objectId: string, patch: CanvasObjectPatch) {
+    validateId(threadId, "threadId");
+    validateId(objectId, "objectId");
+    const existing = this.listCanvasObjects(threadId).find((object) => object.id === objectId);
+    if (!existing) return undefined;
+    const now = nowIso();
+    const next: CanvasObject = {
+      ...existing,
+      kind: patch.kind === undefined ? existing.kind : validateCanvasObjectKind(patch.kind),
+      geometry: patch.geometry === undefined ? existing.geometry : patch.geometry,
+      data: patch.data === undefined ? existing.data : patch.data,
+      updatedAt: now
+    };
+    this.db.prepare(
+      `UPDATE canvas_objects SET kind = ?, geometry_json = ?, data_json = ?, updated_at = ?
+       WHERE id = ? AND thread_id = ?`
+    ).run(next.kind, JSON.stringify(next.geometry), JSON.stringify(next.data), now, objectId, threadId);
+    this.deps.touchThread(threadId, now);
+    return next;
+  }
+
+  deleteCanvasObject(threadId: string, objectId: string) {
+    validateId(threadId, "threadId");
+    validateId(objectId, "objectId");
+    const result = this.db.prepare(`DELETE FROM canvas_objects WHERE id = ? AND thread_id = ?`).run(objectId, threadId);
+    if (result.changes > 0) this.deps.touchThread(threadId);
+    return result.changes > 0;
+  }
+
   getCanvasWorkflow(threadId: string): CanvasWorkflow {
     validateId(threadId, "threadId");
     type Row = { stage: string; rolesJson: string; updatedAt: string };
@@ -643,4 +707,11 @@ function stripLegacyWorkflowRoles(metadata: unknown) {
     next.workflow = cleanWorkflow;
   }
   return next;
+}
+
+function validateCanvasObjectKind(value: unknown) {
+  if (value !== "arrow" && value !== "shape" && value !== "table" && value !== "asset") {
+    throw new Error("Invalid Canvas object kind");
+  }
+  return value;
 }

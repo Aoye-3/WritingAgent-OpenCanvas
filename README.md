@@ -13,7 +13,7 @@ OpenCanvas benchmarks the familiar board experience first: an infinite canvas, n
 ## Product Shape
 
 - **Local-first canvas:** Vite/React frontend, Express API, SQLite/local file persistence, and local workspace files under `.facetwrite/`.
-- **Canvas V2:** React Flow-based board with document, note, reference, and role nodes; directed edges; resize/edit/delete; right-click creation; workflow stages; Role suggestions; session undo.
+- **Canvas V2:** React Flow-based board with an active floating toolbar, select/pan modes, multi-selection, document/note/reference/role nodes, semantic directed edges, free arrows, basic shapes, lightweight tables, local asset cards, workflow stages, Role suggestions, and session undo.
 - **Agent Runtime:** AgentBackend sidecar for Lead Agent/subagent orchestration, ToolUse bridge, runtime dashboard, Knowledge, Memory controls, and provider fallback.
 - **Human-in-the-loop writes:** Agent-originated Canvas changes create pending write requests first. Canvas content changes only after user confirmation or the same-run explicit approval path.
 - **Board direction:** OpenCanvas should evolve toward a PS/Figma-like board file that stores nodes, edges, assets, workflow state, Agent conversations, tool events, and write approvals.
@@ -107,9 +107,9 @@ This starts only the Vite frontend and FacetWrite API and is reserved for narrow
 ## Roadmap
 
 1. **Board file model:** Treat each project/thread as an OpenCanvas board file that groups nodes, edges, workflow state, assets, Agent conversations, tool events, write approvals, and version metadata.
-2. **FigJam-style board tools:** Expand the floating toolbar and contextual quick bar for select, pan, text, note/card, document, shape, table/grid, connector, Role node, assets, and future insert tools.
+2. **FigJam-style board tools:** The floating toolbar now covers select, pan, note/text, document, basic shapes, tables, free arrows, Role nodes, local assets, and selection-aware Agent actions. Future work can add styling, layers, grouping, rotation, and richer connectors.
 3. **Agent-callable board tools:** Extend the current `canvas_write` idea into board-aware tool intents such as creating nodes, appending content, connecting nodes, proposing layout cleanup, creating Role suggestions, and summarizing selected chains.
-4. **Local assets and export:** Add board asset records, snapshots/version history, and portable `.opencanvas` import/export after the data model is stable.
+4. **Local assets and export:** Extend the current local asset records with snapshots/version history and portable `.opencanvas` import/export after the data model is stable.
 5. **Online collaboration:** Add accounts/workspaces, sync, presence, comments, permissions, and share links only after the local board model and Agent tool boundary are stable.
 
 ## Product Principles

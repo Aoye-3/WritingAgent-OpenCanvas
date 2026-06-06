@@ -67,7 +67,7 @@ function AppContent() {
     threadSession.setThreadId(state.thread.id);
     generationRun.setOutputVersions(state.outputVersions);
     generationRun.setToolEvents(state.toolEvents);
-    canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? [], state.canvasWorkflow, state.canvasWorkflowSuggestions ?? []);
+    canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? [], state.canvasWorkflow, state.canvasWorkflowSuggestions ?? [], state.canvasObjects ?? []);
     const latestVersion = state.outputVersions[0];
     generationRun.setActiveVersionId(latestVersion?.id);
     generationRun.setEditableOutput(latestVersion?.content ?? "");
@@ -161,7 +161,7 @@ function AppContent() {
     generationRun.setOutputVersions(state.outputVersions);
     generationRun.setToolEvents(state.toolEvents);
     generationRun.setActiveVersionId(state.outputVersions[0]?.id);
-    canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? [], state.canvasWorkflow, state.canvasWorkflowSuggestions ?? []);
+    canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? [], state.canvasWorkflow, state.canvasWorkflowSuggestions ?? [], state.canvasObjects ?? []);
     setActiveProjectTitle(state.thread.title);
     await refreshProjectSurfaces();
   };
@@ -320,6 +320,7 @@ function AppContent() {
         activeVersionId={generationRun.activeVersionId}
         canvasNodes={canvasState.canvasNodes}
         canvasEdges={canvasState.canvasEdges}
+        canvasObjects={canvasState.canvasObjects}
         canvasWriteRequests={canvasState.canvasWriteRequests}
         canvasWorkflow={canvasState.canvasWorkflow}
         canvasWorkflowSuggestions={canvasState.canvasWorkflowSuggestions}
@@ -333,9 +334,11 @@ function AppContent() {
         onChatSend={generationRun.handleChatSend}
         onCreateCanvasEdge={canvasState.handleCreateCanvasEdge}
         onCreateCanvasNode={canvasState.handleCreateCanvasNode}
+        onCreateCanvasObject={canvasState.handleCreateCanvasObject}
         onAcceptCanvasWorkflowSuggestion={canvasState.handleAcceptCanvasWorkflowSuggestion}
         onConvertCanvasWorkflowSuggestionToNode={canvasState.handleConvertCanvasWorkflowSuggestionToNode}
         onDeleteCanvasEdge={canvasState.handleDeleteCanvasEdge}
+        onDeleteCanvasObject={canvasState.handleDeleteCanvasObject}
         onDeleteCanvasNode={canvasState.handleDeleteCanvasNode}
         onIgnoreCanvasWorkflowSuggestion={canvasState.handleIgnoreCanvasWorkflowSuggestion}
         onEditableOutputChange={generationRun.setEditableOutput}
@@ -358,6 +361,8 @@ function AppContent() {
         onSelectCanvasNode={canvasState.setSelectedCanvasNodeId}
         onToolStateChange={setToolState}
         onUpdateCanvasNode={canvasState.handleUpdateCanvasNode}
+        onUpdateCanvasObject={canvasState.handleUpdateCanvasObject}
+        onUploadCanvasAsset={canvasState.handleUploadCanvasAsset}
         onUpdateCanvasNodeWorkflow={canvasState.handleUpdateCanvasNodeWorkflow}
         onUpdateCanvasWorkflow={canvasState.handleUpdateCanvasWorkflow}
         onUndoCanvas={canvasState.undoCanvas}

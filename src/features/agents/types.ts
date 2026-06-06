@@ -237,6 +237,18 @@ export type CanvasWriteRequest = {
   updatedAt: string;
 };
 
+export type CanvasObjectKind = "arrow" | "shape" | "table" | "asset";
+
+export type CanvasObject = {
+  id: string;
+  threadId: string;
+  kind: CanvasObjectKind;
+  geometry: Record<string, unknown>;
+  data: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CanvasWorkflowSuggestion = {
   id: string;
   threadId: string;
@@ -268,6 +280,7 @@ export type ThreadStateResponse = {
   toolEvents: StoredToolEvent[];
   canvasNodes?: CanvasNode[];
   canvasEdges?: CanvasEdge[];
+  canvasObjects?: CanvasObject[];
   canvasWriteRequests?: CanvasWriteRequest[];
   canvasWorkflow?: CanvasWorkflow;
   canvasWorkflowSuggestions?: CanvasWorkflowSuggestion[];

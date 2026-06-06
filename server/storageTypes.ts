@@ -108,6 +108,27 @@ export type CanvasEdge = {
   updatedAt: string;
 };
 
+export type CanvasObjectKind = "arrow" | "shape" | "table" | "asset";
+
+export type CanvasObject = {
+  id: string;
+  threadId: string;
+  kind: CanvasObjectKind;
+  geometry: JsonValue;
+  data: JsonValue;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CanvasObjectInput = {
+  id?: string;
+  kind: CanvasObjectKind;
+  geometry?: JsonValue;
+  data?: JsonValue;
+};
+
+export type CanvasObjectPatch = Partial<Omit<CanvasObjectInput, "id" | "kind">> & { kind?: CanvasObjectKind };
+
 export type CanvasNodeInput = {
   id?: string;
   kind: CanvasNodeKind;

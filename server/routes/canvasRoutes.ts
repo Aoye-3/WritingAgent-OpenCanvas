@@ -122,6 +122,53 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
     }
   });
 
+  app.post("/api/threads/:threadId/canvas/objects", (request, response) => {
+    try {
+      sendOk(response, { object: canvasService.createObject(request.params.threadId, request.body ?? {}) });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to create canvas object"));
+    }
+  });
+
+  app.patch("/api/threads/:threadId/canvas/objects/:objectId", (request, response) => {
+    try {
+      const object = canvasService.updateObject(request.params.threadId, request.params.objectId, request.body ?? {});
+      if (!object) return sendError(response, 404, "not_found", "Canvas object not found");
+      sendOk(response, { object });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to update canvas object"));
+    }
+  });
+
+  app.delete("/api/threads/:threadId/canvas/objects/:objectId", async (request, response) => {
+    try {
+      if (!await canvasService.deleteObject(request.params.threadId, request.params.objectId)) {
+        return sendError(response, 404, "not_found", "Canvas object not found");
+      }
+      sendOk(response, { ok: true });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to delete canvas object"));
+    }
+  });
+
+  app.post("/api/threads/:threadId/canvas/assets", async (request, response) => {
+    try {
+      sendOk(response, { object: await canvasService.createAsset(request.params.threadId, request.body ?? {}) });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to upload canvas asset"));
+    }
+  });
+
+  app.get("/api/threads/:threadId/canvas/assets/:objectId/content", async (request, response) => {
+    try {
+      const content = await canvasService.readAsset(request.params.threadId, request.params.objectId);
+      if (!content) return sendError(response, 404, "not_found", "Canvas asset not found");
+      response.type(content.extension || "application/octet-stream").send(content.content);
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to read canvas asset"));
+    }
+  });
+
   app.patch("/api/threads/:threadId/canvas/nodes/:nodeId", (request, response) => {
     try {
       const node = canvasService.updateNode(request.params.threadId, request.params.nodeId, request.body ?? {});

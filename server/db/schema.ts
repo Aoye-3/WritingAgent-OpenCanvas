@@ -148,6 +148,16 @@ export function migrateStorageSchema(db: DatabaseSync) {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS canvas_objects (
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      geometry_json TEXT NOT NULL,
+      data_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS canvas_workflows (
       thread_id TEXT PRIMARY KEY,
       stage TEXT NOT NULL,

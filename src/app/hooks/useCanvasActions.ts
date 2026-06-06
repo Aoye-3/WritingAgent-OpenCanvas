@@ -1,23 +1,29 @@
 import type { Dispatch, SetStateAction } from "react";
-import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../features/agents/types";
+import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../features/agents/types";
 import {
   acceptCanvasWorkflowSuggestion,
   approveCanvasWriteRequest,
   convertCanvasWorkflowSuggestionToNode,
   createCanvasEdge,
   createCanvasNode,
+  createCanvasObject,
   createCanvasWriteRequest,
   deleteCanvasEdge,
   deleteCanvasNode,
+  deleteCanvasObject,
   ignoreCanvasWorkflowSuggestion,
   rejectCanvasWriteRequest,
   updateCanvasNode,
+  updateCanvasObject,
   updateCanvasNodeWorkflow,
   updateCanvasWorkflow,
+  uploadCanvasAsset,
   type CanvasEdgeDraft,
   type CanvasNodeDraft,
   type CanvasNodeWorkflowPatch,
   type CanvasNodePatch,
+  type CanvasObjectDraft,
+  type CanvasObjectPatch,
   type CanvasWorkflowPatch,
   type CanvasWriteRequestDraft
 } from "../../features/canvas/canvasClient";
@@ -27,6 +33,7 @@ import { removeCanvasNodeFromState } from "./canvasActions/state";
 type UseCanvasActionsOptions = {
   canvasEdges: CanvasEdge[];
   canvasNodes: CanvasNode[];
+  canvasObjects: CanvasObject[];
   ensureThreadId: () => Promise<string>;
   onRefreshProjectSurfaces: () => Promise<void>;
   onRefreshCanvas: (threadId: string) => Promise<void>;
@@ -34,6 +41,7 @@ type UseCanvasActionsOptions = {
   pushHistory: (entry: CanvasHistoryEntry) => void;
   setCanvasEdges: Dispatch<SetStateAction<CanvasEdge[]>>;
   setCanvasNodes: Dispatch<SetStateAction<CanvasNode[]>>;
+  setCanvasObjects: Dispatch<SetStateAction<CanvasObject[]>>;
   setCanvasWorkflow: Dispatch<SetStateAction<CanvasWorkflow | undefined>>;
   setCanvasWorkflowSuggestions: Dispatch<SetStateAction<CanvasWorkflowSuggestion[]>>;
   setCanvasWriteRequests: Dispatch<SetStateAction<CanvasWriteRequest[]>>;
@@ -45,6 +53,7 @@ type HistoryOptions = { recordHistory?: boolean };
 export function useCanvasActions({
   canvasEdges,
   canvasNodes,
+  canvasObjects,
   ensureThreadId,
   onRefreshCanvas,
   onRefreshProjectSurfaces,
@@ -52,6 +61,7 @@ export function useCanvasActions({
   pushHistory,
   setCanvasEdges,
   setCanvasNodes,
+  setCanvasObjects,
   setCanvasWorkflow,
   setCanvasWorkflowSuggestions,
   setCanvasWriteRequests,
@@ -123,6 +133,43 @@ export function useCanvasActions({
     return handleUpdateCanvasNode(nodeId, { kind });
   };
 
+  const handleCreateCanvasObject = async (draft: CanvasObjectDraft, options: HistoryOptions = {}) => {
+    const threadId = await ensureThreadId();
+    const object = await createCanvasObject(threadId, draft);
+    setCanvasObjects((current) => [...current, object]);
+    if (options.recordHistory !== false) pushHistory({ kind: "deleteObject", objectId: object.id });
+    await onRefreshProjectSurfaces();
+    return object;
+  };
+
+  const handleUpdateCanvasObject = async (objectId: string, patch: CanvasObjectPatch, options: HistoryOptions = {}) => {
+    const threadId = await ensureThreadId();
+    const previous = canvasObjects.find((object) => object.id === objectId);
+    const object = await updateCanvasObject(threadId, objectId, patch);
+    setCanvasObjects((current) => current.map((item) => item.id === object.id ? object : item));
+    if (previous && options.recordHistory !== false) pushHistory({ kind: "updateObject", objectId, geometry: previous.geometry, data: previous.data });
+    await onRefreshProjectSurfaces();
+    return object;
+  };
+
+  const handleDeleteCanvasObject = async (objectId: string, options: HistoryOptions = {}) => {
+    const threadId = await ensureThreadId();
+    const previous = canvasObjects.find((object) => object.id === objectId);
+    if (!previous) return;
+    await deleteCanvasObject(threadId, objectId);
+    setCanvasObjects((current) => current.filter((object) => object.id !== objectId));
+    if (options.recordHistory !== false) pushHistory({ kind: "restoreObject", object: previous });
+    await onRefreshProjectSurfaces();
+  };
+
+  const handleUploadCanvasAsset = async (input: { fileName: string; fileBase64: string }) => {
+    const threadId = await ensureThreadId();
+    const object = await uploadCanvasAsset(threadId, input);
+    setCanvasObjects((current) => [...current, object]);
+    await onRefreshProjectSurfaces();
+    return object;
+  };
+
   const handleUpdateCanvasWorkflow = async (patch: CanvasWorkflowPatch) => {
     const threadId = await ensureThreadId();
     const workflow = await updateCanvasWorkflow(threadId, patch);
@@ -164,8 +211,14 @@ export function useCanvasActions({
       await handleUpdateCanvasNode(entry.nodeId, entry.patch, { recordHistory: false });
     } else if (entry.kind === "deleteEdge") {
       await handleDeleteCanvasEdge(entry.edgeId, { recordHistory: false });
-    } else {
+    } else if (entry.kind === "restoreEdge") {
       await handleCreateCanvasEdge({ sourceNodeId: entry.edge.sourceNodeId, targetNodeId: entry.edge.targetNodeId, label: entry.edge.label }, { recordHistory: false });
+    } else if (entry.kind === "deleteObject") {
+      await handleDeleteCanvasObject(entry.objectId, { recordHistory: false });
+    } else if (entry.kind === "restoreObject") {
+      await handleCreateCanvasObject(entry.object, { recordHistory: false });
+    } else {
+      await handleUpdateCanvasObject(entry.objectId, { geometry: entry.geometry, data: entry.data }, { recordHistory: false });
     }
   };
 
@@ -211,14 +264,18 @@ export function useCanvasActions({
     handleConvertCanvasWorkflowSuggestionToNode,
     handleCreateCanvasEdge,
     handleCreateCanvasNode,
+    handleCreateCanvasObject,
     handleCreateCanvasWriteRequest,
     handleDeleteCanvasEdge,
     handleDeleteCanvasNode,
+    handleDeleteCanvasObject,
     handleIgnoreCanvasWorkflowSuggestion,
     handleRejectCanvasWriteRequest,
     handleUpdateCanvasNodeWorkflow,
     handleUpdateCanvasWorkflow,
     handleUpdateCanvasNode,
+    handleUpdateCanvasObject,
+    handleUploadCanvasAsset,
     undoCanvas
   };
 }

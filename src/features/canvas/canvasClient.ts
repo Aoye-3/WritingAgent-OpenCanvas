@@ -1,4 +1,4 @@
-import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasWorkflow, CanvasWorkflowRole, CanvasWorkflowStage, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../agents/types";
+import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasObjectKind, CanvasWorkflow, CanvasWorkflowRole, CanvasWorkflowStage, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../agents/types";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "../../shared/apiClient";
 
 export type CanvasNodeDraft = {
@@ -40,8 +40,11 @@ export type CanvasEdgeDraft = {
   label?: string;
 };
 
-export async function fetchCanvas(threadId: string): Promise<{ nodes: CanvasNode[]; edges: CanvasEdge[]; writeRequests: CanvasWriteRequest[]; workflow: CanvasWorkflow; suggestions: CanvasWorkflowSuggestion[] }> {
-  return apiGet<{ nodes: CanvasNode[]; edges: CanvasEdge[]; writeRequests: CanvasWriteRequest[]; workflow: CanvasWorkflow; suggestions: CanvasWorkflowSuggestion[] }>(`/api/threads/${encodeURIComponent(threadId)}/canvas`);
+export type CanvasObjectDraft = { id?: string; kind: CanvasObjectKind; geometry?: Record<string, unknown>; data?: Record<string, unknown> };
+export type CanvasObjectPatch = Partial<Omit<CanvasObjectDraft, "id">>;
+
+export async function fetchCanvas(threadId: string): Promise<{ nodes: CanvasNode[]; edges: CanvasEdge[]; objects: CanvasObject[]; writeRequests: CanvasWriteRequest[]; workflow: CanvasWorkflow; suggestions: CanvasWorkflowSuggestion[] }> {
+  return apiGet<{ nodes: CanvasNode[]; edges: CanvasEdge[]; objects: CanvasObject[]; writeRequests: CanvasWriteRequest[]; workflow: CanvasWorkflow; suggestions: CanvasWorkflowSuggestion[] }>(`/api/threads/${encodeURIComponent(threadId)}/canvas`);
 }
 
 export async function createCanvasNode(threadId: string, draft: CanvasNodeDraft): Promise<CanvasNode> {
@@ -94,6 +97,25 @@ export async function deleteCanvasNode(threadId: string, nodeId: string): Promis
 
 export async function deleteCanvasEdge(threadId: string, edgeId: string): Promise<void> {
   await apiDelete<{ ok: true }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/edges/${encodeURIComponent(edgeId)}`);
+}
+
+export async function createCanvasObject(threadId: string, draft: CanvasObjectDraft): Promise<CanvasObject> {
+  const payload = await apiPost<{ object: CanvasObject }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/objects`, draft);
+  return payload.object;
+}
+
+export async function updateCanvasObject(threadId: string, objectId: string, patch: CanvasObjectPatch): Promise<CanvasObject> {
+  const payload = await apiPatch<{ object: CanvasObject }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/objects/${encodeURIComponent(objectId)}`, patch);
+  return payload.object;
+}
+
+export async function deleteCanvasObject(threadId: string, objectId: string): Promise<void> {
+  await apiDelete<{ ok: true }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/objects/${encodeURIComponent(objectId)}`);
+}
+
+export async function uploadCanvasAsset(threadId: string, input: { fileName: string; fileBase64: string }): Promise<CanvasObject> {
+  const payload = await apiPost<{ object: CanvasObject }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/assets`, input);
+  return payload.object;
 }
 
 export async function approveCanvasWriteRequest(threadId: string, requestId: string): Promise<void> {

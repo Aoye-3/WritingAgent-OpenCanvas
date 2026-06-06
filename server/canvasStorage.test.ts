@@ -117,6 +117,45 @@ test("saves canvas settings with default undo depth", async () => {
   assert.throws(() => storage.saveCanvasSettings({ undoDepth: 0 }), /undo depth/i);
 });
 
+test("stores and updates independent canvas objects without creating semantic edges", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;
+  await storage.ensureThread(threadId, "blog-post");
+
+  const arrow = storage.createCanvasObject(threadId, {
+    kind: "arrow",
+    geometry: { startX: 10, startY: 20, endX: 180, endY: 120 },
+    data: {}
+  });
+  const updated = storage.updateCanvasObject(threadId, arrow.id, {
+    geometry: { startX: 30, startY: 40, endX: 200, endY: 140 }
+  });
+
+  assert.equal(arrow.kind, "arrow");
+  assert.deepEqual(updated?.geometry, { startX: 30, startY: 40, endX: 200, endY: 140 });
+  assert.equal(storage.listCanvasObjects(threadId).length, 1);
+  assert.deepEqual(storage.listCanvasEdges(threadId), []);
+  assert.equal(await storage.deleteCanvasObject(threadId, arrow.id), true);
+  assert.deepEqual(storage.listCanvasObjects(threadId), []);
+});
+
+test("stores supported canvas assets inside the thread upload directory", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;
+  await storage.ensureThread(threadId, "blog-post");
+
+  const asset = await storage.createCanvasAsset(threadId, {
+    fileName: "notes.md",
+    fileBase64: Buffer.from("# Notes").toString("base64")
+  });
+
+  assert.equal(asset.kind, "asset");
+  assert.equal((asset.data as { name: string }).name, "notes.md");
+  assert.match((asset.data as { relativePath: string }).relativePath, /^uploads\//);
+  assert.equal(await storage.deleteCanvasObject(threadId, asset.id), true);
+  assert.equal(await storage.readCanvasAsset(threadId, asset.id), undefined);
+});
+
 test("stores role nodes as first-class canvas nodes", async () => {
   const storage = await createStorage();
   const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;

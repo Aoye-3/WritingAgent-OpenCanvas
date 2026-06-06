@@ -1,12 +1,13 @@
 import {
+  ArrowUpRight,
+  FileText,
   Hand,
   Image,
-  FileText,
   MousePointer2,
   Plus,
   Shapes,
-  Square,
   Sparkles,
+  Square,
   StickyNote,
   Table2,
   Type,
@@ -14,10 +15,11 @@ import {
 } from "lucide-react";
 import { iconProps } from "../../../shared/icons";
 import { useI18n } from "../../i18n/I18nProvider";
+import type { CanvasTool } from "./canvas/toolState";
 
 type BoardTool = {
   icon: LucideIcon;
-  id: string;
+  id: CanvasTool;
   label: { en: string; zh: string };
 };
 
@@ -30,6 +32,7 @@ const creationTools: BoardTool[] = [
   { id: "text", icon: Type, label: { en: "Text", zh: "文本" } },
   { id: "document", icon: FileText, label: { en: "Document", zh: "文档" } },
   { id: "note", icon: StickyNote, label: { en: "Note", zh: "便签" } },
+  { id: "arrow", icon: ArrowUpRight, label: { en: "Arrow", zh: "箭头" } },
   { id: "shape", icon: Square, label: { en: "Shape", zh: "形状" } },
   { id: "table", icon: Table2, label: { en: "Table", zh: "表格" } },
   { id: "asset", icon: Image, label: { en: "Asset", zh: "资源" } },
@@ -37,30 +40,29 @@ const creationTools: BoardTool[] = [
   { id: "agent", icon: Sparkles, label: { en: "Agent tool", zh: "Agent 工具" } }
 ];
 
-export function WorkspaceUtilityBar({ promptPreview }: { promptPreview: string }) {
+export function WorkspaceUtilityBar({
+  activeTool,
+  onToolChange,
+  promptPreview
+}: {
+  activeTool: CanvasTool;
+  onToolChange: (tool: CanvasTool) => void;
+  promptPreview: string;
+}) {
   const { locale } = useI18n();
   const hasPrompt = promptPreview.trim().length > 0;
 
   return (
     <aside className="board-tool-dock" aria-label={locale === "zh" ? "画板工具栏" : "Board toolbar"}>
       <div className="board-tool-group">
-        {primaryTools.map((tool) => (
-          <BoardToolButton active={tool.id === "select"} key={tool.id} tool={tool} locale={locale} />
-        ))}
+        {primaryTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} locale={locale} onClick={onToolChange} />)}
       </div>
       <div className="board-tool-divider" aria-hidden="true" />
       <div className="board-tool-group">
-        {creationTools.map((tool) => (
-          <BoardToolButton disabled={tool.id !== "agent" && tool.id !== "document" && tool.id !== "note"} key={tool.id} tool={tool} locale={locale} />
-        ))}
+        {creationTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} locale={locale} onClick={onToolChange} />)}
       </div>
       <div className="board-tool-divider" aria-hidden="true" />
-      <button
-        className="board-tool-button board-tool-add"
-        type="button"
-        title={locale === "zh" ? "后续增加工具" : "Add tools later"}
-        aria-label={locale === "zh" ? "后续增加工具" : "Add tools later"}
-      >
+      <button className="board-tool-button board-tool-add" type="button" title={locale === "zh" ? "后续增加工具" : "Add tools later"} aria-label={locale === "zh" ? "后续增加工具" : "Add tools later"}>
         <Plus {...iconProps} size={18} aria-hidden="true" />
       </button>
       {hasPrompt ? <span className="board-tool-status">{locale === "zh" ? "Prompt 已生成" : "Prompt ready"}</span> : null}
@@ -68,28 +70,11 @@ export function WorkspaceUtilityBar({ promptPreview }: { promptPreview: string }
   );
 }
 
-function BoardToolButton({
-  active,
-  disabled,
-  locale,
-  tool
-}: {
-  active?: boolean;
-  disabled?: boolean;
-  locale: "en" | "zh";
-  tool: BoardTool;
-}) {
+function BoardToolButton({ active, locale, onClick, tool }: { active?: boolean; locale: "en" | "zh"; onClick: (tool: CanvasTool) => void; tool: BoardTool }) {
   const Icon = tool.icon;
   const label = tool.label[locale];
-
   return (
-    <button
-      className={`board-tool-button${active ? " is-active" : ""}`}
-      type="button"
-      disabled={disabled}
-      title={label}
-      aria-label={label}
-    >
+    <button className={`board-tool-button${active ? " is-active" : ""}`} type="button" title={label} aria-label={label} onClick={() => onClick(tool.id)}>
       <Icon {...iconProps} size={18} aria-hidden="true" />
     </button>
   );

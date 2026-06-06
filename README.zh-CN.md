@@ -4,6 +4,12 @@
 
 # OpenCanvas
 
+## 近期画布能力
+
+- 底部浮动工具栏已接入选择、拖动画布、便签/文本、文档、Role、自由箭头、基础形状、轻量表格、本地资源和选区 Agent 操作。
+- 自由箭头、形状、表格与资源保存为独立视觉对象，不会混入思维链或 Role 语义关系。
+- 本地资源支持图片预览，以及 PDF、DOCX、TXT、MD 文件卡片，文件保存在当前线程的 `user-data/uploads/` 目录。
+
 **语言：** [English](README.md) | 中文
 
 OpenCanvas 是一个基于 FacetWrite 架构的本地优先 AI 画板工作区。它把类 FigJam 的画板、可编辑写作节点、AgentCard、可配置工具、项目历史、模型 Provider 设置、知识库、记忆能力，以及内部 Agent Runtime sidecar 组合在一起，用于更丰富的 AI 编排。

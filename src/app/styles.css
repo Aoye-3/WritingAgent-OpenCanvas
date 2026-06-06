@@ -1584,6 +1584,79 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   background-color: #f7f9fd;
 }
 
+.canvas-object-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+.canvas-free-arrow {
+  position: absolute;
+  overflow: visible;
+  pointer-events: auto;
+}
+
+.canvas-free-arrow line {
+  stroke: #253858;
+  stroke-width: 2.5;
+}
+
+.canvas-free-arrow.is-selected line {
+  stroke: var(--color-primary);
+  stroke-width: 4;
+}
+
+.canvas-free-arrow circle {
+  fill: white;
+  stroke: var(--color-primary);
+  stroke-width: 2;
+  cursor: move;
+  pointer-events: auto;
+}
+
+.canvas-board-object {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border: 2px solid #7890ad;
+  background: rgba(232, 241, 255, 0.72);
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+.canvas-board-object.is-circle { border-radius: 999px; }
+.canvas-board-object.is-diamond { transform: rotate(45deg); }
+.canvas-board-object.is-selected { outline: 3px solid var(--color-primary); outline-offset: 3px; }
+.canvas-object-resize-handle { position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px; border: 2px solid var(--color-primary); border-radius: 3px; background: white; cursor: nwse-resize; }
+.canvas-board-object-table { display: block; background: white; overflow: auto; }
+.canvas-board-object table { width: 100%; height: 100%; border-collapse: collapse; }
+.canvas-board-object td { min-width: 72px; border: 1px solid var(--color-border); }
+.canvas-board-object-asset img { width: 100%; height: 100%; object-fit: contain; }
+.canvas-asset-input { display: none; }
+.canvas-table-actions { display: flex; gap: 4px; padding: 4px; }
+.canvas-table-actions button { border: 1px solid var(--color-border); background: white; border-radius: 4px; }
+.canvas-agent-tool-menu {
+  position: absolute;
+  z-index: 30;
+  left: 50%;
+  bottom: 24px;
+  width: 260px;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: white;
+  box-shadow: var(--shadow-floating);
+  transform: translateX(-50%);
+}
+.canvas-agent-tool-menu button { padding: 8px 10px; border: 0; border-radius: 7px; background: var(--color-surface-soft); text-align: left; }
+.canvas-shape-menu { position: absolute; z-index: 30; left: 50%; bottom: 24px; display: flex; gap: 6px; padding: 8px; border: 1px solid var(--color-border); border-radius: 10px; background: white; transform: translateX(-50%); }
+.canvas-shape-menu button { border: 1px solid var(--color-border); border-radius: 6px; background: white; padding: 6px 8px; text-transform: capitalize; }
+.canvas-shape-menu button.is-active { border-color: var(--color-primary); color: var(--color-primary); }
+
 .canvas-status-node {
   position: absolute;
   z-index: 12;

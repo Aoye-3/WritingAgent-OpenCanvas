@@ -2,6 +2,8 @@ import type {
   CanvasEdgeInput,
   CanvasNodeInput,
   CanvasNodePatch,
+  CanvasObjectInput,
+  CanvasObjectPatch,
   CanvasNodeWorkflowPatch,
   CanvasSuggestionToNodeInput,
   CanvasWorkflowInput,
@@ -21,6 +23,7 @@ export function createCanvasDomainService(storage: SQLiteStorageRepository) {
       return {
         nodes: storage.listCanvasNodes(threadId),
         edges: storage.listCanvasEdges(threadId),
+        objects: storage.listCanvasObjects?.(threadId) ?? [],
         writeRequests: storage.listCanvasWriteRequests(threadId, "pending"),
         workflow: storage.getCanvasWorkflow(threadId),
         suggestions: storage.listCanvasWorkflowSuggestions(threadId)
@@ -69,6 +72,26 @@ export function createCanvasDomainService(storage: SQLiteStorageRepository) {
 
     deleteEdge(threadId: string, edgeId: string) {
       return storage.deleteCanvasEdge(threadId, edgeId);
+    },
+
+    createObject(threadId: string, input: CanvasObjectInput) {
+      return storage.createCanvasObject(threadId, input);
+    },
+
+    updateObject(threadId: string, objectId: string, patch: CanvasObjectPatch) {
+      return storage.updateCanvasObject(threadId, objectId, patch);
+    },
+
+    deleteObject(threadId: string, objectId: string) {
+      return storage.deleteCanvasObject(threadId, objectId);
+    },
+
+    createAsset(threadId: string, input: { fileName: string; fileBase64: string }) {
+      return storage.createCanvasAsset(threadId, input);
+    },
+
+    readAsset(threadId: string, objectId: string) {
+      return storage.readCanvasAsset(threadId, objectId);
     },
 
     createWriteRequest(threadId: string, input: CanvasWriteRequestInput) {

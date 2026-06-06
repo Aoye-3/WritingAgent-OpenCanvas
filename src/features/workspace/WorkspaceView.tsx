@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
 import { Topbar } from "../../shared/Topbar";
-import type { AgentCard, AgentValues, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, StoredOutputVersion, StoredToolEvent } from "../agents/types";
-import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch } from "../canvas/canvasClient";
+import type { AgentCard, AgentValues, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, StoredOutputVersion, StoredToolEvent } from "../agents/types";
+import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasObjectDraft, CanvasObjectPatch } from "../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../generation/types";
 import { useI18n } from "../i18n/I18nProvider";
 import { AgentInputDrawer } from "./components/AgentInputDrawer";
@@ -11,6 +11,7 @@ import { AICollaborationPanel } from "./components/AICollaborationPanel";
 import { WorkspaceLayout } from "./components/WorkspaceLayout";
 import { WorkspaceMainCanvas } from "./components/WorkspaceMainCanvas";
 import { WorkspaceUtilityBar } from "./components/WorkspaceUtilityBar";
+import type { CanvasTool } from "./components/canvas/toolState";
 
 const RIGHT_DRAWER_MIN_WIDTH = 360;
 const RIGHT_DRAWER_MAX_WIDTH = 720;
@@ -27,6 +28,7 @@ type WorkspaceViewProps = {
   activeVersionId?: string;
   canvasNodes: CanvasNode[];
   canvasEdges: CanvasEdge[];
+  canvasObjects: CanvasObject[];
   canvasWriteRequests: CanvasWriteRequest[];
   canvasWorkflow?: CanvasWorkflow;
   canvasWorkflowSuggestions: CanvasWorkflowSuggestion[];
@@ -40,8 +42,10 @@ type WorkspaceViewProps = {
   onConvertCanvasWorkflowSuggestionToNode: (suggestionId: string, kind?: CanvasNodeKind) => Promise<void>;
   onCreateCanvasEdge: (draft: CanvasEdgeDraft) => Promise<CanvasEdge | undefined>;
   onCreateCanvasNode: (draft: CanvasNodeDraft) => Promise<unknown>;
+  onCreateCanvasObject: (draft: CanvasObjectDraft) => Promise<unknown>;
   onDeleteCanvasEdge: (edgeId: string) => Promise<void>;
   onDeleteCanvasNode: (nodeId: string) => Promise<void>;
+  onDeleteCanvasObject: (objectId: string) => Promise<void>;
   onIgnoreCanvasWorkflowSuggestion: (suggestionId: string) => Promise<void>;
   onEditableOutputChange: (value: string) => void;
   onGenerate: () => Promise<void>;
@@ -55,6 +59,8 @@ type WorkspaceViewProps = {
   onSelectCanvasNode: (nodeId?: string) => void;
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
   onUpdateCanvasNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
+  onUpdateCanvasObject: (objectId: string, patch: CanvasObjectPatch) => Promise<unknown>;
+  onUploadCanvasAsset: (input: { fileName: string; fileBase64: string }) => Promise<unknown>;
   onUpdateCanvasNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflow["stage"]; roles?: string[] }) => Promise<unknown>;
   onUpdateCanvasWorkflow: (patch: { stage?: CanvasWorkflow["stage"]; roles?: CanvasWorkflow["roles"] }) => Promise<unknown>;
   onUndoCanvas: () => Promise<void>;
@@ -71,6 +77,7 @@ export function WorkspaceView({
   isChatSending,
   canvasNodes,
   canvasEdges,
+  canvasObjects,
   canvasWriteRequests,
   canvasWorkflow,
   canvasWorkflowSuggestions,
@@ -84,8 +91,10 @@ export function WorkspaceView({
   onConvertCanvasWorkflowSuggestionToNode,
   onCreateCanvasEdge,
   onCreateCanvasNode,
+  onCreateCanvasObject,
   onDeleteCanvasEdge,
   onDeleteCanvasNode,
+  onDeleteCanvasObject,
   onIgnoreCanvasWorkflowSuggestion,
   onGoHome,
   onOpenSettings,
@@ -96,6 +105,8 @@ export function WorkspaceView({
   onSelectCanvasNode,
   onToolStateChange,
   onUpdateCanvasNode,
+  onUpdateCanvasObject,
+  onUploadCanvasAsset,
   onUpdateCanvasNodeWorkflow,
   onUpdateCanvasWorkflow,
   onUndoCanvas,
@@ -108,6 +119,15 @@ export function WorkspaceView({
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [rightDrawerWidth, setRightDrawerWidth] = useState(RIGHT_DRAWER_MIN_WIDTH);
   const [composerDraft, setComposerDraft] = useState("");
+  const [activeCanvasTool, setActiveCanvasTool] = useState<CanvasTool>("select");
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setActiveCanvasTool("select");
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const providerLabel = generation
     ? generation.usedMock
@@ -184,8 +204,10 @@ export function WorkspaceView({
         />
 
         <WorkspaceMainCanvas
+          activeTool={activeCanvasTool}
           canUndo={canUndoCanvas}
           edges={canvasEdges}
+          objects={canvasObjects}
           nodes={canvasNodes}
           providerLabel={providerLabel}
           workflow={canvasWorkflow}
@@ -195,15 +217,20 @@ export function WorkspaceView({
           onConvertSuggestionToNode={onConvertCanvasWorkflowSuggestionToNode}
           onCreateEdge={onCreateCanvasEdge}
           onCreateNode={onCreateCanvasNode}
+          onCreateObject={onCreateCanvasObject}
           onDeleteEdge={onDeleteCanvasEdge}
           onDeleteNode={onDeleteCanvasNode}
+          onDeleteObject={onDeleteCanvasObject}
           onIgnoreSuggestion={onIgnoreCanvasWorkflowSuggestion}
           onSendMindChainToChat={setComposerDraft}
           onSelectNode={onSelectCanvasNode}
           onUndo={onUndoCanvas}
           onUpdateNode={onUpdateCanvasNode}
+          onUpdateObject={onUpdateCanvasObject}
+          onUploadAsset={onUploadCanvasAsset}
           onUpdateNodeWorkflow={onUpdateCanvasNodeWorkflow}
           onUpdateWorkflow={onUpdateCanvasWorkflow}
+          onToolChange={setActiveCanvasTool}
         />
 
         <AICollaborationPanel
@@ -227,7 +254,7 @@ export function WorkspaceView({
         />
       </WorkspaceLayout>
 
-      <WorkspaceUtilityBar promptPreview={generation?.prompt ?? promptPreview} />
+      <WorkspaceUtilityBar activeTool={activeCanvasTool} onToolChange={setActiveCanvasTool} promptPreview={generation?.prompt ?? promptPreview} />
     </section>
   );
 }
