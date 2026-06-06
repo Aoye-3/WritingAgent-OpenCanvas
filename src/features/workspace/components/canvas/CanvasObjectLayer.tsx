@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { CanvasObject } from "../../../agents/types";
+import { getCanvasShape } from "./shapeCatalog";
 
 type Geometry = { x?: number; y?: number; width?: number; height?: number; startX?: number; startY?: number; endX?: number; endY?: number };
 
@@ -113,9 +114,10 @@ export function CanvasObjectLayer({
           );
         }
         const data = object.data as { shape?: string; rows?: string[][]; name?: string; previewable?: boolean };
+        const shape = getCanvasShape(data.shape);
         return (
           <div
-            className={`canvas-board-object canvas-board-object-${object.kind}${selected ? " is-selected" : ""}${data.shape ? ` is-${data.shape}` : ""}`}
+            className={`canvas-board-object canvas-board-object-${object.kind}${selected ? " is-selected" : ""}${object.kind === "shape" ? ` is-${shape.className}` : ""}`}
             data-testid={`canvas-object-${object.kind}`}
             key={object.id}
             onClick={(event) => { event.stopPropagation(); onSelectObject(object.id, event.shiftKey); }}

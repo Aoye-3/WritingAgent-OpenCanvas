@@ -29,6 +29,7 @@ import { formatMindChain } from "../../../../shared/canvasMindChain";
 import type { CanvasFlowNode } from "./canvas/types";
 import { completeCanvasToolAction, type CanvasTool } from "./canvas/toolState";
 import { CanvasObjectLayer } from "./canvas/CanvasObjectLayer";
+import { ShapeLibraryPanel } from "./canvas/ShapeLibraryPanel";
 
 type DocumentCanvasProps = {
   activeTool: CanvasTool;
@@ -114,7 +115,8 @@ function DocumentCanvasInner({
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | undefined>();
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
-  const [shapeKind, setShapeKind] = useState<"rectangle" | "circle" | "diamond">("rectangle");
+  const [shapeKind, setShapeKind] = useState("rectangle");
+  const [recentShapeIds, setRecentShapeIds] = useState<string[]>(["rectangle", "circle", "diamond"]);
   const [, setArrowStart] = useState<{ x: number; y: number } | null>(null);
   const resizingNodeIdRef = useRef<string | null>(null);
   const assetInputRef = useRef<HTMLInputElement | null>(null);
@@ -447,9 +449,15 @@ function DocumentCanvasInner({
           </div>
         ) : null}
         {activeTool === "shape" ? (
-          <div className="canvas-shape-menu" data-testid="canvas-shape-menu">
-            {(["rectangle", "circle", "diamond"] as const).map((shape) => <button className={shapeKind === shape ? "is-active" : ""} key={shape} type="button" onClick={() => setShapeKind(shape)}>{shape}</button>)}
-          </div>
+          <ShapeLibraryPanel
+            locale={locale}
+            recentShapeIds={recentShapeIds}
+            onClose={() => onToolChange("select")}
+            onSelectShape={(shape) => {
+              setShapeKind(shape);
+              setRecentShapeIds((current) => [shape, ...current.filter((id) => id !== shape)].slice(0, 6));
+            }}
+          />
         ) : null}
       </div>
 

@@ -42,11 +42,13 @@ The floating toolbar owns the active Canvas tool. Select and pan are persistent 
 Saved visual and structural objects use `canvas_objects` instead of `canvas_nodes` or `canvas_edges`:
 
 - `arrow`: a free visual arrow with Canvas-coordinate endpoints. It does not bind to nodes or enter mind chains.
-- `shape`: rectangle, circle, or diamond visual objects.
+- `shape`: registry-backed Basic, Flowchart, and Advanced visual objects.
 - `table`: a lightweight editable string grid without formulas.
 - `asset`: an image preview or local file card backed by the thread upload directory.
 
 Selection may include multiple content nodes and visual objects, or a semantic edge. The Agent toolbar action summarizes the selected items into the collaboration composer; it does not directly mutate layout or bypass Canvas write approval.
+
+The Shape tool opens a searchable categorized library. Shape definitions live in a frontend registry so the library preview and saved-object renderer use the same stable shape ids. The initial library includes Basic, Flowchart, and Advanced groups plus recent selections.
 
 ## Node Model
 The current content node kinds remain:

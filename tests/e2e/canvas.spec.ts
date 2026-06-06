@@ -75,8 +75,11 @@ test("floating toolbar creates visual objects and opens selection Agent actions"
   const viewport = page.getByTestId("canvas-viewport");
 
   await page.getByRole("button", { name: "Shape" }).click();
+  await expect(page.getByTestId("canvas-shape-library")).toBeVisible();
+  await page.getByRole("button", { name: "Star" }).click();
   await viewport.click({ position: { x: 420, y: 300 } });
   await expect(page.getByTestId("canvas-object-shape")).toHaveCount(1);
+  await expect(page.getByTestId("canvas-object-shape")).toHaveClass(/is-star/);
 
   await page.getByRole("button", { name: "Arrow" }).click();
   const box = await viewport.boundingBox();

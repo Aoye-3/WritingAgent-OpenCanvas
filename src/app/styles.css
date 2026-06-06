@@ -1653,9 +1653,29 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   transform: translateX(-50%);
 }
 .canvas-agent-tool-menu button { padding: 8px 10px; border: 0; border-radius: 7px; background: var(--color-surface-soft); text-align: left; }
-.canvas-shape-menu { position: absolute; z-index: 30; left: 50%; bottom: 24px; display: flex; gap: 6px; padding: 8px; border: 1px solid var(--color-border); border-radius: 10px; background: white; transform: translateX(-50%); }
-.canvas-shape-menu button { border: 1px solid var(--color-border); border-radius: 6px; background: white; padding: 6px 8px; text-transform: capitalize; }
-.canvas-shape-menu button.is-active { border-color: var(--color-primary); color: var(--color-primary); }
+.canvas-shape-library { position: absolute; z-index: 30; top: 18px; left: 18px; width: 286px; max-height: calc(100% - 36px); overflow: auto; padding: 14px; border: 1px solid var(--color-border); border-radius: 14px; background: white; box-shadow: var(--shadow-floating); }
+.canvas-shape-library header, .canvas-shape-search { display: flex; align-items: center; gap: 8px; }
+.canvas-shape-library header { justify-content: space-between; margin-bottom: 12px; }
+.canvas-shape-library header button { border: 0; background: transparent; }
+.canvas-shape-search { padding: 8px 10px; border-radius: 8px; background: var(--color-surface-soft); }
+.canvas-shape-search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; }
+.canvas-shape-section { margin-top: 16px; }
+.canvas-shape-section h3 { margin: 0 0 8px; font-size: 12px; }
+.canvas-shape-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+.canvas-shape-grid button { display: grid; place-items: center; aspect-ratio: 1; border: 1px solid transparent; border-radius: 8px; background: white; }
+.canvas-shape-grid button:hover { border-color: var(--color-primary); background: var(--color-surface-soft); }
+.canvas-shape-preview { width: 34px; height: 28px; border: 2px solid #52647a; background: white; }
+.canvas-board-object.is-circle, .canvas-shape-preview.is-circle, .canvas-board-object.is-terminator, .canvas-shape-preview.is-terminator { border-radius: 999px; }
+.canvas-board-object.is-diamond, .canvas-shape-preview.is-diamond { transform: rotate(45deg); }
+.canvas-board-object.is-triangle, .canvas-shape-preview.is-triangle { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.canvas-board-object.is-star, .canvas-shape-preview.is-star { clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 96%, 50% 72%, 21% 96%, 32% 57%, 2% 35%, 39% 35%); }
+.canvas-board-object.is-arrow-right, .canvas-shape-preview.is-arrow-right { clip-path: polygon(0 25%, 65% 25%, 65% 0, 100% 50%, 65% 100%, 65% 75%, 0 75%); }
+.canvas-board-object.is-data, .canvas-shape-preview.is-data { clip-path: polygon(14% 0, 100% 0, 86% 100%, 0 100%); }
+.canvas-board-object.is-document, .canvas-shape-preview.is-document { clip-path: polygon(0 0, 100% 0, 100% 82%, 75% 100%, 50% 82%, 25% 100%, 0 82%); }
+.canvas-board-object.is-database, .canvas-shape-preview.is-database { border-radius: 50% / 12%; }
+.canvas-board-object.is-hexagon, .canvas-shape-preview.is-hexagon { clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
+.canvas-board-object.is-speech, .canvas-shape-preview.is-speech { clip-path: polygon(0 0, 100% 0, 100% 75%, 30% 75%, 15% 100%, 15% 75%, 0 75%); }
+.canvas-board-object.is-cross, .canvas-shape-preview.is-cross { clip-path: polygon(35% 0, 65% 0, 65% 35%, 100% 35%, 100% 65%, 65% 65%, 65% 100%, 35% 100%, 35% 65%, 0 65%, 0 35%, 35% 35%); }
 
 .canvas-status-node {
   position: absolute;
