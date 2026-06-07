@@ -29,7 +29,8 @@ import { formatMindChain } from "../../../../shared/canvasMindChain";
 import type { CanvasFlowNode } from "./canvas/types";
 import { completeCanvasToolAction, type CanvasTool } from "./canvas/toolState";
 import { CanvasObjectLayer } from "./canvas/CanvasObjectLayer";
-import { ShapeLibraryPanel } from "./canvas/ShapeLibraryPanel";
+import { createCanvasObjectDraft, type CanvasShapeId } from "../../../../shared/canvasObjects";
+import { CanvasAssetInput, CanvasToolOverlays } from "./canvas/CanvasToolOverlays";
 
 type DocumentCanvasProps = {
   activeTool: CanvasTool;
@@ -76,7 +77,6 @@ export function DocumentCanvas(props: DocumentCanvasProps) {
     </ReactFlowProvider>
   );
 }
-
 function DocumentCanvasInner({
   activeTool,
   canUndo,
@@ -115,11 +115,10 @@ function DocumentCanvasInner({
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | undefined>();
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
-  const [shapeKind, setShapeKind] = useState("rectangle");
+  const [shapeKind, setShapeKind] = useState<CanvasShapeId>("rectangle");
   const [recentShapeIds, setRecentShapeIds] = useState<string[]>(["rectangle", "circle", "diamond"]);
   const [, setArrowStart] = useState<{ x: number; y: number } | null>(null);
   const resizingNodeIdRef = useRef<string | null>(null);
-  const assetInputRef = useRef<HTMLInputElement | null>(null);
   const selectedNode = useMemo(() => nodes.find((node) => node.id === selectedNodeId), [nodes, selectedNodeId]);
   const flowEdges = useMemo<Edge[]>(() => edges.map((edge) => ({
     id: edge.id,
@@ -156,10 +155,6 @@ function DocumentCanvasInner({
       }
     }));
   }, [handleResizeStateChange, locale, nodes, onAcceptSuggestion, onConvertSuggestionToNode, onDeleteNode, onIgnoreSuggestion, onUpdateNode, resizingNodeId, selectedNodeId, suggestions, workflow]);
-
-  useEffect(() => {
-    if (activeTool === "asset") assetInputRef.current?.click();
-  }, [activeTool]);
 
   const createNode = async (kind: CanvasNodeKind) => {
     if (!menu) return;
@@ -293,11 +288,7 @@ function DocumentCanvasInner({
     event.preventDefault();
     event.stopPropagation();
     const point = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-    void onCreateObject({
-      kind: activeTool,
-      geometry: { x: point.x, y: point.y, width: activeTool === "table" ? 360 : 220, height: activeTool === "table" ? 180 : 140 },
-      data: activeTool === "shape" ? { shape: shapeKind } : { rows: Array.from({ length: 3 }, () => Array.from({ length: 3 }, () => "")) }
-    }).then(() => onToolChange("select"));
+    void onCreateObject(createCanvasObjectDraft(activeTool, point, shapeKind)).then(() => onToolChange("select"));
   };
 
   return (
@@ -341,18 +332,7 @@ function DocumentCanvasInner({
       </div>
 
       <div className="canvas-viewport" data-testid="canvas-viewport" onClickCapture={handleCanvasClickCapture} onPointerDownCapture={handleArrowPointerDown}>
-        <input
-          accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.docx,.txt,.md"
-          className="canvas-asset-input"
-          ref={assetInputRef}
-          type="file"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.currentTarget.value = "";
-            if (!file) return onToolChange("select");
-            void readFileBase64(file).then((fileBase64) => onUploadAsset({ fileName: file.name, fileBase64 })).finally(() => onToolChange("select"));
-          }}
-        />
+        <CanvasAssetInput activeTool={activeTool} onToolChange={onToolChange} onUploadAsset={onUploadAsset} />
         {workflow ? <CanvasStatusNode label={locale === "zh" ? "写作环节" : "Writing stage"} stageLabel={workflowStageLabels[workflow.stage][locale]} /> : null}
         <ReactFlow<CanvasFlowNode>
           className="canvas-flow"
@@ -430,35 +410,21 @@ function DocumentCanvasInner({
             onSendMindChain={sendMindChain}
           />
         ) : null}
-        {activeTool === "agent" ? (
-          <div className="canvas-agent-tool-menu" data-testid="canvas-agent-tool-menu">
-            <strong>{locale === "zh" ? "选区 Agent 操作" : "Selection Agent actions"}</strong>
-            {[
-              [locale === "zh" ? "总结选区" : "Summarize selection", "Summarize the selected Canvas items."],
-              [locale === "zh" ? "解释关系" : "Explain relationships", "Explain the relationships between the selected Canvas items."],
-              [locale === "zh" ? "生成内容提案" : "Create content proposal", "Create a content proposal based on the selected Canvas items."],
-              [locale === "zh" ? "布局整理建议" : "Suggest layout cleanup", "Suggest a clearer layout for the selected Canvas items without changing the Canvas."]
-            ].map(([label, instruction]) => (
-              <button key={label} type="button" onClick={() => {
-                const selectedNodes = nodes.filter((node) => selectedNodeIds.includes(node.id)).map((node) => `${node.title}: ${node.content}`);
-                const selectedObjects = objects.filter((object) => selectedObjectIds.includes(object.id)).map((object) => `[${object.kind}] ${JSON.stringify(object.data)}`);
-                onSendMindChainToChat(`${instruction}\n\n${[...selectedNodes, ...selectedObjects].join("\n") || "No Canvas items selected."}`);
-                onToolChange("select");
-              }}>{label}</button>
-            ))}
-          </div>
-        ) : null}
-        {activeTool === "shape" ? (
-          <ShapeLibraryPanel
-            locale={locale}
-            recentShapeIds={recentShapeIds}
-            onClose={() => onToolChange("select")}
-            onSelectShape={(shape) => {
-              setShapeKind(shape);
-              setRecentShapeIds((current) => [shape, ...current.filter((id) => id !== shape)].slice(0, 6));
-            }}
-          />
-        ) : null}
+        <CanvasToolOverlays
+          activeTool={activeTool}
+          locale={locale}
+          nodes={nodes}
+          objects={objects}
+          recentShapeIds={recentShapeIds}
+          selectedNodeIds={selectedNodeIds}
+          selectedObjectIds={selectedObjectIds}
+          onSelectShape={(shape) => {
+            setShapeKind(shape);
+            setRecentShapeIds((current) => [shape, ...current.filter((id) => id !== shape)].slice(0, 6));
+          }}
+          onSendToChat={onSendMindChainToChat}
+          onToolChange={onToolChange}
+        />
       </div>
 
       <CanvasSelectionBar
@@ -474,14 +440,5 @@ function DocumentCanvasInner({
       ) : null}
     </section>
   );
-}
-
-function readFileBase64(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error);
-    reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");
-    reader.readAsDataURL(file);
-  });
 }
 

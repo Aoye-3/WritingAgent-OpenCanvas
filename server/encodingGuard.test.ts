@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-const sourceRoots = ["src", "server", "docs"];
+const sourceRoots = ["src", "server", "shared", "docs", "tests/e2e"];
 const textExtensions = new Set([".ts", ".tsx", ".js", ".jsx", ".md", ".json", ".css"]);
 const skippedDirectories = new Set([".git", "dist", "node_modules", "__pycache__"]);
 

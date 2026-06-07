@@ -161,6 +161,18 @@ The frontend owns interaction state and explicit user intent. The Express backen
 - Frontend Canvas interaction coverage is Playwright-based. `npm.cmd run test:e2e:canvas` runs `tests/e2e/canvas.spec.ts` against the local Vite/Express dev server and verifies node type creation, session undo, blur persistence, kind conversion preservation, directed edge creation/deletion, and explicit mind-chain drafting.
 - Playwright tests may use stable `data-testid` hooks for interaction targets, but those hooks are test infrastructure only and must not carry product state or business rules.
 
+## Canvas Visual Object Boundary
+
+Canvas has three intentionally separate persisted concepts:
+
+- `canvas_nodes`: writing and workflow content rendered by React Flow.
+- `canvas_edges`: semantic directed relationships used by mind chains and Role influence.
+- `canvas_objects`: non-semantic arrows, shapes, tables, and assets.
+
+`shared/canvasObjects.ts` is the single contract for visual-object kinds, geometry, type-specific data, default drafts, strict write validation, and compatible reads. New writes are validated by kind before persistence. Existing local rows are normalized on read so missing legacy fields receive safe defaults and an unknown object becomes a safe rectangle placeholder instead of breaking the board.
+
+The frontend keeps orchestration in `DocumentCanvas`, tool overlays and file input behavior in `CanvasToolOverlays`, and type-specific table/asset content in `CanvasObjectContent`. Adding an object kind must extend the shared discriminated union first, which makes unhandled frontend and backend branches visible to TypeScript.
+
 ## Important Current Constraints
 - Canvas background drag, context-menu creation, and node resize depend on pointer events reaching the correct React Flow pane or FacetWrite node control. Any future decorative grid, empty state, alignment guide, selection marquee, or overlay should be verified with browser hit testing so it does not become an invisible interaction blocker.
 - Canvas writes are never applied directly by the Agent. The Agent can only create a pending write proposal/request. The UI may ask the user to write all content or only annotated snippets, then convert that explicit confirmation into the backend approve/apply flow. Direct user commands such as "鍐欏叆" or "save to canvas" are treated as explicit confirmation for the new request from that same run, not as permission to apply older pending proposals.

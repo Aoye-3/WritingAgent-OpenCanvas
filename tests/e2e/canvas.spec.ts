@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const undoButtonName = /Undo|撤销|鎾ら攢/;
-const sendMindChainName = /Send mind chain|发送思维链|鍙戦€佹€濈淮閾?/;
+const undoButtonName = /Undo|撤销/;
+const sendMindChainName = /Send mind chain|发送思维链/;
 
 type CanvasState = {
   canvasNodes: Array<{
@@ -19,10 +19,11 @@ type CanvasState = {
     stage: string;
     roles: Array<{ id: string; label: string }>;
   };
+  canvasObjects?: Array<{ id: string; kind: "arrow" | "shape" | "table" | "asset"; data: Record<string, unknown> }>;
 };
 
 async function openNewCanvas(page: Page) {
-  await page.goto("/");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByTestId("start-button").click();
   await page.getByTestId("home-create-board").click();
   await expect(page.getByTestId("document-canvas")).toBeVisible();
@@ -92,6 +93,46 @@ test("floating toolbar creates visual objects and opens selection Agent actions"
 
   await page.getByRole("button", { name: "Agent tool" }).click();
   await expect(page.getByTestId("canvas-agent-tool-menu")).toBeVisible();
+});
+
+test("shape search, table editing, asset upload, undo, and refresh persistence work", async ({ page }) => {
+  await openNewCanvas(page);
+  const viewport = page.getByTestId("canvas-viewport");
+
+  await page.getByRole("button", { name: "Shape" }).click();
+  await page.getByLabel("Search shapes").fill("star");
+  await page.getByRole("button", { name: "Star" }).click();
+  await viewport.click({ position: { x: 420, y: 300 } });
+  await expect(page.getByTestId("canvas-object-shape")).toHaveClass(/is-star/);
+
+  await page.getByRole("button", { name: "Shape" }).click();
+  await expect(page.getByText("Recents")).toBeVisible();
+  await page.getByRole("button", { name: "Close shape library" }).click();
+
+  await page.getByRole("button", { name: "Table" }).click();
+  await viewport.click({ position: { x: 650, y: 360 } });
+  const table = page.getByTestId("canvas-object-table");
+  await expect(table).toBeVisible();
+  await table.locator("td").first().fill("Canvas cell");
+  await table.locator("td").first().blur();
+
+  await page.getByRole("button", { name: "Asset" }).click();
+  await page.locator("input.canvas-asset-input").setInputFiles({
+    name: "canvas-notes.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("Canvas asset"),
+  });
+  await expect(page.getByTestId("canvas-object-asset")).toBeVisible();
+  await page.getByRole("button", { name: undoButtonName }).click();
+  await expect(page.getByTestId("canvas-object-asset")).toHaveCount(0);
+
+  await page.reload();
+  const persisted = await fetchCanvasState(page);
+  expect(persisted.canvasObjects).toEqual(expect.arrayContaining([
+    expect.objectContaining({ kind: "shape", data: { shapeId: "star" } }),
+    expect.objectContaining({ kind: "table", data: { rows: expect.arrayContaining([expect.arrayContaining(["Canvas cell"])]) } }),
+  ]));
+  expect(persisted.canvasObjects?.some((object) => object.kind === "asset")).toBe(false);
 });
 
 test("canvas deletes a selected node from the corner action", async ({ page }) => {
@@ -191,7 +232,7 @@ test("canvas workflow stage, role nodes, and suggestions are visible in the UI",
 
   await page.getByLabel("Canvas workflow stage").selectOption("publish");
   await expect(page.getByText("Add one concrete source.")).toBeVisible();
-  await page.getByRole("button", { name: /Accept|接受|鎺ュ彈/ }).click();
+  await page.getByRole("button", { name: /Accept|接受/ }).click();
 
   await expect.poll(async () => {
     const state = await fetchCanvasState(page);

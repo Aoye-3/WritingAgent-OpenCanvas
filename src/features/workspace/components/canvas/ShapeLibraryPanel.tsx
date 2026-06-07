@@ -1,6 +1,7 @@
 import { Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { canvasShapes, filterCanvasShapes, type CanvasShapeCategory } from "./shapeCatalog";
+import type { CanvasShapeId } from "../../../../../shared/canvasObjects";
 
 const categoryLabels = {
   basic: { en: "Basic", zh: "基础" },
@@ -17,7 +18,7 @@ export function ShapeLibraryPanel({
   locale: "en" | "zh";
   recentShapeIds: string[];
   onClose: () => void;
-  onSelectShape: (shapeId: string) => void;
+  onSelectShape: (shapeId: CanvasShapeId) => void;
 }) {
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => filterCanvasShapes(query, locale), [locale, query]);
@@ -68,7 +69,7 @@ function ShapeSection({
   label: string;
   locale: "en" | "zh";
   shapes: typeof canvasShapes;
-  onSelectShape: (shapeId: string) => void;
+  onSelectShape: (shapeId: CanvasShapeId) => void;
 }) {
   return (
     <section className="canvas-shape-section">

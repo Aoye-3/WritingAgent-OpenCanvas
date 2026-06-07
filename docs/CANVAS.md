@@ -50,6 +50,24 @@ Selection may include multiple content nodes and visual objects, or a semantic e
 
 The Shape tool opens a searchable categorized library. Shape definitions live in a frontend registry so the library preview and saved-object renderer use the same stable shape ids. The initial library includes Basic, Flowchart, and Advanced groups plus recent selections.
 
+Visual-object contracts live in `shared/canvasObjects.ts`. Object writes are strictly validated while stored legacy rows are normalized on read. The frontend and server must not introduce independent copies of object-kind, geometry, or data types.
+
+Tool lifecycle:
+
+- Select, pan, and Agent remain active until the user changes tools.
+- Node and visual-object creation tools return to Select after one successful action.
+- Shape selection keeps the Shape tool active until the user places the chosen shape or closes the library.
+- Asset selection opens the file input; cancel and completion both return to Select.
+
+Object create, geometry/data update, and delete participate in session undo. Asset upload participates as a create operation and can be undone by deleting the new asset. Deleted asset bytes are removed immediately and are not restored by undo.
+
+To add a new visual-object kind:
+
+1. Extend the discriminated union, validator, compatible normalizer, and default draft in `shared/canvasObjects.ts`.
+2. Add repository/storage tests for valid writes, invalid writes, and compatible reads.
+3. Add a focused object renderer instead of adding type-specific UI to `DocumentCanvas`.
+4. Add toolbar behavior and Playwright coverage, then update API and Canvas documentation.
+
 ## Node Model
 The current content node kinds remain:
 

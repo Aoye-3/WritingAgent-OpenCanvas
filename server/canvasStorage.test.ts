@@ -139,6 +139,23 @@ test("stores and updates independent canvas objects without creating semantic ed
   assert.deepEqual(storage.listCanvasObjects(threadId), []);
 });
 
+test("rejects invalid Canvas object writes", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;
+  await storage.ensureThread(threadId, "blog-post");
+
+  assert.throws(() => storage.createCanvasObject(threadId, {
+    kind: "shape",
+    geometry: { x: 0, y: 0, width: 220, height: 140 },
+    data: { shapeId: "not-a-shape" },
+  }), /shape/i);
+  assert.throws(() => storage.createCanvasObject(threadId, {
+    kind: "asset",
+    geometry: { x: 0, y: 0, width: 220, height: 140 },
+    data: { name: "unsafe.txt", relativePath: "uploads/unsafe.txt" },
+  }), /asset/i);
+});
+
 test("stores supported canvas assets inside the thread upload directory", async () => {
   const storage = await createStorage();
   const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;

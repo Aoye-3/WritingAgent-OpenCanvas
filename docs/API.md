@@ -14,6 +14,16 @@
 - `GET /api/threads/:threadId/canvas/assets/:objectId/content`
   - Returns the thread-local asset bytes for preview/download.
 
+Canvas object writes use the shared kind-specific contract:
+
+```json
+{ "kind": "arrow", "geometry": { "startX": 10, "startY": 20, "endX": 180, "endY": 120 }, "data": {} }
+{ "kind": "shape", "geometry": { "x": 10, "y": 20, "width": 220, "height": 140 }, "data": { "shapeId": "star" } }
+{ "kind": "table", "geometry": { "x": 10, "y": 20, "width": 360, "height": 180 }, "data": { "rows": [["A", "B"]] } }
+```
+
+Coordinates and sizes must be finite numbers, shape ids must be registered, and table rows must be a non-empty two-dimensional string array. Invalid writes return `400 bad_request`. Asset objects cannot be created or have metadata replaced through `/canvas/objects`; clients must use `/canvas/assets`, which validates the file and generates safe thread-relative storage metadata. Asset object PATCH requests may update geometry only.
+
 ## Response Shape
 Successful responses return the route payload directly. Errors use:
 

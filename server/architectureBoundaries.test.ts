@@ -44,8 +44,8 @@ test("Canvas route is wired through the Canvas domain service", () => {
 test("generated QA and Playwright artifacts stay out of source commits", () => {
   const gitignore = readFileSync(".gitignore", "utf8");
 
-  assert.match(gitignore, /(?:^|\n)test-results\/(?:\n|$)/);
-  assert.match(gitignore, /(?:^|\n)\*-qa\.png(?:\n|$)/);
+  assert.match(gitignore, /(?:^|\r?\n)test-results\/(?:\r?\n|$)/);
+  assert.match(gitignore, /(?:^|\r?\n)\*-qa\.png(?:\r?\n|$)/);
 });
 
 function readSourceFiles(root: string): string[] {

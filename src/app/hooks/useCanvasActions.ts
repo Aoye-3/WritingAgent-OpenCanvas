@@ -27,7 +27,7 @@ import {
   type CanvasWorkflowPatch,
   type CanvasWriteRequestDraft
 } from "../../features/canvas/canvasClient";
-import { createInverseCanvasNodePatch, type CanvasHistoryEntry } from "../../../shared/canvasHistory";
+import { createInverseCanvasNodePatch, createInverseCanvasObjectPatch, type CanvasHistoryEntry } from "../../../shared/canvasHistory";
 import { removeCanvasNodeFromState } from "./canvasActions/state";
 
 type UseCanvasActionsOptions = {
@@ -147,7 +147,11 @@ export function useCanvasActions({
     const previous = canvasObjects.find((object) => object.id === objectId);
     const object = await updateCanvasObject(threadId, objectId, patch);
     setCanvasObjects((current) => current.map((item) => item.id === object.id ? object : item));
-    if (previous && options.recordHistory !== false) pushHistory({ kind: "updateObject", objectId, geometry: previous.geometry, data: previous.data });
+    if (previous && options.recordHistory !== false) pushHistory({
+      kind: "updateObject",
+      objectId,
+      patch: createInverseCanvasObjectPatch(previous, patch)
+    });
     await onRefreshProjectSurfaces();
     return object;
   };
@@ -158,7 +162,7 @@ export function useCanvasActions({
     if (!previous) return;
     await deleteCanvasObject(threadId, objectId);
     setCanvasObjects((current) => current.filter((object) => object.id !== objectId));
-    if (options.recordHistory !== false) pushHistory({ kind: "restoreObject", object: previous });
+    if (options.recordHistory !== false && previous.kind !== "asset") pushHistory({ kind: "restoreObject", object: previous });
     await onRefreshProjectSurfaces();
   };
 
@@ -166,6 +170,7 @@ export function useCanvasActions({
     const threadId = await ensureThreadId();
     const object = await uploadCanvasAsset(threadId, input);
     setCanvasObjects((current) => [...current, object]);
+    pushHistory({ kind: "deleteObject", objectId: object.id });
     await onRefreshProjectSurfaces();
     return object;
   };
@@ -218,7 +223,7 @@ export function useCanvasActions({
     } else if (entry.kind === "restoreObject") {
       await handleCreateCanvasObject(entry.object, { recordHistory: false });
     } else {
-      await handleUpdateCanvasObject(entry.objectId, { geometry: entry.geometry, data: entry.data }, { recordHistory: false });
+      await handleUpdateCanvasObject(entry.objectId, entry.patch, { recordHistory: false });
     }
   };
 

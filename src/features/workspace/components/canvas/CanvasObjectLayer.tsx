@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { CanvasObject } from "../../../agents/types";
+import type { CanvasObjectPatch } from "../../../../../shared/canvasObjects";
 import { getCanvasShape } from "./shapeCatalog";
+import { CanvasObjectContent } from "./CanvasObjectContent";
 
 type Geometry = { x?: number; y?: number; width?: number; height?: number; startX?: number; startY?: number; endX?: number; endY?: number };
 
@@ -19,8 +21,8 @@ export function CanvasObjectLayer({
   transform: string;
   onDeleteObject: (objectId: string) => void;
   onSelectObject: (objectId: string, additive: boolean) => void;
-  onUpdateObject: (objectId: string, geometry: Record<string, unknown>) => void;
-  onUpdateData: (objectId: string, data: Record<string, unknown>) => void;
+  onUpdateObject: (objectId: string, geometry: CanvasObject["geometry"]) => void;
+  onUpdateData: (objectId: string, data: NonNullable<CanvasObjectPatch["data"]>) => void;
   zoom: number;
 }) {
   const [liveGeometry, setLiveGeometry] = useState<Record<string, Geometry>>({});
@@ -49,7 +51,7 @@ export function CanvasObjectLayer({
         delete next[objectId];
         return next;
       });
-      onUpdateObject(objectId, nextGeometry as Record<string, unknown>);
+      onUpdateObject(objectId, nextGeometry as CanvasObject["geometry"]);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", finish, { once: true });
@@ -89,7 +91,7 @@ export function CanvasObjectLayer({
                 delete next[object.id];
                 return next;
               });
-              onUpdateObject(object.id, nextGeometry as Record<string, unknown>);
+              onUpdateObject(object.id, nextGeometry as CanvasObject["geometry"]);
             };
             window.addEventListener("pointermove", move);
             window.addEventListener("pointerup", finish, { once: true });
@@ -113,8 +115,7 @@ export function CanvasObjectLayer({
             </svg>
           );
         }
-        const data = object.data as { shape?: string; rows?: string[][]; name?: string; previewable?: boolean };
-        const shape = getCanvasShape(data.shape);
+        const shape = getCanvasShape(object.kind === "shape" ? object.data.shapeId : undefined);
         return (
           <div
             className={`canvas-board-object canvas-board-object-${object.kind}${selected ? " is-selected" : ""}${object.kind === "shape" ? ` is-${shape.className}` : ""}`}
@@ -125,28 +126,11 @@ export function CanvasObjectLayer({
             onPointerDown={(event) => startGeometryDrag(object.id, geometry, event, "move")}
             style={{ left: geometry.x ?? 0, top: geometry.y ?? 0, width: geometry.width ?? 220, height: geometry.height ?? 140 }}
           >
-            {object.kind === "table" ? <SimpleTable rows={data.rows ?? defaultRows()} onChange={(rows) => onUpdateData(object.id, { ...data, rows })} /> : object.kind === "asset" ? data.previewable ? <img alt={data.name ?? "Canvas asset"} src={`/api/threads/${encodeURIComponent(object.threadId)}/canvas/assets/${encodeURIComponent(object.id)}/content`} /> : <span>{data.name ?? "Asset"}</span> : null}
+            {object.kind === "table" || object.kind === "asset" ? <CanvasObjectContent object={object} onUpdateTable={(rows) => onUpdateData(object.id, { rows })} /> : null}
             {selected ? <button className="canvas-object-resize-handle" type="button" aria-label="Resize canvas object" onPointerDown={(event) => startGeometryDrag(object.id, geometry, event, "resize")} /> : null}
           </div>
         );
       })}
     </div>
   );
-}
-
-function SimpleTable({ rows, onChange }: { rows: string[][]; onChange: (rows: string[][]) => void }) {
-  const update = (rowIndex: number, cellIndex: number, value: string) => onChange(rows.map((row, r) => row.map((cell, c) => r === rowIndex && c === cellIndex ? value : cell)));
-  return (
-    <>
-      <table onPointerDown={(event) => event.stopPropagation()}><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td contentEditable key={cellIndex} suppressContentEditableWarning onBlur={(event) => update(rowIndex, cellIndex, event.currentTarget.textContent ?? "")}>{cell}</td>)}</tr>)}</tbody></table>
-      <div className="canvas-table-actions" onPointerDown={(event) => event.stopPropagation()}>
-        <button type="button" onClick={() => onChange([...rows, Array.from({ length: rows[0]?.length ?? 1 }, () => "")])}>+ Row</button>
-        <button type="button" onClick={() => onChange(rows.map((row) => [...row, ""]))}>+ Column</button>
-      </div>
-    </>
-  );
-}
-
-function defaultRows() {
-  return Array.from({ length: 3 }, () => Array.from({ length: 3 }, () => ""));
 }

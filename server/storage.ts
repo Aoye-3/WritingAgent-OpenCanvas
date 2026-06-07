@@ -285,11 +285,10 @@ export class SQLiteStorageRepository {
     const relativePath = path.join("uploads", storedName).replace(/\\/g, "/");
     const fullPath = resolveThreadRelativePath(threadId, relativePath);
     await writeFile(fullPath, buffer);
-    return this.canvas.createCanvasObject(threadId, {
-      kind: "asset",
-      geometry: { x: 160, y: 160, width: extension.match(/\.(png|jpe?g|gif|webp)$/) ? 320 : 260, height: 180 },
-      data: { name: fileName, extension, size: buffer.byteLength, relativePath, previewable: Boolean(extension.match(/\.(png|jpe?g|gif|webp)$/)) }
-    });
+      return this.canvas.createCanvasAssetObject(threadId, {
+        geometry: { x: 160, y: 160, width: extension.match(/\.(png|jpe?g|gif|webp)$/) ? 320 : 260, height: 180 },
+        data: { name: fileName, extension, size: buffer.byteLength, relativePath, previewable: Boolean(extension.match(/\.(png|jpe?g|gif|webp)$/)) }
+      });
   }
 
   async readCanvasAsset(threadId: string, objectId: string) {

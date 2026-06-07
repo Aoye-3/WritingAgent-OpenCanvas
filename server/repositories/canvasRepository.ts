@@ -28,6 +28,7 @@ import {
   readWorkflowMetadata,
   readWorkflowRoleMetadata
 } from "../../shared/canvasWorkflow.js";
+import { createStoredCanvasAsset, normalizeStoredCanvasObject, validateCanvasObjectWrite, type CanvasAssetObject } from "../../shared/canvasObjects.js";
 import { sanitizeVisibleText } from "../services/generation/outputNormalizer.js";
 import {
   cleanText,
@@ -357,26 +358,46 @@ export class CanvasRepository {
               created_at as createdAt, updated_at as updatedAt
        FROM canvas_objects WHERE thread_id = ? ORDER BY created_at ASC`
     ).all(threadId) as Row[];
-    return rows.map(({ geometryJson, dataJson, ...row }) => ({ ...row, geometry: parseJson(geometryJson), data: parseJson(dataJson) }));
+    return rows.map(({ geometryJson, dataJson, ...row }) => normalizeStoredCanvasObject({
+      ...row,
+      geometry: parseJson(geometryJson),
+      data: parseJson(dataJson)
+    }));
   }
 
   createCanvasObject(threadId: string, input: CanvasObjectInput) {
     validateId(threadId, "threadId");
-    const kind = validateCanvasObjectKind(input.kind);
+    const validated = validateCanvasObjectWrite(input);
     const now = nowIso();
     const object: CanvasObject = {
       id: input.id ? cleanCanvasRecordId(input.id, "objectId") : randomId("object"),
       threadId,
-      kind,
-      geometry: input.geometry ?? {},
-      data: input.data ?? {},
+      ...validated,
       createdAt: now,
       updatedAt: now
     };
     this.db.prepare(
       `INSERT INTO canvas_objects (id, thread_id, kind, geometry_json, data_json, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(object.id, threadId, kind, JSON.stringify(object.geometry), JSON.stringify(object.data), now, now);
+    ).run(object.id, threadId, object.kind, JSON.stringify(object.geometry), JSON.stringify(object.data), now, now);
+    this.deps.touchThread(threadId, now);
+    return object;
+  }
+
+  createCanvasAssetObject(threadId: string, input: Omit<CanvasAssetObject, "id" | "threadId" | "kind" | "createdAt" | "updatedAt">) {
+    validateId(threadId, "threadId");
+    const now = nowIso();
+    const object = createStoredCanvasAsset({
+      id: randomId("object"),
+      threadId,
+      ...input,
+      createdAt: now,
+      updatedAt: now
+    });
+    this.db.prepare(
+      `INSERT INTO canvas_objects (id, thread_id, kind, geometry_json, data_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(object.id, threadId, object.kind, JSON.stringify(object.geometry), JSON.stringify(object.data), now, now);
     this.deps.touchThread(threadId, now);
     return object;
   }
@@ -387,13 +408,17 @@ export class CanvasRepository {
     const existing = this.listCanvasObjects(threadId).find((object) => object.id === objectId);
     if (!existing) return undefined;
     const now = nowIso();
-    const next: CanvasObject = {
-      ...existing,
-      kind: patch.kind === undefined ? existing.kind : validateCanvasObjectKind(patch.kind),
-      geometry: patch.geometry === undefined ? existing.geometry : patch.geometry,
-      data: patch.data === undefined ? existing.data : patch.data,
-      updatedAt: now
-    };
+    if (existing.kind === "asset" && (patch.kind !== undefined || patch.data !== undefined)) {
+      throw new Error("Canvas asset metadata cannot be updated through the object endpoint");
+    }
+    const validated = existing.kind === "asset"
+      ? createStoredCanvasAsset({ ...existing, geometry: patch.geometry === undefined ? existing.geometry : patch.geometry as CanvasAssetObject["geometry"] })
+      : validateCanvasObjectWrite({
+        kind: patch.kind ?? existing.kind,
+        geometry: patch.geometry ?? existing.geometry,
+        data: patch.data ?? existing.data
+      });
+    const next = { ...existing, ...validated, updatedAt: now } as CanvasObject;
     this.db.prepare(
       `UPDATE canvas_objects SET kind = ?, geometry_json = ?, data_json = ?, updated_at = ?
        WHERE id = ? AND thread_id = ?`
@@ -707,11 +732,4 @@ function stripLegacyWorkflowRoles(metadata: unknown) {
     next.workflow = cleanWorkflow;
   }
   return next;
-}
-
-function validateCanvasObjectKind(value: unknown) {
-  if (value !== "arrow" && value !== "shape" && value !== "table" && value !== "asset") {
-    throw new Error("Invalid Canvas object kind");
-  }
-  return value;
 }

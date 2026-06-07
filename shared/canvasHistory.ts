@@ -1,3 +1,5 @@
+import type { CanvasObject, CanvasObjectPatch } from "./canvasObjects.js";
+
 export type CanvasHistoryNode = {
   id: string;
   kind: "document" | "note" | "reference" | "role";
@@ -17,12 +19,7 @@ export type CanvasHistoryEdge = {
   label: string;
 };
 
-export type CanvasHistoryObject = {
-  id: string;
-  kind: "arrow" | "shape" | "table" | "asset";
-  geometry: Record<string, unknown>;
-  data: Record<string, unknown>;
-};
+export type CanvasHistoryObject = Pick<CanvasObject, "id" | "kind" | "geometry" | "data">;
 
 export type CanvasHistoryNodePatch = Partial<{
   kind: CanvasHistoryNode["kind"];
@@ -42,8 +39,8 @@ export type CanvasHistoryEntry =
   | { kind: "deleteEdge"; edgeId: string }
   | { kind: "restoreEdge"; edge: CanvasHistoryEdge }
   | { kind: "deleteObject"; objectId: string }
-  | { kind: "restoreObject"; object: CanvasHistoryObject }
-  | { kind: "updateObject"; objectId: string; geometry: Record<string, unknown>; data: Record<string, unknown> };
+  | { kind: "restoreObject"; object: Exclude<CanvasObject, { kind: "asset" }> }
+  | { kind: "updateObject"; objectId: string; patch: CanvasObjectPatch };
 
 export function limitCanvasHistoryDepth(entries: CanvasHistoryEntry[], undoDepth: number) {
   return entries.slice(0, Math.max(1, undoDepth));
@@ -70,5 +67,18 @@ export function createInverseCanvasNodePatch(
   if (patch.width !== undefined) inverse.width = node.width;
   if (patch.height !== undefined) inverse.height = node.height;
   if (patch.metadata !== undefined) inverse.metadata = node.metadata;
+  return inverse;
+}
+
+export function createInverseCanvasObjectPatch(
+  object: CanvasHistoryObject,
+  patch: CanvasObjectPatch
+): CanvasObjectPatch {
+  const inverse: CanvasObjectPatch = {};
+  if (patch.kind !== undefined) inverse.kind = object.kind;
+  if (patch.geometry !== undefined) inverse.geometry = object.geometry;
+  if (patch.data !== undefined && object.kind !== "asset") {
+    inverse.data = object.data as NonNullable<CanvasObjectPatch["data"]>;
+  }
   return inverse;
 }

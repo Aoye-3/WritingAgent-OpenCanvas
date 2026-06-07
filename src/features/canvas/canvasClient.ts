@@ -1,4 +1,6 @@
-import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasObjectKind, CanvasWorkflow, CanvasWorkflowRole, CanvasWorkflowStage, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../agents/types";
+import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowRole, CanvasWorkflowStage, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../agents/types";
+import type { CanvasObjectDraft, CanvasObjectPatch } from "../../../shared/canvasObjects";
+export type { CanvasObjectDraft, CanvasObjectPatch } from "../../../shared/canvasObjects";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "../../shared/apiClient";
 
 export type CanvasNodeDraft = {
@@ -39,9 +41,6 @@ export type CanvasEdgeDraft = {
   targetNodeId: string;
   label?: string;
 };
-
-export type CanvasObjectDraft = { id?: string; kind: CanvasObjectKind; geometry?: Record<string, unknown>; data?: Record<string, unknown> };
-export type CanvasObjectPatch = Partial<Omit<CanvasObjectDraft, "id">>;
 
 export async function fetchCanvas(threadId: string): Promise<{ nodes: CanvasNode[]; edges: CanvasEdge[]; objects: CanvasObject[]; writeRequests: CanvasWriteRequest[]; workflow: CanvasWorkflow; suggestions: CanvasWorkflowSuggestion[] }> {
   return apiGet<{ nodes: CanvasNode[]; edges: CanvasEdge[]; objects: CanvasObject[]; writeRequests: CanvasWriteRequest[]; workflow: CanvasWorkflow; suggestions: CanvasWorkflowSuggestion[] }>(`/api/threads/${encodeURIComponent(threadId)}/canvas`);

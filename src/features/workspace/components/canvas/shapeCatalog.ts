@@ -1,7 +1,9 @@
+import { canvasShapeIds, type CanvasShapeId } from "../../../../../shared/canvasObjects";
+
 export type CanvasShapeCategory = "basic" | "flowchart" | "advanced";
 
 export type CanvasShapeDefinition = {
-  id: string;
+  id: CanvasShapeId;
   category: CanvasShapeCategory;
   label: { en: string; zh: string };
   className: string;
@@ -23,6 +25,10 @@ export const canvasShapes: CanvasShapeDefinition[] = [
   { id: "speech", category: "advanced", label: { en: "Speech bubble", zh: "对话气泡" }, className: "speech" },
   { id: "cross", category: "advanced", label: { en: "Cross", zh: "十字形" }, className: "cross" },
 ];
+
+if (canvasShapes.length !== canvasShapeIds.length) {
+  throw new Error("Canvas shape catalog must define every shared Canvas shape id");
+}
 
 export function getCanvasShape(id: string | undefined) {
   return canvasShapes.find((shape) => shape.id === id) ?? canvasShapes[0];

@@ -237,17 +237,8 @@ export type CanvasWriteRequest = {
   updatedAt: string;
 };
 
-export type CanvasObjectKind = "arrow" | "shape" | "table" | "asset";
-
-export type CanvasObject = {
-  id: string;
-  threadId: string;
-  kind: CanvasObjectKind;
-  geometry: Record<string, unknown>;
-  data: Record<string, unknown>;
-  createdAt: string;
-  updatedAt: string;
-};
+import type { CanvasObject } from "../../../shared/canvasObjects";
+export type { CanvasObject, CanvasObjectKind } from "../../../shared/canvasObjects";
 
 export type CanvasWorkflowSuggestion = {
   id: string;
