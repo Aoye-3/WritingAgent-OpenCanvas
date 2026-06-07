@@ -1,0 +1,4 @@
+interface:
+  display_name: "Maintainability & Concurrency Review"
+  short_description: "Review architecture, tests, and race risks"
+  default_prompt: "Use $review-maintainability-concurrency to review this project for maintainability, extensibility, decoupling, test gaps, and concurrency risks, then update the technical docs."

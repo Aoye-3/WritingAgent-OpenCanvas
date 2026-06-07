@@ -101,6 +101,7 @@ This starts only the Vite frontend and FacetWrite API and is reserved for narrow
 - [Agent And Tools](docs/AGENT.md)
 - [Decisions](docs/DECISIONS.md)
 - [Refactor Log](docs/REFACTOR_LOG.md)
+- [Maintainability And Concurrency Review Plan](docs/superpowers/plans/2026-06-07-maintainability-concurrency-review.md)
 - [Security](docs/SECURITY.md)
 - [Reference Archive](docs/reference/README.md)
 

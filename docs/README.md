@@ -14,6 +14,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 - `SECURITY.md`: local secret handling, tool permissions, Agent Runtime auth, and runtime redaction rules.
 - `DECISIONS.md`: dated technical decisions and their impacts.
 - `REFACTOR_LOG.md`: review results, completed work, open TODOs, and next priority checks.
+- `superpowers/plans/2026-06-07-maintainability-concurrency-review.md`: executable maintainability, extensibility, decoupling, test-gap, and concurrency review plan.
 
 ## Update Rules
 - Code structure changes update `ARCHITECTURE.md`.

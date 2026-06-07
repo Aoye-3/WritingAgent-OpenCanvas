@@ -1,5 +1,27 @@
 # FacetWrite Refactor Log
 
+## 2026-06-07: Maintainability And Concurrency Review Planning
+Scope: Inspected the FacetWrite-owned architecture and test suite, identified concurrency-risk boundaries, and created an executable review and test-supplement plan.
+
+Findings:
+- Existing route/domain/service/repository boundaries, SQLite transactions, approval-gated Canvas writes, and Agent Runtime auth-session deduplication provide a strong base.
+- Highest-risk paths are Canvas approval state transitions, stale frontend async results, provider-config file writes, same-base Knowledge mutations, thread autosave ordering, and stream cancellation/finalization.
+- Several large files remain review hotspots, but file size alone is not a reason to refactor.
+- The current baseline passes `npm.cmd run typecheck`, 181 `npm.cmd test` checks, the production build, and all 7 Canvas Playwright tests.
+
+Completed:
+- Added `docs/superpowers/plans/2026-06-07-maintainability-concurrency-review.md`.
+- Added the project-level `$review-maintainability-concurrency` shortcut Skill under `.agents/skills/`.
+- Linked the plan from the technical documentation map and root README.
+- Stabilized the architecture-boundary line-ending check and isolated Playwright on a non-reserved API port with enough time for Windows cold startup.
+
+Open TODO:
+- Execute the plan in priority order, starting with the mutable-workflow inventory and atomic Canvas approval transitions.
+- Review `modules/agent-runtime/` separately after FacetWrite-owned concurrency invariants are covered.
+
+Next Priority Check:
+- Prove duplicate Canvas approvals and stale frontend responses are harmless before expanding product behavior.
+
 ## 2026-05-25: DOCX Knowledge Embedding Fix
 Scope: Reproduced the DOCX upload path, fixed the OpenAI-compatible embedding URL used by Knowledge indexing, and verified the user's stuck DOCX item.
 
