@@ -10,6 +10,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 - `AGENT.md`: AgentCard, Agent settings, Agent Runtime mapping, Tool catalog, and ToolUse safety.
 - `API.md`: HTTP API contracts, runtime environment variables, and response shape.
 - `AGENT_RUNTIME_RUNBOOK.md`: Docker Desktop/local and Linux Docker Compose runtime acceptance, dependencies, ports, env, smoke checks, and troubleshooting.
+- `APP_SHELL_RUNBOOK.md`: Windows Electron development shell startup, ports, ownership, shutdown, HMR, and troubleshooting.
 - `DATABASE.md`: SQLite location, tables, Canvas write semantics, and migration notes.
 - `SECURITY.md`: local secret handling, tool permissions, Agent Runtime auth, and runtime redaction rules.
 - `DECISIONS.md`: dated technical decisions and their impacts.
@@ -25,6 +26,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 - Agent, ToolUse, Skill, MCP, or Agent Runtime changes update `AGENT.md`.
 - Security, auth, secret, approval, or side-effect changes update `SECURITY.md`.
 - Important design tradeoffs update `DECISIONS.md`.
+- Application-shell lifecycle changes update `APP_SHELL_RUNBOOK.md`.
 - Every review or refactor updates `REFACTOR_LOG.md`.
 
 ## Current Runtime Position

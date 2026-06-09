@@ -5,6 +5,7 @@ FacetWrite treats Agent Runtime as the primary AI execution subsystem when `AGEN
 ## Supported Paths
 
 - Local acceptance: Docker Desktop plus the internal Agent Runtime Docker Compose module under `modules/agent-runtime/`.
+- Windows Electron development shell: Docker Desktop plus shell-managed Compose startup and ownership tracking. See `APP_SHELL_RUNBOOK.md`.
 - Production: Linux or cloud host running Docker Compose.
 - Windows native local mode is not the main path. If `make` or `nginx` is missing on Windows, use Docker Desktop or WSL/Linux rather than trying to install native nginx as the primary workflow.
 
@@ -20,6 +21,7 @@ FacetWrite treats Agent Runtime as the primary AI execution subsystem when `AGEN
 
 - FacetWrite app/API: `http://127.0.0.1:8837` for backend service-to-service callbacks.
 - FacetWrite Vite UI: `http://127.0.0.1:3000` by default. The backend default avoids Windows' common excluded range around `8787`.
+- Electron development shell: Vite `http://127.0.0.1:17776`, API callback `http://host.docker.internal:17777`.
 - Agent Runtime nginx sidecar: `http://127.0.0.1:2026`.
 - Agent Runtime gateway container service: exposed through nginx for FacetWrite runtime use.
 
@@ -90,6 +92,8 @@ npm run agent-runtime:status
 - `facetwrite-agent-runtime-nginx`
 - `facetwrite-agent-runtime-frontend`
 - `facetwrite-agent-runtime-gateway`
+
+For the Electron development shell, double-click `start-opencanvas-shell.vbs`. The shell reuses a complete compatible runtime without owning it; otherwise it starts Compose and runs `down` when the application window closes.
 
 ## Smoke Checks
 

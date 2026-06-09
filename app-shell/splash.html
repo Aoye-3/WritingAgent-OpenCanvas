@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Starting OpenCanvas</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        color: #172033;
+        background: radial-gradient(circle at top, #ffffff 0, #f3f6fb 58%, #e9eef7 100%);
+        font-family: Inter, "Segoe UI", sans-serif;
+      }
+      main { width: 390px; text-align: center; }
+      img { width: 74px; height: 74px; border-radius: 18px; box-shadow: 0 16px 42px rgba(37, 99, 235, .18); }
+      h1 { margin: 18px 0 6px; font-size: 25px; }
+      p { min-height: 24px; margin: 0; color: #667085; font-size: 14px; }
+      .track { height: 4px; margin-top: 28px; overflow: hidden; border-radius: 999px; background: #dce5f4; }
+      .bar { width: 42%; height: 100%; border-radius: inherit; background: #2563eb; animation: travel 1.25s ease-in-out infinite; }
+      .error { color: #b42318; }
+      @keyframes travel { 0% { transform: translateX(-115%); } 100% { transform: translateX(340%); } }
+      @media (prefers-reduced-motion: reduce) { .bar { animation: none; width: 100%; opacity: .65; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="../public/assets/ui/brand/opencanvas-icon.png" alt="" />
+      <h1>OpenCanvas</h1>
+      <p id="status">Preparing the application shell...</p>
+      <div class="track"><div class="bar"></div></div>
+    </main>
+    <script>
+      const labels = {
+        docker: "Checking Docker Desktop...",
+        runtime: "Preparing Agent Runtime...",
+        api: "Starting the OpenCanvas API...",
+        frontend: "Starting the live development workspace...",
+        ready: "Opening OpenCanvas...",
+        stopping: "Stopping OpenCanvas services...",
+      };
+      window.openCanvasShell.onStage(({ stage, message }) => {
+        const status = document.getElementById("status");
+        status.textContent = message || labels[stage] || "Starting OpenCanvas...";
+        status.classList.toggle("error", stage === "error");
+      });
+    </script>
+  </body>
+</html>

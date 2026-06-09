@@ -9,6 +9,8 @@
     "dev:services": "concurrently \"npm:dev:client\" \"npm:dev:server\"",
     "dev:client": "vite --host 127.0.0.1 --port 3000",
     "dev:server": "tsx server/index.ts",
+    "shell:dev": "electron app-shell/main.mjs",
+    "shell:test": "node --test app-shell/*.test.mjs",
     "agent-runtime:up": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/agent-runtime.ps1 up",
     "agent-runtime:up:local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/agent-runtime.ps1 up-local",
     "agent-runtime:down": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/agent-runtime.ps1 down",
@@ -54,6 +56,7 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "concurrently": "^9.2.1",
+    "electron": "41.2.1",
     "tsx": "^4.20.6",
     "typescript": "~5.9.3",
     "vite": "^7.1.12"

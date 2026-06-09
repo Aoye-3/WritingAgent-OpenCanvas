@@ -42,3 +42,11 @@ When Agent Runtime is enabled, FacetWrite accesses protected runtime APIs throug
 - `FACETWRITE_INTERNAL_TOOL_TOKEN`, when configured, is only used between Agent Runtime and FacetWrite backend bridge calls and must not be shown in frontend payloads, logs, or ToolUse output.
 - Agent Runtime-proposed writes or external side effects must still pass through FacetWrite Human-in-the-loop confirmation before changing product data.
 - The FacetWrite Agent Runtime dev compose is an acceptance profile. It intentionally does not mount the host Docker socket or local CLI credential directories into the gateway container. Add those mounts only for isolated sandbox or CLI-auth work after explicitly accepting the credential and host-control risk.
+
+## Electron Development Shell
+
+- Electron renderer windows keep `contextIsolation:true`, `nodeIntegration:false`, and `sandbox:true`.
+- The shell exposes no general Node or process API to the OpenCanvas frontend.
+- Service ownership is explicit: the shell stops only its Vite/API processes and an Agent Runtime Compose project that it started.
+- Existing partial services, occupied ports, or an incompatible Runtime callback stop startup instead of being terminated automatically.
+- Docker Desktop remains an external trusted local dependency. A future no-Docker Runtime requires a separate security and packaging review.

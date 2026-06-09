@@ -70,6 +70,7 @@ services:
       - DEER_FLOW_HOST_BASE_DIR=${AGENT_RUNTIME_ROOT}/backend/.deer-flow
       - DEER_FLOW_HOST_SKILLS_PATH=${AGENT_RUNTIME_ROOT}/skills
       - DEER_FLOW_SANDBOX_HOST=host.docker.internal
+      - FACETWRITE_INTERNAL_BASE_URL=${FACETWRITE_INTERNAL_BASE_URL:-http://host.docker.internal:8837}
     env_file:
       - ../.env
     extra_hosts:

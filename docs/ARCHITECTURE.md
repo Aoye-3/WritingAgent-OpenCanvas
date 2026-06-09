@@ -30,6 +30,14 @@ Frontend React workspace
 
 The frontend owns interaction state and explicit user intent. The Express backend owns policy, orchestration, output normalization, and all product-data writes. SQLite/local files are the source of truth for threads, Canvas, settings, runs, and Knowledge metadata. AgentRuntime is an execution subsystem: it receives sanitized runtime context from FacetWrite and can call back only through the internal ToolUse bridge.
 
+## Development App Shell
+
+`app-shell/main.mjs` is a Windows source-development control layer around the existing services. Electron owns a Splash window, the main BrowserWindow, Vite on `17776`, Express on `17777`, and any Agent Runtime Compose project that it starts. It does not replace the web architecture or production HTTP API.
+
+The shell uses a single-instance lock, checks ports before startup, waits for each service health endpoint, and opens the main window only after readiness. A complete pre-existing Agent Runtime may be reused only when its ToolUse callback targets `http://host.docker.internal:17777`; partial or incompatible runtimes block startup. Shutdown attempts every owned cleanup step and never stops a reused runtime.
+
+Renderer windows use context isolation, disabled Node integration, and sandboxing. Vite HMR remains active for frontend source changes; Electron main-process changes require a shell restart. Docker Desktop remains a required external dependency in this phase.
+
 ## Frontend
 - `src/app/App.tsx` is the control-plane composition layer. It owns navigation, active Agent selection, and view wiring, while thread, generation, Canvas, and trash workflows live in focused hooks under `src/app/hooks/`.
 - `src/app/hooks/useThreadSession.ts` owns thread creation, thread restore, and last-thread persistence.

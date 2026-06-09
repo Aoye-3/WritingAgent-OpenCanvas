@@ -24,6 +24,16 @@ OpenCanvas benchmarks the familiar board experience first: an infinite canvas, n
 
 ## Run
 
+### Windows Development App Shell
+
+For an independent Electron development window with Vite HMR, install dependencies and double-click `start-opencanvas-shell.vbs`, or run:
+
+```powershell
+npm.cmd run shell:dev
+```
+
+The shell shows startup progress, uses Vite `17776` and API `17777`, starts Docker Desktop/Agent Runtime when needed, and stops Vite/API plus only the Agent Runtime it started when the window closes. Docker Desktop is still required; this is a source-development shell, not an installer. See [App Shell Runbook](docs/APP_SHELL_RUNBOOK.md).
+
 ### Recommended: OpenCanvas + Agent Runtime
 
 Use this path for local development and acceptance. OpenCanvas runs the frontend/backend, while the internal Agent Runtime module runs as the primary AI execution subsystem through Docker Compose. The current internal runtime implementation is AgentBackend. Provider and mock fallback should only be treated as runtime safety nets.
@@ -103,6 +113,7 @@ This starts only the Vite frontend and FacetWrite API and is reserved for narrow
 - [Refactor Log](docs/REFACTOR_LOG.md)
 - [Maintainability And Concurrency Review Plan](docs/superpowers/plans/2026-06-07-maintainability-concurrency-review.md)
 - [Security](docs/SECURITY.md)
+- [Development App Shell Runbook](docs/APP_SHELL_RUNBOOK.md)
 - [Reference Archive](docs/reference/README.md)
 
 ## Roadmap

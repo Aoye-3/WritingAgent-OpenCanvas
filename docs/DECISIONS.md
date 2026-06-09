@@ -208,3 +208,10 @@ Reason: FacetWrite is local-first but provider keys are production secrets.
 
 Impact: Settings save requires explicit confirmation for local key writes, and docs must avoid pasted secrets.
 
+# 2026-06-08: Electron Owns The Windows Source-Development Shell
+
+Decision: Use Electron as a Windows source-development application shell around the existing Vite, Express, and Docker Agent Runtime services.
+
+Reason: The immediate goal is an independent application window with startup feedback, Vite HMR, and window-bound service lifecycle without prematurely designing an installer or native Agent Runtime.
+
+Impact: The shell uses fixed development ports `17776` and `17777`, starts Docker Desktop when available, owns only services it starts, and preserves complete compatible pre-existing Agent Runtime services. The planned Vite port `3100` was rejected because Windows dynamically reserved `3007-3106`. Docker Desktop remains required. Packaging, automatic updates, and a no-Docker local Runtime are deferred.

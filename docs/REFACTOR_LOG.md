@@ -569,3 +569,20 @@ Next Priority Check:
 - Verify `canvas_write` cannot be enabled outside policy or applied without approve.
 - Review API response consistency across frontend clients.
 
+# 2026-06-08: Electron Development App Shell
+
+Scope: Added the Windows source-development application shell and documented its lifecycle boundary.
+
+Completed:
+- Added single-instance Electron Splash/main windows with secure renderer settings.
+- Added ordered Docker, Agent Runtime, API, and Vite readiness checks.
+- Added owned-versus-reused Agent Runtime detection and idempotent full cleanup.
+- Routed Windows `.cmd` child processes through `ComSpec` to avoid Node `spawn EINVAL`.
+- Removed npm/cmd wrappers from shell-owned Vite and API processes so closing and restarting cannot leave the API listener behind.
+- Added hidden double-click launcher, shell tests, fixed shell ports, and callback injection.
+- Replaced planned Vite port `3100` with `17776` after Windows dynamically reserved `3007-3106`.
+- Verified a real shell-owned startup and shutdown leaves no listeners on `17776`, `17777`, or `2026`, and no Agent Runtime containers.
+
+Deferred:
+- Packaged executable, installer, signing, and automatic updates.
+- Native local Agent Runtime for machines without Docker.
