@@ -1,9 +1,10 @@
 export type CanvasTool =
   | "select"
   | "pan"
-  | "text"
+  | "reference"
   | "document"
   | "note"
+  | "text"
   | "arrow"
   | "shape"
   | "table"
@@ -11,7 +12,7 @@ export type CanvasTool =
   | "role"
   | "agent";
 
-const creationTools = new Set<CanvasTool>(["text", "document", "note", "arrow", "shape", "table", "asset", "role"]);
+const creationTools = new Set<CanvasTool>(["reference", "document", "note", "text", "arrow", "shape", "table", "asset", "role"]);
 
 export function isCanvasCreationTool(tool: CanvasTool) {
   return creationTools.has(tool);

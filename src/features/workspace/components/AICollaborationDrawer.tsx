@@ -8,6 +8,7 @@ import type { CollaborationMessage, GenerateRequest } from "../../generation/typ
 import { useI18n } from "../../i18n/I18nProvider";
 import { AnnotationChipRow, CanvasWriteProposalPanel, type MessageAnnotation } from "./CanvasWriteProposalPanel";
 import { ToolEventDrawer } from "./ToolEventDrawer";
+import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain";
 
 type ToolKey = NonNullable<GenerateRequest["toolState"]> extends Partial<Record<infer Key, boolean>> ? Key : never;
 
@@ -28,6 +29,7 @@ type AICollaborationDrawerProps = {
   canvasWriteRequests: CanvasWriteRequest[];
   collapsed: boolean;
   inputDraft: string;
+  mindChainContext: CanvasMindChainContext | null;
   messages: CollaborationMessage[];
   isSending: boolean;
   modelSettings?: AgentSettings["model"];
@@ -36,8 +38,10 @@ type AICollaborationDrawerProps = {
   onApplyWriteText: (text: string) => Promise<void>;
   onRejectWriteRequest: (requestId: string) => Promise<void>;
   onInputDraftConsumed: () => void;
+  onMindChainContextConsumed: () => void;
+  onRemoveMindChainContext: () => void;
   onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"]) => Promise<void>;
+  onSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => Promise<void>;
   onToggleCollapsed: () => void;
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
   toolState: GenerateRequest["toolState"];
@@ -55,11 +59,15 @@ const waitingLabels = {
   en: ["Thinking", "Reviewing context", "Checking available sources", "Structuring the answer", "Preparing the response"]
 } as const;
 
+const COMPOSER_MIN_HEIGHT = 72;
+const COMPOSER_MAX_HEIGHT = 240;
+
 export function AICollaborationDrawer({
   allowedTools,
   canvasWriteRequests,
   collapsed,
   inputDraft,
+  mindChainContext,
   messages,
   isSending,
   modelSettings,
@@ -68,6 +76,8 @@ export function AICollaborationDrawer({
   onApplyWriteText,
   onRejectWriteRequest,
   onInputDraftConsumed,
+  onMindChainContextConsumed,
+  onRemoveMindChainContext,
   onResizeStart,
   onSend,
   onToggleCollapsed,
@@ -85,9 +95,10 @@ export function AICollaborationDrawer({
   const [writeBusy, setWriteBusy] = useState(false);
   const [writeStatus, setWriteStatus] = useState("");
   const [statusIndex, setStatusIndex] = useState(0);
+  const [composerHeight, setComposerHeight] = useState(86);
   const messageListRef = useRef<HTMLDivElement | null>(null);
 
-  const pendingWriteRequest = canvasWriteRequests[0];
+  const pendingWriteRequest = canvasWriteRequests.find((request) => request.operation !== "replace_range");
   const lastAssistantText = useMemo(() => [...messages].reverse().find((message) => message.role === "assistant" && message.text.trim())?.text ?? "", [messages]);
   const proposalFullText = writeDraft?.text || pendingWriteRequest?.content || lastAssistantText;
   const annotatedText = annotations.map((annotation) => annotation.text).join("\n\n");
@@ -170,7 +181,8 @@ export function AICollaborationDrawer({
     await onSend(text, supportsThinking ? {
       thinkingMode: thinkEnabled ? "enabled" : "disabled",
       reasoningEffort
-    } : undefined);
+    } : undefined, mindChainContext ? { canvasMindChain: mindChainContext.text } : undefined);
+    if (mindChainContext) onMindChainContextConsumed();
   };
 
   const captureSelection = (event: React.MouseEvent<HTMLDivElement>, message: CollaborationMessage) => {
@@ -212,6 +224,34 @@ export function AICollaborationDrawer({
   const startMessageWrite = (message: CollaborationMessage) => {
     setWriteDraft({ messageId: message.id, text: message.text });
     setWriteStatus("");
+  };
+
+  const startComposerResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = composerHeight;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+
+    document.body.style.cursor = "ns-resize";
+    document.body.style.userSelect = "none";
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const nextHeight = Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, startHeight + startY - moveEvent.clientY));
+      setComposerHeight(nextHeight);
+    };
+
+    const stopResize = () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
   };
 
   if (collapsed) {
@@ -305,11 +345,35 @@ export function AICollaborationDrawer({
 
       <form className="drawer-chat-composer" onSubmit={submit}>
         <AnnotationChipRow annotations={annotations} compact onRemoveAnnotation={removeAnnotation} />
+        {mindChainContext ? (
+          <div className="mind-chain-context-chip" data-testid="mind-chain-context-chip">
+            <span>{locale === "zh" ? `思维链 · ${mindChainContext.nodeCount} 节点` : `Mind chain · ${mindChainContext.nodeCount} ${mindChainContext.nodeCount === 1 ? "node" : "nodes"}`}</span>
+            <button
+              aria-label={locale === "zh" ? "移除思维链上下文" : "Remove mind chain context"}
+              onClick={onRemoveMindChainContext}
+              type="button"
+            >
+              ×
+            </button>
+          </div>
+        ) : null}
+        <div
+          aria-label={locale === "zh" ? "调整输入框高度" : "Resize message input"}
+          aria-orientation="horizontal"
+          className="composer-resize-handle"
+          data-testid="composer-resize-handle"
+          onPointerDown={startComposerResize}
+          role="separator"
+          title={locale === "zh" ? "上下拖动调整输入框高度" : "Drag vertically to resize the message input"}
+        >
+          <span aria-hidden="true" />
+        </div>
         <textarea
           aria-label="AI collaboration message"
           data-testid="ai-collaboration-input"
           placeholder={locale === "zh" ? "让 AI 协作修改当前草稿..." : "Ask AI to collaborate on this draft..."}
           rows={3}
+          style={{ height: composerHeight }}
           value={input}
           onChange={(event) => setInput(event.target.value)}
         />

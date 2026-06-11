@@ -133,6 +133,10 @@ export function migrateStorageSchema(db: DatabaseSync) {
       title TEXT NOT NULL,
       content TEXT NOT NULL,
       rationale TEXT NOT NULL,
+      range_start INTEGER,
+      range_end INTEGER,
+      original_text TEXT,
+      base_node_updated_at TEXT,
       status TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -247,6 +251,18 @@ export function migrateStorageSchema(db: DatabaseSync) {
   }
   if (!columnExists(db, "canvas_workflow_suggestions", "target_node_id")) {
     db.exec(`ALTER TABLE canvas_workflow_suggestions ADD COLUMN target_node_id TEXT NOT NULL DEFAULT ''`);
+  }
+  if (!columnExists(db, "canvas_write_requests", "range_start")) {
+    db.exec(`ALTER TABLE canvas_write_requests ADD COLUMN range_start INTEGER`);
+  }
+  if (!columnExists(db, "canvas_write_requests", "range_end")) {
+    db.exec(`ALTER TABLE canvas_write_requests ADD COLUMN range_end INTEGER`);
+  }
+  if (!columnExists(db, "canvas_write_requests", "original_text")) {
+    db.exec(`ALTER TABLE canvas_write_requests ADD COLUMN original_text TEXT`);
+  }
+  if (!columnExists(db, "canvas_write_requests", "base_node_updated_at")) {
+    db.exec(`ALTER TABLE canvas_write_requests ADD COLUMN base_node_updated_at TEXT`);
   }
 }
 

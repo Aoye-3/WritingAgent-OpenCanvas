@@ -17,7 +17,7 @@ export function validateNodeKind(value: string): CanvasNodeKind {
 }
 
 export function validateWriteOperation(value: string): CanvasWriteOperation {
-  if (value === "create" || value === "replace" || value === "append") return value;
+  if (value === "create" || value === "replace" || value === "append" || value === "replace_range") return value;
   throw new Error("Invalid canvas write operation");
 }
 

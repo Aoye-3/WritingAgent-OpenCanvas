@@ -179,8 +179,8 @@ export type StoredToolEvent = {
 };
 
 export type CanvasNodeKind = "document" | "note" | "reference" | "role";
-export type CanvasWriteOperation = "create" | "replace" | "append";
-export type CanvasWriteRequestStatus = "pending" | "approved" | "rejected";
+export type CanvasWriteOperation = "create" | "replace" | "append" | "replace_range";
+export type CanvasWriteRequestStatus = "pending" | "approved" | "rejected" | "stale";
 export type CanvasWorkflowStage = "inspiration" | "research" | "structure" | "writing" | "polish" | "publish";
 export type CanvasWorkflowSuggestionStatus = "pending" | "accepted" | "ignored";
 
@@ -232,6 +232,10 @@ export type CanvasWriteRequest = {
   title: string;
   content: string;
   rationale: string;
+  rangeStart?: number;
+  rangeEnd?: number;
+  originalText?: string;
+  baseNodeUpdatedAt?: string;
   status: CanvasWriteRequestStatus;
   createdAt: string;
   updatedAt: string;

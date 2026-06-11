@@ -13,6 +13,7 @@ export function RoleNodeRenderer({ locale, node, onUpdateNode }: RoleNodeRendere
   const role = useMemo(() => readWorkflowRole(node), [node]);
   const [label, setLabel] = useState(role.label);
   const [prompt, setPrompt] = useState(role.prompt);
+  const [editing, setEditing] = useState<"label" | "prompt" | null>(null);
 
   useEffect(() => setLabel(role.label), [role.label]);
   useEffect(() => setPrompt(role.prompt), [role.prompt]);
@@ -31,27 +32,33 @@ export function RoleNodeRenderer({ locale, node, onUpdateNode }: RoleNodeRendere
   };
 
   return (
-    <div className="canvas-role-node-body nodrag">
-      <input
-        className="canvas-node-title"
+    <div className="canvas-role-node-body">
+      {editing === "label" ? <input
+        autoFocus
+        className="canvas-node-title nodrag"
         data-testid="canvas-role-label"
         value={label}
         placeholder={locale === "zh" ? "Role 名称" : "Role label"}
         onBlur={() => {
           if (label !== role.label) saveRole({ label });
+          setEditing(null);
         }}
+        onKeyDown={(event) => { if (event.key === "Escape") event.currentTarget.blur(); }}
         onChange={(event) => setLabel(event.currentTarget.value)}
-      />
-      <textarea
-        className="canvas-node-content nowheel"
+      /> : <div className="canvas-node-title canvas-node-readonly" data-testid="canvas-role-label" onDoubleClick={() => setEditing("label")}>{label}</div>}
+      {editing === "prompt" ? <textarea
+        autoFocus
+        className="canvas-node-content nodrag nowheel"
         data-testid="canvas-role-prompt"
         value={prompt}
         placeholder={locale === "zh" ? "输入这个 Role 的建议视角 prompt..." : "Prompt for this role perspective..."}
         onBlur={() => {
           if (prompt !== role.prompt) saveRole({ prompt });
+          setEditing(null);
         }}
+        onKeyDown={(event) => { if (event.key === "Escape") event.currentTarget.blur(); }}
         onChange={(event) => setPrompt(event.currentTarget.value)}
-      />
+      /> : <div className="canvas-node-content canvas-node-readonly" data-testid="canvas-role-prompt" onDoubleClick={() => setEditing("prompt")}>{prompt || (locale === "zh" ? "双击编辑 Role prompt" : "Double-click to edit Role prompt")}</div>}
     </div>
   );
 }

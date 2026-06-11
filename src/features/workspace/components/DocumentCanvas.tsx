@@ -16,8 +16,8 @@ import {
   type NodeChange,
   type OnSelectionChangeParams
 } from "@xyflow/react";
-import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowStage, CanvasWorkflowSuggestion } from "../../agents/types";
-import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasObjectDraft, CanvasObjectPatch } from "../../canvas/canvasClient";
+import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowStage, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../agents/types";
+import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../../canvas/canvasClient";
 import { useI18n } from "../../i18n/I18nProvider";
 import { ResetIcon, ZoomInIcon, ZoomOutIcon } from "../../../shared/icons";
 import { CanvasCurveEdge } from "./canvas/CanvasCurveEdge";
@@ -25,12 +25,15 @@ import { CanvasNodeFrame } from "./canvas/CanvasNodeFrame";
 import { CanvasContextMenu, CanvasSelectedNodeWorkflow, CanvasSelectionBar, CanvasStatusNode, type CanvasMenuState } from "./canvas/CanvasChrome";
 import { MAX_ZOOM, MIN_ZOOM, canvasNodeKinds, kindLabels, workflowStageLabels } from "./canvas/constants";
 import { buildCanvasFlowNodes } from "./canvas/flowMapping";
-import { formatMindChain } from "../../../../shared/canvasMindChain";
+import { formatMindChainContext, type CanvasMindChainContext } from "../../../../shared/canvasMindChain";
 import type { CanvasFlowNode } from "./canvas/types";
 import { completeCanvasToolAction, type CanvasTool } from "./canvas/toolState";
 import { CanvasObjectLayer } from "./canvas/CanvasObjectLayer";
 import { createCanvasObjectDraft, type CanvasShapeId } from "../../../../shared/canvasObjects";
 import { CanvasAssetInput, CanvasToolOverlays } from "./canvas/CanvasToolOverlays";
+import { CanvasCreationPreview } from "./canvas/CanvasCreationPreview";
+import { createCanvasNodeDraft, getCanvasCreationSize, isPreviewCreationTool, pointToCenteredOrigin } from "./canvas/canvasCreation";
+import { CANVAS_CLIPBOARD_MIME, createCanvasClipboardPayload, type CanvasClipboardPayload } from "../../../../shared/canvasClipboard";
 
 type DocumentCanvasProps = {
   activeTool: CanvasTool;
@@ -42,6 +45,9 @@ type DocumentCanvasProps = {
   workflow?: CanvasWorkflow;
   suggestions: CanvasWorkflowSuggestion[];
   selectedNodeId?: string;
+  writeRequests: CanvasWriteRequest[];
+  agentCardId?: string;
+  modelOverrides?: CanvasRangeRewriteDraft["modelOverrides"];
   onAcceptSuggestion: (suggestionId: string) => Promise<void>;
   onConvertSuggestionToNode: (suggestionId: string, kind?: CanvasNodeKind) => Promise<void>;
   onCreateEdge: (draft: CanvasEdgeDraft) => Promise<CanvasEdge | undefined>;
@@ -50,11 +56,17 @@ type DocumentCanvasProps = {
   onDeleteEdge: (edgeId: string) => Promise<void>;
   onDeleteNode: (nodeId: string) => Promise<void>;
   onDeleteObject: (objectId: string) => Promise<void>;
+  onPaste: (payload: CanvasClipboardPayload, center: { x: number; y: number }) => Promise<void>;
+  onConvertText: (objectId: string, kind: Extract<CanvasNodeKind, "document" | "reference" | "note">) => Promise<void>;
   onIgnoreSuggestion: (suggestionId: string) => Promise<void>;
+  onAttachMindChain: (context: CanvasMindChainContext) => void;
   onSendMindChainToChat: (text: string) => void;
   onSelectNode: (nodeId?: string) => void;
   onUndo: () => Promise<void>;
   onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
+  onRequestRangeRewrite: (draft: CanvasRangeRewriteDraft) => Promise<CanvasWriteRequest>;
+  onApproveWriteRequest: (requestId: string) => Promise<{ request: CanvasWriteRequest; node?: CanvasNode }>;
+  onRejectWriteRequest: (requestId: string) => Promise<unknown>;
   onUpdateObject: (objectId: string, patch: CanvasObjectPatch) => Promise<unknown>;
   onUploadAsset: (input: { fileName: string; fileBase64: string }) => Promise<unknown>;
   onUpdateNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflowStage; roles?: string[] }) => Promise<unknown>;
@@ -87,6 +99,9 @@ function DocumentCanvasInner({
   workflow,
   suggestions,
   selectedNodeId,
+  writeRequests,
+  agentCardId,
+  modelOverrides,
   onAcceptSuggestion,
   onConvertSuggestionToNode,
   onCreateEdge,
@@ -95,11 +110,17 @@ function DocumentCanvasInner({
   onDeleteEdge,
   onDeleteNode,
   onDeleteObject,
+  onPaste,
+  onConvertText,
   onIgnoreSuggestion,
+  onAttachMindChain,
   onSendMindChainToChat,
   onSelectNode,
   onUndo,
   onUpdateNode,
+  onRequestRangeRewrite,
+  onApproveWriteRequest,
+  onRejectWriteRequest,
   onUpdateObject,
   onUploadAsset,
   onUpdateNodeWorkflow,
@@ -117,8 +138,12 @@ function DocumentCanvasInner({
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [shapeKind, setShapeKind] = useState<CanvasShapeId>("rectangle");
   const [recentShapeIds, setRecentShapeIds] = useState<string[]>(["rectangle", "circle", "diamond"]);
+  const [creationPreviewPoint, setCreationPreviewPoint] = useState<{ x: number; y: number } | null>(null);
+  const [editNewTextId, setEditNewTextId] = useState<string | null>(null);
   const [, setArrowStart] = useState<{ x: number; y: number } | null>(null);
   const resizingNodeIdRef = useRef<string | null>(null);
+  const lastCanvasPointRef = useRef<{ x: number; y: number } | null>(null);
+  const internalClipboardRef = useRef<CanvasClipboardPayload | null>(null);
   const selectedNode = useMemo(() => nodes.find((node) => node.id === selectedNodeId), [nodes, selectedNodeId]);
   const flowEdges = useMemo<Edge[]>(() => edges.map((edge) => ({
     id: edge.id,
@@ -135,6 +160,7 @@ function DocumentCanvasInner({
     resizingNodeIdRef.current = nodeId ?? null;
     setResizingNodeId(nodeId ?? null);
   }, []);
+  const clearCreationPreview = useCallback(() => setCreationPreviewPoint(null), []);
 
   useEffect(() => {
     setFlowNodes((current) => buildCanvasFlowNodes({
@@ -145,47 +171,29 @@ function DocumentCanvasInner({
       locale,
       workflow,
       suggestions,
+      writeRequests,
+      agentCardId,
+      modelOverrides,
       callbacks: {
         onAcceptSuggestion,
         onConvertSuggestionToNode,
         onDeleteNode,
         onIgnoreSuggestion,
+        onCreationPreviewBlocked: clearCreationPreview,
         onResizeStateChange: handleResizeStateChange,
-        onUpdateNode
+        onUpdateNode,
+        onRequestRangeRewrite,
+        onApproveWriteRequest,
+        onRejectWriteRequest
       }
     }));
-  }, [handleResizeStateChange, locale, nodes, onAcceptSuggestion, onConvertSuggestionToNode, onDeleteNode, onIgnoreSuggestion, onUpdateNode, resizingNodeId, selectedNodeId, suggestions, workflow]);
+  }, [agentCardId, clearCreationPreview, handleResizeStateChange, locale, modelOverrides, nodes, onAcceptSuggestion, onApproveWriteRequest, onConvertSuggestionToNode, onDeleteNode, onIgnoreSuggestion, onRejectWriteRequest, onRequestRangeRewrite, onUpdateNode, resizingNodeId, selectedNodeId, suggestions, workflow, writeRequests]);
 
   const createNode = async (kind: CanvasNodeKind) => {
     if (!menu) return;
     setMenu(null);
-    const roleId = `role_${Date.now().toString(36)}`;
-    await onCreateNode({
-      kind,
-      title: kindLabels[kind]?.[locale] ?? kind,
-      content: "",
-      x: Math.round(menu.canvasX),
-      y: Math.round(menu.canvasY),
-      width: kind === "document" ? 520 : kind === "role" ? 280 : 300,
-      height: kind === "document" ? 260 : kind === "role" ? 190 : 190,
-      metadata: kind === "role" ? { workflowRole: { roleId, label: "Role", prompt: "" } } : undefined
-    });
+    await onCreateNode(createCanvasNodeDraft(kind, { x: menu.canvasX, y: menu.canvasY }, locale));
   };
-
-  const createNodeAt = useCallback(async (kind: CanvasNodeKind, x: number, y: number) => {
-    const roleId = `role_${Date.now().toString(36)}`;
-    await onCreateNode({
-      kind,
-      title: kindLabels[kind]?.[locale] ?? kind,
-      content: "",
-      x: Math.round(x),
-      y: Math.round(y),
-      width: kind === "document" ? 520 : kind === "role" ? 280 : 300,
-      height: kind === "document" ? 260 : kind === "role" ? 190 : 190,
-      metadata: kind === "role" ? { workflowRole: { roleId, label: "Role", prompt: "" } } : undefined
-    });
-    onToolChange(completeCanvasToolAction(activeTool));
-  }, [activeTool, locale, onCreateNode, onToolChange]);
 
   const onNodesChange = useCallback((changes: NodeChange<CanvasFlowNode>[]) => {
     const activeResizeNodeId = resizingNodeIdRef.current;
@@ -243,6 +251,52 @@ function DocumentCanvasInner({
     return () => window.removeEventListener("keydown", handleDelete);
   }, [onDeleteEdge, onDeleteNode, onDeleteObject, selectedEdgeId, selectedNodeIds, selectedObjectIds]);
 
+  useEffect(() => {
+    const isEditable = (target: EventTarget | null) => target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable);
+    const copy = (event: ClipboardEvent) => {
+      if (isEditable(event.target)) return;
+      const copiedNodes = nodes.filter((node) => selectedNodeIds.includes(node.id));
+      const copiedObjects = objects.filter((object) => selectedObjectIds.includes(object.id));
+      if (copiedNodes.length === 0 && !copiedObjects.some((object) => object.kind === "text")) return;
+      const payload = createCanvasClipboardPayload({ nodes: copiedNodes, objects: copiedObjects, edges });
+      internalClipboardRef.current = payload;
+      event.preventDefault();
+      event.clipboardData?.setData(CANVAS_CLIPBOARD_MIME, JSON.stringify(payload));
+      event.clipboardData?.setData("text/plain", [
+        ...copiedNodes.map((node) => [node.title, node.content].filter(Boolean).join("\n")),
+        ...copiedObjects.filter((object) => object.kind === "text").map((object) => object.data.text),
+      ].join("\n\n"));
+    };
+    const paste = (event: ClipboardEvent) => {
+      if (isEditable(event.target)) return;
+      const raw = event.clipboardData?.getData(CANVAS_CLIPBOARD_MIME);
+      let payload: CanvasClipboardPayload | null = null;
+      if (raw) {
+        try { payload = JSON.parse(raw) as CanvasClipboardPayload; } catch { payload = null; }
+      }
+      const text = event.clipboardData?.getData("text/plain") ?? "";
+      if (!payload && !text) return;
+      event.preventDefault();
+      const center = lastCanvasPointRef.current ?? reactFlow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+      if (payload?.version === 1) {
+        void onPaste(payload, center);
+        return;
+      }
+      const textDraft = createCanvasObjectDraft("text", pointToCenteredOrigin(center, getCanvasCreationSize("text")));
+      void onCreateObject({ kind: "text", geometry: textDraft.geometry as { x: number; y: number; width: number; height: number }, data: { text, fontSize: 16, color: "#1f2937" } }).then((created) => {
+        const object = created as CanvasObject;
+        setSelectedObjectIds([object.id]);
+        setEditNewTextId(object.id);
+      });
+    };
+    window.addEventListener("copy", copy);
+    window.addEventListener("paste", paste);
+    return () => {
+      window.removeEventListener("copy", copy);
+      window.removeEventListener("paste", paste);
+    };
+  }, [edges, nodes, objects, onCreateObject, onPaste, reactFlow, selectedNodeIds, selectedObjectIds]);
+
   const resetViewport = () => {
     void reactFlow.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 160 });
   };
@@ -253,8 +307,8 @@ function DocumentCanvasInner({
   }, [onCreateEdge]);
 
   const sendMindChain = (nodeId: string) => {
-    const text = formatMindChain(nodeId, nodes, edges, locale);
-    if (text) onSendMindChainToChat(text);
+    const context = formatMindChainContext(nodeId, nodes, edges, locale);
+    if (context) onAttachMindChain(context);
     setMenu(null);
   };
 
@@ -264,9 +318,34 @@ function DocumentCanvasInner({
     setSelectedEdgeId(undefined);
   };
 
-  const handleArrowPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (activeTool !== "arrow") return;
+  const createPreviewItem = (center: { x: number; y: number }) => {
+    if (!isPreviewCreationTool(activeTool) || isPointOverCanvasContent(center, nodes, objects)) return;
+    const origin = pointToCenteredOrigin(center, getCanvasCreationSize(activeTool));
+    const roundedOrigin = { x: Math.round(origin.x), y: Math.round(origin.y) };
+    setCreationPreviewPoint(null);
+    if (activeTool === "shape" || activeTool === "table" || activeTool === "text") {
+      void onCreateObject(createCanvasObjectDraft(activeTool, roundedOrigin, shapeKind)).then((created) => {
+        if (activeTool === "text") {
+          const object = created as CanvasObject;
+          setSelectedObjectIds([object.id]);
+          setEditNewTextId(object.id);
+        }
+        onToolChange(completeCanvasToolAction(activeTool));
+      });
+      return;
+    }
+    void onCreateNode(createCanvasNodeDraft(activeTool, roundedOrigin, locale)).then(() => onToolChange(completeCanvasToolAction(activeTool)));
+  };
+
+  const handleCanvasPointerDownCapture = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!(event.target instanceof Element) || !event.target.closest(".react-flow__pane")) return;
+    if (event.button === 0 && isPreviewCreationTool(activeTool)) {
+      event.preventDefault();
+      event.stopPropagation();
+      createPreviewItem(reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY }));
+      return;
+    }
+    if (activeTool !== "arrow") return;
     event.preventDefault();
     event.stopPropagation();
     const start = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
@@ -282,14 +361,25 @@ function DocumentCanvasInner({
     window.addEventListener("pointerup", finish, { once: true });
   };
 
-  const handleCanvasClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (activeTool !== "shape" && activeTool !== "table") return;
-    if (!(event.target instanceof Element) || !event.target.closest(".react-flow__pane")) return;
-    event.preventDefault();
-    event.stopPropagation();
+  const handleCanvasPointerMoveCapture = (event: React.PointerEvent<HTMLDivElement>) => {
     const point = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-    void onCreateObject(createCanvasObjectDraft(activeTool, point, shapeKind)).then(() => onToolChange("select"));
+    lastCanvasPointRef.current = point;
+    if (!isPreviewCreationTool(activeTool) || !isBlankCanvasPoint(event.clientX, event.clientY) || isPointOverCanvasContent(point, nodes, objects)) {
+      setCreationPreviewPoint(null);
+      return;
+    }
+    setCreationPreviewPoint(point);
   };
+
+  const handleCanvasPointerOverCapture = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.target instanceof Element && event.target.closest(".react-flow__node, .canvas-board-object, .canvas-free-arrow")) {
+      setCreationPreviewPoint(null);
+    }
+  };
+
+  useEffect(() => {
+    setCreationPreviewPoint(null);
+  }, [activeTool]);
 
   return (
     <section className="canvas-shell" aria-label="Document canvas workspace" data-testid="document-canvas">
@@ -331,11 +421,18 @@ function DocumentCanvasInner({
         </div>
       </div>
 
-      <div className="canvas-viewport" data-testid="canvas-viewport" onClickCapture={handleCanvasClickCapture} onPointerDownCapture={handleArrowPointerDown}>
+      <div
+        className="canvas-viewport"
+        data-testid="canvas-viewport"
+        onPointerDownCapture={handleCanvasPointerDownCapture}
+        onPointerLeave={() => setCreationPreviewPoint(null)}
+        onPointerMoveCapture={handleCanvasPointerMoveCapture}
+        onPointerOverCapture={handleCanvasPointerOverCapture}
+      >
         <CanvasAssetInput activeTool={activeTool} onToolChange={onToolChange} onUploadAsset={onUploadAsset} />
         {workflow ? <CanvasStatusNode label={locale === "zh" ? "写作环节" : "Writing stage"} stageLabel={workflowStageLabels[workflow.stage][locale]} /> : null}
         <ReactFlow<CanvasFlowNode>
-          className="canvas-flow"
+          className={`canvas-flow${isPreviewCreationTool(activeTool) ? " is-creating" : ""}`}
           colorMode="light"
           deleteKeyCode={null}
           fitView={nodes.length > 0}
@@ -356,15 +453,11 @@ function DocumentCanvasInner({
           onMoveStart={closeMenu}
           onNodeDragStart={closeMenu}
           onNodeDragStop={onNodeDragStop}
+          onNodeMouseEnter={() => setCreationPreviewPoint(null)}
           onNodeContextMenu={openNodeMenu}
           onNodesChange={onNodesChange}
-          onPaneClick={(event) => {
+          onPaneClick={() => {
             closeMenu();
-            if (activeTool === "document" || activeTool === "note" || activeTool === "text" || activeTool === "role") {
-              const point = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-              void createNodeAt(activeTool === "text" ? "note" : activeTool, point.x, point.y);
-              return;
-            }
             setSelectedObjectIds([]);
             onSelectNode(undefined);
           }}
@@ -384,6 +477,7 @@ function DocumentCanvasInner({
           selectedObjectIds={selectedObjectIds}
           transform={`translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`}
           onDeleteObject={(objectId) => void onDeleteObject(objectId)}
+          onCreationPreviewBlocked={clearCreationPreview}
           onSelectObject={(objectId, additive) => {
             setSelectedObjectIds((current) => additive ? current.includes(objectId) ? current.filter((id) => id !== objectId) : [...current, objectId] : [objectId]);
             setSelectedEdgeId(undefined);
@@ -391,7 +485,17 @@ function DocumentCanvasInner({
           }}
           onUpdateObject={(objectId, geometry) => void onUpdateObject(objectId, { geometry })}
           onUpdateData={(objectId, data) => void onUpdateObject(objectId, { data })}
+          onConvertText={(objectId, kind) => {
+            void onConvertText(objectId, kind);
+          }}
+          requestedEditingTextId={editNewTextId}
           zoom={viewport.zoom}
+        />
+        <CanvasCreationPreview
+          activeTool={activeTool}
+          point={creationPreviewPoint}
+          shapeKind={shapeKind}
+          transform={`translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`}
         />
 
         {nodes.length === 0 ? (
@@ -440,5 +544,28 @@ function DocumentCanvasInner({
       ) : null}
     </section>
   );
+}
+
+function isBlankCanvasPoint(clientX: number, clientY: number) {
+  return Boolean(document.elementFromPoint(clientX, clientY)?.closest(".react-flow__pane"));
+}
+
+function isPointOverCanvasContent(point: { x: number; y: number }, nodes: CanvasNode[], objects: CanvasObject[]) {
+  if (nodes.some((node) => point.x >= node.x && point.x <= node.x + node.width && point.y >= node.y && point.y <= node.y + node.height)) {
+    return true;
+  }
+  return objects.some((object) => {
+    if (object.kind === "arrow") {
+      const padding = 12;
+      return point.x >= Math.min(object.geometry.startX, object.geometry.endX) - padding
+        && point.x <= Math.max(object.geometry.startX, object.geometry.endX) + padding
+        && point.y >= Math.min(object.geometry.startY, object.geometry.endY) - padding
+        && point.y <= Math.max(object.geometry.startY, object.geometry.endY) + padding;
+    }
+    return point.x >= object.geometry.x
+      && point.x <= object.geometry.x + object.geometry.width
+      && point.y >= object.geometry.y
+      && point.y <= object.geometry.y + object.geometry.height;
+  });
 }
 

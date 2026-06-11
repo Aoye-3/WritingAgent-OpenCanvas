@@ -73,12 +73,23 @@ export function CanvasNodeFrame({ data, selected }: NodeProps<CanvasFlowNode>) {
   };
 
   return (
-    <article className={`canvas-node ${kindClass} ${selected ? "is-selected" : ""}`} data-testid="canvas-node">
+    <article className={`canvas-node ${kindClass} ${selected ? "is-selected" : ""}`} data-testid="canvas-node" onPointerEnter={data.onCreationPreviewBlocked}>
       <NodeLinkPort />
       {selected ? <ResizeFrame onResizeStart={startResize} /> : null}
       <CanvasNodeHeader locale={locale} node={node} />
       <CanvasNodeWorkflowBadges locale={locale} node={node} />
-      <CanvasNodeRenderer isResizing={isResizing} locale={locale} node={node} onUpdateNode={onUpdateNode} />
+      <CanvasNodeRenderer
+        agentCardId={data.agentCardId}
+        isResizing={isResizing}
+        locale={locale}
+        modelOverrides={data.modelOverrides}
+        node={node}
+        pendingRequest={data.writeRequests[0]}
+        onApproveWriteRequest={data.onApproveWriteRequest}
+        onRejectWriteRequest={data.onRejectWriteRequest}
+        onRequestRangeRewrite={data.onRequestRangeRewrite}
+        onUpdateNode={onUpdateNode}
+      />
       <CanvasNodeSuggestions
         locale={locale}
         roles={data.workflow?.roles ?? []}

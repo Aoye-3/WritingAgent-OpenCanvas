@@ -11,6 +11,7 @@ import type { KnowledgeService } from "../../knowledge/service.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import { isChatMode } from "./mockFallback.js";
 import { resolveConfiguredModelApi } from "../../domains/model-config/index.js";
+import { shouldExcludeFromModelContext } from "./outputNormalizer.js";
 
 export type GenerateModelSettings = NonNullable<ReturnType<AgentRuntimeAdapter["resolveAgentCard"]>["settings"]>["model"];
 
@@ -118,7 +119,9 @@ export function buildChatMessages(
 ): ChatMessage[] {
   const messages: ChatMessage[] = [{ role: "system", content: input.systemPrompt }];
   if (!input.clearContext && input.contextCount > 0) {
-    const history = storage.listMessages(input.threadId).slice(-input.contextCount);
+    const history = storage.listMessages(input.threadId)
+      .filter((message) => !shouldExcludeFromModelContext(message.text))
+      .slice(-input.contextCount);
     for (const message of history) {
     messages.push({ role: message.role, content: message.text });
     }

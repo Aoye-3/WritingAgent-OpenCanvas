@@ -64,6 +64,7 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces, undoD
     canvasEdges,
     canvasNodes,
     canvasObjects,
+    canvasWriteRequests,
     ensureThreadId,
     onRefreshCanvas: refreshCanvas,
     onRefreshProjectSurfaces,

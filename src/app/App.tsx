@@ -179,7 +179,7 @@ function AppContent() {
     onRefreshThreadState: refreshThreadState,
     onFetchAndApplyThreadState: fetchThreadState,
     onApplyThreadState: applyThreadState,
-    onApproveCanvasWriteRequest: canvasState.handleApproveCanvasWriteRequest,
+    onApproveCanvasWriteRequest: async (requestId) => { await canvasState.handleApproveCanvasWriteRequest(requestId); },
     getPendingCanvasWriteRequestIds: () => canvasState.canvasWriteRequests.map((request) => request.id),
     onRefreshProjectSurfaces: refreshProjectSurfaces
   });
@@ -341,11 +341,14 @@ function AppContent() {
         onDeleteCanvasObject={canvasState.handleDeleteCanvasObject}
         onDeleteCanvasNode={canvasState.handleDeleteCanvasNode}
         onIgnoreCanvasWorkflowSuggestion={canvasState.handleIgnoreCanvasWorkflowSuggestion}
+        onPasteCanvas={canvasState.handlePasteCanvas}
+        onConvertCanvasText={canvasState.handleConvertCanvasText}
         onEditableOutputChange={generationRun.setEditableOutput}
         onGenerate={generationRun.handleGenerate}
         onGoHome={() => setView("home")}
         onOpenSettings={() => setSettingsOpen(true)}
         onRejectCanvasWriteRequest={canvasState.handleRejectCanvasWriteRequest}
+        onRequestCanvasRangeRewrite={canvasState.handleRequestCanvasRangeRewrite}
         onApplyCanvasWriteFromMessage={async (text) => {
           const request = await canvasState.handleCreateCanvasWriteRequest({
             operation: canvasState.selectedCanvasNodeId ? "append" : "create",

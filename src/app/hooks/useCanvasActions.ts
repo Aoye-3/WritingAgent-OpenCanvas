@@ -13,6 +13,7 @@ import {
   deleteCanvasObject,
   ignoreCanvasWorkflowSuggestion,
   rejectCanvasWriteRequest,
+  requestCanvasRangeRewrite,
   updateCanvasNode,
   updateCanvasObject,
   updateCanvasNodeWorkflow,
@@ -27,13 +28,17 @@ import {
   type CanvasWorkflowPatch,
   type CanvasWriteRequestDraft
 } from "../../features/canvas/canvasClient";
+import type { CanvasRangeRewriteDraft } from "../../features/canvas/canvasClient";
 import { createInverseCanvasNodePatch, createInverseCanvasObjectPatch, type CanvasHistoryEntry } from "../../../shared/canvasHistory";
 import { removeCanvasNodeFromState } from "./canvasActions/state";
+import { placeCanvasClipboardPayload, type CanvasClipboardPayload } from "../../../shared/canvasClipboard";
+import type { CanvasPoint, CanvasTextObject } from "../../../shared/canvasObjects";
 
 type UseCanvasActionsOptions = {
   canvasEdges: CanvasEdge[];
   canvasNodes: CanvasNode[];
   canvasObjects: CanvasObject[];
+  canvasWriteRequests: CanvasWriteRequest[];
   ensureThreadId: () => Promise<string>;
   onRefreshProjectSurfaces: () => Promise<void>;
   onRefreshCanvas: (threadId: string) => Promise<void>;
@@ -54,6 +59,7 @@ export function useCanvasActions({
   canvasEdges,
   canvasNodes,
   canvasObjects,
+  canvasWriteRequests,
   ensureThreadId,
   onRefreshCanvas,
   onRefreshProjectSurfaces,
@@ -175,6 +181,57 @@ export function useCanvasActions({
     return object;
   };
 
+  const handleRequestCanvasRangeRewrite = async (draft: CanvasRangeRewriteDraft) => {
+    const threadId = await ensureThreadId();
+    const request = await requestCanvasRangeRewrite(threadId, draft);
+    setCanvasWriteRequests((current) => [request, ...current.filter((item) => item.id !== request.id)]);
+    return request;
+  };
+
+  const handlePasteCanvas = async (payload: CanvasClipboardPayload, center: CanvasPoint) => {
+    const placed = placeCanvasClipboardPayload(payload, center);
+    const nodeIds = new Map<string, string>();
+    const createdNodeIds: string[] = [];
+    const createdObjectIds: string[] = [];
+    const createdEdgeIds: string[] = [];
+    for (const item of placed.nodes) {
+      const node = await handleCreateCanvasNode(item.draft, { recordHistory: false });
+      nodeIds.set(item.sourceId, node.id);
+      createdNodeIds.push(node.id);
+    }
+    for (const item of placed.objects) {
+      const object = await handleCreateCanvasObject(item.draft, { recordHistory: false });
+      createdObjectIds.push(object.id);
+    }
+    for (const edge of placed.edges) {
+      const sourceNodeId = nodeIds.get(edge.sourceId);
+      const targetNodeId = nodeIds.get(edge.targetId);
+      if (!sourceNodeId || !targetNodeId) continue;
+      const created = await handleCreateCanvasEdge({ sourceNodeId, targetNodeId, label: edge.label }, { recordHistory: false });
+      if (created) createdEdgeIds.push(created.id);
+    }
+    pushHistory({ kind: "deleteGroup", nodeIds: createdNodeIds, objectIds: createdObjectIds, edgeIds: createdEdgeIds });
+  };
+
+  const handleConvertCanvasText = async (objectId: string, kind: Extract<CanvasNodeKind, "document" | "reference" | "note">) => {
+    const object = canvasObjects.find((item): item is CanvasTextObject => item.id === objectId && item.kind === "text");
+    if (!object) return;
+    const node = await handleCreateCanvasNode({
+      kind,
+      title: kind[0].toUpperCase() + kind.slice(1),
+      content: object.data.text,
+      x: object.geometry.x,
+      y: object.geometry.y,
+    }, { recordHistory: false });
+    try {
+      await handleDeleteCanvasObject(object.id, { recordHistory: false });
+      pushHistory({ kind: "restoreTextConversion", nodeId: node.id, object });
+    } catch (error) {
+      await handleDeleteCanvasNode(node.id, { recordHistory: false });
+      throw error;
+    }
+  };
+
   const handleUpdateCanvasWorkflow = async (patch: CanvasWorkflowPatch) => {
     const threadId = await ensureThreadId();
     const workflow = await updateCanvasWorkflow(threadId, patch);
@@ -222,16 +279,29 @@ export function useCanvasActions({
       await handleDeleteCanvasObject(entry.objectId, { recordHistory: false });
     } else if (entry.kind === "restoreObject") {
       await handleCreateCanvasObject(entry.object, { recordHistory: false });
-    } else {
+    } else if (entry.kind === "updateObject") {
       await handleUpdateCanvasObject(entry.objectId, entry.patch, { recordHistory: false });
+    } else if (entry.kind === "deleteGroup") {
+      for (const edgeId of entry.edgeIds) await handleDeleteCanvasEdge(edgeId, { recordHistory: false });
+      for (const nodeId of entry.nodeIds) await handleDeleteCanvasNode(nodeId, { recordHistory: false });
+      for (const objectId of entry.objectIds) await handleDeleteCanvasObject(objectId, { recordHistory: false });
+    } else {
+      await handleDeleteCanvasNode(entry.nodeId, { recordHistory: false });
+      await handleCreateCanvasObject(entry.object, { recordHistory: false });
     }
   };
 
   const handleApproveCanvasWriteRequest = async (requestId: string) => {
     const threadId = await ensureThreadId();
-    await approveCanvasWriteRequest(threadId, requestId);
+    const request = canvasWriteRequests.find((item) => item.id === requestId);
+    const previous = request?.targetNodeId ? canvasNodes.find((node) => node.id === request.targetNodeId) : undefined;
+    const result = await approveCanvasWriteRequest(threadId, requestId);
+    if (request?.operation === "replace_range" && previous && result.request.status === "approved" && result.node) {
+      pushHistory({ kind: "updateNode", nodeId: previous.id, patch: { content: previous.content } });
+    }
     await onRefreshCanvas(threadId);
     await onRefreshProjectSurfaces();
+    return result;
   };
 
   const handleRejectCanvasWriteRequest = async (requestId: string) => {
@@ -271,15 +341,18 @@ export function useCanvasActions({
     handleCreateCanvasNode,
     handleCreateCanvasObject,
     handleCreateCanvasWriteRequest,
+    handleRequestCanvasRangeRewrite,
     handleDeleteCanvasEdge,
     handleDeleteCanvasNode,
     handleDeleteCanvasObject,
     handleIgnoreCanvasWorkflowSuggestion,
+    handlePasteCanvas,
     handleRejectCanvasWriteRequest,
     handleUpdateCanvasNodeWorkflow,
     handleUpdateCanvasWorkflow,
     handleUpdateCanvasNode,
     handleUpdateCanvasObject,
+    handleConvertCanvasText,
     handleUploadCanvasAsset,
     undoCanvas
   };

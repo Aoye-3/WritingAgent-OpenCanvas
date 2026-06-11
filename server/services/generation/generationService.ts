@@ -195,7 +195,7 @@ export function createGenerationService(
     const agentCard = context.runtimeConfig.agentCard;
     await storage.ensureThread(threadId, agentCard.id);
     const facetwriteMemoryContent = context.runtimeConfig.settings.memory.enabled ? (await deps.memory?.readMemory())?.content : undefined;
-    const textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
+    let textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
 
     callbacks.onStatus?.({ phase: "thinking", label: streamLabels.thinking });
@@ -214,8 +214,6 @@ export function createGenerationService(
       }, executionRuntime);
 
       if (agentBackendRun) {
-        textGate.flush();
-        callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
         const normalized = normalizeAgentRunOutput({
           text: agentBackendRun.text,
           locale: payload.locale,
@@ -226,7 +224,10 @@ export function createGenerationService(
           const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend returned internal runtime output"));
           runtimeEvents.push(...(normalized.events ?? []), event);
           callbacks.onToolEvent?.(event);
+          textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
         } else {
+          textGate.flush();
+          callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
           const events = maybeCreateCanvasWriteRequest({
             storage,
             payload,
@@ -258,6 +259,7 @@ export function createGenerationService(
       const event = createRuntimeFallbackEvent("agent-backend", error);
       runtimeEvents.push(event);
       callbacks.onToolEvent?.(event);
+      textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     }
 
     try {

@@ -4,6 +4,7 @@ import { completeCanvasToolAction, isCanvasCreationTool } from "../../src/featur
 
 test("creation tools return to select after one action", () => {
   assert.equal(completeCanvasToolAction("document"), "select");
+  assert.equal(completeCanvasToolAction("reference"), "select");
   assert.equal(completeCanvasToolAction("arrow"), "select");
 });
 

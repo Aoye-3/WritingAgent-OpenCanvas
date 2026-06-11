@@ -1,5 +1,5 @@
-import type { CanvasNode } from "../../../../agents/types";
-import type { CanvasNodePatch } from "../../../../canvas/canvasClient";
+import type { CanvasNode, CanvasWriteRequest } from "../../../../agents/types";
+import type { CanvasNodePatch, CanvasRangeRewriteDraft } from "../../../../canvas/canvasClient";
 import { isKnownCanvasKind } from "../nodeLayout";
 import type { CanvasLocale } from "../types";
 import { DocumentNodeRenderer } from "./DocumentNodeRenderer";
@@ -13,6 +13,12 @@ type CanvasNodeRendererProps = {
   locale: CanvasLocale;
   node: CanvasNode;
   onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
+  agentCardId?: string;
+  modelOverrides?: CanvasRangeRewriteDraft["modelOverrides"];
+  pendingRequest?: CanvasWriteRequest;
+  onApproveWriteRequest: (requestId: string) => Promise<{ request: CanvasWriteRequest; node?: CanvasNode }>;
+  onRejectWriteRequest: (requestId: string) => Promise<unknown>;
+  onRequestRangeRewrite: (draft: CanvasRangeRewriteDraft) => Promise<CanvasWriteRequest>;
 };
 
 export function CanvasNodeRenderer(props: CanvasNodeRendererProps) {

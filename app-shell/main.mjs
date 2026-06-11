@@ -139,7 +139,10 @@ async function inspectRuntime() {
     "{{.Names}}",
   ], { cwd: root, timeout: 20_000 });
   const services = parseRunningServices(stdout);
-  if (services.length === 3) await assertExistingRuntimeBridge();
+  if (services.length === 3 && !(await existingRuntimeTargetsBridge())) {
+    await stopRuntime();
+    return [];
+  }
   return services;
 }
 
@@ -165,16 +168,14 @@ async function isDockerReady() {
   return run("docker.exe", ["info"], { cwd: root, timeout: 10_000 }).then(() => true, () => false);
 }
 
-async function assertExistingRuntimeBridge() {
+async function existingRuntimeTargetsBridge() {
   const { stdout } = await run("docker.exe", [
     "inspect",
     "facetwrite-agent-runtime-gateway",
     "--format",
     "{{range .Config.Env}}{{println .}}{{end}}",
   ], { cwd: root, timeout: 20_000 });
-  if (!stdout.split(/\r?\n/).includes(`FACETWRITE_INTERNAL_BASE_URL=${bridgeUrl}`)) {
-    throw new Error(`The running Agent Runtime does not target ${bridgeUrl}. Stop it before launching OpenCanvas.`);
-  }
+  return stdout.split(/\r?\n/).includes(`FACETWRITE_INTERNAL_BASE_URL=${bridgeUrl}`);
 }
 
 async function startRuntime() {

@@ -1592,6 +1592,65 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   pointer-events: none;
 }
 
+.canvas-creation-preview-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+.canvas-creation-preview {
+  position: absolute;
+  border: 2px dashed rgba(37, 99, 235, 0.72);
+  border-radius: var(--radius-md);
+  background: rgba(219, 234, 254, 0.54);
+  box-shadow: 0 12px 30px rgba(37, 99, 235, 0.14);
+  opacity: 0.78;
+}
+
+.canvas-creation-preview.is-note {
+  background: rgba(255, 251, 234, 0.82);
+}
+
+.canvas-creation-preview.is-reference {
+  background: rgba(240, 253, 244, 0.82);
+}
+
+.canvas-creation-preview.is-role {
+  background: rgba(248, 250, 252, 0.88);
+}
+
+.canvas-creation-preview.is-shape {
+  border-style: solid;
+  border-color: rgba(82, 100, 122, 0.72);
+  background: rgba(232, 241, 255, 0.62);
+}
+
+.canvas-creation-preview.is-circle,
+.canvas-creation-preview.is-terminator { border-radius: 999px; }
+.canvas-creation-preview.is-diamond { transform: rotate(45deg); }
+.canvas-creation-preview.is-triangle { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.canvas-creation-preview.is-star { clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 96%, 50% 72%, 21% 96%, 32% 57%, 2% 35%, 39% 35%); }
+.canvas-creation-preview.is-arrow-right { clip-path: polygon(0 25%, 65% 25%, 65% 0, 100% 50%, 65% 100%, 65% 75%, 0 75%); }
+.canvas-creation-preview.is-data { clip-path: polygon(14% 0, 100% 0, 86% 100%, 0 100%); }
+.canvas-creation-preview.is-database { border-radius: 50% / 12%; }
+.canvas-creation-preview.is-hexagon { clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
+.canvas-creation-preview.is-speech { clip-path: polygon(0 0, 100% 0, 100% 75%, 30% 75%, 15% 100%, 15% 75%, 0 75%); }
+.canvas-creation-preview.is-cross { clip-path: polygon(35% 0, 65% 0, 65% 35%, 100% 35%, 100% 65%, 65% 65%, 65% 100%, 35% 100%, 35% 65%, 0 65%, 0 35%, 35% 35%); }
+
+.canvas-creation-preview-table {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+}
+
+.canvas-creation-preview-table span {
+  border: 1px solid rgba(120, 144, 173, 0.64);
+}
+
 .canvas-free-arrow {
   position: absolute;
   overflow: visible;
@@ -1716,6 +1775,11 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 
 .canvas-flow .react-flow__pane:active {
   cursor: grabbing;
+}
+
+.canvas-flow.is-creating .react-flow__pane,
+.canvas-flow.is-creating .react-flow__pane:active {
+  cursor: crosshair;
 }
 
 .canvas-flow .react-flow__node {
@@ -2446,11 +2510,78 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 .drawer-chat-composer textarea {
   width: 100%;
   min-height: 86px;
+  max-height: 240px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  resize: vertical;
+  resize: none;
+  overflow-y: auto;
   padding: 10px 12px;
   outline: 0;
+}
+
+.composer-resize-handle {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 14px;
+  margin-bottom: -6px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.composer-resize-handle span {
+  width: 54px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--color-border);
+  transition: width 120ms ease, background 120ms ease;
+}
+
+.composer-resize-handle:hover span,
+.composer-resize-handle:active span {
+  width: 72px;
+  background: var(--color-primary);
+}
+
+.mind-chain-context-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
+  min-height: 26px;
+  max-width: 100%;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.07);
+  color: var(--color-primary);
+  padding: 3px 5px 3px 9px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.mind-chain-context-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mind-chain-context-chip button {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: currentColor;
+  padding: 0;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.mind-chain-context-chip button:hover {
+  background: rgba(37, 99, 235, 0.12);
 }
 
 .drawer-chat-composer .button {
@@ -4900,4 +5031,199 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   .canvas-type-catalog {
     grid-template-columns: 1fr;
   }
+}
+.canvas-node-readonly {
+  cursor: default;
+  white-space: pre-wrap;
+}
+
+.canvas-board-object-text {
+  background: transparent;
+  border-color: transparent;
+  overflow: visible;
+  padding: 4px;
+}
+
+.canvas-board-object-text.is-selected {
+  border-color: #2563eb;
+}
+
+.canvas-free-text-value,
+.canvas-free-text-editor {
+  background: transparent;
+  border: 0;
+  box-sizing: border-box;
+  font: inherit;
+  line-height: 1.35;
+  min-height: 100%;
+  outline: 0;
+  padding: 0;
+  resize: none;
+  white-space: pre-wrap;
+  width: 100%;
+}
+
+.canvas-free-text-menu {
+  align-items: center;
+  background: #172033;
+  border-radius: 8px;
+  bottom: calc(100% + 10px);
+  box-shadow: 0 8px 24px rgb(15 23 42 / 20%);
+  display: flex;
+  gap: 4px;
+  left: 0;
+  padding: 6px;
+  position: absolute;
+  z-index: 8;
+}
+
+.canvas-free-text-menu button {
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: white;
+  cursor: pointer;
+  padding: 5px 7px;
+  white-space: nowrap;
+}
+
+.canvas-free-text-menu button.is-active {
+  background: #2563eb;
+}
+
+.canvas-free-text-menu input[type="color"] {
+  background: transparent;
+  border: 0;
+  height: 26px;
+  padding: 0;
+  width: 30px;
+}
+.canvas-source-markdown {
+  white-space: normal;
+}
+
+.canvas-source-markdown p {
+  margin: 0 0 0.65em;
+  min-height: 1.35em;
+}
+
+.canvas-source-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.canvas-source-markdown a {
+  color: var(--blue, #1677ff);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.canvas-selection-toolbar,
+.canvas-range-proposal-actions {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #dfe4ec;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgb(15 23 42 / 16%);
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  position: fixed;
+  z-index: 10000;
+}
+
+.canvas-selection-ai-badge {
+  align-items: center;
+  background: #ff5b4d;
+  border-radius: 8px;
+  color: #fff;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 700;
+  height: 25px;
+  justify-content: center;
+  width: 25px;
+}
+
+.canvas-selection-toolbar input {
+  background: transparent;
+  border: 0;
+  color: #1d2735;
+  font: inherit;
+  height: 30px;
+  outline: none;
+  padding: 0 8px;
+  width: 220px;
+}
+
+.canvas-selection-toolbar button,
+.canvas-range-proposal-actions button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  color: #273244;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  height: 32px;
+  justify-content: center;
+  min-width: 32px;
+  padding: 0 10px;
+}
+
+.canvas-selection-toolbar button:hover,
+.canvas-range-proposal-actions button:hover {
+  background: #f0f4f9;
+}
+
+.canvas-selection-toolbar button.is-primary,
+.canvas-range-proposal-actions button.is-primary {
+  background: #1684ff;
+  color: #fff;
+}
+
+.canvas-selection-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.collaborative-document-content {
+  cursor: text;
+  user-select: text;
+}
+
+.canvas-range-proposal-text {
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.canvas-range-proposal-shell {
+  position: relative;
+  padding-top: 38px;
+}
+
+.canvas-range-proposal-shell .canvas-range-proposal-actions {
+  left: 50%;
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+}
+
+.canvas-range-proposal-text del {
+  color: #8a929f;
+  text-decoration-color: #a5acb7;
+}
+
+.canvas-range-proposal-text ins {
+  background: #edf6ff;
+  color: #087cf0;
+  display: inline;
+  margin-left: 4px;
+  text-decoration: none;
+}
+
+.canvas-range-error {
+  color: #c23b32;
+  font-size: 11px;
+  margin-top: 6px;
 }

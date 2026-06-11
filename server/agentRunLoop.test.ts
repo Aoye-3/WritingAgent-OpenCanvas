@@ -161,6 +161,41 @@ test("streams provider assistant tokens before final result", async () => {
   assert.ok(statuses.includes("finalizing"));
 });
 
+test("awaits provider stream promises before iterating chunks", async () => {
+  const client: ChatClient = {
+    async createChatCompletion() {
+      throw new Error("non-streaming path should not be used");
+    },
+    createChatCompletionStream: () => Promise.resolve((async function* () {
+      yield { choices: [{ delta: { content: "Promise stream" } }] };
+      yield { choices: [{ finish_reason: "stop", delta: {} }] };
+    })())
+  };
+
+  const result = await runAgentCompletionStream({
+    client,
+    providerId: "silicon",
+    modelSettings: {
+      providerId: "silicon",
+      model: "deepseek-ai/DeepSeek-V3.2",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: true,
+      toolCallMode: "none",
+      maxToolCalls: 0
+    },
+    messages: [{ role: "user", content: "Say hello" }],
+    allowedToolRefs: [],
+    toolState: {},
+    toolContext: {}
+  });
+
+  assert.equal(result.text, "Promise stream");
+});
+
 test("streaming provider loop continues after streamed tool calls", async () => {
   const events: ToolEventRecord[] = [];
   const statuses: string[] = [];

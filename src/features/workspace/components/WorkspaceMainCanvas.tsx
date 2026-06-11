@@ -1,7 +1,9 @@
-import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion } from "../../agents/types";
-import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasObjectDraft, CanvasObjectPatch } from "../../canvas/canvasClient";
+import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../agents/types";
+import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../../canvas/canvasClient";
 import { DocumentCanvas } from "./DocumentCanvas";
 import type { CanvasTool } from "./canvas/toolState";
+import type { CanvasClipboardPayload } from "../../../../shared/canvasClipboard";
+import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain";
 
 type WorkspaceMainCanvasProps = {
   activeTool: CanvasTool;
@@ -13,6 +15,9 @@ type WorkspaceMainCanvasProps = {
   workflow?: CanvasWorkflow;
   suggestions: CanvasWorkflowSuggestion[];
   selectedNodeId?: string;
+  writeRequests: CanvasWriteRequest[];
+  agentCardId?: string;
+  modelOverrides?: CanvasRangeRewriteDraft["modelOverrides"];
   onAcceptSuggestion: (suggestionId: string) => Promise<void>;
   onConvertSuggestionToNode: (suggestionId: string, kind?: CanvasNodeKind) => Promise<void>;
   onCreateEdge: (draft: CanvasEdgeDraft) => Promise<CanvasEdge | undefined>;
@@ -21,11 +26,17 @@ type WorkspaceMainCanvasProps = {
   onDeleteEdge: (edgeId: string) => Promise<void>;
   onDeleteNode: (nodeId: string) => Promise<void>;
   onDeleteObject: (objectId: string) => Promise<void>;
+  onPaste: (payload: CanvasClipboardPayload, center: { x: number; y: number }) => Promise<void>;
+  onConvertText: (objectId: string, kind: Extract<CanvasNodeKind, "document" | "reference" | "note">) => Promise<void>;
   onIgnoreSuggestion: (suggestionId: string) => Promise<void>;
+  onAttachMindChain: (context: CanvasMindChainContext) => void;
   onSendMindChainToChat: (text: string) => void;
   onSelectNode: (nodeId?: string) => void;
   onUndo: () => Promise<void>;
   onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
+  onRequestRangeRewrite: (draft: CanvasRangeRewriteDraft) => Promise<CanvasWriteRequest>;
+  onApproveWriteRequest: (requestId: string) => Promise<{ request: CanvasWriteRequest; node?: CanvasNode }>;
+  onRejectWriteRequest: (requestId: string) => Promise<unknown>;
   onUpdateObject: (objectId: string, patch: CanvasObjectPatch) => Promise<unknown>;
   onUploadAsset: (input: { fileName: string; fileBase64: string }) => Promise<unknown>;
   onUpdateNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflow["stage"]; roles?: string[] }) => Promise<unknown>;
@@ -46,6 +57,9 @@ export function WorkspaceMainCanvas(props: WorkspaceMainCanvasProps) {
         workflow={props.workflow}
         suggestions={props.suggestions}
         selectedNodeId={props.selectedNodeId}
+        writeRequests={props.writeRequests}
+        agentCardId={props.agentCardId}
+        modelOverrides={props.modelOverrides}
         onAcceptSuggestion={props.onAcceptSuggestion}
         onConvertSuggestionToNode={props.onConvertSuggestionToNode}
         onCreateEdge={props.onCreateEdge}
@@ -54,11 +68,17 @@ export function WorkspaceMainCanvas(props: WorkspaceMainCanvasProps) {
         onDeleteEdge={props.onDeleteEdge}
         onDeleteNode={props.onDeleteNode}
         onDeleteObject={props.onDeleteObject}
+        onPaste={props.onPaste}
+        onConvertText={props.onConvertText}
         onIgnoreSuggestion={props.onIgnoreSuggestion}
+        onAttachMindChain={props.onAttachMindChain}
         onSendMindChainToChat={props.onSendMindChainToChat}
         onSelectNode={props.onSelectNode}
         onUndo={props.onUndo}
         onUpdateNode={props.onUpdateNode}
+        onRequestRangeRewrite={props.onRequestRangeRewrite}
+        onApproveWriteRequest={props.onApproveWriteRequest}
+        onRejectWriteRequest={props.onRejectWriteRequest}
         onUpdateObject={props.onUpdateObject}
         onUploadAsset={props.onUploadAsset}
         onUpdateNodeWorkflow={props.onUpdateNodeWorkflow}

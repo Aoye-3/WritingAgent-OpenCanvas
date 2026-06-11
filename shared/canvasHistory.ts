@@ -11,6 +11,7 @@ export type CanvasHistoryNode = {
   height: number;
   metadata: unknown;
 };
+export type CanvasNodeKind = CanvasHistoryNode["kind"];
 
 export type CanvasHistoryEdge = {
   id: string;
@@ -40,7 +41,9 @@ export type CanvasHistoryEntry =
   | { kind: "restoreEdge"; edge: CanvasHistoryEdge }
   | { kind: "deleteObject"; objectId: string }
   | { kind: "restoreObject"; object: Exclude<CanvasObject, { kind: "asset" }> }
-  | { kind: "updateObject"; objectId: string; patch: CanvasObjectPatch };
+  | { kind: "updateObject"; objectId: string; patch: CanvasObjectPatch }
+  | { kind: "deleteGroup"; nodeIds: string[]; objectIds: string[]; edgeIds: string[] }
+  | { kind: "restoreTextConversion"; nodeId: string; object: Extract<CanvasObject, { kind: "text" }> };
 
 export function limitCanvasHistoryDepth(entries: CanvasHistoryEntry[], undoDepth: number) {
   return entries.slice(0, Math.max(1, undoDepth));

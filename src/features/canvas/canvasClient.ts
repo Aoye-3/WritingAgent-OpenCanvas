@@ -28,12 +28,30 @@ export type CanvasNodeWorkflowPatch = {
 };
 
 export type CanvasWriteRequestDraft = {
-  operation: "create" | "replace" | "append";
+  operation: "create" | "replace" | "append" | "replace_range";
   targetNodeId?: string;
   nodeKind?: CanvasNodeKind;
   title?: string;
   content: string;
   rationale?: string;
+  rangeStart?: number;
+  rangeEnd?: number;
+  originalText?: string;
+  baseNodeUpdatedAt?: string;
+};
+
+export type CanvasRangeRewriteDraft = {
+  nodeId: string;
+  rangeStart: number;
+  rangeEnd: number;
+  originalText: string;
+  instruction: string;
+  locale: "en" | "zh";
+  agentCardId?: string;
+  modelOverrides?: {
+    thinkingMode?: "enabled" | "disabled";
+    reasoningEffort?: "high" | "max" | "low" | "medium" | "xhigh";
+  };
 };
 
 export type CanvasEdgeDraft = {
@@ -53,6 +71,11 @@ export async function createCanvasNode(threadId: string, draft: CanvasNodeDraft)
 
 export async function createCanvasWriteRequest(threadId: string, draft: CanvasWriteRequestDraft): Promise<CanvasWriteRequest> {
   const payload = await apiPost<{ request: CanvasWriteRequest }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/write-requests`, draft);
+  return payload.request;
+}
+
+export async function requestCanvasRangeRewrite(threadId: string, draft: CanvasRangeRewriteDraft): Promise<CanvasWriteRequest> {
+  const payload = await apiPost<{ request: CanvasWriteRequest }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/range-rewrites`, draft);
   return payload.request;
 }
 
@@ -117,8 +140,8 @@ export async function uploadCanvasAsset(threadId: string, input: { fileName: str
   return payload.object;
 }
 
-export async function approveCanvasWriteRequest(threadId: string, requestId: string): Promise<void> {
-  await apiPost(`/api/threads/${encodeURIComponent(threadId)}/canvas/write-requests/${encodeURIComponent(requestId)}/approve`);
+export async function approveCanvasWriteRequest(threadId: string, requestId: string): Promise<{ request: CanvasWriteRequest; node?: CanvasNode }> {
+  return apiPost<{ request: CanvasWriteRequest; node?: CanvasNode }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/write-requests/${encodeURIComponent(requestId)}/approve`);
 }
 
 export async function rejectCanvasWriteRequest(threadId: string, requestId: string): Promise<void> {

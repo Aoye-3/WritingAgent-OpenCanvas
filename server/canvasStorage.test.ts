@@ -65,6 +65,71 @@ test("rejecting a canvas write request leaves nodes unchanged", async () => {
   assert.equal(storage.listCanvasNodes(threadId)[0].content, "Keep me");
 });
 
+test("approves a range replacement only while the source node is unchanged", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;
+  await storage.ensureThread(threadId, "blog-post");
+  const node = storage.createCanvasNode(threadId, {
+    kind: "document",
+    title: "Draft",
+    content: "Keep this sentence. Rewrite this sentence."
+  });
+  const start = node.content.indexOf("Rewrite");
+  const originalText = "Rewrite this sentence.";
+  const request = storage.createCanvasWriteRequest(threadId, {
+    operation: "replace_range",
+    targetNodeId: node.id,
+    content: "This sentence is clearer.",
+    rangeStart: start,
+    rangeEnd: start + originalText.length,
+    originalText,
+    baseNodeUpdatedAt: node.updatedAt
+  });
+
+  const approved = storage.approveCanvasWriteRequest(threadId, request.id);
+  assert.equal(approved?.request.status, "approved");
+  assert.equal(approved?.node?.content, "Keep this sentence. This sentence is clearer.");
+
+  const staleNode = storage.createCanvasNode(threadId, {
+    kind: "document",
+    title: "Changed",
+    content: "Original paragraph"
+  });
+  const staleRequest = storage.createCanvasWriteRequest(threadId, {
+    operation: "replace_range",
+    targetNodeId: staleNode.id,
+    content: "Replacement",
+    rangeStart: 0,
+    rangeEnd: 8,
+    originalText: "Original",
+    baseNodeUpdatedAt: staleNode.updatedAt
+  });
+  storage.updateCanvasNode(threadId, staleNode.id, { content: "Edited paragraph" });
+
+  const stale = storage.approveCanvasWriteRequest(threadId, staleRequest.id);
+  assert.equal(stale?.request.status, "stale");
+  assert.equal(stale?.node?.content, "Edited paragraph");
+});
+
+test("allows only one pending range replacement per document node", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;
+  await storage.ensureThread(threadId, "blog-post");
+  const node = storage.createCanvasNode(threadId, { kind: "document", title: "Draft", content: "Rewrite this" });
+  const draft = {
+    operation: "replace_range" as const,
+    targetNodeId: node.id,
+    content: "Replace this",
+    rangeStart: 0,
+    rangeEnd: 7,
+    originalText: "Rewrite",
+    baseNodeUpdatedAt: node.updatedAt
+  };
+
+  storage.createCanvasWriteRequest(threadId, draft);
+  assert.throws(() => storage.createCanvasWriteRequest(threadId, draft), /pending range replacement/i);
+});
+
 test("stores directed canvas edges and removes edges when a node is deleted", async () => {
   const storage = await createStorage();
   const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;

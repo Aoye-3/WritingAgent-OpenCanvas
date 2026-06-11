@@ -132,7 +132,7 @@ export async function runAgentCompletionStream(input: AgentRunInput & AgentRunSt
   input.onStatus?.({ phase: "thinking", label: streamLabels.thinking });
 
   while (true) {
-    const response = input.client.createChatCompletionStream(normalizeChatRequest(profile, {
+    const response = await input.client.createChatCompletionStream(normalizeChatRequest(profile, {
       modelSettings: input.modelSettings,
       messages,
       tools,

@@ -265,6 +265,36 @@ test("generation facade blocks AgentBackend internal prompt output before record
   assert.ok((records[0] as { events: Array<{ eventType: string }> }).events.some((event) => event.eventType === "internal_output_blocked"));
 });
 
+test("generation facade falls back when AgentBackend returns a provider-unavailable message", async () => {
+  const { storage, records } = fakeStorage();
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: "The configured LLM provider is temporarily unavailable after multiple retries. Please wait a moment and continue the conversation.",
+        finishReason: "agent_backend_completed",
+        events: []
+      })
+    },
+    provider: {
+      apiKey: "test-key",
+      createClient: () => ({ createChatCompletion: async () => ({ choices: [] }) } as ChatClient),
+      runAgent: async (input) => ({
+        text: "Provider recovered after AgentBackend provider failure",
+        finishReason: "stop",
+        messages: input.messages,
+        events: []
+      })
+    }
+  });
+
+  const result = await service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "Hello" });
+
+  assert.equal(result.provider, "deepseek");
+  assert.equal(result.text, "Provider recovered after AgentBackend provider failure");
+  assert.equal((records[0] as { output: string }).output, "Provider recovered after AgentBackend provider failure");
+});
+
 test("generation facade strips search result JSON from recorded assistant text", async () => {
   const { storage, records } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {

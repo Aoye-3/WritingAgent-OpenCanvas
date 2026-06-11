@@ -213,7 +213,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     }
   };
 
-  const handleChatSend = async (text: string, modelOverrides?: GenerateRequest["modelOverrides"]) => {
+  const handleChatSend = async (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => {
     setIsChatSending(true);
     const previousPendingWriteIds = new Set(options.getPendingCanvasWriteRequestIds());
     const userMessageId = crypto.randomUUID();
@@ -243,7 +243,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         threadId,
         locale: options.locale,
         structuredValues: options.agentValues,
-        contextValues: options.getContextValues(),
+        contextValues: { ...options.getContextValues(), ...requestContext },
         chatInstruction: text,
         toolState: { ...options.toolState, quick_messages: true, canvas_write: true },
         modelOverrides,

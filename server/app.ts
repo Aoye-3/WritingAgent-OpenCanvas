@@ -49,7 +49,7 @@ export async function createApp() {
   registerProjectRoutes(app, { storage, agentRuntime });
   registerCanvasRoutes(app, { canvasService });
   registerSettingsRoutes(app, { storage });
-  registerGenerationRoutes(app, { generationService });
+  registerGenerationRoutes(app, { generationService, canvasService });
 
   return app;
 }

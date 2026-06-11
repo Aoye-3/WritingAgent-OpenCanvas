@@ -25,6 +25,17 @@ test("blocks provider reasoning_content protocol errors from visible output", ()
   assert.ok(result.events.some((event) => event.eventType === "internal_output_blocked"));
 });
 
+test("blocks AgentBackend provider-unavailable fallback messages", () => {
+  const result = normalizeAgentRunOutput({
+    text: "The configured LLM provider is temporarily unavailable after multiple retries. Please wait a moment and continue the conversation.",
+    locale: "en",
+    source: "agent-backend"
+  });
+
+  assert.match(result.text, /internal runtime information/i);
+  assert.ok(result.events.some((event) => event.eventType === "internal_output_blocked"));
+});
+
 test("strips pasted tool search JSON from visible assistant text", () => {
   const result = normalizeAgentRunOutput({
     text: '好的，我来搜索一下最近中美两国的主要新闻。\n{"query":"2026年5月 美国 重大新闻","total_results":5,"results":[{"title":"raw"}]}\n下面是整理后的摘要。',

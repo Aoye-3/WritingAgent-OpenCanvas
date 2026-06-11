@@ -30,6 +30,7 @@ import {
 } from "../../shared/canvasWorkflow.js";
 import { createStoredCanvasAsset, normalizeStoredCanvasObject, validateCanvasObjectWrite, type CanvasAssetObject } from "../../shared/canvasObjects.js";
 import { sanitizeVisibleText } from "../services/generation/outputNormalizer.js";
+import { isSingleParagraphRange, replaceTextRange } from "../../shared/canvasRangeEdit.js";
 import {
   cleanText,
   defaultCanvasTitle,
@@ -220,8 +221,8 @@ export class CanvasRepository {
     validateId(threadId, "threadId");
     const operation = validateWriteOperation(input.operation);
     const targetNode = input.targetNodeId ? this.getCanvasNode(threadId, input.targetNodeId) : undefined;
-    if ((operation === "replace" || operation === "append") && !targetNode) {
-      throw new Error("A valid target node is required for replace and append operations");
+    if ((operation === "replace" || operation === "append" || operation === "replace_range") && !targetNode) {
+      throw new Error("A valid target node is required for canvas update operations");
     }
     const nodeKind = validateNodeKind(input.nodeKind ?? targetNode?.kind ?? "document");
     const now = nowIso();
@@ -234,6 +235,10 @@ export class CanvasRepository {
       title: cleanText(input.title) || targetNode?.title || defaultCanvasTitle(nodeKind),
       content: cleanText(input.content),
       rationale: cleanText(input.rationale),
+      rangeStart: input.rangeStart,
+      rangeEnd: input.rangeEnd,
+      originalText: typeof input.originalText === "string" ? input.originalText : undefined,
+      baseNodeUpdatedAt: cleanText(input.baseNodeUpdatedAt) || undefined,
       status: "pending",
       createdAt: now,
       updatedAt: now
@@ -241,14 +246,28 @@ export class CanvasRepository {
     if (!request.content) {
       throw new Error("Canvas write content is required");
     }
+    if (operation === "replace_range") {
+      if (!targetNode || targetNode.kind !== "document") throw new Error("Range replacement requires a document node");
+      const existingPending = this.listCanvasWriteRequests(threadId, "pending")
+        .some((item) => item.operation === "replace_range" && item.targetNodeId === targetNode.id);
+      if (existingPending) throw new Error("A pending range replacement already exists for this node");
+      if (request.rangeStart === undefined || request.rangeEnd === undefined || request.originalText === undefined || !request.baseNodeUpdatedAt) {
+        throw new Error("Range replacement metadata is required");
+      }
+      if (!isSingleParagraphRange(targetNode.content, request.rangeStart, request.rangeEnd)
+        || targetNode.content.slice(request.rangeStart, request.rangeEnd) !== request.originalText) {
+        throw new Error("Range replacement source is invalid");
+      }
+    }
 
     this.db
       .prepare(
         `INSERT INTO canvas_write_requests
-          (id, thread_id, operation, target_node_id, node_kind, title, content, rationale, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (id, thread_id, operation, target_node_id, node_kind, title, content, rationale, range_start, range_end, original_text, base_node_updated_at, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(request.id, threadId, request.operation, request.targetNodeId ?? null, request.nodeKind, request.title, request.content, request.rationale, request.status, now, now);
+      .run(request.id, threadId, request.operation, request.targetNodeId ?? null, request.nodeKind, request.title, request.content, request.rationale,
+        request.rangeStart ?? null, request.rangeEnd ?? null, request.originalText ?? null, request.baseNodeUpdatedAt ?? null, request.status, now, now);
     this.deps.touchThread(threadId, now);
     return request;
   }
@@ -268,6 +287,10 @@ export class CanvasRepository {
                 title,
                 content,
                 rationale,
+                range_start as rangeStart,
+                range_end as rangeEnd,
+                original_text as originalText,
+                base_node_updated_at as baseNodeUpdatedAt,
                 status,
                 created_at as createdAt,
                 updated_at as updatedAt
@@ -291,6 +314,7 @@ export class CanvasRepository {
     if (!request || request.status !== "pending") return undefined;
     const now = nowIso();
     let node: CanvasNode | undefined;
+    let resolvedStatus: CanvasWriteRequestStatus = "approved";
     this.deps.withTransaction(() => {
       if (request.operation === "create") {
         const nextIndex = this.listCanvasNodes(threadId).length;
@@ -304,6 +328,25 @@ export class CanvasRepository {
       } else {
         const existing = request.targetNodeId ? this.getCanvasNode(threadId, request.targetNodeId) : undefined;
         if (!existing) throw new Error("Target node was not found");
+        if (request.operation === "replace_range") {
+          const start = request.rangeStart;
+          const end = request.rangeEnd;
+          const unchanged = existing.updatedAt === request.baseNodeUpdatedAt
+            && start !== undefined
+            && end !== undefined
+            && existing.content.slice(start, end) === request.originalText;
+          if (!unchanged) {
+            resolvedStatus = "stale";
+            this.updateCanvasWriteRequestStatus(threadId, requestId, "stale", now);
+            node = existing;
+            return;
+          }
+          node = this.updateCanvasNode(threadId, existing.id, {
+            content: replaceTextRange(existing.content, start!, end!, request.content)
+          });
+          this.updateCanvasWriteRequestStatus(threadId, requestId, "approved", now);
+          return;
+        }
         const content = request.operation === "append"
           ? [existing.content.trim(), request.content.trim()].filter(Boolean).join("\n\n")
           : request.content;
@@ -314,7 +357,7 @@ export class CanvasRepository {
       }
       this.updateCanvasWriteRequestStatus(threadId, requestId, "approved", now);
     });
-    return { request: { ...request, status: "approved" as const, updatedAt: now }, node };
+    return { request: { ...request, status: resolvedStatus, updatedAt: now }, node };
   }
 
   rejectCanvasWriteRequest(threadId: string, requestId: string) {

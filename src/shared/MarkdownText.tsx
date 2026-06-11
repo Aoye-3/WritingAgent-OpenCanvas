@@ -125,7 +125,7 @@ function toBlocks(text: string): Block[] {
 
 function renderInline(text: string, highlights: string[]) {
   const nodes: ReactNode[] = [];
-  const pattern = /(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__|`[^`]+`)/g;
+  const pattern = /(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_|`[^`]+`)/g;
   let lastIndex = 0;
 
   for (const match of text.matchAll(pattern)) {
@@ -143,8 +143,10 @@ function renderInline(text: string, highlights: string[]) {
           {renderHighlightedText(link[1], highlights, 0)}
         </a>
       ) : token);
-    } else {
+    } else if (token.startsWith("**") || token.startsWith("__")) {
       nodes.push(<strong key={nodes.length}>{renderHighlightedText(token.slice(2, -2), highlights, 0)}</strong>);
+    } else {
+      nodes.push(<em key={nodes.length}>{renderHighlightedText(token.slice(1, -1), highlights, 0)}</em>);
     }
     lastIndex = match.index + token.length;
   }
