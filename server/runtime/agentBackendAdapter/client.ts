@@ -213,8 +213,8 @@ async function readAgentBackendStream(
         finalValuesText = extractFinalValuesText(parsed.data) ?? finalValuesText;
       }
 
-      const event = mapToolEvent(parsed.event, parsed.data);
-      if (event) {
+      const toolEvents = mapToolEvents(parsed.event, parsed.data);
+      for (const event of toolEvents) {
         events.push(event);
         callbacks.onStatus?.(statusFromToolEvent(event));
         callbacks.onToolEvent?.(event);
@@ -288,14 +288,42 @@ function textFromUnknown(value: unknown): string | undefined {
   return undefined;
 }
 
-function mapToolEvent(event: string, data: unknown): ToolEventRecord | undefined {
-  if (event !== "custom" || !isRecord(data)) return undefined;
-  const type = typeof data.type === "string" ? data.type : typeof data.event === "string" ? data.event : undefined;
-  if (!type || !type.startsWith("task_")) return undefined;
-  return {
-    eventType: `agent_backend_${type}`,
-    payload: data
-  };
+function mapToolEvents(event: string, data: unknown): ToolEventRecord[] {
+  if (event === "custom" && isRecord(data)) {
+    const type = typeof data.type === "string" ? data.type : typeof data.event === "string" ? data.event : undefined;
+    return type?.startsWith("task_") ? [{ eventType: `agent_backend_${type}`, payload: data }] : [];
+  }
+  if (event !== "messages" && event !== "messages-tuple") return [];
+  const message = Array.isArray(data) ? data[0] : data;
+  if (!isRecord(message)) return [];
+
+  if (Array.isArray(message.tool_calls)) {
+    return message.tool_calls.flatMap((toolCall) => {
+      if (!isRecord(toolCall)) return [];
+      const toolName = typeof toolCall.name === "string" ? toolCall.name : undefined;
+      if (!toolName) return [];
+      return [{
+        eventType: "agent_backend_tool_started",
+        payload: {
+          type: "tool_started",
+          toolName,
+          toolCallId: typeof toolCall.id === "string" ? toolCall.id : undefined
+        }
+      }];
+    });
+  }
+
+  const messageType = typeof message.type === "string" ? message.type.toLowerCase() : "";
+  const role = typeof message.role === "string" ? message.role.toLowerCase() : "";
+  if (messageType !== "tool" && role !== "tool") return [];
+  return [{
+    eventType: "agent_backend_tool_completed",
+    payload: {
+      type: "tool_completed",
+      toolName: typeof message.name === "string" ? message.name : "unknown",
+      toolCallId: typeof message.tool_call_id === "string" ? message.tool_call_id : undefined
+    }
+  }];
 }
 
 function extractUsage(data: unknown): unknown {

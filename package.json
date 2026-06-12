@@ -11,6 +11,7 @@
     "dev:server": "tsx server/index.ts",
     "shell:dev": "electron app-shell/main.mjs",
     "shell:test": "node --test app-shell/*.test.mjs",
+    "acceptance:local-runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-runtime-acceptance.ps1",
     "agent-runtime:up": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/agent-runtime-local.ps1 up",
     "agent-runtime:down": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/agent-runtime-local.ps1 down",
     "agent-runtime:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/agent-runtime-local.ps1 status",

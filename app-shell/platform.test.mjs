@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildSpawnCommand, parseRunningServices, waitForHttp } from "./platform.mjs";
+import { EventEmitter } from "node:events";
+import { buildSpawnCommand, parseRunningServices, runDetachedCommand, waitForHttp } from "./platform.mjs";
 
 test("runs Windows command scripts through ComSpec", () => {
   assert.deepEqual(
@@ -20,6 +21,23 @@ test("starts executable commands directly", () => {
     buildSpawnCommand("node.exe", ["server.js"], { platform: "win32" }),
     { command: "node.exe", args: ["server.js"] },
   );
+});
+
+test("runs daemon bootstrap commands without inheritable output pipes", async () => {
+  const child = new EventEmitter();
+  let spawnOptions;
+  const completion = runDetachedCommand("powershell.exe", ["-File", "runtime.ps1", "up"], {
+    cwd: "F:\\project",
+    spawnImpl: (_command, _args, options) => {
+      spawnOptions = options;
+      queueMicrotask(() => child.emit("close", 0));
+      return child;
+    },
+  });
+
+  await completion;
+  assert.equal(spawnOptions.stdio, "ignore");
+  assert.equal(spawnOptions.windowsHide, true);
 });
 
 test("parses running compose service names", () => {

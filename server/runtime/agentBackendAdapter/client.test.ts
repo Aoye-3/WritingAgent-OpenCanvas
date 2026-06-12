@@ -191,6 +191,55 @@ test("reads AgentBackend stream text and task events", async () => {
   assert.equal(runHeaders.get("X-CSRF-Token"), "csrf");
 });
 
+test("maps AgentBackend tool calls and results into FacetWrite tool events", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_1","name":"web_search","args":{"query":"OpenAI official homepage"}}]}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"tool","name":"web_search","tool_call_id":"call_1","content":"[{\\"title\\":\\"OpenAI\\",\\"url\\":\\"https://openai.com\\"}]"}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"Search complete"}]\n\n'
+  ].join("");
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+      controller.close();
+    }
+  });
+  const fetchImpl = async (url: string | URL | Request) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) return Response.json({ needs_setup: false });
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, { headers });
+    }
+    return new Response(stream, { status: 200 }) as Response;
+  };
+
+  const result = await runAgentBackendAgent({
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    config: {
+      enabled: true,
+      baseUrl: "http://AgentBackend.local",
+      assistantId: "lead_agent",
+      auth: { email: "admin@example.com", password: "strong-password", autoSetup: false, timeoutMs: 5000 }
+    },
+    threadId: "thread_1",
+    agentCard: getAgentCard("blog-post"),
+    messages: [{ role: "user", content: "Search for OpenAI" }],
+    prompt: "Search for OpenAI",
+    fetchImpl
+  });
+
+  assert.deepEqual(result.events.map((event) => event.eventType), [
+    "agent_backend_tool_started",
+    "agent_backend_tool_completed"
+  ]);
+  assert.equal(result.events[0]?.payload?.toolName, "web_search");
+  assert.equal(result.events[1]?.payload?.toolCallId, "call_1");
+  assert.equal(result.text, "Search complete");
+});
+
 test("ignores AgentBackend values events that replay prompt messages", async () => {
   const body = [
     'event: messages-tuple\ndata: [{"content":"Visible answer"}]\n\n',

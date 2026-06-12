@@ -1,11 +1,11 @@
 import { app, BrowserWindow } from "electron";
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLifecycle } from "./runtime.mjs";
 import { resolveRuntimeMode } from "./runtime-config.mjs";
-import { parseRunningServices, run, startProcess, waitForHttp } from "./platform.mjs";
+import { parseRunningServices, run, runDetachedCommand, startProcess, waitForHttp } from "./platform.mjs";
 import { sendWindowStage } from "./window-status.mjs";
 
 const shellDir = path.dirname(fileURLToPath(import.meta.url));
@@ -22,6 +22,9 @@ const bridgeUrl = runtime.mode === "docker" ? dockerBridgeUrl : localBridgeUrl;
 const iconPath = path.join(root, "public", "assets", "ui", "brand", "opencanvas-icon.png");
 const tsxCli = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
 const viteCli = path.join(root, "node_modules", "vite", "bin", "vite.js");
+const logsRoot = path.join(root, "logs");
+const shellLogPath = path.join(logsRoot, "app-shell.log");
+mkdirSync(logsRoot, { recursive: true });
 const shellEnv = {
   ...process.env,
   PORT: String(apiPort),
@@ -63,8 +66,18 @@ async function startShell() {
     inspectRuntime,
     startRuntime,
     stopRuntime,
-    startApi: () => startProcess("node.exe", [tsxCli, "server/index.ts"], { cwd: root, env: shellEnv }),
-    startFrontend: () => startProcess("node.exe", [viteCli, "--host", "127.0.0.1", "--port", String(frontendPort)], { cwd: root, env: shellEnv }),
+    startApi: () => startProcess("node.exe", [tsxCli, "server/index.ts"], {
+      cwd: root,
+      env: shellEnv,
+      stdoutPath: path.join(logsRoot, "api.out.log"),
+      stderrPath: path.join(logsRoot, "api.err.log"),
+    }),
+    startFrontend: () => startProcess("node.exe", [viteCli, "--host", "127.0.0.1", "--port", String(frontendPort)], {
+      cwd: root,
+      env: shellEnv,
+      stdoutPath: path.join(logsRoot, "frontend.out.log"),
+      stderrPath: path.join(logsRoot, "frontend.err.log"),
+    }),
     waitForRuntime: () => waitForHttp(`${runtime.baseUrl}/health`, { attempts: 90 }),
     waitForApi: () => waitForHttp(`${apiUrl}/api/health`, { attempts: 90 }),
     waitForFrontend: () => waitForHttp(frontendUrl, { attempts: 90 }),
@@ -191,7 +204,8 @@ async function existingRuntimeTargetsBridge() {
 async function startRuntime() {
   const script = runtime.mode === "local" ? "scripts/agent-runtime-local.ps1" : "scripts/agent-runtime.ps1";
   const extraArgs = runtime.mode === "local" ? ["-Port", String(runtimePort), "-BridgeBaseUrl", bridgeUrl] : [];
-  await run("powershell.exe", [
+  const command = runtime.mode === "local" ? runDetachedCommand : run;
+  await command("powershell.exe", [
     "-NoProfile",
     "-ExecutionPolicy",
     "Bypass",
@@ -231,11 +245,13 @@ async function assertPortAvailable(port) {
 }
 
 function updateStage(stage) {
+  writeShellLog(`stage=${stage}`);
   sendWindowStage(splashWindow, stage);
 }
 
 function showStartupError(error) {
   const message = error instanceof Error ? error.message : String(error);
+  writeShellLog(`startup-error=${error instanceof Error ? error.stack ?? message : message}`);
   console.error("OpenCanvas app shell startup failed:", error);
   sendWindowStage(splashWindow, "error", message);
 }
@@ -247,10 +263,15 @@ async function shutdown() {
   try {
     await lifecycle?.stop();
   } catch (error) {
+    writeShellLog(`cleanup-error=${error instanceof Error ? error.stack ?? error.message : String(error)}`);
     console.error("OpenCanvas app shell cleanup failed:", error);
   } finally {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
     if (splashWindow && !splashWindow.isDestroyed()) splashWindow.destroy();
     app.quit();
   }
+}
+
+function writeShellLog(message) {
+  appendFileSync(shellLogPath, `${new Date().toISOString()} ${message}\n`, "utf8");
 }

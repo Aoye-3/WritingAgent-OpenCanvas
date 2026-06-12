@@ -23,6 +23,7 @@ test("Electron shell owns fixed non-reserved development ports and shutdown", ()
   assert.match(main, /await lifecycle\?\.stop\(\)/);
   assert.match(main, /resolveRuntimeMode/);
   assert.match(main, /agent-runtime-local\.ps1/);
+  assert.match(main, /runDetachedCommand/);
   assert.doesNotMatch(main, /Docker Desktop\.exe/);
 });
 
@@ -30,7 +31,18 @@ test("shell commands and hidden shortcut are present", () => {
   assert.equal(packageJson.scripts?.["shell:dev"], "electron app-shell/main.mjs");
   assert.equal(packageJson.scripts?.["shell:test"], "node --test app-shell/*.test.mjs");
   assert.equal(packageJson.devDependencies?.electron, "41.2.1");
-  assert.match(read("start-opencanvas-shell.vbs"), /npm\.cmd run shell:dev/);
+  const shortcut = read("start-opencanvas-shell.vbs");
+  assert.match(shortcut, /AGENT_RUNTIME_MODE/);
+  assert.match(shortcut, /AGENT_BACKEND_BASE_URL/);
+  assert.match(shortcut, /npm\.cmd run shell:dev/);
+});
+
+test("Electron shell records lifecycle and child service logs", () => {
+  assert.match(main, /app-shell\.log/);
+  assert.match(main, /api\.out\.log/);
+  assert.match(main, /api\.err\.log/);
+  assert.match(main, /frontend\.out\.log/);
+  assert.match(main, /frontend\.err\.log/);
 });
 
 test("Agent Runtime compose profiles accept the shell callback URL", () => {

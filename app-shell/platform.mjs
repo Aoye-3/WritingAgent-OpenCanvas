@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { closeSync, openSync } from "node:fs";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -16,6 +17,30 @@ export async function run(command, args, options = {}) {
   });
 }
 
+export async function runDetachedCommand(command, args, options = {}) {
+  const spawnImpl = options.spawnImpl ?? spawn;
+  await new Promise((resolve, reject) => {
+    const child = spawnImpl(command, args, {
+      cwd: options.cwd,
+      env: options.env,
+      windowsHide: true,
+      stdio: "ignore",
+    });
+    const timeout = options.timeout
+      ? setTimeout(() => {
+        child.kill?.();
+        reject(new Error(`${command} timed out.`));
+      }, options.timeout)
+      : undefined;
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (timeout) clearTimeout(timeout);
+      if (code === 0) resolve();
+      else reject(new Error(`${command} exited with code ${code}.`));
+    });
+  });
+}
+
 export function buildSpawnCommand(command, args, options = {}) {
   const platform = options.platform ?? process.platform;
   if (platform === "win32" && /\.(cmd|bat)$/i.test(command)) {
@@ -29,12 +54,20 @@ export function buildSpawnCommand(command, args, options = {}) {
 
 export function startProcess(command, args, options = {}) {
   const spawnCommand = buildSpawnCommand(command, args);
-  const child = spawn(spawnCommand.command, spawnCommand.args, {
-    cwd: options.cwd,
-    env: options.env,
-    windowsHide: true,
-    stdio: "ignore",
-  });
+  const stdout = options.stdoutPath ? openSync(options.stdoutPath, "a") : "ignore";
+  const stderr = options.stderrPath ? openSync(options.stderrPath, "a") : "ignore";
+  let child;
+  try {
+    child = spawn(spawnCommand.command, spawnCommand.args, {
+      cwd: options.cwd,
+      env: options.env,
+      windowsHide: true,
+      stdio: ["ignore", stdout, stderr],
+    });
+  } finally {
+    if (typeof stdout === "number") closeSync(stdout);
+    if (typeof stderr === "number") closeSync(stderr);
+  }
   child.on("error", () => undefined);
   return {
     pid: child.pid,
