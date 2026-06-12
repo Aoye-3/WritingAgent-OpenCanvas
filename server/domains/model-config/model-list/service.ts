@@ -29,9 +29,9 @@ export async function listProviderModels(payload: ProviderModelsPayload): Promis
     };
   }
 
-  const config = await resolveProviderApiConfig(provider.id);
-  const apiKey = payload.apiKey?.trim() || config.apiKey?.trim() || "";
-  const baseURL = payload.baseURL?.trim() || config.baseURL || provider.apiHost;
+  const config = await resolveProviderApiConfig(provider.id).catch(() => undefined);
+  const apiKey = payload.apiKey?.trim() || config?.apiKey?.trim() || "";
+  const baseURL = payload.baseURL?.trim() || config?.baseURL || provider.apiHost;
 
   if (!baseURL.trim()) {
     return {

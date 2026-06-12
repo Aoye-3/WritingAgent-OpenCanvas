@@ -9,6 +9,8 @@ import type { StreamStatus } from "../../agentRunLoop.js";
 export type AgentBackendRunnerInput = {
   payload: GenerateRequest;
   threadId: string;
+  projectId: string;
+  configuredModelApiId: string;
   runtimeConfig: AgentRuntimeConfig;
   messages: ChatMessage[];
   prompt: string;
@@ -30,6 +32,8 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
   const run = await (deps.runAgent ?? runAgentBackendAgent)({
     config,
     threadId: input.threadId,
+    projectId: input.projectId,
+    configuredModelApiId: input.configuredModelApiId,
     agentCard: input.runtimeConfig.agentCard,
     settings: input.runtimeConfig.settings,
     messages: input.messages,

@@ -9,7 +9,7 @@ const minimumSafeLength = 80;
 const minChunkLength = 24;
 const preferredChunkLength = 48;
 const maxChunkLength = 80;
-const unsafeStreamPattern = /#\s*AgentCard|#\s*Loaded Skills|#\s*Current User Instruction|#\s*Output Contract|FacetWrite runtime context|reasoning_content|"results"\s*:|"tool_call_id"\s*:/i;
+const unsafeStreamPattern = /#\s*AgentCard|#\s*Loaded Skills|#\s*Current User Instruction|#\s*Output Contract|FacetWrite runtime context|reasoning_content|LLM request failed:|Content Exists Risk|The configured LLM provider (?:is|rejected the request)|"results"\s*:|"tool_call_id"\s*:/i;
 
 export function createProgressiveTextGate(
   locale: GenerateRequest["locale"],

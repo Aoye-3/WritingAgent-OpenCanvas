@@ -14,8 +14,10 @@ import { mockText } from "./mockFallback.js";
 import { normalizeAgentRunOutput } from "./outputNormalizer.js";
 import { buildGenerationRunContext } from "./promptRunBuilder.js";
 import { createProgressiveTextGate } from "./progressiveTextGate.js";
-import { runProviderGeneration, runProviderGenerationStream, type ProviderRunnerDeps } from "./providerRunner.js";
+import type { ProviderRunnerDeps } from "./providerRunner.js";
 import { recordGenerationRun } from "./runRecorder.js";
+import { resolveConfiguredModelApi, type ConfiguredModelApi } from "../../domains/model-config/index.js";
+import { isConfiguredModelRuntimeReady } from "../../runtime/agentBackendAdapter/modelSync.js";
 
 export type GenerationService = {
   generateAndRecord: (payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void) => Promise<GenerateResponse>;
@@ -36,6 +38,10 @@ export type GenerationServiceDeps = {
   provider?: ProviderRunnerDeps;
   knowledge?: KnowledgeService;
   memory?: AgentRuntimeMemoryService;
+  modelRuntime?: {
+    resolveConfiguredModel: (configuredModelApiId: string) => Promise<ConfiguredModelApi>;
+    isModelReady: (configuredModelApiId: string) => boolean;
+  };
 };
 
 const streamLabels = {
@@ -52,20 +58,20 @@ export function createGenerationService(
 
   async function generateAndRecord(payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
-    const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge);
+    const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
+    const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     const agentCard = context.runtimeConfig.agentCard;
-    await storage.ensureThread(threadId, agentCard.id);
-    const facetwriteMemoryContent = context.runtimeConfig.settings.memory.enabled ? (await deps.memory?.readMemory())?.content : undefined;
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
 
     try {
       const agentBackendRun = await runAgentRuntimeGeneration({
         payload,
         threadId,
+        projectId: selection.projectId,
+        configuredModelApiId: context.modelSettings.configuredModelApiId!,
         runtimeConfig: context.runtimeConfig,
         messages: context.messages,
         prompt: context.prompt,
-        facetwriteMemoryContent,
         onToolEvent
       }, executionRuntime);
 
@@ -84,7 +90,7 @@ export function createGenerationService(
           const events = maybeCreateCanvasWriteRequest({
             storage,
             payload,
-            threadId,
+            threadId: selection.projectId,
             agentTitle: agentCard.title[payload.locale],
             text: normalized.text,
             events: [...runtimeEvents, ...(normalized.events ?? [])],
@@ -96,6 +102,8 @@ export function createGenerationService(
             threadId,
             agentCardId: agentCard.id,
             agentTitle: agentCard.title[payload.locale],
+            configuredModelApiId: context.modelSettings.configuredModelApiId,
+            modelId: context.modelSettings.model,
             mode: context.mode,
             prompt: context.prompt,
             text: normalized.text,
@@ -107,6 +115,10 @@ export function createGenerationService(
             usage: agentBackendRun.usage
           });
         }
+      } else {
+        const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend is disabled or unavailable"));
+        runtimeEvents.push(event);
+        onToolEvent?.(event);
       }
     } catch (error) {
       const event = createRuntimeFallbackEvent("agent-backend", error);
@@ -114,72 +126,19 @@ export function createGenerationService(
       onToolEvent?.(event);
     }
 
-    try {
-      const providerRun = await runProviderGeneration({
-        payload,
-        threadId,
-        agentCard,
-        providerId: context.providerId,
-        modelSettings: context.modelSettings,
-        messages: context.messages,
-        effectiveToolState: context.effectiveToolState,
-        storage,
-        knowledgeService: deps.knowledge,
-        onToolEvent
-      }, deps.provider);
-
-      const normalized = normalizeAgentRunOutput({
-        text: providerRun.text,
-        locale: payload.locale,
-        source: context.providerId,
-        events: providerRun.events
-      });
-
-      const events = maybeCreateCanvasWriteRequest({
-        storage,
-        payload,
-        threadId,
-        agentTitle: agentCard.title[payload.locale],
-        text: normalized.text,
-        events: [...runtimeEvents, ...(normalized.events ?? [])],
-        onToolEvent
-      });
-
-      return recordGenerationRun({
-        storage,
-        payload,
-        threadId,
-        agentCardId: agentCard.id,
-        agentTitle: agentCard.title[payload.locale],
-        mode: context.mode,
-        prompt: context.prompt,
-        text: normalized.text,
-        provider: context.providerId,
-        usedMock: false,
-        toolState: context.effectiveToolState,
-        events,
-        finishReason: providerRun.finishReason,
-        usage: providerRun.usage
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown generation error";
-      return recordGenerationRun({
-        storage,
-        payload,
-        threadId,
-        agentCardId: agentCard.id,
-        agentTitle: agentCard.title[payload.locale],
-        mode: context.mode,
-        prompt: context.prompt,
-        text: mockText(payload),
-        provider: "mock",
-        usedMock: true,
-        errorMessage: formatGenerationFailure(runtimeEvents, message),
-        toolState: context.effectiveToolState,
-        events: runtimeEvents,
-        finishReason: "mock_fallback"
-      });
-    }
+    return recordMockFallback({
+      storage,
+      payload,
+      threadId,
+      agentCardId: agentCard.id,
+      agentTitle: agentCard.title[payload.locale],
+      configuredModelApiId: context.modelSettings.configuredModelApiId,
+      modelId: context.modelSettings.model,
+      mode: context.mode,
+      prompt: context.prompt,
+      toolState: context.effectiveToolState,
+      events: runtimeEvents
+    });
   }
 
   async function generateAndRecordStream(
@@ -191,11 +150,10 @@ export function createGenerationService(
     } = {}
   ): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
-    const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge);
+    const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
+    const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     const agentCard = context.runtimeConfig.agentCard;
-    await storage.ensureThread(threadId, agentCard.id);
-    const facetwriteMemoryContent = context.runtimeConfig.settings.memory.enabled ? (await deps.memory?.readMemory())?.content : undefined;
-    const textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
+    let textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
 
     callbacks.onStatus?.({ phase: "thinking", label: streamLabels.thinking });
@@ -204,18 +162,17 @@ export function createGenerationService(
       const agentBackendRun = await runAgentRuntimeGeneration({
         payload,
         threadId,
+        projectId: selection.projectId,
+        configuredModelApiId: context.modelSettings.configuredModelApiId!,
         runtimeConfig: context.runtimeConfig,
         messages: context.messages,
         prompt: context.prompt,
-        facetwriteMemoryContent,
         onToolEvent: callbacks.onToolEvent,
         onToken: textGate.push,
         onStatus: callbacks.onStatus
       }, executionRuntime);
 
       if (agentBackendRun) {
-        textGate.flush();
-        callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
         const normalized = normalizeAgentRunOutput({
           text: agentBackendRun.text,
           locale: payload.locale,
@@ -226,11 +183,14 @@ export function createGenerationService(
           const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend returned internal runtime output"));
           runtimeEvents.push(...(normalized.events ?? []), event);
           callbacks.onToolEvent?.(event);
+          textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
         } else {
+          textGate.flush();
+          callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
           const events = maybeCreateCanvasWriteRequest({
             storage,
             payload,
-            threadId,
+            threadId: selection.projectId,
             agentTitle: agentCard.title[payload.locale],
             text: normalized.text,
             events: [...runtimeEvents, ...(normalized.events ?? [])],
@@ -242,6 +202,8 @@ export function createGenerationService(
             threadId,
             agentCardId: agentCard.id,
             agentTitle: agentCard.title[payload.locale],
+            configuredModelApiId: context.modelSettings.configuredModelApiId,
+            modelId: context.modelSettings.model,
             mode: context.mode,
             prompt: context.prompt,
             text: normalized.text,
@@ -253,86 +215,34 @@ export function createGenerationService(
             usage: agentBackendRun.usage
           });
         }
+      } else {
+        const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend is disabled or unavailable"));
+        runtimeEvents.push(event);
+        callbacks.onToolEvent?.(event);
       }
     } catch (error) {
       const event = createRuntimeFallbackEvent("agent-backend", error);
       runtimeEvents.push(event);
       callbacks.onToolEvent?.(event);
+      textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     }
 
-    try {
-      const providerRun = await runProviderGenerationStream({
-        payload,
-        threadId,
-        agentCard,
-        providerId: context.providerId,
-        modelSettings: context.modelSettings,
-        messages: context.messages,
-        effectiveToolState: context.effectiveToolState,
-        storage,
-        knowledgeService: deps.knowledge,
-        onToolEvent: callbacks.onToolEvent,
-        onToken: textGate.push,
-        onStatus: callbacks.onStatus
-      }, deps.provider);
-
-      textGate.flush();
-      callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
-      const normalized = normalizeAgentRunOutput({
-        text: providerRun.text,
-        locale: payload.locale,
-        source: context.providerId,
-        events: providerRun.events
-      });
-
-      const events = maybeCreateCanvasWriteRequest({
-        storage,
-        payload,
-        threadId,
-        agentTitle: agentCard.title[payload.locale],
-        text: normalized.text,
-        events: [...runtimeEvents, ...(normalized.events ?? [])],
-        onToolEvent: callbacks.onToolEvent
-      });
-
-      return recordGenerationRun({
-        storage,
-        payload,
-        threadId,
-        agentCardId: agentCard.id,
-        agentTitle: agentCard.title[payload.locale],
-        mode: context.mode,
-        prompt: context.prompt,
-        text: normalized.text,
-        provider: context.providerId,
-        usedMock: false,
-        toolState: context.effectiveToolState,
-        events,
-        finishReason: providerRun.finishReason,
-        usage: providerRun.usage
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown generation error";
-      const text = mockText(payload);
-      textGate.push(text);
-      textGate.flush();
-      return recordGenerationRun({
-        storage,
-        payload,
-        threadId,
-        agentCardId: agentCard.id,
-        agentTitle: agentCard.title[payload.locale],
-        mode: context.mode,
-        prompt: context.prompt,
-        text,
-        provider: "mock",
-        usedMock: true,
-        errorMessage: formatGenerationFailure(runtimeEvents, message),
-        toolState: context.effectiveToolState,
-        events: runtimeEvents,
-        finishReason: "mock_fallback"
-      });
-    }
+    const result = recordMockFallback({
+      storage,
+      payload,
+      threadId,
+      agentCardId: agentCard.id,
+      agentTitle: agentCard.title[payload.locale],
+      configuredModelApiId: context.modelSettings.configuredModelApiId,
+      modelId: context.modelSettings.model,
+      mode: context.mode,
+      prompt: context.prompt,
+      toolState: context.effectiveToolState,
+      events: runtimeEvents
+    });
+    textGate.push(result.text);
+    textGate.flush();
+    return result;
   }
 
   return { generateAndRecord, generateAndRecordStream };
@@ -348,7 +258,7 @@ function createRuntimeFallbackEvent(source: "agent-backend", error: unknown): To
     payload: {
       source,
       message: safeRuntimeErrorMessage(error),
-      fallback: "provider"
+      fallback: "mock"
     }
   };
 }
@@ -361,12 +271,68 @@ function safeRuntimeErrorMessage(error: unknown) {
   return message.slice(0, 240);
 }
 
-function formatGenerationFailure(runtimeEvents: ToolEventRecord[], providerMessage: string) {
+function formatGenerationFailure(runtimeEvents: ToolEventRecord[]) {
   const agentBackendMessage = runtimeEvents.find((event) => event.eventType === "agent_backend_runtime_failed")?.payload?.message;
   if (typeof agentBackendMessage === "string") {
-    return `AgentBackend failed: ${agentBackendMessage}; Provider failed: ${providerMessage}`;
+    return `AgentBackend failed: ${agentBackendMessage}`;
   }
-  return providerMessage;
+  return "AgentBackend failed with an unknown runtime error.";
+}
+
+async function prepareThreadModelSelection(
+  payload: GenerateRequest,
+  threadId: string,
+  storage: SQLiteStorageRepository,
+  modelRuntime?: GenerationServiceDeps["modelRuntime"]
+): Promise<{ projectId: string; configuredModel?: ConfiguredModelApi }> {
+  let thread = storage.getThread(threadId);
+  if (!thread) {
+    const projectId = safeId(payload.projectId);
+    if (!projectId || !storage.getProject(projectId)) {
+      throw new Error("A valid projectId is required before creating a conversation.");
+    }
+    await storage.ensureThread(threadId, projectId);
+    thread = storage.getThread(threadId);
+  }
+  if (!thread) throw new Error("Conversation could not be created.");
+  const configuredModelApiId = thread.configuredModelApiId?.trim();
+  if (!configuredModelApiId) {
+    throw new Error("Please select a project model before generating.");
+  }
+  if (!storage.getProjectModelBindings(thread.projectId).includes(configuredModelApiId)) {
+    throw new Error("The selected conversation model is not bound to this project.");
+  }
+  const configuredModel = await (modelRuntime?.resolveConfiguredModel ?? resolveConfiguredModelApi)(configuredModelApiId);
+  if (!configuredModel.enabled || !configuredModel.apiKey?.trim()) {
+    throw new Error("The selected project model is disabled or has no configured API key.");
+  }
+  if (!(modelRuntime?.isModelReady ?? isConfiguredModelRuntimeReady)(configuredModelApiId)) {
+    throw new Error("The selected project model is not synchronized with AgentBackend.");
+  }
+  return { projectId: thread.projectId, configuredModel };
+}
+
+function recordMockFallback(input: {
+  storage: SQLiteStorageRepository;
+  payload: GenerateRequest;
+  threadId: string;
+  agentCardId: string;
+  agentTitle: string;
+  configuredModelApiId?: string;
+  modelId?: string;
+  mode: "structured" | "chat";
+  prompt: string;
+  toolState: Parameters<typeof recordGenerationRun>[0]["toolState"];
+  events: ToolEventRecord[];
+}) {
+  return recordGenerationRun({
+    ...input,
+    text: mockText(input.payload),
+    provider: "mock",
+    usedMock: true,
+    errorMessage: formatGenerationFailure(input.events),
+    finishReason: "mock_fallback"
+  });
 }
 
 function maybeCreateCanvasWriteRequest(input: {

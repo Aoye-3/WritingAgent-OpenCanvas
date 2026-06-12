@@ -1,4 +1,4 @@
-﻿import test from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import { agentCards, defaultAgentSettings } from "../agentCards.js";
 import { createGenerationService } from "./generationService.js";
@@ -81,6 +81,10 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
     canvasWriteRequests,
     storage: {
       ensureThread: async () => undefined,
+      getThread: () => ({ id: "thread_test", projectId: "project_test", title: "Test", configuredModelApiId: "configured-test", updatedAt: "" }),
+      getProject: () => ({ id: "project_test", title: "Test", summary: "", updatedAt: "" }),
+      getProjectModelBindings: () => ["configured-test"],
+      getProjectSharedContext: () => undefined,
       listMessages: () => messages.map((message, index) => ({
         id: `msg_${index}`,
         threadId: "thread_test",
@@ -107,6 +111,22 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
   };
 }
 
+const fakeModelRuntime = {
+  resolveConfiguredModel: async () => ({
+    id: "configured-test",
+    providerId: "deepseek" as const,
+    modelId: "deepseek-test",
+    modelName: "DeepSeek Test",
+    modelType: "chat",
+    apiKey: "test-key",
+    baseURL: "https://api.deepseek.test",
+    enabled: true,
+    createdAt: "",
+    updatedAt: ""
+  }),
+  isModelReady: () => true
+};
+
 function fakeKnowledgeService(observedSearches: KnowledgeSearchInput[]) {
   return {
     search: async (input: KnowledgeSearchInput) => {
@@ -128,6 +148,7 @@ function fakeKnowledgeService(observedSearches: KnowledgeSearchInput[]) {
 test("generation facade records AgentBackend runs when AgentBackend is enabled", async () => {
   const { storage, records } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async () => ({
@@ -144,11 +165,13 @@ test("generation facade records AgentBackend runs when AgentBackend is enabled",
   assert.equal(result.provider, "agent-backend");
   assert.equal(result.usedMock, false);
   assert.equal((records[0] as { provider: string }).provider, "agent-backend");
+  assert.equal((records[0] as { configuredModelApiId: string }).configuredModelApiId, "configured-test");
 });
 
 test("generation facade creates a pending Canvas write request for AgentBackend canvas intent", async () => {
   const { storage, records, canvasWriteRequests } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async () => ({
@@ -182,6 +205,7 @@ test("generation facade recognizes Chinese and English Canvas write intents", as
   for (const chatInstruction of ["请写入画板", "save to canvas", "write this"]) {
     const { storage, canvasWriteRequests } = fakeStorage();
     const service = createGenerationService(storage, fakeAgentRuntime(), {
+      modelRuntime: fakeModelRuntime,
       agentBackend: {
         getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
         runAgent: async () => ({
@@ -205,9 +229,11 @@ test("generation facade recognizes Chinese and English Canvas write intents", as
   }
 });
 
-test("generation facade falls back to provider when AgentBackend returns no usable text", async () => {
+test("generation facade falls back to mock without calling provider when AgentBackend fails", async () => {
   const { storage, records } = fakeStorage();
+  let providerCalls = 0;
   const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async () => {
@@ -217,26 +243,26 @@ test("generation facade falls back to provider when AgentBackend returns no usab
     provider: {
       apiKey: "test-key",
       createClient: () => ({ createChatCompletion: async () => ({ choices: [] }) } as ChatClient),
-      runAgent: async (input) => ({
-        text: "Provider recovered text",
-        finishReason: "stop",
-        messages: input.messages,
-        events: []
-      })
+      runAgent: async () => {
+        providerCalls += 1;
+        throw new Error("Provider must not be called");
+      }
     }
   });
 
   const result = await service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "Hello" });
 
-  assert.equal(result.provider, "deepseek");
-  assert.equal(result.usedMock, false);
-  assert.equal(result.text, "Provider recovered text");
-  assert.ok((records[0] as { events: Array<{ eventType: string; payload: { fallback?: string } }> }).events.some((event) => event.eventType === "agent_backend_runtime_failed" && event.payload.fallback === "provider"));
+  assert.equal(result.provider, "mock");
+  assert.equal(result.usedMock, true);
+  assert.equal(providerCalls, 0);
+  assert.match(result.errorMessage ?? "", /AgentBackend returned an empty response/);
+  assert.ok((records[0] as { events: Array<{ eventType: string; payload: { fallback?: string } }> }).events.some((event) => event.eventType === "agent_backend_runtime_failed" && event.payload.fallback === "mock"));
 });
 
 test("generation facade blocks AgentBackend internal prompt output before recording", async () => {
   const { storage, records } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async () => ({
@@ -260,14 +286,82 @@ test("generation facade blocks AgentBackend internal prompt output before record
   const result = await service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "Hello" });
 
   assert.equal(result.text.includes("# AgentCard"), false);
-  assert.equal(result.text, "Provider recovered after internal AgentBackend output");
+  assert.equal(result.provider, "mock");
+  assert.equal(result.usedMock, true);
+  assert.match(result.text, /mock fallback mode/);
   assert.equal((records[0] as { output: string }).output.includes("# AgentCard"), false);
   assert.ok((records[0] as { events: Array<{ eventType: string }> }).events.some((event) => event.eventType === "internal_output_blocked"));
+});
+
+test("generation facade falls back to mock when AgentBackend returns a provider-unavailable message", async () => {
+  const { storage, records } = fakeStorage();
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: "The configured LLM provider is temporarily unavailable after multiple retries. Please wait a moment and continue the conversation.",
+        finishReason: "agent_backend_completed",
+        events: []
+      })
+    },
+    provider: {
+      apiKey: "test-key",
+      createClient: () => ({ createChatCompletion: async () => ({ choices: [] }) } as ChatClient),
+      runAgent: async (input) => ({
+        text: "Provider recovered after AgentBackend provider failure",
+        finishReason: "stop",
+        messages: input.messages,
+        events: []
+      })
+    }
+  });
+
+  const result = await service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "Hello" });
+
+  assert.equal(result.provider, "mock");
+  assert.equal(result.usedMock, true);
+  assert.match((records[0] as { errorMessage: string }).errorMessage, /internal runtime output/);
+});
+
+test("streaming generation falls back to mock without calling provider when AgentBackend fails", async () => {
+  const { storage } = fakeStorage();
+  let providerCalls = 0;
+  const tokens: string[] = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => {
+        throw new Error("AgentBackend stream failed");
+      }
+    },
+    provider: {
+      apiKey: "test-key",
+      createClient: () => ({ createChatCompletion: async () => ({ choices: [] }) } as ChatClient),
+      runAgentStream: async () => {
+        providerCalls += 1;
+        throw new Error("Provider must not be called");
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream(
+    { mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "Hello" },
+    { onToken: (token) => tokens.push(token) }
+  );
+
+  assert.equal(result.provider, "mock");
+  assert.equal(result.usedMock, true);
+  assert.equal(providerCalls, 0);
+  assert.match(result.errorMessage ?? "", /AgentBackend stream failed/);
+  assert.equal(tokens.join(""), result.text);
 });
 
 test("generation facade strips search result JSON from recorded assistant text", async () => {
   const { storage, records } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async () => ({
@@ -285,27 +379,23 @@ test("generation facade strips search result JSON from recorded assistant text",
   assert.equal((records[0] as { output: string }).output.includes('"results"'), false);
 });
 
-test("generation facade passes policy-aware tool context to provider runner", async () => {
+test("generation facade passes policy-aware tool context to AgentBackend", async () => {
   const { storage, records } = fakeStorage([
     { role: "user", text: "Old user" },
     { role: "assistant", text: "Old assistant" }
   ]);
-  let observedToolContext: unknown;
+  let observedInput: unknown;
   let observedMessages: unknown[] = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
     agentBackend: {
-      getRuntimeConfig: () => ({ enabled: false, baseUrl: "http://AgentBackend", assistantId: "lead_agent" })
-    },
-    provider: {
-      apiKey: "test-key",
-      createClient: () => ({ createChatCompletion: async () => ({ choices: [] }) } as ChatClient),
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async (input) => {
-        observedToolContext = input.toolContext;
+        observedInput = input;
         observedMessages = input.messages;
         return {
-          text: "Provider text",
+          text: "AgentBackend text",
           finishReason: "stop",
-          messages: input.messages,
           events: []
         };
       }
@@ -322,15 +412,15 @@ test("generation facade passes policy-aware tool context to provider runner", as
     selectedCanvasNodeId: "node_123"
   });
 
-  assert.equal(result.provider, "deepseek");
-  assert.equal((observedToolContext as { selectedCanvasNodeId: string }).selectedCanvasNodeId, "node_123");
-  assert.deepEqual((observedToolContext as { allowedToolRefs: string[] }).allowedToolRefs.includes("canvas_write"), true);
-  assert.equal((observedToolContext as { toolState: Record<string, boolean> }).toolState.canvas_write, true);
+  assert.equal(result.provider, "agent-backend");
+  assert.equal((observedInput as { selectedCanvasNodeId: string }).selectedCanvasNodeId, "node_123");
+  assert.deepEqual((observedInput as { allowedToolRefs: string[] }).allowedToolRefs.includes("canvas_write"), true);
+  assert.equal((observedInput as { toolState: Record<string, boolean> }).toolState.canvas_write, true);
   assert.ok(observedMessages.some((message) => (message as { content?: string }).content === "Old assistant"));
   assert.equal((records[0] as { mode: string }).mode, "chat");
 });
 
-test("generation facade injects Knowledge References into provider messages", async () => {
+test("generation facade injects Knowledge References into AgentBackend messages", async () => {
   const { storage, records } = fakeStorage();
   const observedSearches: KnowledgeSearchInput[] = [];
   let observedMessages: unknown[] = [];
@@ -340,23 +430,19 @@ test("generation facade injects Knowledge References into provider messages", as
     documentCount: 2,
     threshold: 0.4
   })), {
+    modelRuntime: fakeModelRuntime,
     agentBackend: {
-      getRuntimeConfig: () => ({ enabled: false, baseUrl: "http://AgentBackend", assistantId: "lead_agent" })
-    },
-    knowledge: fakeKnowledgeService(observedSearches) as never,
-    provider: {
-      apiKey: "test-key",
-      createClient: () => ({ createChatCompletion: async () => ({ choices: [] }) } as ChatClient),
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async (input) => {
         observedMessages = input.messages;
         return {
           text: "The codename is ORCHID-9137.",
           finishReason: "stop",
-          messages: input.messages,
           events: []
         };
       }
-    }
+    },
+    knowledge: fakeKnowledgeService(observedSearches) as never
   });
 
   await service.generateAndRecord({
@@ -392,23 +478,19 @@ test("generation facade skips knowledge search when disabled by settings or tool
       enabled: setup.knowledgeEnabled,
       baseIds: ["kb_orchid"]
     })), {
+      modelRuntime: fakeModelRuntime,
       agentBackend: {
-        getRuntimeConfig: () => ({ enabled: false, baseUrl: "http://AgentBackend", assistantId: "lead_agent" })
-      },
-      knowledge: fakeKnowledgeService(observedSearches) as never,
-      provider: {
-        apiKey: "test-key",
-        createClient: () => ({ createChatCompletion: async () => ({ choices: [] }) } as ChatClient),
+        getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
         runAgent: async (input) => {
           observedMessages = input.messages;
           return {
             text: "No knowledge context",
             finishReason: "stop",
-            messages: input.messages,
             events: []
           };
         }
-      }
+      },
+      knowledge: fakeKnowledgeService(observedSearches) as never
     });
 
     await service.generateAndRecord({
@@ -426,56 +508,16 @@ test("generation facade skips knowledge search when disabled by settings or tool
   }
 });
 
-test("generation facade applies per-run model thinking overrides", async () => {
-  const { storage } = fakeStorage();
-  let observedThinkingMode: unknown;
-  let observedReasoningEffort: unknown;
-  const service = createGenerationService(storage, fakeAgentRuntime(), {
-    agentBackend: {
-      getRuntimeConfig: () => ({ enabled: false, baseUrl: "http://AgentBackend", assistantId: "lead_agent" })
-    },
-    provider: {
-      apiKey: "test-key",
-      createClient: () => ({ createChatCompletion: async () => ({ choices: [] }) } as ChatClient),
-      runAgent: async (input) => {
-        observedThinkingMode = input.modelSettings.thinkingMode;
-        observedReasoningEffort = input.modelSettings.reasoningEffort;
-        return {
-          text: "Provider text",
-          finishReason: "stop",
-          messages: input.messages,
-          events: []
-        };
-      }
-    }
-  });
-
-  await service.generateAndRecord({
-    mode: "chat",
-    locale: "en",
-    agentCardId: "blog-post",
-    chatInstruction: "Think and search",
-    toolState: { web_search: true },
-    modelOverrides: { thinkingMode: "enabled", reasoningEffort: "max" }
-  });
-
-  assert.equal(observedThinkingMode, "enabled");
-  assert.equal(observedReasoningEffort, "max");
-});
-
-test("generation facade honors clear_context and falls back to mock on provider failure", async () => {
+test("generation facade honors clear_context and falls back to mock on AgentBackend failure", async () => {
   const { storage, records } = fakeStorage([{ role: "assistant", text: "Should not appear" }]);
   let observedMessages: unknown[] = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
     agentBackend: {
-      getRuntimeConfig: () => ({ enabled: false, baseUrl: "http://AgentBackend", assistantId: "lead_agent" })
-    },
-    provider: {
-      apiKey: "test-key",
-      createClient: () => ({ createChatCompletion: async () => ({ choices: [] }) } as ChatClient),
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async (input) => {
         observedMessages = input.messages;
-        throw new Error("provider down");
+        throw new Error("AgentBackend down");
       }
     }
   });
@@ -493,5 +535,5 @@ test("generation facade honors clear_context and falls back to mock on provider 
   assert.match(result.text, /Mock fallback/);
   assert.equal(observedMessages.some((message) => (message as { content?: string }).content === "Should not appear"), false);
   assert.equal((records[0] as { provider: string; errorMessage: string }).provider, "mock");
-  assert.match((records[0] as { errorMessage: string }).errorMessage, /provider down/);
+  assert.match((records[0] as { errorMessage: string }).errorMessage, /AgentBackend down/);
 });

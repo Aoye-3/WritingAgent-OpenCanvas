@@ -43,7 +43,8 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 
 ## Health
 - `GET /api/health`
-  - Returns server health.
+  - Returns `{ ok: true, schemaVersion: 3, apiContract: "facetwrite-project-first-v1" }`.
+  - The frontend blocks workspace requests when either Project-first contract value is incompatible.
 
 ## Catalog
 - `GET /api/tools/catalog`
@@ -96,8 +97,8 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - `contextValues`, when present, represents explicit left AgentCard structured inputs and current workspace state such as draft or Canvas node data. It must not contain bottom-bar placeholder content or historical defaults such as course notes or audience profiles.
   - `modelOverrides`, when present, is a per-run override for runtime-safe model controls such as `thinkingMode` and `reasoningEffort`. It does not mutate saved Agent settings.
   - Runs generation, records the result, and returns generation metadata and output.
-  - Uses the internal Agent Runtime when `AGENT_BACKEND_ENABLED=true`; otherwise uses the current TypeScript provider runtime. The current Agent Runtime implementation is the AgentBackend adapter.
-  - If Agent Runtime fails without a user-visible answer, returns only internal/runtime output, or returns an empty stream, the backend records a `agent_backend_runtime_failed` tool event and continues with the Provider runtime before considering Mock fallback.
+  - Uses AgentBackend as the only real generation runtime. If it is disabled or unavailable, generation records Mock fallback.
+  - If Agent Runtime fails without a user-visible answer, returns only internal/runtime output, or returns an empty stream, the backend records `agent_backend_runtime_failed` with `fallback:"mock"`.
   - Provider-private runtime metadata, including DeepSeek `reasoning_content`, is not part of the public request or response schema. It may be used internally for provider continuation only.
   - Direct Canvas-write intent in `chatInstruction`, such as `鍐欏叆`, `淇濆瓨鍒扮敾鏉縛, `save to canvas`, or `write this`, may cause the frontend to approve the newly returned pending Canvas write request after this endpoint completes. The API still records the request first; Canvas mutation remains behind the approve path.
   - When Agent knowledge is enabled and `knowledge_base` is active, generation searches selected Knowledge Bases before model execution. Retrieved references are injected into runtime context and recorded as `knowledge_search_completed` tool events.
@@ -108,7 +109,7 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - `token` events are emitted as progressive, user-visible assistant text segments after the backend safety gate has enough text to rule out obvious internal prompt, ToolUse, or reasoning leaks. Segments are intentionally small UI chunks so the right AI collaboration drawer can render a visible typewriter effect even when an upstream provider or runtime flushes a large block at once.
   - `error` payloads include `code` and `message`.
   - Agent Runtime custom subagent events from the current adapter are emitted as `tool_event` records with `eventType` prefixed by `AgentBackend_`.
-  - Recoverable Agent Runtime-to-Provider fallback is emitted as a `tool_event` with `eventType:"agent_backend_runtime_failed"` and a redacted payload containing `fallback:"provider"`.
+  - Recoverable Agent Runtime failure is emitted as a `tool_event` with `eventType:"agent_backend_runtime_failed"` and a redacted payload containing `fallback:"mock"`.
   - The `final` payload remains the recorded `GenerateResponse`. Clients should let the chat assistant typewriter queue drain before reconciling temporary streaming text with this final thread state so the drawer does not suddenly replace a large block of content.
 
 ## Agent Runtime Configuration
@@ -171,8 +172,8 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
 - `GET /api/threads/recent`
   - Returns `{ threads }`.
 - `POST /api/threads`
-  - Body may include `agentCardId` and optional safe `threadId`.
-  - Ensures the thread exists and returns `{ threadId, agentCardId }`.
+  - Body: `{ projectId: string, title?: string }`.
+  - Creates a Project conversation, defaults the title to `New conversation`, and returns `{ thread, threadId, projectId }`.
 - `PATCH /api/threads/:threadId`
   - Body: `{ title: string }`.
   - Renames an active thread/project by updating `threads.title` and `updated_at`.
@@ -197,17 +198,19 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
 - `GET /api/threads/:threadId/state`
   - Returns thread, sanitized messages, sanitized output versions, tool events, Canvas nodes, Canvas edges, Canvas Workflow state, Canvas Workflow suggestions, and pending Canvas write requests.
   - Internal prompt text, raw ToolUse JSON, provider-private fields such as DeepSeek `reasoning_content`, and AgentBackend replay values must not appear in `messages` or `outputVersions`; they are represented as redacted tool/runtime events when needed.
-  - Runtime fallback events such as `agent_backend_runtime_failed` are returned in `toolEvents` so the UI can show when a run switched from AgentBackend to the Provider runtime.
+  - Runtime fallback events such as `agent_backend_runtime_failed` are returned in `toolEvents`; the only generation fallback is Mock.
 
 ## Projects
 - `GET /api/projects`
-  - Returns active project/thread summaries. `title` is the custom thread/project title; Agent display name remains available as Agent metadata.
+  - Returns active Project summaries, model bindings, Thread counts, and asset counts.
 - `GET /api/projects/trash`
   - Returns trashed project/thread summaries.
+- `GET /api/projects/:projectId/threads`
+  - Returns `{ threads }` containing only active conversations for that Project, ordered by `updatedAt` descending.
 
 ## Canvas
 - `GET /api/threads/:threadId/canvas`
-  - Returns `{ nodes, edges, writeRequests, workflow, suggestions }` for an active thread.
+  - Resolves the Thread's Project, then returns the Project-owned `{ nodes, edges, objects, writeRequests, workflow, suggestions }`.
 - `POST /api/threads/:threadId/canvas/nodes`
   - Creates a Canvas node. Body accepts the existing node draft fields: `id`, `kind`, `title`, `content`, `x`, `y`, `width`, `height`, and `metadata`. `id` is optional and is used by session undo restore paths.
   - New nodes inherit the current Canvas Workflow stage into `metadata.workflow.stage` unless the request supplies explicit workflow metadata.
@@ -216,6 +219,7 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
 - `PATCH /api/threads/:threadId/canvas/nodes/:nodeId`
   - Updates a Canvas node. Canvas V2 uses this for user-driven title/content edits, node drag position persistence, and node resize geometry persistence.
   - Updating `kind` converts a node between supported Canvas kinds. `role` is a workflow function node; AI write requests should continue to default to `document`.
+  - `includeInProjectContext` explicitly controls whether the node enters Project shared context.
 - `DELETE /api/threads/:threadId/canvas/nodes/:nodeId`
   - Deletes a Canvas node and removes attached directed edges.
 - `POST /api/threads/:threadId/canvas/edges`
@@ -263,6 +267,10 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
 - `GET /api/settings/configured-model-apis`
   - Returns `{ activeConfigId?, configs }`, where every config is a local callable `API + model` binding.
   - Summaries include binding id, provider id/label, model id/name/type, key configured state, key hint, base URL, enabled state, and timestamps. API key plaintext is never returned.
+- `GET /api/settings/model-runtime-sync-status`
+  - Returns per-Model Config AgentBackend synchronization state: `synced`, `failed`, `unsupported`, or `disabled`. It never returns API keys.
+- `POST /api/settings/model-runtime-sync/retry`
+  - Retries synchronization. Failed or unsupported models remain unavailable for generation.
 - `GET /api/settings/configured-model-apis/:configId`
   - Returns one redacted configured model API summary.
 - `POST /api/settings/configured-model-apis`
@@ -285,3 +293,16 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
   - Writing an API key requires explicit local key write confirmation.
 
 Implementation note: these HTTP contracts are stable while the internals move to domain modules. Provider registry, configured model API bindings, and provider model listing are served by `server/domains/model-config/`; legacy service files re-export that domain for compatibility.
+# Project And Conversation APIs (2026-06-11)
+
+- `POST /api/projects`: create an empty Project.
+- `PATCH /api/projects/:projectId`: rename a Project.
+- `PUT /api/projects/:projectId/models`: replace the Project's allowed Model Config IDs.
+- `POST /api/threads`: create a conversation; requires a valid `projectId`.
+- `GET /api/projects/:projectId/threads`: list the current Project's active conversations in most-recently-updated order.
+- `PATCH /api/threads/:threadId/model`: explicitly select the conversation Model Config.
+- `PATCH /api/threads/:threadId/inputs`: save Project-scoped Agent inputs; requires `agentCardId` and a monotonically increasing integer `revision`.
+- `PATCH /api/threads/:threadId/output-versions/:versionId/context`: explicitly include or exclude an output version from Project shared context.
+- `GET /api/threads/:threadId/state`: returns Thread history plus Project metadata, all Project Agent inputs, and Project Canvas state.
+
+Generation requests may include `projectId` when creating a new conversation. Existing conversations derive Project and model selection from backend storage. Provider/model names supplied by the frontend are not authoritative.

@@ -46,6 +46,7 @@ test("provider model listing falls back to static models with a safe error", asy
     await saveProviderApiConfig("deepseek", {
       apiKey: "sk-deepseek-local",
       baseURL: "https://api.deepseek.local",
+      defaultModel: "deepseek-explicit",
       confirmLocalKeyWrite: true
     });
 

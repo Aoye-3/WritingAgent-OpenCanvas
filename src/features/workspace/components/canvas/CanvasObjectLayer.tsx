@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { CanvasObject } from "../../../agents/types";
 import type { CanvasObjectPatch } from "../../../../../shared/canvasObjects";
+import { canvasTextFontSizes, type CanvasTextFontSize } from "../../../../../shared/canvasObjects";
+import type { CanvasNodeKind } from "../../../agents/types";
 import { getCanvasShape } from "./shapeCatalog";
 import { CanvasObjectContent } from "./CanvasObjectContent";
 
@@ -10,22 +12,32 @@ export function CanvasObjectLayer({
   objects,
   selectedObjectIds,
   transform,
+  onCreationPreviewBlocked,
   onDeleteObject,
   onSelectObject,
   onUpdateObject,
   onUpdateData,
+  onConvertText,
+  requestedEditingTextId,
   zoom
 }: {
   objects: CanvasObject[];
   selectedObjectIds: string[];
   transform: string;
+  onCreationPreviewBlocked: () => void;
   onDeleteObject: (objectId: string) => void;
   onSelectObject: (objectId: string, additive: boolean) => void;
   onUpdateObject: (objectId: string, geometry: CanvasObject["geometry"]) => void;
   onUpdateData: (objectId: string, data: NonNullable<CanvasObjectPatch["data"]>) => void;
+  onConvertText: (objectId: string, kind: Extract<CanvasNodeKind, "document" | "reference" | "note">) => void;
+  requestedEditingTextId?: string | null;
   zoom: number;
 }) {
   const [liveGeometry, setLiveGeometry] = useState<Record<string, Geometry>>({});
+  const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  useEffect(() => {
+    if (requestedEditingTextId) setEditingTextId(requestedEditingTextId);
+  }, [requestedEditingTextId]);
   const startGeometryDrag = (objectId: string, geometry: Geometry, event: React.PointerEvent, mode: "move" | "resize") => {
     event.stopPropagation();
     const originX = event.clientX;
@@ -101,6 +113,7 @@ export function CanvasObjectLayer({
               className={`canvas-free-arrow${selected ? " is-selected" : ""}`}
               data-testid="canvas-free-arrow"
               key={object.id}
+              onPointerEnter={onCreationPreviewBlocked}
               onClick={(event) => { event.stopPropagation(); onSelectObject(object.id, event.shiftKey); }}
               onDoubleClick={() => onDeleteObject(object.id)}
               onPointerDown={(event) => startGeometryDrag(object.id, geometry, event, "move")}
@@ -116,11 +129,55 @@ export function CanvasObjectLayer({
           );
         }
         const shape = getCanvasShape(object.kind === "shape" ? object.data.shapeId : undefined);
+        if (object.kind === "text") {
+          return (
+            <div
+              className={`canvas-board-object canvas-board-object-text${selected ? " is-selected" : ""}`}
+              data-testid="canvas-object-text"
+              key={object.id}
+              onClick={(event) => { event.stopPropagation(); onSelectObject(object.id, event.shiftKey); }}
+              onDoubleClick={(event) => { event.stopPropagation(); setEditingTextId(object.id); }}
+              onPointerDown={(event) => {
+                if (editingTextId !== object.id) startGeometryDrag(object.id, geometry, event, "move");
+              }}
+              style={{ left: geometry.x ?? 0, top: geometry.y ?? 0, width: geometry.width ?? 320, minHeight: geometry.height ?? 40 }}
+            >
+              {editingTextId === object.id ? (
+                <textarea
+                  autoFocus
+                  className="canvas-free-text-editor"
+                  style={{ color: object.data.color, fontSize: object.data.fontSize }}
+                  value={object.data.text}
+                  onBlur={(event) => {
+                    onUpdateData(object.id, { ...object.data, text: event.currentTarget.value });
+                    setEditingTextId(null);
+                  }}
+                  onChange={(event) => onUpdateData(object.id, { ...object.data, text: event.currentTarget.value })}
+                  onKeyDown={(event) => { if (event.key === "Escape") event.currentTarget.blur(); }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                />
+              ) : (
+                <div className="canvas-free-text-value" style={{ color: object.data.color, fontSize: object.data.fontSize }}>
+                  {object.data.text || "Double-click to edit"}
+                </div>
+              )}
+              {selected && editingTextId !== object.id ? (
+                <div className="canvas-free-text-menu" onPointerDown={(event) => event.stopPropagation()}>
+                  {canvasTextFontSizes.map((fontSize) => <button className={object.data.fontSize === fontSize ? "is-active" : ""} key={fontSize} type="button" onClick={() => onUpdateData(object.id, { ...object.data, fontSize: fontSize as CanvasTextFontSize })}>{fontSize}</button>)}
+                  <input aria-label="Text color" type="color" value={object.data.color} onChange={(event) => onUpdateData(object.id, { ...object.data, color: event.currentTarget.value })} />
+                  {(["document", "reference", "note"] as const).map((kind) => <button key={kind} type="button" onClick={() => onConvertText(object.id, kind)}>To {kind}</button>)}
+                </div>
+              ) : null}
+              {selected ? <button className="canvas-object-resize-handle" type="button" aria-label="Resize canvas object" onPointerDown={(event) => startGeometryDrag(object.id, geometry, event, "resize")} /> : null}
+            </div>
+          );
+        }
         return (
           <div
             className={`canvas-board-object canvas-board-object-${object.kind}${selected ? " is-selected" : ""}${object.kind === "shape" ? ` is-${shape.className}` : ""}`}
             data-testid={`canvas-object-${object.kind}`}
             key={object.id}
+            onPointerEnter={onCreationPreviewBlocked}
             onClick={(event) => { event.stopPropagation(); onSelectObject(object.id, event.shiftKey); }}
             onDoubleClick={() => onDeleteObject(object.id)}
             onPointerDown={(event) => startGeometryDrag(object.id, geometry, event, "move")}

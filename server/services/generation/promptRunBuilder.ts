@@ -1,5 +1,5 @@
 import type { AgentRuntimeAdapter } from "../../agentRuntimeAdapter.js";
-import { getModel, getProviderId, getSystemPrompt } from "../../config/providerConfig.js";
+import { getSystemPrompt } from "../../config/providerConfig.js";
 import type { GenerateRequest } from "../../contracts/generation.js";
 import { buildAgentPrompt } from "../../promptBuilder.js";
 import type { ChatMessage } from "../../providerRuntime.js";
@@ -10,7 +10,8 @@ import type { ProviderId } from "../../types.js";
 import type { KnowledgeService } from "../../knowledge/service.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import { isChatMode } from "./mockFallback.js";
-import { resolveConfiguredModelApi } from "../../domains/model-config/index.js";
+import type { ConfiguredModelApi } from "../../domains/model-config/index.js";
+import { shouldExcludeFromModelContext } from "./outputNormalizer.js";
 
 export type GenerateModelSettings = NonNullable<ReturnType<AgentRuntimeAdapter["resolveAgentCard"]>["settings"]>["model"];
 
@@ -30,23 +31,29 @@ export async function buildGenerationRunContext(
   threadId: string,
   storage: SQLiteStorageRepository,
   agentRuntime: AgentRuntimeAdapter,
-  knowledgeService?: KnowledgeService
+  knowledgeService?: KnowledgeService,
+  configuredModel?: ConfiguredModelApi
 ): Promise<GenerationRunContext> {
   const runtimeConfig = await agentRuntime.getAgentRuntimeConfig(payload.agentCardId ?? payload.taskId ?? "");
   const agentCard = runtimeConfig.agentCard;
+  const thread = storage.getThread?.(threadId);
+  const projectContext = thread ? storage.getProjectSharedContext?.(thread.projectId) : undefined;
+  const effectivePayload = projectContext
+    ? { ...payload, contextValues: { project: projectContext, ...payload.contextValues } }
+    : payload;
   const effectiveToolState: ToolState = { ...runtimeConfig.settings.tools, ...payload.toolState };
   const skills = await loadSkillsByRefs(agentCard.skillRefs);
   const prompt = buildAgentPrompt({
     agentCard,
     skills,
     locale: payload.locale,
-    structuredValues: payload.structuredValues ?? payload.formValues,
-    contextValues: payload.contextValues,
+    structuredValues: effectivePayload.structuredValues ?? effectivePayload.formValues,
+    contextValues: effectivePayload.contextValues,
     chatInstruction: payload.chatInstruction,
     freeTextPrompt: payload.freeTextPrompt,
     toolState: effectiveToolState
   });
-  const modelSettings = await resolveModelSettings(runtimeConfig.settings.model, payload.providerId, payload.modelOverrides);
+  const modelSettings = await resolveModelSettings(runtimeConfig.settings.model, configuredModel, payload.modelOverrides);
   const userPrompt = userPromptForModel(payload, agentCard.outputContract.type);
   const knowledge = await buildKnowledgeContext({
     knowledgeService,
@@ -80,16 +87,16 @@ export async function buildGenerationRunContext(
 
 export async function resolveModelSettings(
   settings: GenerateModelSettings | undefined,
-  overrideProviderId?: ProviderId,
+  configured?: ConfiguredModelApi,
   modelOverrides?: GenerateRequest["modelOverrides"]
 ): Promise<GenerateModelSettings> {
-  const configuredModelApiId = overrideProviderId ? undefined : settings?.configuredModelApiId;
-  const configured = configuredModelApiId ? await resolveConfiguredModelApi(configuredModelApiId) : undefined;
-  const providerId = overrideProviderId ?? configured?.providerId ?? settings?.providerId ?? getProviderId();
+  if (!configured?.enabled || !configured.apiKey?.trim()) {
+    throw new Error("Please select an enabled project model with a configured API key before generating.");
+  }
   return {
-    configuredModelApiId,
-    providerId,
-    model: configured?.modelId || settings?.model?.trim() || getModel(providerId),
+    configuredModelApiId: configured.id,
+    providerId: configured.providerId,
+    model: configured.modelId,
     temperature: settings?.temperature ?? 0.7,
     topP: settings?.topP ?? 1,
     contextCount: settings?.contextCount ?? 5,
@@ -118,7 +125,9 @@ export function buildChatMessages(
 ): ChatMessage[] {
   const messages: ChatMessage[] = [{ role: "system", content: input.systemPrompt }];
   if (!input.clearContext && input.contextCount > 0) {
-    const history = storage.listMessages(input.threadId).slice(-input.contextCount);
+    const history = storage.listMessages(input.threadId)
+      .filter((message) => !shouldExcludeFromModelContext(message.text))
+      .slice(-input.contextCount);
     for (const message of history) {
     messages.push({ role: message.role, content: message.text });
     }

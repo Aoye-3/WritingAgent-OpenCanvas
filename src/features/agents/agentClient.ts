@@ -16,8 +16,22 @@ export async function fetchAgentCards(): Promise<AgentCard[]> {
   return payload.agentCards;
 }
 
-export async function createThread(agentCardId: string): Promise<ThreadCreateResponse> {
-  return apiPost<ThreadCreateResponse>("/api/threads", { agentCardId });
+export async function createProject(title: string): Promise<ProjectSummary> {
+  const payload = await apiPost<{ project: ProjectSummary }>("/api/projects", { title });
+  return payload.project;
+}
+
+export async function createThread(projectId: string, title = "New conversation"): Promise<ThreadCreateResponse> {
+  return apiPost<ThreadCreateResponse>("/api/threads", { projectId, title });
+}
+
+export async function fetchProjectThreads(projectId: string): Promise<StoredThread[]> {
+  const payload = await apiGet<{ threads: StoredThread[] }>(`/api/projects/${encodeURIComponent(projectId)}/threads`);
+  return payload.threads;
+}
+
+export async function fetchProjectFirstHealth(): Promise<unknown> {
+  return apiGet<unknown>("/api/health");
 }
 
 export async function fetchRecentThreads(): Promise<StoredThread[]> {
@@ -55,9 +69,35 @@ export async function renameThread(threadId: string, title: string): Promise<Sto
   return payload.thread;
 }
 
-export async function saveThreadInputs(threadId: string, structuredValues: Record<string, string | string[]>): Promise<Record<string, string | string[]>> {
-  const payload = await apiPatch<{ structuredValues: Record<string, string | string[]> }>(`/api/threads/${encodeURIComponent(threadId)}/inputs`, { structuredValues });
-  return payload.structuredValues;
+export async function renameProject(projectId: string, title: string): Promise<ProjectSummary> {
+  const payload = await apiPatch<{ project: ProjectSummary }>(`/api/projects/${encodeURIComponent(projectId)}`, { title });
+  return payload.project;
+}
+
+export async function bindProjectModels(projectId: string, configuredModelApiIds: string[]): Promise<string[]> {
+  const payload = await apiPut<{ configuredModelApiIds: string[] }>(`/api/projects/${encodeURIComponent(projectId)}/models`, { configuredModelApiIds });
+  return payload.configuredModelApiIds;
+}
+
+export async function selectThreadModel(threadId: string, configuredModelApiId?: string): Promise<StoredThread> {
+  const payload = await apiPatch<{ thread: StoredThread }>(`/api/threads/${encodeURIComponent(threadId)}/model`, { configuredModelApiId });
+  return payload.thread;
+}
+
+export async function moveProjectToTrash(projectId: string): Promise<void> {
+  await apiPost<{ ok: true }>(`/api/projects/${encodeURIComponent(projectId)}/trash`);
+}
+
+export async function restoreProjectFromTrash(projectId: string): Promise<void> {
+  await apiPost<{ ok: true }>(`/api/projects/${encodeURIComponent(projectId)}/restore`);
+}
+
+export async function hardDeleteProject(projectId: string): Promise<void> {
+  await apiDelete<{ ok: true }>(`/api/projects/${encodeURIComponent(projectId)}`);
+}
+
+export async function saveThreadInputs(threadId: string, agentCardId: string, structuredValues: Record<string, string | string[]>, revision: number): Promise<{ structuredValues: Record<string, string | string[]>; revision: number }> {
+  return apiPatch<{ structuredValues: Record<string, string | string[]>; revision: number }>(`/api/threads/${encodeURIComponent(threadId)}/inputs`, { agentCardId, structuredValues, revision });
 }
 
 export async function fetchAgentSettings(agentCardId: string): Promise<AgentSettings> {
@@ -85,4 +125,8 @@ export async function saveAgentSettings(agentCardId: string, settings: AgentSett
 
 export async function fetchThreadState(threadId: string): Promise<ThreadStateResponse> {
   return apiGet<ThreadStateResponse>(`/api/threads/${encodeURIComponent(threadId)}/state`);
+}
+
+export async function setOutputVersionProjectContext(threadId: string, versionId: string, included: boolean): Promise<void> {
+  await apiPatch<{ ok: true }>(`/api/threads/${encodeURIComponent(threadId)}/output-versions/${encodeURIComponent(versionId)}/context`, { included });
 }

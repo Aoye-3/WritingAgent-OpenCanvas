@@ -10,20 +10,30 @@ export type MindChainEdge = {
   targetNodeId: string;
 };
 
-export function formatMindChain(nodeId: string, nodes: MindChainNode[], edges: MindChainEdge[], locale: "en" | "zh") {
+export type CanvasMindChainContext = {
+  text: string;
+  nodeCount: number;
+};
+
+export function formatMindChainContext(nodeId: string, nodes: MindChainNode[], edges: MindChainEdge[], locale: "en" | "zh"): CanvasMindChainContext | null {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const startId = findChainStart(nodeId, edges);
   const orderedIds = followDirectedChain(startId, edges);
   const orderedNodes = orderedIds.map((id) => nodeById.get(id)).filter((node): node is MindChainNode => Boolean(node));
-  if (orderedNodes.length === 0) return "";
+  if (orderedNodes.length === 0) return null;
   const title = locale === "zh" ? "请基于以下 Canvas 思维链协作：" : "Please collaborate using this Canvas mind chain:";
-  return [
+  const text = [
     title,
     ...orderedNodes.map((node, index) => [
       `${index + 1}. [${node.kind}] ${node.title || node.id}`,
       node.content.trim() || (locale === "zh" ? "（空节点）" : "(empty node)")
     ].join("\n"))
   ].join("\n\n");
+  return { text, nodeCount: orderedNodes.length };
+}
+
+export function formatMindChain(nodeId: string, nodes: MindChainNode[], edges: MindChainEdge[], locale: "en" | "zh") {
+  return formatMindChainContext(nodeId, nodes, edges, locale)?.text ?? "";
 }
 
 export function findChainStart(nodeId: string, edges: MindChainEdge[]) {

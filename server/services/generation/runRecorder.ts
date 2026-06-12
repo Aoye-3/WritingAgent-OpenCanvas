@@ -11,6 +11,8 @@ export type RecordRunInput = {
   threadId: string;
   agentCardId: string;
   agentTitle: string;
+  configuredModelApiId?: string;
+  modelId?: string;
   mode: "structured" | "chat";
   prompt: string;
   text: string;
@@ -27,6 +29,8 @@ export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
   const saved = input.storage.recordRun({
     threadId: input.threadId,
     agentCardId: input.agentCardId,
+    configuredModelApiId: input.configuredModelApiId,
+    modelId: input.modelId,
     mode: input.mode,
     prompt: input.prompt,
     output: input.text,

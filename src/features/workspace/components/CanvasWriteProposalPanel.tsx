@@ -95,6 +95,7 @@ export function CanvasWriteProposalPanel({
 
 function operationLabel(operation: CanvasWriteRequest["operation"], locale: "en" | "zh") {
   if (locale !== "zh") return operation;
+  if (operation === "replace_range") return "局部替换";
   return { create: "创建", replace: "替换", append: "追加" }[operation];
 }
 

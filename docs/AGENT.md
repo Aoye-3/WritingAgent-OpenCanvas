@@ -79,7 +79,7 @@ AgentBackend and provider responses are classified before recording:
 
 Only `assistant_text` may enter `messages` and `output_versions`. `tool_event` and `internal_event` are exposed through the runtime timeline with redacted payload previews.
 
-Recoverable AgentBackend failures are also runtime events. If AgentBackend returns no user-visible text or returns content that the output boundary classifies as internal/runtime-only, FacetWrite records `agent_backend_runtime_failed` and immediately continues with the Provider runtime. The chat message is recorded from the Provider result, while the timeline shows that AgentBackend was bypassed for that run.
+Recoverable AgentBackend failures are also runtime events. If AgentBackend returns no user-visible text or returns content classified as internal/runtime-only, FacetWrite records `agent_backend_runtime_failed` and records a Mock fallback. The local Provider runtime is not called by generation.
 
 ## Agent Runtime Main Agent And Subagents
 Agent Runtime is FacetWrite's internal execution subsystem when `AGENT_BACKEND_ENABLED=true`; the current adapter is AgentBackend.

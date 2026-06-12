@@ -122,14 +122,25 @@ Runtime acceptance:
 - Response provider must be `agent-backend` and `usedMock:false`.
 - In the right-side AI conversation drawer, a streaming run must show the assistant avatar/status immediately and then receive visible text before the final `GenerateResponse` completes.
 - Tool events must not include `agent_backend_runtime_failed`.
-- Run five short generations in a row and confirm none fall back to Provider or Mock.
+- Run five short generations in a row and confirm none fall back to Mock.
 
 Fallback verification:
 
 - Stop Agent Runtime.
 - Run one generation.
-- Confirm `agent_backend_runtime_failed` is emitted and Provider fallback still works.
-- This proves fallback exists, but it is not the passing condition for Agent Runtime acceptance.
+- Confirm `agent_backend_runtime_failed` is emitted and the response uses Mock fallback.
+- Confirm the local Provider runner is never called.
+
+Model synchronization:
+
+```bash
+curl http://127.0.0.1:17777/api/settings/model-runtime-sync-status
+curl -X POST http://127.0.0.1:17777/api/settings/model-runtime-sync/retry
+```
+
+- Model Config is the only generation model source.
+- A failed or unsupported synchronization is a degraded state and blocks that model from generation.
+- Status and retry responses must never expose API keys.
 
 ## ToolUse Acceptance
 

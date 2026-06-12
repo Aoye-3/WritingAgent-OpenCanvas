@@ -33,9 +33,9 @@ Knowledge Base vector stores and uploads are created under:
 - `schema_version`
   - Tracks local schema version and application time.
 - `projects`
-  - Local project records. Current default project is `local-project`.
+  - Top-level workspace records. New Projects have no default model or inherited context.
 - `threads`
-  - Thread/project records with `agent_card_id`, custom project `title`, timestamps, and optional `deleted_at`.
+  - Conversations belonging to one Project, with an optional explicitly selected `configured_model_api_id`.
 - `messages`
   - User and assistant messages for a thread.
 - `runs`
@@ -57,7 +57,7 @@ Knowledge Base vector stores and uploads are created under:
 - `quick_messages`
   - Per-Agent quick message text.
 - `canvas_nodes`
-  - Canvas node state: kind, title, content, position, size, metadata JSON, timestamps.
+  - Project-owned Canvas node state, including `project_id` and `include_in_project_context`.
 - `canvas_objects`
   - Saved non-semantic board artifacts. `kind` is `arrow`, `shape`, `table`, or `asset`; geometry and type-specific data are stored as JSON.
 - `canvas_workflows`
@@ -99,13 +99,11 @@ Canvas pan, drag, resize, and hit testing are presentation-only. React Flow view
 
 Free arrows, shapes, tables, and asset cards are explicit saved user artifacts and therefore live in `canvas_objects`. They never create `canvas_edges` implicitly. Asset bytes live under `.facetwrite/threads/<threadId>/user-data/uploads/`; SQLite stores only safe metadata and the thread-relative path.
 
-## Thread And Project Title Semantics
-The current project list is backed by `threads`; there is no separate project table-level rename. Renaming a project updates `threads.title` and `updated_at` for active, non-trashed threads only.
-
-Recent projects and Projects search prefer the custom thread title for the primary label. AgentCard title remains secondary type metadata.
+## Thread And Project Semantics
+Projects are backed by `projects` and renamed independently from their Threads. Threads are conversations inside a Project and do not own Agent identity, Canvas resources, project model bindings, or project shared context.
 
 ## Migration Notes
-Schema creation and migration live in `server/db/schema.ts`. The migration is idempotent and currently ensures `threads.deleted_at` exists for trash/restore behavior plus the Canvas Workflow tables.
+Schema creation and migration live in `server/db/schema.ts`. Schema version 3 intentionally clears workspace data, removes `thread_inputs` and `threads.agent_card_id`, rebuilds Canvas tables with `project_id`, adds explicit context-inclusion flags, and adds Project Agent input revisions. Model Config, Agent definitions, and Knowledge data are retained.
 
 `server/storage.ts` remains the public storage facade. `server/db/sqlite.ts` owns SQLite initialization, `server/storageTypes.ts` owns shared record shapes, `server/storagePaths.ts` owns app-root/thread-directory resolution, and repository classes under `server/repositories/` handle focused persistence areas behind the facade without changing table names or local paths.
 
@@ -121,3 +119,15 @@ Knowledge Base metadata is stored in FacetWrite's main SQLite database, while em
 The main database intentionally does not store provider secrets. Embedding requests use process/runtime provider configuration such as `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL`, and optional Ollama base URL settings.
 
 File uploads are stored outside the main database under `.facetwrite/knowledge/uploads/<baseId>/`. The database keeps source metadata only; vector chunks remain in the per-base libSQL store.
+# Project-First Workspace Schema V3 (2026-06-11)
+
+- `projects`: top-level workspace, title, summary, timestamps, trash state.
+- `threads`: conversations belonging to a Project. `configured_model_api_id` is nullable and must be explicitly selected before generation.
+- `project_model_bindings`: Model Config entries allowed for a Project.
+- `project_agent_inputs`: structured input values keyed by `(project_id, agent_card_id)`.
+- `messages`, `runs`, `prompt_versions`, `output_versions`, and `tool_events`: Thread history.
+- Canvas resources are physically and logically Project-owned through `project_id`.
+- `canvas_nodes.include_in_project_context` and `output_versions.include_in_project_context` default to false.
+- `project_agent_inputs.revision` rejects stale autosave writes.
+
+Schema version 3 intentionally clears legacy workspace data to complete the physical Project migration. Model Config, Agent definitions, and knowledge-base data are retained.

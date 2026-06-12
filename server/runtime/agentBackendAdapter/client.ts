@@ -10,6 +10,8 @@ import { buildAgentBackendRuntimeMetadata } from "./taskAgentMapping.js";
 
 export type AgentBackendRunInput = {
   threadId: string;
+  projectId: string;
+  configuredModelApiId: string;
   agentCard: AgentCard;
   settings?: AgentSettings;
   messages: ChatMessage[];
@@ -42,7 +44,7 @@ const streamLabels = {
 } as const;
 
 type AgentBackendRunContext = {
-  model_name?: string;
+  model_name: string;
   thinking_enabled?: boolean;
   reasoning_effort?: string;
   facetwrite_memory_enabled: boolean;
@@ -69,7 +71,7 @@ export async function runAgentBackendAgent(input: AgentBackendRunInput): Promise
   });
 
   if (!response.ok) {
-    throw new Error(`AgentBackend runtime returned HTTP ${response.status}`);
+    throw new Error(await formatRuntimeHttpError(response));
   }
   if (!response.body) {
     throw new Error("AgentBackend runtime returned an empty stream");
@@ -81,6 +83,16 @@ export async function runAgentBackendAgent(input: AgentBackendRunInput): Promise
     onToken: input.onToken,
     onStatus: input.onStatus
   });
+}
+
+async function formatRuntimeHttpError(response: Response) {
+  const prefix = `AgentBackend runtime returned HTTP ${response.status}`;
+  const detail = (await response.text()).trim().replace(/\s+/g, " ").slice(0, 240);
+  if (!detail) return prefix;
+  if (/api[_-]?key|authorization|token|password|secret|cookie/i.test(detail)) {
+    return `${prefix}: credential-related error`;
+  }
+  return `${prefix}: ${detail}`;
 }
 
 export function buildRunRequest(input: AgentBackendRunInput, config: AgentBackendRuntimeConfig) {
@@ -118,25 +130,26 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
   };
 }
 
-function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId" | "settings" | "facetwriteMemoryContent">): AgentBackendRunContext {
-  const memoryEnabled = Boolean(input.settings?.memory.enabled);
+function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId" | "projectId" | "configuredModelApiId" | "settings" | "facetwriteMemoryContent">): AgentBackendRunContext {
+  const memoryEnabled = false;
   const memoryContent = memoryEnabled ? input.facetwriteMemoryContent?.trim() : "";
   if (!input.settings) {
     return {
+      model_name: input.configuredModelApiId,
       facetwrite_memory_enabled: false,
       facetwrite_memory_scope_id: input.threadId,
-      facetwrite_project_id: "local-project"
+      facetwrite_project_id: input.projectId
     };
   }
   const settings = input.settings;
   const thinkingMode = settings.model.thinkingMode ?? (settings.model.providerId === "deepseek" && settings.model.model === "deepseek-reasoner" ? "enabled" : "disabled");
   return {
-    model_name: settings.model.model,
+    model_name: input.configuredModelApiId,
     thinking_enabled: thinkingMode === "enabled",
     reasoning_effort: normalizeAgentBackendReasoningEffort(settings.model.reasoningEffort),
     facetwrite_memory_enabled: memoryEnabled,
     facetwrite_memory_scope_id: input.threadId,
-    facetwrite_project_id: "local-project",
+    facetwrite_project_id: input.projectId,
     ...(memoryContent ? { facetwrite_memory_content: memoryContent } : {})
   };
 }

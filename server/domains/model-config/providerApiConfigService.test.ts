@@ -38,27 +38,35 @@ test("provider API config store saves multiple providers and returns redacted su
   });
 });
 
-test("provider API config store migrates legacy OPENAI env settings once", async () => {
+test("provider API config store does not create a default model from OPENAI env settings", async () => {
   await withTempWorkspace(async () => {
     process.env.OPENAI_PROVIDER_ID = "dashscope";
     process.env.OPENAI_API_KEY = "sk-env-dashscope";
     process.env.OPENAI_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
     process.env.OPENAI_MODEL = "qwen-plus";
 
-    const config = await resolveProviderApiConfig("dashscope");
-    assert.equal(config.apiKey, "sk-env-dashscope");
-    assert.equal(config.baseURL, "https://dashscope.aliyuncs.com/compatible-mode/v1");
-    assert.equal(config.defaultModel, "qwen-plus");
-
     const store = await readProviderApiConfigStore();
-    assert.equal(Object.values(store.configs).some((item) => item.providerId === "dashscope" && item.apiKey === "sk-env-dashscope"), true);
+    assert.equal(Object.values(store.configs).some((item) => item.providerId === "dashscope"), false);
+    await assert.rejects(() => resolveProviderApiConfig("dashscope"), /not configured/i);
+  });
+});
+
+test("saving a Model Config does not mutate runtime OPENAI defaults", async () => {
+  await withTempWorkspace(async () => {
+    await saveProviderApiConfig("deepseek", {
+      apiKey: "sk-explicit",
+      defaultModel: "deepseek-explicit",
+      confirmLocalKeyWrite: true
+    });
+    assert.equal(process.env.OPENAI_API_KEY, undefined);
+    assert.equal(process.env.OPENAI_MODEL, undefined);
   });
 });
 
 test("provider API config save requires explicit confirmation when writing a key", async () => {
   await withTempWorkspace(async () => {
     await assert.rejects(
-      () => saveProviderApiConfig("deepseek", { apiKey: "sk-secret" }),
+      () => saveProviderApiConfig("deepseek", { apiKey: "sk-secret", defaultModel: "deepseek-explicit" }),
       /confirmLocalKeyWrite/
     );
   });
@@ -66,8 +74,8 @@ test("provider API config save requires explicit confirmation when writing a key
 
 test("provider API config can delete one provider without touching others", async () => {
   await withTempWorkspace(async () => {
-    await saveProviderApiConfig("deepseek", { apiKey: "sk-a", confirmLocalKeyWrite: true });
-    await saveProviderApiConfig("silicon", { apiKey: "sk-b", confirmLocalKeyWrite: true });
+    await saveProviderApiConfig("deepseek", { apiKey: "sk-a", defaultModel: "deepseek-explicit", confirmLocalKeyWrite: true });
+    await saveProviderApiConfig("silicon", { apiKey: "sk-b", defaultModel: "silicon-explicit", confirmLocalKeyWrite: true });
     await deleteProviderApiConfig("deepseek");
 
     const list = await listProviderApiConfigSummaries();

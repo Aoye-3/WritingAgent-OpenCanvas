@@ -13,8 +13,7 @@ User input
  -> AgentCard + AgentSettings
  -> PromptBuilder + Skills + Tool policy
  -> Agent Runtime, when AGENT_BACKEND_ENABLED=true
- -> Provider runtime fallback, when Agent Runtime is disabled or returns no user-visible answer
- -> Tool runtime, when local tool_calls are returned by the fallback runtime
+ -> Mock fallback, when Agent Runtime is disabled, fails, or returns no safe user-visible answer
  -> SQLite run records and Canvas write requests
  -> Thread state refresh in the UI
 ```
@@ -40,7 +39,7 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 
 ## Frontend
 - `src/app/App.tsx` is the control-plane composition layer. It owns navigation, active Agent selection, and view wiring, while thread, generation, Canvas, and trash workflows live in focused hooks under `src/app/hooks/`.
-- `src/app/hooks/useThreadSession.ts` owns thread creation, thread restore, and last-thread persistence.
+- `src/app/hooks/useThreadSession.ts` owns Project conversation listing, most-recent conversation restore, empty-Project conversation creation, visible session errors, operation ownership, and last-thread persistence.
 - `src/app/hooks/useCanvasState.ts` is the Canvas state composition hook. Canvas API operation orchestration lives in `useCanvasActions.ts`, session undo ownership lives in `useCanvasHistory.ts`, and pure undo helpers live in `shared/canvasHistory.ts`.
 - `src/app/hooks/useGenerationRun.ts` owns structured generation, chat generation, streaming token/status/tool-event updates, versions, collaboration messages, and direct Canvas-write intent handoff. For chat streaming it creates a temporary assistant message in the right AI collaboration drawer, fills that assistant bubble through a typewriter queue, then reconciles with persisted thread state after the final response. The main Canvas layout is not a streaming transcript surface. When the user explicitly asks to write to Canvas, it auto-approves only the new pending write requests created by that run.
 - `src/app/hooks/useProjectTrash.ts` owns trash, restore, and hard-delete flows.
@@ -49,7 +48,7 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 - `src/features/*` groups product areas: agents, canvas, generation, home, i18n, knowledge, projects, settings, start, tasks, and workspace.
 - `src/shared/ui/` is the lightweight FacetWrite UI primitive layer. It provides shared buttons, fields, chips, tabs, panels, drawers, dialogs, badges, and empty states without owning business data or backend/runtime behavior.
 - `public/assets/ui/` is the local UI and image asset library. Brand asset URLs are centralized in `src/shared/brandAssets.ts` so components avoid hard-coded public paths. See `docs/UI_ASSETS.md`.
-- `src/features/workspace/WorkspaceView.tsx` renders the main writing workspace: structured Agent inputs, document Canvas, collaboration drawer, tool events, version history, and workspace utility surfaces.
+- `src/features/workspace/WorkspaceView.tsx` renders the Project-first writing workspace: Project/model settings and Agent parameters in the left panel, Project-owned document Canvas in the center, and Project conversation history plus per-run Agent selection in the right collaboration drawer.
 - `src/features/workspace/components/AICollaborationDrawer.tsx` owns chat-side Canvas write proposals, temporary streaming assistant status, temporary response annotations, annotation chips, and highlighted assistant-message text. Annotation chips are shown both in the proposal panel and above the composer so the user can see the active write selection before sending "write" instructions. Annotation state is intentionally client-only and is cleared after write/cancel/page refresh.
 - `src/features/workspace/components/DocumentCanvas.tsx` renders Canvas V2 through `@xyflow/react`. React Flow owns viewport pan, zoom, selection, and node dragging; FacetWrite owns node rendering, node CRUD calls, resize persistence, and Canvas write approval flows. Shared Canvas submodules under `src/features/workspace/components/canvas/` keep the node frame, node-kind renderers, edge rendering, resize/layout helpers, node constants, status/context/selection chrome, and flow-node mapping separated from the Canvas container.
 - Canvas Workflow is layered over Canvas V2 without becoming the spatial engine. `shared/canvasWorkflow.ts` owns stage, Role-node, suggestion, and context-filtering pure helpers; `useCanvasState.ts`/`useCanvasActions.ts` own frontend state and API orchestration; `DocumentCanvas.tsx` and `CanvasNodeFrame.tsx` only render workflow controls, function nodes, badges, and suggestions through passed data/callbacks. Workflow control features that need targeted influence should be nodeized and relationship-driven, not added as more controls on ordinary content nodes.
@@ -57,7 +56,7 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 - Canvas hit testing is intentionally split between React Flow pane interactions and FacetWrite node controls. Inputs/buttons use `nodrag`, resize controls use `nodrag nopan`, and any future overlay must be browser-verified so it does not block pane context menus, pan/zoom, node drag, node resize, or node editing. See `docs/CANVAS.md`.
 - Canvas browser coverage lives in Playwright under `tests/e2e/canvas.spec.ts`; stable `data-testid` hooks are allowed for Canvas controls but should not become product behavior.
 - `src/shared/MarkdownText.tsx` preserves Markdown block/inline rendering while optionally wrapping annotated text fragments in highlight marks.
-- Runtime context is sourced from the left AgentCard structured input drawer plus current draft/Canvas state. The bottom workspace utility bar is reserved for future tools and prompt preview; it must not inject course-note, audience-profile, or other hidden context.
+- Runtime context is sourced from Project-scoped structured inputs plus current draft/Canvas state. Agent selection is a per-run choice recorded on `runs.agent_card_id`; model selection remains Thread state and Project model availability remains Project state.
 - Canvas node context is kind-aware and workflow-aware: notes are excluded by default, documents contribute previews, references contribute reference content, Role nodes contribute prompts only when connected to selected/filtered content nodes, and Canvas Workflow filters narrow runtime context by selected/specified chain, current stage, and `Role -> content` edges. Explicitly sent mind chains may include notes because they are user-selected context.
 - `src/features/ai-dashboard/AiDashboardView.tsx` renders the AI runtime dashboard for Agent Runtime status, Skills/MCP visibility, Agent mapping, and ToolUse bridge progress.
 - `src/features/knowledge/KnowledgeSettingsView.tsx` renders the local Knowledge Base management console for creating RAG bases, importing text/URL/sitemap/local-file sources, viewing indexing status, and testing retrieval.
@@ -98,7 +97,7 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 - The normalizer separates user-visible assistant text from tool/internal events. System prompts, AgentCard prompt blocks, ToolUse JSON, search result JSON, reasoning payloads, and AgentBackend replay values are blocked from chat/output surfaces and recorded only as redacted runtime events.
 - `/api/generate/stream` uses a server-side progressive text gate before releasing text so obvious internal prompt, ToolUse, search JSON, and reasoning payload leaks are not streamed into the UI. After the initial safety buffer, the gate emits small user-visible UI chunks instead of large paragraph-sized blocks; long flush/final remainders are also split before they reach the browser.
 - The frontend treats streamed chunks as input to a UI-only typewriter queue. In chat mode the visible queue target is the assistant bubble in `AICollaborationDrawer`; `final` remains authoritative for persistence, but the UI waits for that typewriter queue to drain and only corrects visible text if the final recorded output differs from the streamed text.
-- If AgentBackend returns an empty answer or only internal/runtime output, FacetWrite records a `agent_backend_runtime_failed` event and continues with the Provider runtime. Only if the Provider runtime also fails does the run enter Mock fallback.
+- If AgentBackend returns an empty answer, fails, or returns only blocked internal/runtime output, FacetWrite records `agent_backend_runtime_failed` and enters Mock fallback. Generation never calls the local Provider runtime.
 - Stored historical messages and output versions are sanitized again at read time so older leaked local records cannot reappear in the workspace UI.
 
 ## Knowledge Runtime Boundary
@@ -116,7 +115,7 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 - The Model Config page is a first-level workspace view. It shows the complete provider model catalog separately from the local API model list. The catalog is for discovery; the local list is the set of bindings that Agents and Knowledge Bases may call.
 - Dynamic model listing is backend-owned under `server/domains/model-config/model-list/`: `service.ts` handles fallback flow, `fetchers.ts` holds provider-specific remote strategies, and `utils.ts` owns response parsing and redaction helpers. `server/services/modelListService.ts` is only a compatibility export.
 - Dynamic model listing remains a provider catalog operation: request draft key/base URL first, saved binding for that provider second, registry defaults for non-secret fields last. It must not borrow a key from another provider.
-- The TypeScript provider runner resolves the active Agent's `configuredModelApiId` at request time. Legacy `providerId + model` settings are still accepted as fallback, but Agent settings must not store API keys or copied base URLs.
+- Generation resolves the Thread's explicitly selected backend Model Config at request time. There is no default, Agent-owned, environment, Provider-runner, or test compatibility model fallback.
 - Knowledge Bases resolve `embeddingConfigId` and `rerankConfigId` through the same configured model API store, so embedding/rerank credentials are not read from unrelated Agent provider settings.
 - DeepSeek `reasoning_content` is runtime-only state. It may be preserved across thinking-mode tool-call turns so DeepSeek can continue a valid conversation, but it is never part of FacetWrite's public message, output version, or Canvas schemas.
 - Provider-private fields are stripped for providers that do not explicitly support them, including OpenAI-compatible defaults.
@@ -146,12 +145,12 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 - `server/db/sqlite.ts` initializes SQLite, enables WAL and foreign keys, and calls schema migration.
 - `server/db/schema.ts` owns schema creation and idempotent migration checks.
 - `server/storageTypes.ts` owns shared storage and Canvas record shapes so repositories can depend on data contracts without importing the storage facade.
-- `server/storagePaths.ts` owns local app-root resolution and thread workspace directory creation. `FACETWRITE_APP_ROOT` can point tests or e2e runs at an isolated local workspace.
+- `server/storagePaths.ts` owns local app-root resolution and workspace directory creation. `FACETWRITE_APP_ROOT` can point tests or e2e runs at an isolated local workspace.
 - `server/repositories/*` contains focused repository boundaries introduced behind the facade. Thread listing/trash, Agent settings, Run/message/output/tool-event persistence, Knowledge metadata, and Canvas persistence delegate through repository classes; `server/storage.ts` remains the compatibility facade used by routes and services.
 - Runtime database path: `.facetwrite/data/facetwrite.db`.
 - Knowledge vector path: `.facetwrite/knowledge/<baseId>/vectors.db`.
 - Thread file workspace path: `.facetwrite/threads/<threadId>/user-data/`.
-- Thread rows are the current project identity boundary. Project rename updates `threads.title`; AgentCard names remain type metadata and are displayed as secondary information.
+- Project rows are the workspace, Canvas, shared-context, and model-binding boundary. Threads own conversation history and one explicit Model Config selection. Agents are selected per run and own no project context.
 - Canvas undo depth is stored in the generic `settings` table under the `canvas` key. The undo stack itself is browser-session state and is not persisted.
 - Canvas Workflow stores one project-level stage and Role library per thread in `canvas_workflows`. Individual node stage remains in `canvas_nodes.metadata.workflow.stage`. Role behavior lives in `role` Canvas nodes plus directed `Role -> content` edges; legacy `metadata.workflow.roles` is migrated away. Role suggestions live in `canvas_workflow_suggestions` with both `roleNodeId` and `targetNodeId`.
 
@@ -187,3 +186,16 @@ The frontend keeps orchestration in `DocumentCanvas`, tool overlays and file inp
 - Agent Runtime-generated write or side-effect proposals must still be converted into FacetWrite confirmation and approval flows before data changes. AgentRuntime does not read or write Canvas storage directly; it receives frontend-filtered context through the backend generation request and can affect Canvas only through the internal ToolUse bridge.
 - Tool definitions, prompt hints, schemas, risk levels, and approval requirements should stay in the Tool catalog/policy layer.
 - Provider details should stay behind provider runtime/profile code rather than being inferred in UI components.
+# Project-First Runtime Boundary (2026-06-11)
+
+FacetWrite uses `Project` as the only workspace and shared-context boundary.
+
+- A Project owns structured Agent inputs, Canvas resources, project summary, model bindings, and shared outputs.
+- A Thread belongs to one Project and owns only its conversation messages, runs, and current explicit Model Config selection.
+- An Agent is selected per run. Agent definitions contain capabilities, prompt templates, tools, and field definitions; they do not own project context or model configuration.
+- New Projects start with empty context. Runs automatically receive structured context from the current Project plus the current Thread history, never another Project's context.
+- AgentBackend receives the real `facetwrite_project_id` and current `thread_id`; the former `local-project` scope is forbidden.
+
+Canvas database columns and public Canvas records use `project_id`/`projectId`. Thread-scoped Canvas routes explicitly resolve the Thread's Project before calling the Project-owned Canvas domain.
+
+Project shared context is explicit and bounded. Project Agent inputs are shared by default; Canvas nodes and output versions enter shared context only when the user marks them included. Category budgets total at most 24,000 characters. Frontend generation and Thread restoration use operation ownership checks so stale asynchronous results cannot apply after a Project or Thread switch.

@@ -7,19 +7,20 @@ type CanvasRouteDeps = {
 };
 
 export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRouteDeps) {
+  const projectIdForThread = (threadId: string) => canvasService.projectIdForThread(threadId);
   app.get("/api/threads/:threadId/canvas", (request, response) => {
-    const canvas = canvasService.getCanvas(request.params.threadId);
-    if (!canvas) {
-      sendError(response, 404, "not_found", "Thread not found");
-      return;
+    try {
+      const canvas = canvasService.getCanvas(projectIdForThread(request.params.threadId));
+      if (!canvas) return sendError(response, 404, "not_found", "Project not found");
+      sendOk(response, canvas);
+    } catch (error) {
+      sendError(response, 404, "not_found", errorMessage(error, "Thread not found"));
     }
-
-    sendOk(response, canvas);
   });
 
   app.put("/api/threads/:threadId/canvas/workflow", (request, response) => {
     try {
-      sendOk(response, { workflow: canvasService.updateWorkflow(request.params.threadId, request.body ?? {}) });
+      sendOk(response, { workflow: canvasService.updateWorkflow(projectIdForThread(request.params.threadId), request.body ?? {}) });
     } catch (error) {
       sendError(response, 400, "bad_request", errorMessage(error, "Unable to update canvas workflow"));
     }
@@ -27,7 +28,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.patch("/api/threads/:threadId/canvas/nodes/:nodeId/workflow", (request, response) => {
     try {
-      const node = canvasService.updateNodeWorkflow(request.params.threadId, request.params.nodeId, request.body ?? {});
+      const node = canvasService.updateNodeWorkflow(projectIdForThread(request.params.threadId), request.params.nodeId, request.body ?? {});
       if (!node) {
         sendError(response, 404, "not_found", "Canvas node not found");
         return;
@@ -40,7 +41,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.post("/api/threads/:threadId/canvas/suggestions", (request, response) => {
     try {
-      sendOk(response, { suggestion: canvasService.createSuggestion(request.params.threadId, request.body ?? {}) });
+      sendOk(response, { suggestion: canvasService.createSuggestion(projectIdForThread(request.params.threadId), request.body ?? {}) });
     } catch (error) {
       sendError(response, 400, "bad_request", errorMessage(error, "Unable to create canvas workflow suggestion"));
     }
@@ -48,7 +49,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.post("/api/threads/:threadId/canvas/suggestions/:suggestionId/accept", (request, response) => {
     try {
-      const suggestion = canvasService.acceptSuggestion(request.params.threadId, request.params.suggestionId);
+      const suggestion = canvasService.acceptSuggestion(projectIdForThread(request.params.threadId), request.params.suggestionId);
       if (!suggestion) {
         sendError(response, 404, "not_found", "Canvas workflow suggestion not found");
         return;
@@ -61,7 +62,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.post("/api/threads/:threadId/canvas/suggestions/:suggestionId/ignore", (request, response) => {
     try {
-      const suggestion = canvasService.ignoreSuggestion(request.params.threadId, request.params.suggestionId);
+      const suggestion = canvasService.ignoreSuggestion(projectIdForThread(request.params.threadId), request.params.suggestionId);
       if (!suggestion) {
         sendError(response, 404, "not_found", "Canvas workflow suggestion not found");
         return;
@@ -74,7 +75,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.post("/api/threads/:threadId/canvas/suggestions/:suggestionId/convert-to-node", (request, response) => {
     try {
-      const result = canvasService.convertSuggestionToNode(request.params.threadId, request.params.suggestionId, request.body ?? {});
+      const result = canvasService.convertSuggestionToNode(projectIdForThread(request.params.threadId), request.params.suggestionId, request.body ?? {});
       if (!result) {
         sendError(response, 404, "not_found", "Canvas workflow suggestion not found");
         return;
@@ -87,7 +88,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.post("/api/threads/:threadId/canvas/nodes", (request, response) => {
     try {
-      sendOk(response, { node: canvasService.createNode(request.params.threadId, request.body ?? {}) });
+      sendOk(response, { node: canvasService.createNode(projectIdForThread(request.params.threadId), request.body ?? {}) });
     } catch (error) {
       sendError(response, 400, "bad_request", errorMessage(error, "Unable to create canvas node"));
     }
@@ -95,7 +96,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.post("/api/threads/:threadId/canvas/write-requests", (request, response) => {
     try {
-      sendOk(response, { request: canvasService.createWriteRequest(request.params.threadId, request.body ?? {}) });
+      sendOk(response, { request: canvasService.createWriteRequest(projectIdForThread(request.params.threadId), request.body ?? {}) });
     } catch (error) {
       sendError(response, 400, "bad_request", errorMessage(error, "Unable to create canvas write request"));
     }
@@ -103,7 +104,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.post("/api/threads/:threadId/canvas/edges", (request, response) => {
     try {
-      sendOk(response, { edge: canvasService.createEdge(request.params.threadId, request.body ?? {}) });
+      sendOk(response, { edge: canvasService.createEdge(projectIdForThread(request.params.threadId), request.body ?? {}) });
     } catch (error) {
       sendError(response, 400, "bad_request", errorMessage(error, "Unable to create canvas edge"));
     }
@@ -111,7 +112,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.delete("/api/threads/:threadId/canvas/edges/:edgeId", (request, response) => {
     try {
-      const deleted = canvasService.deleteEdge(request.params.threadId, request.params.edgeId);
+      const deleted = canvasService.deleteEdge(projectIdForThread(request.params.threadId), request.params.edgeId);
       if (!deleted) {
         sendError(response, 404, "not_found", "Canvas edge not found");
         return;
@@ -124,7 +125,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.post("/api/threads/:threadId/canvas/objects", (request, response) => {
     try {
-      sendOk(response, { object: canvasService.createObject(request.params.threadId, request.body ?? {}) });
+      sendOk(response, { object: canvasService.createObject(projectIdForThread(request.params.threadId), request.body ?? {}) });
     } catch (error) {
       sendError(response, 400, "bad_request", errorMessage(error, "Unable to create canvas object"));
     }
@@ -132,7 +133,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.patch("/api/threads/:threadId/canvas/objects/:objectId", (request, response) => {
     try {
-      const object = canvasService.updateObject(request.params.threadId, request.params.objectId, request.body ?? {});
+      const object = canvasService.updateObject(projectIdForThread(request.params.threadId), request.params.objectId, request.body ?? {});
       if (!object) return sendError(response, 404, "not_found", "Canvas object not found");
       sendOk(response, { object });
     } catch (error) {
@@ -142,7 +143,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.delete("/api/threads/:threadId/canvas/objects/:objectId", async (request, response) => {
     try {
-      if (!await canvasService.deleteObject(request.params.threadId, request.params.objectId)) {
+      if (!await canvasService.deleteObject(projectIdForThread(request.params.threadId), request.params.objectId)) {
         return sendError(response, 404, "not_found", "Canvas object not found");
       }
       sendOk(response, { ok: true });
@@ -153,7 +154,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.post("/api/threads/:threadId/canvas/assets", async (request, response) => {
     try {
-      sendOk(response, { object: await canvasService.createAsset(request.params.threadId, request.body ?? {}) });
+      sendOk(response, { object: await canvasService.createAsset(projectIdForThread(request.params.threadId), request.body ?? {}) });
     } catch (error) {
       sendError(response, 400, "bad_request", errorMessage(error, "Unable to upload canvas asset"));
     }
@@ -161,7 +162,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.get("/api/threads/:threadId/canvas/assets/:objectId/content", async (request, response) => {
     try {
-      const content = await canvasService.readAsset(request.params.threadId, request.params.objectId);
+      const content = await canvasService.readAsset(projectIdForThread(request.params.threadId), request.params.objectId);
       if (!content) return sendError(response, 404, "not_found", "Canvas asset not found");
       response.type(content.extension || "application/octet-stream").send(content.content);
     } catch (error) {
@@ -171,7 +172,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.patch("/api/threads/:threadId/canvas/nodes/:nodeId", (request, response) => {
     try {
-      const node = canvasService.updateNode(request.params.threadId, request.params.nodeId, request.body ?? {});
+      const node = canvasService.updateNode(projectIdForThread(request.params.threadId), request.params.nodeId, request.body ?? {});
       if (!node) {
         sendError(response, 404, "not_found", "Canvas node not found");
         return;
@@ -184,7 +185,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.delete("/api/threads/:threadId/canvas/nodes/:nodeId", (request, response) => {
     try {
-      const deleted = canvasService.deleteNode(request.params.threadId, request.params.nodeId);
+      const deleted = canvasService.deleteNode(projectIdForThread(request.params.threadId), request.params.nodeId);
       if (!deleted) {
         sendError(response, 404, "not_found", "Canvas node not found");
         return;
@@ -197,7 +198,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.post("/api/threads/:threadId/canvas/write-requests/:requestId/approve", (request, response) => {
     try {
-      const result = canvasService.approveWriteRequest(request.params.threadId, request.params.requestId);
+      const result = canvasService.approveWriteRequest(projectIdForThread(request.params.threadId), request.params.requestId);
       if (!result) {
         sendError(response, 404, "not_found", "Pending write request not found");
         return;
@@ -210,7 +211,7 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
 
   app.post("/api/threads/:threadId/canvas/write-requests/:requestId/reject", (request, response) => {
     try {
-      const requestResult = canvasService.rejectWriteRequest(request.params.threadId, request.params.requestId);
+      const requestResult = canvasService.rejectWriteRequest(projectIdForThread(request.params.threadId), request.params.requestId);
       if (!requestResult) {
         sendError(response, 404, "not_found", "Pending write request not found");
         return;

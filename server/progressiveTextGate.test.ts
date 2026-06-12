@@ -61,3 +61,13 @@ test("splitIntoUiChunks never returns a single large chunk for long text", () =>
   assert.ok(chunks.length > 1);
   assert.ok(chunks.every((chunk) => chunk.length <= 80));
 });
+
+test("progressive gate blocks AgentBackend provider-unavailable messages", () => {
+  const chunks = splitProgressiveTextForTest(
+    "The configured LLM provider is temporarily unavailable after multiple retries. Please wait a moment and continue the conversation.",
+    "en"
+  );
+
+  assert.equal(chunks.length, 1);
+  assert.match(chunks[0] ?? "", /blocked/i);
+});

@@ -14,11 +14,13 @@ type ProjectsViewProps = {
   onBatchHardDelete: (threadIds: string[]) => Promise<void>;
   onBatchMoveToTrash: (threadIds: string[]) => Promise<void>;
   onNavigate: (view: AppView) => void;
-  onOpenThread: (thread: StoredThread) => void;
+  onOpenThread: (thread: StoredThread | ProjectSummary) => void;
   onMoveToTrash: (threadId: string) => void;
   onRenameThread: (threadId: string, title: string) => Promise<void>;
   onRestore: (threadId: string) => void;
   onHardDelete: (threadId: string) => void;
+  sessionBusy?: boolean;
+  sessionError?: string;
 };
 
 const projectCopy = {
@@ -100,7 +102,9 @@ export function ProjectsView({
   onMoveToTrash,
   onRenameThread,
   onRestore,
-  onHardDelete
+  onHardDelete,
+  sessionBusy = false,
+  sessionError = ""
 }: ProjectsViewProps) {
   const { locale } = useI18n();
   const copy = projectCopy[locale];
@@ -163,6 +167,7 @@ export function ProjectsView({
           </div>
           <Button variant="primary" type="button" onClick={() => onNavigate("home")}>{copy.create}</Button>
         </div>
+        {sessionError ? <p className="project-open-error" role="alert">{sessionError}</p> : null}
 
         <div className="management-toolbar">
           <TextField aria-label={copy.search} label={copy.search} value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -199,7 +204,7 @@ export function ProjectsView({
               <label className="project-select-cell">
                 <input type="checkbox" checked={selectedIds.includes(project.id)} onChange={() => toggleSelected(project.id)} aria-label={`${copy.name} ${project.title || agentTitle(project)}`} />
               </label>
-              <button type="button" onClick={() => !showTrash && onOpenThread(project)} disabled={showTrash}>
+              <button type="button" onClick={() => !showTrash && onOpenThread(project)} disabled={showTrash || sessionBusy}>
                 <strong>{project.title || agentTitle(project)}</strong>
                 <small>{agentTitle(project)} / {project.id}</small>
               </button>
@@ -214,7 +219,7 @@ export function ProjectsView({
                   </>
                 ) : (
                   <>
-                    <Button size="sm" type="button" onClick={() => onOpenThread(project)}>{copy.open}</Button>
+                    <Button size="sm" type="button" disabled={sessionBusy} loading={sessionBusy} onClick={() => onOpenThread(project)}>{sessionBusy ? copy.working : copy.open}</Button>
                     <div className="project-more-wrap">
                       <Button size="sm" className="project-more-button" type="button" onClick={() => setOpenMenuThreadId((current) => current === project.id ? "" : project.id)}>
                         <MoreIcon aria-hidden="true" size={18} />

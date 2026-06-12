@@ -7,6 +7,8 @@ export type JsonValue = Record<string, unknown> | unknown[] | string | number | 
 export type RunRecordInput = {
   threadId: string;
   agentCardId: string;
+  configuredModelApiId?: string;
+  modelId?: string;
   mode: "structured" | "chat";
   prompt: string;
   output: string;
@@ -31,16 +33,24 @@ export type StoredMessage = {
 
 export type StoredThread = {
   id: string;
-  agentCardId: string;
+  projectId: string;
   title: string;
+  configuredModelApiId?: string | null;
   updatedAt: string;
   deletedAt?: string | null;
   assetCount?: number;
 };
 
-export type ProjectSummary = StoredThread & {
-  agentTitle: string;
+export type ProjectSummary = {
+  id: string;
+  title: string;
+  summary: string;
+  updatedAt: string;
+  deletedAt?: string | null;
   provider?: string;
+  assetCount: number;
+  threadCount: number;
+  modelConfigIds: string[];
 };
 
 export type StoredStructuredValues = Record<string, string | string[]>;
@@ -53,6 +63,7 @@ export type StoredOutputVersion = {
   mode: "structured" | "chat";
   provider: Provider;
   usedMock: boolean;
+  includeInProjectContext: boolean;
   createdAt: string;
 };
 
@@ -66,12 +77,12 @@ export type StoredToolEvent = {
 };
 
 export type CanvasNodeKind = "document" | "note" | "reference" | "role";
-export type CanvasWriteOperation = "create" | "replace" | "append";
-export type CanvasWriteRequestStatus = "pending" | "approved" | "rejected";
+export type CanvasWriteOperation = "create" | "replace" | "append" | "replace_range";
+export type CanvasWriteRequestStatus = "pending" | "approved" | "rejected" | "stale";
 
 export type CanvasNode = {
   id: string;
-  threadId: string;
+  projectId: string;
   kind: CanvasNodeKind;
   title: string;
   content: string;
@@ -80,19 +91,24 @@ export type CanvasNode = {
   width: number;
   height: number;
   metadata: JsonValue;
+  includeInProjectContext: boolean;
   createdAt: string;
   updatedAt: string;
 };
 
 export type CanvasWriteRequest = {
   id: string;
-  threadId: string;
+  projectId: string;
   operation: CanvasWriteOperation;
   targetNodeId?: string;
   nodeKind: CanvasNodeKind;
   title: string;
   content: string;
   rationale: string;
+  rangeStart?: number;
+  rangeEnd?: number;
+  originalText?: string;
+  baseNodeUpdatedAt?: string;
   status: CanvasWriteRequestStatus;
   createdAt: string;
   updatedAt: string;
@@ -100,7 +116,7 @@ export type CanvasWriteRequest = {
 
 export type CanvasEdge = {
   id: string;
-  threadId: string;
+  projectId: string;
   sourceNodeId: string;
   targetNodeId: string;
   label: string;
@@ -122,6 +138,7 @@ export type CanvasNodeInput = {
   width?: number;
   height?: number;
   metadata?: JsonValue;
+  includeInProjectContext?: boolean;
 };
 
 export type CanvasNodePatch = Partial<Omit<CanvasNodeInput, "kind">> & {
@@ -135,6 +152,10 @@ export type CanvasWriteRequestInput = {
   title?: string;
   content: string;
   rationale?: string;
+  rangeStart?: number;
+  rangeEnd?: number;
+  originalText?: string;
+  baseNodeUpdatedAt?: string;
 };
 
 export type CanvasEdgeInput = {
@@ -148,7 +169,7 @@ export type CanvasSettings = {
 };
 
 export type CanvasWorkflow = {
-  threadId: string;
+  projectId: string;
   stage: CanvasWorkflowStage;
   stages: CanvasWorkflowStage[];
   roles: CanvasWorkflowRole[];
@@ -167,7 +188,7 @@ export type CanvasNodeWorkflowPatch = {
 
 export type CanvasWorkflowSuggestion = {
   id: string;
-  threadId: string;
+  projectId: string;
   nodeId: string;
   roleNodeId: string;
   targetNodeId: string;

@@ -215,3 +215,21 @@ Decision: Use Electron as a Windows source-development application shell around 
 Reason: The immediate goal is an independent application window with startup feedback, Vite HMR, and window-bound service lifecycle without prematurely designing an installer or native Agent Runtime.
 
 Impact: The shell uses fixed development ports `17776` and `17777`, starts Docker Desktop when available, owns only services it starts, and preserves complete compatible pre-existing Agent Runtime services. The planned Vite port `3100` was rejected because Windows dynamically reserved `3007-3106`. Docker Desktop remains required. Packaging, automatic updates, and a no-Docker local Runtime are deferred.
+# 2026-06-11: Project-First Context And Explicit Model Selection
+
+- Project is the strict workspace and shared-context boundary.
+- Thread is a conversation inside a Project and does not bind an Agent.
+- Agent is selected per run and begins with no personal or cross-project context.
+- Project Agent input values are keyed by Project and Agent, then immediately become Project shared context.
+- Model Config backend storage is the sole generation model source.
+- Projects bind multiple Model Config entries; Threads explicitly select one and have no default.
+- Existing legacy workspace data is cleared instead of migrated from the shared `local-project` design.
+
+## 2026-06-11: Complete Physical Project Boundary And Runtime Sync Gate
+
+- Schema version 3 clears workspace data again and rebuilds Canvas storage with physical `project_id` ownership.
+- Project Agent inputs are shared by default and protected by monotonically increasing revisions.
+- Canvas nodes and output versions enter Project shared context only after explicit user inclusion; shared context uses deterministic category budgets totaling 24,000 characters.
+- Model Config remains saved when AgentBackend synchronization fails, but the model is marked degraded and cannot generate until synchronized.
+- New Projects do not bind or select a default model. Project model binding and Thread model selection are explicit user actions.
+- AgentBackend is the only real generation runtime. Runtime failure enters Mock fallback and never calls the local Provider runner.

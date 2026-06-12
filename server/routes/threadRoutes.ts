@@ -1,5 +1,4 @@
 import type { Express } from "express";
-import { agentCards } from "../agentCards.js";
 import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
 import type { SQLiteStorageRepository } from "../storage.js";
 import { errorMessage, sendError, sendOk } from "../utils/http.js";
@@ -10,18 +9,19 @@ type ThreadRouteDeps = {
   agentRuntime: AgentRuntimeAdapter;
 };
 
-export function registerThreadRoutes(app: Express, { storage, agentRuntime }: ThreadRouteDeps) {
+export function registerThreadRoutes(app: Express, { storage, agentRuntime: _agentRuntime }: ThreadRouteDeps) {
   app.get("/api/threads/recent", (_request, response) => {
     sendOk(response, { threads: storage.listRecentThreads() });
   });
 
   app.post("/api/threads", async (request, response) => {
-    const agentCard = agentRuntime.resolveAgentCard(String(request.body?.agentCardId ?? agentCards[0].id));
     const threadId = safeId(request.body?.threadId) ?? randomThreadId();
+    const projectId = safeId(request.body?.projectId);
 
     try {
-      await storage.ensureThread(threadId, agentCard.id);
-      sendOk(response, { threadId, agentCardId: agentCard.id });
+      if (!projectId || !storage.getProject(projectId)) throw new Error("A valid projectId is required");
+      const thread = await storage.ensureThread(threadId, projectId, request.body?.title ?? "New conversation");
+      sendOk(response, { thread, threadId: thread?.id ?? threadId, projectId });
     } catch (error) {
       sendError(response, 400, "bad_request", errorMessage(error, "Unable to create thread"));
     }
@@ -103,16 +103,40 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime }: Th
 
   app.patch("/api/threads/:threadId/inputs", (request, response) => {
     try {
-      const structuredValues = storage.saveThreadInputValues(request.params.threadId, request.body?.structuredValues);
-      if (!structuredValues) {
+      const thread = storage.getThread(request.params.threadId);
+      const agentCardId = safeId(request.body?.agentCardId);
+      const saved = thread && agentCardId
+        ? storage.saveProjectAgentInputValues(thread.projectId, agentCardId, request.body?.structuredValues, request.body?.revision)
+        : undefined;
+      if (!saved) {
         sendError(response, 404, "not_found", "Thread not found");
         return;
       }
 
-      sendOk(response, { structuredValues });
+      sendOk(response, saved);
     } catch (error) {
       sendError(response, 400, "bad_request", errorMessage(error, "Unable to save structured inputs"));
     }
+  });
+
+  app.patch("/api/threads/:threadId/model", (request, response) => {
+    try {
+      const configuredModelApiId = safeId(request.body?.configuredModelApiId);
+      const thread = storage.setThreadModelConfig(request.params.threadId, configuredModelApiId ?? undefined);
+      if (!thread) return sendError(response, 404, "not_found", "Thread not found");
+      sendOk(response, { thread });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to select conversation model"));
+    }
+  });
+
+  app.patch("/api/threads/:threadId/output-versions/:versionId/context", (request, response) => {
+    if (typeof request.body?.included !== "boolean") {
+      return sendError(response, 400, "bad_request", "included must be a boolean");
+    }
+    const updated = storage.setOutputVersionProjectContext(request.params.threadId, request.params.versionId, request.body.included);
+    if (!updated) return sendError(response, 404, "not_found", "Output version not found");
+    sendOk(response, { ok: true, included: request.body.included });
   });
 
   app.delete("/api/threads/:threadId", async (request, response) => {
@@ -140,19 +164,23 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime }: Th
       return;
     }
 
-    storage.migrateCanvasWorkflowRoleNodes(request.params.threadId);
+    const projectId = thread.projectId;
+    const project = storage.listProjects().find((candidate) => candidate.id === projectId);
+    storage.migrateCanvasWorkflowRoleNodes(projectId);
     sendOk(response, {
       thread,
+      project,
       messages: storage.listMessages(request.params.threadId),
-      structuredValues: storage.getThreadInputValues(request.params.threadId),
+      projectInputs: storage.getAllProjectAgentInputValues(projectId),
+      projectInputRevisions: storage.getAllProjectAgentInputRevisions(projectId),
       outputVersions: storage.listOutputVersions(request.params.threadId),
       toolEvents: storage.listToolEvents(request.params.threadId),
-      canvasNodes: storage.listCanvasNodes(request.params.threadId),
-      canvasEdges: storage.listCanvasEdges(request.params.threadId),
-      canvasObjects: storage.listCanvasObjects(request.params.threadId),
-      canvasWriteRequests: storage.listCanvasWriteRequests(request.params.threadId, "pending"),
-      canvasWorkflow: storage.getCanvasWorkflow(request.params.threadId),
-      canvasWorkflowSuggestions: storage.listCanvasWorkflowSuggestions(request.params.threadId)
+      canvasNodes: storage.listCanvasNodes(projectId),
+      canvasEdges: storage.listCanvasEdges(projectId),
+      canvasObjects: storage.listCanvasObjects(projectId),
+      canvasWriteRequests: storage.listCanvasWriteRequests(projectId, "pending"),
+      canvasWorkflow: storage.getCanvasWorkflow(projectId),
+      canvasWorkflowSuggestions: storage.listCanvasWorkflowSuggestions(projectId)
     });
   });
 }

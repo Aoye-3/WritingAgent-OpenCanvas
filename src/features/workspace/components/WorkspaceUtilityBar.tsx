@@ -1,16 +1,17 @@
 import {
   ArrowUpRight,
+  BookOpen,
   FileText,
   Hand,
   Image,
   MousePointer2,
   Plus,
-  Shapes,
   Sparkles,
   Square,
   StickyNote,
   Table2,
   Type,
+  UserRoundCog,
   type LucideIcon
 } from "lucide-react";
 import { iconProps } from "../../../shared/icons";
@@ -28,15 +29,19 @@ const primaryTools: BoardTool[] = [
   { id: "pan", icon: Hand, label: { en: "Pan", zh: "拖动画布" } }
 ];
 
-const creationTools: BoardTool[] = [
-  { id: "text", icon: Type, label: { en: "Text", zh: "文本" } },
+const nodeTools: BoardTool[] = [
+  { id: "reference", icon: BookOpen, label: { en: "Reference", zh: "引用" } },
   { id: "document", icon: FileText, label: { en: "Document", zh: "文档" } },
   { id: "note", icon: StickyNote, label: { en: "Note", zh: "便签" } },
+  { id: "role", icon: UserRoundCog, label: { en: "Role", zh: "角色节点" } }
+];
+
+const otherTools: BoardTool[] = [
+  { id: "text", icon: Type, label: { en: "Text", zh: "自由文本" } },
   { id: "arrow", icon: ArrowUpRight, label: { en: "Arrow", zh: "箭头" } },
   { id: "shape", icon: Square, label: { en: "Shape", zh: "形状" } },
   { id: "table", icon: Table2, label: { en: "Table", zh: "表格" } },
   { id: "asset", icon: Image, label: { en: "Asset", zh: "资源" } },
-  { id: "role", icon: Shapes, label: { en: "Role", zh: "角色节点" } },
   { id: "agent", icon: Sparkles, label: { en: "Agent tool", zh: "Agent 工具" } }
 ];
 
@@ -58,8 +63,12 @@ export function WorkspaceUtilityBar({
         {primaryTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} locale={locale} onClick={onToolChange} />)}
       </div>
       <div className="board-tool-divider" aria-hidden="true" />
-      <div className="board-tool-group">
-        {creationTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} locale={locale} onClick={onToolChange} />)}
+      <div className="board-tool-group" data-testid="board-node-tools">
+        {nodeTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} locale={locale} onClick={onToolChange} />)}
+      </div>
+      <div className="board-tool-divider" aria-hidden="true" />
+      <div className="board-tool-group" data-testid="board-other-tools">
+        {otherTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} locale={locale} onClick={onToolChange} />)}
       </div>
       <div className="board-tool-divider" aria-hidden="true" />
       <button className="board-tool-button board-tool-add" type="button" title={locale === "zh" ? "后续增加工具" : "Add tools later"} aria-label={locale === "zh" ? "后续增加工具" : "Add tools later"}>

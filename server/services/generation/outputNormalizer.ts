@@ -9,6 +9,9 @@ const blockedPromptPatterns = [
   /#\s*Output Contract/i,
   /FacetWrite runtime context/i,
   /This context is private implementation detail/i,
+  /LLM request failed:/i,
+  /Content Exists Risk/i,
+  /The configured LLM provider (?:is|rejected the request)/i,
   /LLM request failed:.*reasoning_content/i,
   /reasoning_content.*(?:must be passed back|thinking mode)/i
 ];
@@ -50,6 +53,13 @@ export function sanitizeVisibleText(text: string, locale: Locale = "en") {
 
   const withoutJson = stripLeakedToolJson(trimmed).text.trim();
   return withoutJson || blockedMessage(locale);
+}
+
+export function shouldExcludeFromModelContext(text: string) {
+  const trimmed = text.trim();
+  return blockedPromptPatterns.some((pattern) => pattern.test(trimmed))
+    || trimmed === blockedMessage("en")
+    || trimmed === blockedMessage("zh");
 }
 
 function stripLeakedToolJson(text: string): { text: string; events: ToolEventRecord[] } {

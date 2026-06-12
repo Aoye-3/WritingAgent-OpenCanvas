@@ -75,7 +75,7 @@ export type ChatCompletionStreamChunk = {
 
 export type ChatClient = {
   createChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse>;
-  createChatCompletionStream?: (request: ChatCompletionRequest) => AsyncIterable<ChatCompletionStreamChunk>;
+  createChatCompletionStream?: (request: ChatCompletionRequest) => AsyncIterable<ChatCompletionStreamChunk> | Promise<AsyncIterable<ChatCompletionStreamChunk>>;
 };
 
 export type ProviderCapabilities = {

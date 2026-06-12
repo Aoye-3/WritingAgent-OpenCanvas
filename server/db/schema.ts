@@ -133,6 +133,10 @@ export function migrateStorageSchema(db: DatabaseSync) {
       title TEXT NOT NULL,
       content TEXT NOT NULL,
       rationale TEXT NOT NULL,
+      range_start INTEGER,
+      range_end INTEGER,
+      original_text TEXT,
+      base_node_updated_at TEXT,
       status TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -247,6 +251,204 @@ export function migrateStorageSchema(db: DatabaseSync) {
   }
   if (!columnExists(db, "canvas_workflow_suggestions", "target_node_id")) {
     db.exec(`ALTER TABLE canvas_workflow_suggestions ADD COLUMN target_node_id TEXT NOT NULL DEFAULT ''`);
+  }
+  if (!columnExists(db, "canvas_write_requests", "range_start")) {
+    db.exec(`ALTER TABLE canvas_write_requests ADD COLUMN range_start INTEGER`);
+  }
+  if (!columnExists(db, "canvas_write_requests", "range_end")) {
+    db.exec(`ALTER TABLE canvas_write_requests ADD COLUMN range_end INTEGER`);
+  }
+  if (!columnExists(db, "canvas_write_requests", "original_text")) {
+    db.exec(`ALTER TABLE canvas_write_requests ADD COLUMN original_text TEXT`);
+  }
+  if (!columnExists(db, "canvas_write_requests", "base_node_updated_at")) {
+    db.exec(`ALTER TABLE canvas_write_requests ADD COLUMN base_node_updated_at TEXT`);
+  }
+  if (!columnExists(db, "projects", "summary")) {
+    db.exec(`ALTER TABLE projects ADD COLUMN summary TEXT NOT NULL DEFAULT ''`);
+  }
+  if (!columnExists(db, "projects", "deleted_at")) {
+    db.exec(`ALTER TABLE projects ADD COLUMN deleted_at TEXT`);
+  }
+  if (!columnExists(db, "threads", "configured_model_api_id")) {
+    db.exec(`ALTER TABLE threads ADD COLUMN configured_model_api_id TEXT`);
+  }
+  if (!columnExists(db, "runs", "configured_model_api_id")) {
+    db.exec(`ALTER TABLE runs ADD COLUMN configured_model_api_id TEXT`);
+  }
+  if (!columnExists(db, "runs", "model_id")) {
+    db.exec(`ALTER TABLE runs ADD COLUMN model_id TEXT`);
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS project_model_bindings (
+      project_id TEXT NOT NULL,
+      configured_model_api_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (project_id, configured_model_api_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS project_agent_inputs (
+      project_id TEXT NOT NULL,
+      agent_card_id TEXT NOT NULL,
+      structured_values_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (project_id, agent_card_id)
+    );
+  `);
+
+  const version2 = db.prepare(`SELECT version FROM schema_version WHERE version = 2`).get();
+  if (!version2) {
+    db.exec(`
+      DELETE FROM canvas_edges;
+      DELETE FROM canvas_objects;
+      DELETE FROM canvas_workflow_suggestions;
+      DELETE FROM canvas_workflows;
+      DELETE FROM canvas_write_requests;
+      DELETE FROM canvas_nodes;
+      DELETE FROM thread_inputs;
+      DELETE FROM project_agent_inputs;
+      DELETE FROM project_model_bindings;
+      DELETE FROM tool_events;
+      DELETE FROM output_versions;
+      DELETE FROM prompt_versions;
+      DELETE FROM runs;
+      DELETE FROM messages;
+      DELETE FROM threads;
+      DELETE FROM projects;
+      INSERT INTO schema_version (version, applied_at) VALUES (2, datetime('now'));
+    `);
+  }
+
+  const version3 = db.prepare(`SELECT version FROM schema_version WHERE version = 3`).get();
+  if (!version3) {
+    db.exec(`
+      DELETE FROM tool_events;
+      DELETE FROM output_versions;
+      DELETE FROM prompt_versions;
+      DELETE FROM runs;
+      DELETE FROM messages;
+      DELETE FROM threads;
+      DELETE FROM projects;
+
+      DROP TABLE IF EXISTS thread_inputs;
+      DROP TABLE IF EXISTS canvas_edges;
+      DROP TABLE IF EXISTS canvas_objects;
+      DROP TABLE IF EXISTS canvas_workflow_suggestions;
+      DROP TABLE IF EXISTS canvas_workflows;
+      DROP TABLE IF EXISTS canvas_write_requests;
+      DROP TABLE IF EXISTS canvas_nodes;
+
+      CREATE TABLE canvas_nodes (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        x REAL NOT NULL,
+        y REAL NOT NULL,
+        width REAL NOT NULL,
+        height REAL NOT NULL,
+        metadata_json TEXT NOT NULL,
+        include_in_project_context INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE canvas_write_requests (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        target_node_id TEXT,
+        node_kind TEXT NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        rationale TEXT NOT NULL,
+        range_start INTEGER,
+        range_end INTEGER,
+        original_text TEXT,
+        base_node_updated_at TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE canvas_edges (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        source_node_id TEXT NOT NULL,
+        target_node_id TEXT NOT NULL,
+        label TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE canvas_objects (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        geometry_json TEXT NOT NULL,
+        data_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE canvas_workflows (
+        project_id TEXT PRIMARY KEY,
+        stage TEXT NOT NULL,
+        roles_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE canvas_workflow_suggestions (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        role_node_id TEXT NOT NULL DEFAULT '',
+        target_node_id TEXT NOT NULL DEFAULT '',
+        role_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        rationale TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      ALTER TABLE threads RENAME TO threads_v2;
+      CREATE TABLE threads (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        configured_model_api_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+      );
+      DROP TABLE threads_v2;
+
+      ALTER TABLE output_versions RENAME TO output_versions_v2;
+      CREATE TABLE output_versions (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        include_in_project_context INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+      DROP TABLE output_versions_v2;
+
+      DROP TABLE project_agent_inputs;
+      CREATE TABLE project_agent_inputs (
+        project_id TEXT NOT NULL,
+        agent_card_id TEXT NOT NULL,
+        structured_values_json TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, agent_card_id)
+      );
+
+      INSERT INTO schema_version (version, applied_at) VALUES (3, datetime('now'));
+    `);
   }
 }
 

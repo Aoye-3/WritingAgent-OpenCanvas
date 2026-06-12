@@ -13,6 +13,7 @@ import {
   FileText,
   FolderOpen,
   Home,
+  History,
   LayoutDashboard,
   Network,
   ListTree,
@@ -67,6 +68,7 @@ export const DatabaseIcon = createIcon(Database);
 export const DocumentIcon = createIcon(FileText);
 export const FolderIcon = createIcon(FolderOpen);
 export const HomeIcon = createIcon(Home);
+export const HistoryIcon = createIcon(History);
 export const KnowledgeIcon = createIcon(BookOpen);
 export const ModelConfigIcon = createIcon(ListTree);
 export const CanvasNodesIcon = createIcon(Network);

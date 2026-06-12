@@ -15,6 +15,7 @@ export function EditableTextNode({ isResizing, locale, node, onUpdateNode }: Edi
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [title, setTitle] = useState(node.title);
   const [content, setContent] = useState(node.content);
+  const [editing, setEditing] = useState<"title" | "content" | null>(null);
 
   useEffect(() => setTitle(node.title), [node.title]);
   useEffect(() => setContent(node.content), [node.content]);
@@ -34,16 +35,20 @@ export function EditableTextNode({ isResizing, locale, node, onUpdateNode }: Edi
 
   return (
     <div className="canvas-text-node-body">
-      <input
+      {editing === "title" ? <input
+        autoFocus
         className="canvas-node-title nodrag"
         data-testid="canvas-node-title"
         onBlur={() => {
           if (title !== node.title) void onUpdateNode(node.id, { title });
+          setEditing(null);
         }}
+        onKeyDown={(event) => { if (event.key === "Escape") event.currentTarget.blur(); }}
         onChange={(event) => setTitle(event.currentTarget.value)}
         value={title}
-      />
-      <textarea
+      /> : <div className="canvas-node-title canvas-node-readonly" data-testid="canvas-node-title" onDoubleClick={() => setEditing("title")}>{title}</div>}
+      {editing === "content" ? <textarea
+        autoFocus
         className="canvas-node-content nodrag nowheel"
         data-testid="canvas-node-content"
         ref={textareaRef}
@@ -51,9 +56,11 @@ export function EditableTextNode({ isResizing, locale, node, onUpdateNode }: Edi
         placeholder={locale === "zh" ? "在这里编辑节点内容..." : "Edit node content..."}
         onBlur={() => {
           if (content !== node.content) void onUpdateNode(node.id, { content });
+          setEditing(null);
         }}
+        onKeyDown={(event) => { if (event.key === "Escape") event.currentTarget.blur(); }}
         onChange={(event) => setContent(event.currentTarget.value)}
-      />
+      /> : <div className="canvas-node-content canvas-node-readonly" data-testid="canvas-node-content" onDoubleClick={() => setEditing("content")}>{content || (locale === "zh" ? "双击编辑内容" : "Double-click to edit content")}</div>}
     </div>
   );
 }

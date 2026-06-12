@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { batchHardDeleteThreads, batchMoveThreadsToTrash, fetchProjects, fetchRecentThreads, renameThread } from "../../agents/agentClient";
+import { fetchProjects, fetchRecentThreads, hardDeleteProject, moveProjectToTrash, renameProject } from "../../agents/agentClient";
 import type { ProjectSummary, StoredThread } from "../../agents/types";
 
 const PINNED_RECENT_THREADS_KEY = "facetwrite:pinned-recent-threads";
@@ -34,17 +34,17 @@ export function useProjects() {
   }, [refreshProjects, refreshRecentThreads]);
 
   const handleRenameThread = useCallback(async (threadId: string, title: string) => {
-    await renameThread(threadId, title);
+    await renameProject(threadId, title);
     await refreshProjectSurfaces();
   }, [refreshProjectSurfaces]);
 
   const handleBatchMoveToTrash = useCallback(async (threadIds: string[]) => {
-    await batchMoveThreadsToTrash(threadIds);
+    await Promise.all(threadIds.map(moveProjectToTrash));
     await refreshProjectSurfaces();
   }, [refreshProjectSurfaces]);
 
   const handleBatchHardDelete = useCallback(async (threadIds: string[]) => {
-    await batchHardDeleteThreads(threadIds);
+    await Promise.all(threadIds.map(hardDeleteProject));
     await refreshProjectSurfaces();
   }, [refreshProjectSurfaces]);
 

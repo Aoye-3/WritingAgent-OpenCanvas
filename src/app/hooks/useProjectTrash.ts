@@ -1,4 +1,4 @@
-import { hardDeleteThread, moveThreadToTrash, restoreThreadFromTrash } from "../../features/agents/agentClient";
+import { hardDeleteProject, moveProjectToTrash, moveThreadToTrash, restoreProjectFromTrash } from "../../features/agents/agentClient";
 import type { StoredThread } from "../../features/agents/types";
 
 type UseProjectTrashOptions = {
@@ -8,19 +8,20 @@ type UseProjectTrashOptions = {
 
 export function useProjectTrash({ onClearPersistedThreadId, onRefreshProjectSurfaces }: UseProjectTrashOptions) {
   const handleMoveToTrash = async (thread: StoredThread | string) => {
-    const threadId = typeof thread === "string" ? thread : thread.id;
-    await moveThreadToTrash(threadId);
-    onClearPersistedThreadId(threadId);
+    const id = typeof thread === "string" ? thread : thread.id;
+    if (typeof thread === "string") await moveProjectToTrash(id);
+    else await moveThreadToTrash(id);
+    onClearPersistedThreadId(id);
     await onRefreshProjectSurfaces();
   };
 
   const handleRestoreThread = async (threadId: string) => {
-    await restoreThreadFromTrash(threadId);
+    await restoreProjectFromTrash(threadId);
     await onRefreshProjectSurfaces();
   };
 
   const handleHardDeleteThread = async (threadId: string) => {
-    await hardDeleteThread(threadId);
+    await hardDeleteProject(threadId);
     onClearPersistedThreadId(threadId);
     await onRefreshProjectSurfaces();
   };

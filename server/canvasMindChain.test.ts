@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { MindChainEdge, MindChainNode } from "../shared/canvasMindChain.js";
-import { findChainStart, followDirectedChain, formatMindChain } from "../shared/canvasMindChain.js";
+import { findChainStart, followDirectedChain, formatMindChain, formatMindChainContext } from "../shared/canvasMindChain.js";
 
 const baseNode = {
   threadId: "thread_a",
@@ -47,4 +47,13 @@ test("mind chain formats selected nodes as explicit chat draft context", () => {
   assert.match(text, /Please collaborate using this Canvas mind chain/);
   assert.match(text, /1\. \[note\] Source\nFirst/);
   assert.match(text, /2\. \[note\] Note\n\(empty node\)/);
+});
+
+test("mind chain context includes its hidden text and node count", () => {
+  const nodes = [node("a", "Source", "First"), node("b", "Note", "Second")];
+  const context = formatMindChainContext("b", nodes, [edge("e1", "a", "b")], "en");
+
+  assert.equal(context?.nodeCount, 2);
+  assert.match(context?.text ?? "", /First/);
+  assert.match(context?.text ?? "", /Second/);
 });

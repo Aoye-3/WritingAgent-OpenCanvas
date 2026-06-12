@@ -1,13 +1,14 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, SendIcon } from "../../../shared/icons";
+import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, HistoryIcon, KnowledgeIcon, SearchIcon, SendIcon, SparkleIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
-import type { CanvasWriteRequest, StoredToolEvent } from "../../agents/types";
+import type { AgentCard, CanvasWriteRequest, StoredThread, StoredToolEvent } from "../../agents/types";
 import type { AgentSettings } from "../../agents/types";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
 import { useI18n } from "../../i18n/I18nProvider";
 import { AnnotationChipRow, CanvasWriteProposalPanel, type MessageAnnotation } from "./CanvasWriteProposalPanel";
 import { ToolEventDrawer } from "./ToolEventDrawer";
+import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain";
 
 type ToolKey = NonNullable<GenerateRequest["toolState"]> extends Partial<Record<infer Key, boolean>> ? Key : never;
 
@@ -25,29 +26,41 @@ type WriteDraft = {
 
 type AICollaborationDrawerProps = {
   allowedTools: string[];
+  activeAgent: AgentCard;
+  agentCards: AgentCard[];
   canvasWriteRequests: CanvasWriteRequest[];
   collapsed: boolean;
   inputDraft: string;
+  mindChainContext: CanvasMindChainContext | null;
   messages: CollaborationMessage[];
+  projectThreads: StoredThread[];
+  currentThreadId: string;
+  sessionBusy: boolean;
+  sessionError: string;
   isSending: boolean;
   modelSettings?: AgentSettings["model"];
   toolEvents: StoredToolEvent[];
   onApproveWriteRequest: (requestId: string) => Promise<void>;
+  onCreateConversation: () => Promise<void>;
   onApplyWriteText: (text: string) => Promise<void>;
   onRejectWriteRequest: (requestId: string) => Promise<void>;
   onInputDraftConsumed: () => void;
+  onMindChainContextConsumed: () => void;
+  onRemoveMindChainContext: () => void;
   onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"]) => Promise<void>;
+  onSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => Promise<void>;
+  onSelectAgent: (agentCardId: string) => void;
+  onSelectThread: (threadId: string) => Promise<void>;
   onToggleCollapsed: () => void;
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
   toolState: GenerateRequest["toolState"];
 };
 
-const toolMeta: Record<string, { en: string; zh: string; icon: string; hint: string }> = {
-  web_search: { en: "Web search", zh: "联网搜索", icon: "W", hint: "Web search intent only" },
-  knowledge_base: { en: "Knowledge base", zh: "知识库引用", icon: "K", hint: "Use selected knowledge hints" },
-  quick_messages: { en: "Quick message", zh: "快捷消息", icon: "Q", hint: "Treat input as a quick editing command" },
-  clear_context: { en: "Clear context", zh: "清除上下文", icon: "C", hint: "Ignore previous conversational context" }
+const toolMeta: Record<string, { en: string; zh: string; hint: string }> = {
+  web_search: { en: "Web search", zh: "联网搜索", hint: "Web search intent only" },
+  knowledge_base: { en: "Knowledge base", zh: "知识库引用", hint: "Use selected knowledge hints" },
+  quick_messages: { en: "Quick message", zh: "快捷消息", hint: "Treat input as a quick editing command" },
+  clear_context: { en: "Clear context", zh: "清除上下文", hint: "Ignore previous conversational context" }
 };
 
 const waitingLabels = {
@@ -55,21 +68,36 @@ const waitingLabels = {
   en: ["Thinking", "Reviewing context", "Checking available sources", "Structuring the answer", "Preparing the response"]
 } as const;
 
+const COMPOSER_MIN_HEIGHT = 72;
+const COMPOSER_MAX_HEIGHT = 240;
+
 export function AICollaborationDrawer({
   allowedTools,
+  activeAgent,
+  agentCards,
   canvasWriteRequests,
   collapsed,
   inputDraft,
+  mindChainContext,
   messages,
+  projectThreads,
+  currentThreadId,
+  sessionBusy,
+  sessionError,
   isSending,
   modelSettings,
   toolEvents,
   onApproveWriteRequest,
+  onCreateConversation,
   onApplyWriteText,
   onRejectWriteRequest,
   onInputDraftConsumed,
+  onMindChainContextConsumed,
+  onRemoveMindChainContext,
   onResizeStart,
   onSend,
+  onSelectAgent,
+  onSelectThread,
   onToggleCollapsed,
   onToolStateChange,
   toolState
@@ -85,9 +113,11 @@ export function AICollaborationDrawer({
   const [writeBusy, setWriteBusy] = useState(false);
   const [writeStatus, setWriteStatus] = useState("");
   const [statusIndex, setStatusIndex] = useState(0);
+  const [composerHeight, setComposerHeight] = useState(72);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
 
-  const pendingWriteRequest = canvasWriteRequests[0];
+  const pendingWriteRequest = canvasWriteRequests.find((request) => request.operation !== "replace_range");
   const lastAssistantText = useMemo(() => [...messages].reverse().find((message) => message.role === "assistant" && message.text.trim())?.text ?? "", [messages]);
   const proposalFullText = writeDraft?.text || pendingWriteRequest?.content || lastAssistantText;
   const annotatedText = annotations.map((annotation) => annotation.text).join("\n\n");
@@ -170,7 +200,8 @@ export function AICollaborationDrawer({
     await onSend(text, supportsThinking ? {
       thinkingMode: thinkEnabled ? "enabled" : "disabled",
       reasoningEffort
-    } : undefined);
+    } : undefined, mindChainContext ? { canvasMindChain: mindChainContext.text } : undefined);
+    if (mindChainContext) onMindChainContextConsumed();
   };
 
   const captureSelection = (event: React.MouseEvent<HTMLDivElement>, message: CollaborationMessage) => {
@@ -214,6 +245,34 @@ export function AICollaborationDrawer({
     setWriteStatus("");
   };
 
+  const startComposerResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = composerHeight;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+
+    document.body.style.cursor = "ns-resize";
+    document.body.style.userSelect = "none";
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const nextHeight = Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, startHeight + startY - moveEvent.clientY));
+      setComposerHeight(nextHeight);
+    };
+
+    const stopResize = () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+  };
+
   if (collapsed) {
     return (
       <aside className="ai-drawer ai-drawer-collapsed" aria-label="AI collaboration drawer collapsed">
@@ -237,15 +296,34 @@ export function AICollaborationDrawer({
         tabIndex={0}
         title={locale === "zh" ? "向左拖动扩大 AI 协作层" : "Drag left to expand AI collaboration"}
       />
-      <div className="ai-drawer-header">
-        <div>
-          <p className="eyebrow">{locale === "zh" ? "AI 协作层" : "AI Collaboration"}</p>
-          <h2>{locale === "zh" ? "对话与修改建议" : "Chat and revision support"}</h2>
+      <div className="conversation-compact-header" data-testid="conversation-compact-header">
+        <strong>{projectThreads.find((thread) => thread.id === currentThreadId)?.title ?? (locale === "zh" ? "新对话" : "New conversation")}</strong>
+        <div className="conversation-header-actions">
+          <button className="icon-button conversation-icon-action" type="button" disabled={sessionBusy} onClick={() => { void onCreateConversation(); }} aria-label={locale === "zh" ? "新建" : "New"} title={locale === "zh" ? "新建对话" : "New conversation"}>
+            <AddIcon aria-hidden="true" size={17} />
+          </button>
+          <button className="icon-button conversation-icon-action" type="button" aria-expanded={historyOpen} onClick={() => setHistoryOpen((value) => !value)} aria-label={locale === "zh" ? "历史" : "History"} title={locale === "zh" ? "历史对话" : "Conversation history"}>
+            <HistoryIcon aria-hidden="true" size={17} />
+          </button>
+          <button className="icon-button conversation-icon-action" type="button" onClick={onToggleCollapsed} aria-label={locale === "zh" ? "收起右侧栏" : "Collapse right drawer"}>
+            <ChevronRightIcon aria-hidden="true" size={18} />
+          </button>
         </div>
-        <button className="icon-button" type="button" onClick={onToggleCollapsed} aria-label={locale === "zh" ? "收起右侧栏" : "Collapse right drawer"}>
-          <ChevronRightIcon aria-hidden="true" />
-        </button>
       </div>
+
+      {historyOpen ? (
+        <div className="conversation-history-popover" aria-label={locale === "zh" ? "当前项目历史对话" : "Current Project conversation history"}>
+          {projectThreads.map((thread) => (
+            <button className={thread.id === currentThreadId ? "is-active" : ""} key={thread.id} type="button"
+              onClick={() => { setHistoryOpen(false); void onSelectThread(thread.id); }}>
+              <strong>{thread.title}</strong><time>{new Date(thread.updatedAt).toLocaleString()}</time>
+            </button>
+          ))}
+          {projectThreads.length === 0 ? <p>{locale === "zh" ? "暂无历史对话" : "No conversation history yet."}</p> : null}
+        </div>
+      ) : null}
+
+      {sessionError ? <p className="session-error" role="alert">{sessionError}</p> : null}
 
       <div className="drawer-message-list" aria-live="polite" ref={messageListRef}>
         {messages.length === 0 ? (
@@ -303,13 +381,46 @@ export function AICollaborationDrawer({
         </button>
       ) : null}
 
+      <ToolEventDrawer events={toolEvents} />
+
       <form className="drawer-chat-composer" onSubmit={submit}>
+        <div className="composer-agent-row" data-testid="composer-agent-row">
+          <AgentIcon aria-hidden="true" size={16} />
+          <select className="composer-agent-select" aria-label={locale === "zh" ? "本次执行 Agent" : "Agent for this message"}
+            value={activeAgent.id} onChange={(event) => onSelectAgent(event.target.value)}>
+            {agentCards.map((agent) => <option key={agent.id} value={agent.id}>{agent.title[locale]}</option>)}
+          </select>
+        </div>
         <AnnotationChipRow annotations={annotations} compact onRemoveAnnotation={removeAnnotation} />
+        {mindChainContext ? (
+          <div className="mind-chain-context-chip" data-testid="mind-chain-context-chip">
+            <span>{locale === "zh" ? `思维链 · ${mindChainContext.nodeCount} 节点` : `Mind chain · ${mindChainContext.nodeCount} ${mindChainContext.nodeCount === 1 ? "node" : "nodes"}`}</span>
+            <button
+              aria-label={locale === "zh" ? "移除思维链上下文" : "Remove mind chain context"}
+              onClick={onRemoveMindChainContext}
+              type="button"
+            >
+              ×
+            </button>
+          </div>
+        ) : null}
+        <div
+          aria-label={locale === "zh" ? "调整输入框高度" : "Resize message input"}
+          aria-orientation="horizontal"
+          className="composer-resize-handle"
+          data-testid="composer-resize-handle"
+          onPointerDown={startComposerResize}
+          role="separator"
+          title={locale === "zh" ? "上下拖动调整输入框高度" : "Drag vertically to resize the message input"}
+        >
+          <span aria-hidden="true" />
+        </div>
         <textarea
           aria-label="AI collaboration message"
           data-testid="ai-collaboration-input"
           placeholder={locale === "zh" ? "让 AI 协作修改当前草稿..." : "Ask AI to collaborate on this draft..."}
           rows={3}
+          style={{ height: composerHeight }}
           value={input}
           onChange={(event) => setInput(event.target.value)}
         />
@@ -340,14 +451,12 @@ export function AICollaborationDrawer({
               ) : null}
             </div>
           ) : null}
-          <button className="button button-primary chat-send" type="submit" disabled={isSending || writeBusy}>
-            <SendIcon />
-            {isSending ? (locale === "zh" ? "发送中" : "Sending") : (locale === "zh" ? "发送" : "Send")}
+          <button className="button button-primary chat-send chat-send-icon" type="submit" disabled={isSending || writeBusy}
+            aria-label={locale === "zh" ? "发送" : "Send"} title={isSending ? (locale === "zh" ? "发送中" : "Sending") : (locale === "zh" ? "发送" : "Send")}>
+            <SendIcon aria-hidden="true" size={18} />
           </button>
         </div>
       </form>
-
-      <ToolEventDrawer events={toolEvents} />
     </aside>
   );
 }
@@ -396,7 +505,7 @@ function ToolUseIconBar({ allowedTools, toolState, onToolStateChange }: Pick<AIC
     <div className="composer-tool-icons" aria-label="ToolUse">
       {visibleTools.map((tool) => {
         const active = Boolean(toolState?.[tool as ToolKey]);
-        const meta = toolMeta[tool] ?? { en: tool, zh: tool, icon: tool.slice(0, 1).toUpperCase(), hint: tool };
+        const meta = toolMeta[tool] ?? { en: tool, zh: tool, hint: tool };
         const label = locale === "zh" ? meta.zh : meta.en;
         return (
           <button
@@ -408,11 +517,18 @@ function ToolUseIconBar({ allowedTools, toolState, onToolStateChange }: Pick<AIC
             title={`${label}: ${meta.hint}`}
             type="button"
           >
-            <span aria-hidden="true">{meta.icon}</span>
+            <ToolIcon tool={tool} />
             {active ? <i aria-hidden="true" /> : null}
           </button>
         );
       })}
     </div>
   );
+}
+
+function ToolIcon({ tool }: { tool: string }) {
+  if (tool === "web_search") return <SearchIcon aria-hidden="true" size={16} />;
+  if (tool === "knowledge_base") return <KnowledgeIcon aria-hidden="true" size={16} />;
+  if (tool === "quick_messages") return <SparkleIcon aria-hidden="true" size={16} />;
+  return <CloseIcon aria-hidden="true" size={16} />;
 }

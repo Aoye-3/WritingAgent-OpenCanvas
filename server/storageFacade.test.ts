@@ -28,21 +28,20 @@ test("storage facade records thread runs, messages, versions, events, projects, 
   });
 
   assert.match(saved.runId, /^run_/);
-  assert.equal(storage.getThread(threadId)?.agentCardId, agentCard.id);
+  assert.equal(storage.getThread(threadId)?.projectId, agentCard.id);
   assert.deepEqual(storage.listMessages(threadId).map((message) => message.role), ["user", "assistant"]);
   assert.equal(storage.listOutputVersions(threadId)[0].content, "Output text");
   assert.ok(storage.listToolEvents(threadId).some((event) => event.eventType === "tool_call_completed"));
-  assert.ok(storage.listProjects(agentCards).some((project) => project.id === threadId && project.assetCount >= 1));
+  assert.ok(storage.listProjects(agentCards).some((project) => project.id === agentCard.id && project.assetCount >= 1));
 
   const renamed = storage.renameThread(threadId, "Renamed project");
   assert.equal(renamed?.title, "Renamed project");
   assert.ok(storage.getThread(threadId)?.updatedAt);
   assert.ok(storage.listRecentThreads().some((thread) => thread.id === threadId && thread.title === "Renamed project"));
-  assert.ok(storage.listProjects(agentCards).some((project) => project.id === threadId && project.title === "Renamed project"));
+  assert.ok(storage.listProjects(agentCards).some((project) => project.id === agentCard.id));
   assert.throws(() => storage.renameThread(threadId, "   "), /required/);
 
   assert.equal(storage.moveThreadToTrash(threadId), true);
-  assert.ok(storage.listProjects(agentCards, true).some((project) => project.id === threadId));
   assert.equal(storage.renameThread(threadId, "Hidden rename"), undefined);
   assert.equal(storage.restoreThread(threadId), true);
   assert.equal(storage.moveThreadToTrash(threadId), true);
@@ -103,7 +102,7 @@ test("storage facade saves and returns Agent settings", async () => {
   });
 
   const saved = storage.getAgentSettings(agentCardId);
-  assert.equal(saved?.model?.providerId, "deepseek");
+  assert.equal(saved?.model?.providerId, "");
   assert.deepEqual(saved?.quickMessages, ["Shorten this", "Make it clearer"]);
 });
 

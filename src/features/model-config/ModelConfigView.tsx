@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { AppView } from "../../app/App";
 import { AppSidebar } from "../../shared/AppSidebar";
 import { EmptyState, StatusBadge } from "../../shared/ui";
@@ -6,6 +7,7 @@ import { ApiConfigPanel } from "./components/ApiConfigPanel";
 import { ConfiguredApiListPanel } from "./components/ConfiguredApiListPanel";
 import { ProviderListPanel } from "./components/ProviderListPanel";
 import { useModelConfig } from "./hooks/useModelConfig";
+import { getModelRuntimeSyncStatus, retryModelRuntimeSync, type ModelRuntimeSyncEntry } from "./modelConfigClient";
 
 type ModelConfigViewProps = {
   activeView: AppView;
@@ -16,6 +18,13 @@ export function ModelConfigView({ activeView, onNavigate }: ModelConfigViewProps
   const { locale } = useI18n();
   const zh = locale === "zh";
   const state = useModelConfig(activeView, zh);
+  const [runtimeSync, setRuntimeSync] = useState<ModelRuntimeSyncEntry[]>([]);
+
+  useEffect(() => {
+    if (activeView !== "modelConfig") return;
+    void getModelRuntimeSyncStatus().then((result) => setRuntimeSync(result.models)).catch(() => setRuntimeSync([]));
+  }, [activeView, state.configuredModelApis.length]);
+  const degradedCount = runtimeSync.filter((model) => model.status === "failed" || model.status === "unsupported").length;
 
   return (
     <main className="view management-app model-config-app" data-active={activeView === "modelConfig"}>
@@ -32,6 +41,15 @@ export function ModelConfigView({ activeView, onNavigate }: ModelConfigViewProps
         {state.busy === "loading" ? <EmptyState title={zh ? "正在读取模型配置..." : "Loading model configuration..."} /> : null}
         {state.message ? <p className="settings-message">{state.message}</p> : null}
         {state.error ? <p className="settings-message is-error">{state.error}</p> : null}
+        <p className={`settings-message${degradedCount > 0 ? " is-error" : ""}`}>
+          {degradedCount > 0
+            ? (zh ? `${degradedCount} 个模型尚未同步到 AgentBackend，生成已被阻止。` : `${degradedCount} model(s) are not synchronized with AgentBackend; generation is blocked.`)
+            : (zh ? "AgentBackend 模型同步状态正常。" : "AgentBackend model synchronization is healthy.")}
+          {" "}
+          <button type="button" onClick={() => void retryModelRuntimeSync().then((result) => setRuntimeSync(result.models)).catch(() => void getModelRuntimeSyncStatus().then((result) => setRuntimeSync(result.models)))}>
+            {zh ? "重试同步" : "Retry sync"}
+          </button>
+        </p>
 
         {state.selectedProvider ? (
           <div className="model-config-grid">

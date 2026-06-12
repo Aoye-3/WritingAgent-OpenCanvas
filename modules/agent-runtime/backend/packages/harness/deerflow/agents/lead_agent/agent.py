@@ -36,18 +36,13 @@ def _get_runtime_config(config: RunnableConfig) -> dict:
 
 
 def _resolve_model_name(requested_model_name: str | None = None, *, app_config: AppConfig | None = None) -> str:
-    """Resolve a runtime model name safely, falling back to default if invalid. Returns None if no models are configured."""
+    """Resolve an explicitly selected runtime model name."""
     app_config = app_config or get_app_config()
-    default_model_name = app_config.models[0].name if app_config.models else None
-    if default_model_name is None:
-        raise ValueError("No chat models are configured. Please configure at least one model in config.yaml.")
-
     if requested_model_name and app_config.get_model_config(requested_model_name):
         return requested_model_name
-
-    if requested_model_name and requested_model_name != default_model_name:
-        logger.warning(f"Model '{requested_model_name}' not found in config; fallback to default model '{default_model_name}'.")
-    return default_model_name
+    if requested_model_name:
+        raise ValueError(f"Model '{requested_model_name}' is not in the configured model allowlist.")
+    raise ValueError("A model_name is required; AgentBackend does not select a default model.")
 
 
 def _create_summarization_middleware(*, app_config: AppConfig | None = None) -> DeerFlowSummarizationMiddleware | None:

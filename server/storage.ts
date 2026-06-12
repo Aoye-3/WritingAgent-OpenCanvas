@@ -7,6 +7,7 @@ import { AgentSettingsRepository } from "./repositories/agentSettingsRepository.
 import { CanvasRepository } from "./repositories/canvasRepository.js";
 import { KnowledgeRepository } from "./repositories/knowledgeRepository.js";
 import { RunRepository } from "./repositories/runRepository.js";
+import { ProjectRepository } from "./repositories/projectRepository.js";
 import { cleanText, nowIso, parseJson, validateId } from "./repositories/storageRepositoryUtils.js";
 import { ThreadRepository } from "./repositories/threadRepository.js";
 import type { KnowledgeBase, KnowledgeBaseInput, KnowledgeEventInput, KnowledgeItemInput, KnowledgeItemStatus } from "./knowledge/types.js";
@@ -69,10 +70,12 @@ const dbDir = storagePaths.dbDir;
 const dbPath = storagePaths.dbPath;
 const threadDirectoryManager = createThreadDirectoryManager(appRoot);
 const maxThreadTitleLength = 120;
+const maxProjectTitleLength = 120;
 
 export class SQLiteStorageRepository {
   private db: DatabaseSync;
   private threads: ThreadRepository;
+  private projects: ProjectRepository;
   private agentSettings: AgentSettingsRepository;
   private canvas: CanvasRepository;
   private knowledge: KnowledgeRepository;
@@ -81,10 +84,11 @@ export class SQLiteStorageRepository {
   constructor() {
     this.db = createFacetWriteDatabase(dbPath);
     this.threads = new ThreadRepository(this.db);
+    this.projects = new ProjectRepository(this.db);
     this.agentSettings = new AgentSettingsRepository(this.db, (work) => this.withTransaction(work));
     this.canvas = new CanvasRepository(this.db, {
       withTransaction: (work) => this.withTransaction(work),
-      touchThread: (threadId, updatedAt) => this.touchThread(threadId, updatedAt)
+      touchProject: (projectId, updatedAt) => this.touchProject(projectId, updatedAt)
     });
     this.knowledge = new KnowledgeRepository(this.db, {
       withTransaction: (work) => this.withTransaction(work)
@@ -95,17 +99,35 @@ export class SQLiteStorageRepository {
     });
   }
 
-  async ensureThread(threadId: string, agentCardId: string) {
+  createProject(projectId: string, title: unknown, summary = "") {
+    validateId(projectId, "projectId");
+    const cleanTitle = cleanText(title);
+    if (!cleanTitle) throw new Error("Project title is required");
+    if (cleanTitle.length > maxProjectTitleLength) throw new Error(`Project title must be ${maxProjectTitleLength} characters or fewer`);
+    return this.projects.create(projectId, cleanTitle, cleanText(summary));
+  }
+
+  getProject(projectId: string) {
+    validateId(projectId, "projectId");
+    return this.projects.get(projectId);
+  }
+
+  async ensureThread(threadId: string, projectId: string, title = "New conversation") {
     validateId(threadId, "threadId");
+    validateId(projectId, "projectId");
+    if (!this.getProject(projectId)) {
+      this.createProject(projectId, "Untitled project");
+    }
     await ensureThreadDirs(threadId);
     const now = nowIso();
     this.db
       .prepare(
-        `INSERT INTO threads (id, project_id, agent_card_id, title, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET agent_card_id = excluded.agent_card_id, updated_at = excluded.updated_at`
+        `INSERT INTO threads (id, project_id, title, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET project_id = excluded.project_id, updated_at = excluded.updated_at`
       )
-      .run(threadId, "local-project", agentCardId, agentCardId, now, now);
+      .run(threadId, projectId, cleanText(title) || "New conversation", now, now);
+    return this.getThread(threadId);
   }
 
   upsertAgentCards(cards: AgentCard[]) {
@@ -136,8 +158,171 @@ export class SQLiteStorageRepository {
     return this.threads.listRecentThreads(limit);
   }
 
-  listProjects(cards: AgentCard[], includeDeleted = false) {
-    return this.threads.listProjects(cards, includeDeleted);
+  listProjectThreads(projectId: string) {
+    validateId(projectId, "projectId");
+    return this.threads.listProjectThreads(projectId);
+  }
+
+  listProjects(_cards?: AgentCard[], includeDeleted = false) {
+    return this.projects.list(includeDeleted);
+  }
+
+  getProjectModelBindings(projectId: string) {
+    validateId(projectId, "projectId");
+    return (this.db
+      .prepare(`SELECT configured_model_api_id as id FROM project_model_bindings WHERE project_id = ? ORDER BY created_at ASC`)
+      .all(projectId) as { id: string }[]).map((row) => row.id);
+  }
+
+  setProjectModelBindings(projectId: string, configIds: string[]) {
+    validateId(projectId, "projectId");
+    if (!this.getProject(projectId)) throw new Error("Project not found");
+    const ids = [...new Set(configIds.map((id) => {
+      validateId(id, "configuredModelApiId");
+      return id;
+    }))];
+    const now = nowIso();
+    this.withTransaction(() => {
+      this.db.prepare(`DELETE FROM project_model_bindings WHERE project_id = ?`).run(projectId);
+      const insert = this.db.prepare(`INSERT INTO project_model_bindings (project_id, configured_model_api_id, created_at) VALUES (?, ?, ?)`);
+      ids.forEach((id) => insert.run(projectId, id, now));
+      this.db.prepare(`UPDATE projects SET updated_at = ? WHERE id = ?`).run(now, projectId);
+    });
+    return ids;
+  }
+
+  setThreadModelConfig(threadId: string, configuredModelApiId?: string) {
+    validateId(threadId, "threadId");
+    if (configuredModelApiId) validateId(configuredModelApiId, "configuredModelApiId");
+    const thread = this.getThread(threadId);
+    if (!thread) return undefined;
+    if (configuredModelApiId && !this.getProjectModelBindings(thread.projectId).includes(configuredModelApiId)) {
+      throw new Error("Model configuration is not bound to this project");
+    }
+    this.db.prepare(`UPDATE threads SET configured_model_api_id = ?, updated_at = ? WHERE id = ?`).run(configuredModelApiId ?? null, nowIso(), threadId);
+    return this.getThread(threadId);
+  }
+
+  getProjectAgentInputValues(projectId: string, agentCardId: string): StoredStructuredValues {
+    validateId(projectId, "projectId");
+    validateId(agentCardId, "agentCardId");
+    const row = this.db
+      .prepare(`SELECT structured_values_json as structuredValuesJson FROM project_agent_inputs WHERE project_id = ? AND agent_card_id = ?`)
+      .get(projectId, agentCardId) as { structuredValuesJson: string } | undefined;
+    return row ? cleanStructuredValues(parseJson(row.structuredValuesJson)) : {};
+  }
+
+  saveProjectAgentInputValues(projectId: string, agentCardId: string, structuredValues: unknown, revision: number) {
+    validateId(projectId, "projectId");
+    validateId(agentCardId, "agentCardId");
+    if (!this.getProject(projectId)) return undefined;
+    const values = cleanStructuredValues(structuredValues);
+    if (!Number.isInteger(revision) || revision < 1) throw new Error("Project Agent input revision must be a positive integer");
+    const current = this.db
+      .prepare(`SELECT revision FROM project_agent_inputs WHERE project_id = ? AND agent_card_id = ?`)
+      .get(projectId, agentCardId) as { revision: number } | undefined;
+    if (current && revision <= current.revision) throw new Error("Stale Project Agent input revision");
+    const now = nowIso();
+    this.db.prepare(
+      `INSERT INTO project_agent_inputs (project_id, agent_card_id, structured_values_json, revision, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(project_id, agent_card_id) DO UPDATE SET structured_values_json = excluded.structured_values_json, revision = excluded.revision, updated_at = excluded.updated_at`
+    ).run(projectId, agentCardId, JSON.stringify(values), revision, now);
+    this.db.prepare(`UPDATE projects SET updated_at = ? WHERE id = ?`).run(now, projectId);
+    return { structuredValues: values, revision };
+  }
+
+  getProjectSharedContext(projectId: string) {
+    validateId(projectId, "projectId");
+    const project = this.getProject(projectId);
+    if (!project) return undefined;
+    const inputRows = this.db
+      .prepare(`SELECT agent_card_id as agentCardId, structured_values_json as valuesJson FROM project_agent_inputs WHERE project_id = ? ORDER BY updated_at DESC`)
+      .all(projectId) as { agentCardId: string; valuesJson: string }[];
+    const outputRows = this.db
+      .prepare(
+        `SELECT output_versions.content
+         FROM output_versions
+         JOIN threads ON threads.id = output_versions.thread_id
+         WHERE threads.project_id = ? AND output_versions.include_in_project_context = 1
+         ORDER BY output_versions.created_at DESC
+         LIMIT 24`
+      )
+      .all(projectId) as { content: string }[];
+    const agentInputs = takeBudgetedEntries(
+      inputRows.map((row) => [row.agentCardId, cleanStructuredValues(parseJson(row.valuesJson))] as const),
+      8_000
+    );
+    const canvasNodes = takeBudgetedValues(
+      this.listCanvasNodes(projectId)
+        .filter((node) => node.includeInProjectContext)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .map((node) => ({ id: node.id, kind: node.kind, title: node.title, content: node.content })),
+      8_000
+    );
+    const recentOutputs = takeBudgetedValues(outputRows.map((row) => row.content), 6_000);
+    return {
+      projectId,
+      title: truncateContextValue(project.title, 2_000),
+      summary: truncateContextValue(project.summary, 2_000),
+      agentInputs: Object.fromEntries(agentInputs),
+      canvasNodes,
+      recentOutputs
+    };
+  }
+
+  getAllProjectAgentInputValues(projectId: string) {
+    return this.getProjectSharedContext(projectId)?.agentInputs ?? {};
+  }
+
+  getAllProjectAgentInputRevisions(projectId: string) {
+    validateId(projectId, "projectId");
+    return Object.fromEntries((this.db
+      .prepare(`SELECT agent_card_id as agentCardId, revision FROM project_agent_inputs WHERE project_id = ?`)
+      .all(projectId) as { agentCardId: string; revision: number }[]).map((row) => [row.agentCardId, row.revision]));
+  }
+
+  renameProject(projectId: string, title: unknown) {
+    validateId(projectId, "projectId");
+    const cleanTitle = cleanText(title);
+    if (!cleanTitle) throw new Error("Project title is required");
+    if (cleanTitle.length > maxProjectTitleLength) throw new Error(`Project title must be ${maxProjectTitleLength} characters or fewer`);
+    return this.projects.rename(projectId, cleanTitle);
+  }
+
+  moveProjectToTrash(projectId: string) {
+    validateId(projectId, "projectId");
+    return this.projects.moveToTrash(projectId);
+  }
+
+  restoreProject(projectId: string) {
+    validateId(projectId, "projectId");
+    return this.projects.restore(projectId);
+  }
+
+  async hardDeleteProject(projectId: string) {
+    validateId(projectId, "projectId");
+    const project = this.db.prepare(`SELECT id FROM projects WHERE id = ? AND deleted_at IS NOT NULL`).get(projectId);
+    if (!project) return false;
+    const threadIds = (this.db.prepare(`SELECT id FROM threads WHERE project_id = ?`).all(projectId) as { id: string }[]).map((row) => row.id);
+    this.withTransaction(() => {
+      for (const threadId of threadIds) {
+        this.db.prepare(`DELETE FROM tool_events WHERE thread_id = ?`).run(threadId);
+        this.db.prepare(`DELETE FROM output_versions WHERE thread_id = ?`).run(threadId);
+        this.db.prepare(`DELETE FROM prompt_versions WHERE thread_id = ?`).run(threadId);
+        this.db.prepare(`DELETE FROM runs WHERE thread_id = ?`).run(threadId);
+        this.db.prepare(`DELETE FROM messages WHERE thread_id = ?`).run(threadId);
+      }
+      for (const table of ["canvas_edges", "canvas_objects", "canvas_workflow_suggestions", "canvas_workflows", "canvas_write_requests", "canvas_nodes"]) {
+        this.db.prepare(`DELETE FROM ${table} WHERE project_id = ?`).run(projectId);
+      }
+      this.db.prepare(`DELETE FROM project_agent_inputs WHERE project_id = ?`).run(projectId);
+      this.db.prepare(`DELETE FROM project_model_bindings WHERE project_id = ?`).run(projectId);
+      this.db.prepare(`DELETE FROM threads WHERE project_id = ?`).run(projectId);
+      this.db.prepare(`DELETE FROM projects WHERE id = ?`).run(projectId);
+    });
+    await Promise.all([...threadIds, projectId].map((id) => rm(threadDataRoot(id), { recursive: true, force: true })));
+    return true;
   }
 
   moveThreadToTrash(threadId: string) {
@@ -160,45 +345,12 @@ export class SQLiteStorageRepository {
     return this.threads.renameThread(threadId, cleanTitle);
   }
 
-  getThreadInputValues(threadId: string): StoredStructuredValues {
-    validateId(threadId, "threadId");
-    const row = this.db
-      .prepare(`SELECT structured_values_json as structuredValuesJson FROM thread_inputs WHERE thread_id = ?`)
-      .get(threadId) as { structuredValuesJson: string } | undefined;
-    if (!row) return {};
-    return cleanStructuredValues(parseJson(row.structuredValuesJson));
-  }
-
-  saveThreadInputValues(threadId: string, structuredValues: unknown) {
-    validateId(threadId, "threadId");
-    const thread = this.getThread(threadId);
-    if (!thread) return undefined;
-    const values = cleanStructuredValues(structuredValues);
-    const now = nowIso();
-    this.db
-      .prepare(
-        `INSERT INTO thread_inputs (thread_id, structured_values_json, updated_at)
-         VALUES (?, ?, ?)
-         ON CONFLICT(thread_id) DO UPDATE SET structured_values_json = excluded.structured_values_json, updated_at = excluded.updated_at`
-      )
-      .run(threadId, JSON.stringify(values), now);
-    this.touchThread(threadId, now);
-    return values;
-  }
-
   async hardDeleteThread(threadId: string) {
     validateId(threadId, "threadId");
     const thread = this.db.prepare(`SELECT id FROM threads WHERE id = ? AND deleted_at IS NOT NULL`).get(threadId);
     if (!thread) return false;
 
     this.withTransaction(() => {
-      this.db.prepare(`DELETE FROM canvas_edges WHERE thread_id = ?`).run(threadId);
-      this.db.prepare(`DELETE FROM canvas_objects WHERE thread_id = ?`).run(threadId);
-      this.db.prepare(`DELETE FROM canvas_workflow_suggestions WHERE thread_id = ?`).run(threadId);
-      this.db.prepare(`DELETE FROM canvas_workflows WHERE thread_id = ?`).run(threadId);
-      this.db.prepare(`DELETE FROM canvas_write_requests WHERE thread_id = ?`).run(threadId);
-      this.db.prepare(`DELETE FROM canvas_nodes WHERE thread_id = ?`).run(threadId);
-      this.db.prepare(`DELETE FROM thread_inputs WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM tool_events WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM output_versions WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM prompt_versions WHERE thread_id = ?`).run(threadId);
@@ -409,6 +561,12 @@ export class SQLiteStorageRepository {
     return this.runs.listOutputVersions(threadId);
   }
 
+  setOutputVersionProjectContext(threadId: string, outputVersionId: string, included: boolean) {
+    validateId(threadId, "threadId");
+    validateId(outputVersionId, "outputVersionId");
+    return this.runs.setOutputVersionProjectContext(threadId, outputVersionId, included);
+  }
+
   listToolEvents(threadId: string) {
     return this.runs.listToolEvents(threadId);
   }
@@ -423,6 +581,10 @@ export class SQLiteStorageRepository {
 
   private touchThread(threadId: string, updatedAt = nowIso()) {
     this.threads.touchThread(threadId, updatedAt);
+  }
+
+  private touchProject(projectId: string, updatedAt = nowIso()) {
+    this.projects.touch(projectId, updatedAt);
   }
 }
 
@@ -461,5 +623,42 @@ function cleanStructuredValues(value: unknown): StoredStructuredValues {
     }
   }
   return values;
+}
+
+function truncateContextValue(value: string, limit = 4_000) {
+  return value.length <= limit ? value : value.slice(0, limit);
+}
+
+function takeBudgetedValues<T>(values: T[], budget: number) {
+  const selected: T[] = [];
+  let used = 0;
+  for (const value of values) {
+    const normalized = typeof value === "string" ? truncateContextValue(value) : truncateContextRecord(value);
+    const size = JSON.stringify(normalized).length;
+    if (used + size > budget) continue;
+    selected.push(normalized as T);
+    used += size;
+  }
+  return selected;
+}
+
+function takeBudgetedEntries<T>(entries: ReadonlyArray<readonly [string, T]>, budget: number) {
+  const selected: Array<readonly [string, T]> = [];
+  let used = 0;
+  for (const [key, value] of entries) {
+    const normalized = truncateContextRecord(value);
+    const size = key.length + JSON.stringify(normalized).length;
+    if (used + size > budget) continue;
+    selected.push([key, normalized as T]);
+    used += size;
+  }
+  return selected;
+}
+
+function truncateContextRecord<T>(value: T): T {
+  if (typeof value === "string") return truncateContextValue(value) as T;
+  if (Array.isArray(value)) return value.map((item) => truncateContextRecord(item)) as T;
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, truncateContextRecord(item)])) as T;
 }
 
