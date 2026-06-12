@@ -7,7 +7,7 @@
     "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File ./start-facetwrite.ps1",
     "dev:full": "powershell -NoProfile -ExecutionPolicy Bypass -File ./start-facetwrite.ps1",
     "dev:services": "concurrently \"npm:dev:client\" \"npm:dev:server\"",
-    "dev:client": "vite --host 127.0.0.1 --port 3000",
+    "dev:client": "vite --host 127.0.0.1",
     "dev:server": "tsx server/index.ts",
     "shell:dev": "electron app-shell/main.mjs",
     "shell:test": "node --test app-shell/*.test.mjs",

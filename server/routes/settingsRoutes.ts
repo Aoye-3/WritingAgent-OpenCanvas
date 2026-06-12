@@ -17,6 +17,7 @@ import { getSettingsStatus, saveSettings, validateSettings } from "../services/s
 import { scheduleDevServerShutdown } from "../services/devServerControl.js";
 import { errorMessage, sendError, sendOk } from "../utils/http.js";
 import type { SQLiteStorageRepository } from "../storage.js";
+import { getModelRuntimeSyncStatus, syncConfiguredModelsToAgentBackend } from "../runtime/agentBackendAdapter/modelSync.js";
 
 type SettingsRouteDeps = {
   storage: SQLiteStorageRepository;
@@ -39,6 +40,19 @@ export function registerSettingsRoutes(app: Express, { storage }: SettingsRouteD
     sendOk(response, await listConfiguredModelApiSummaries());
   });
 
+  app.get("/api/settings/model-runtime-sync-status", (_request, response) => {
+    sendOk(response, getModelRuntimeSyncStatus());
+  });
+
+  app.post("/api/settings/model-runtime-sync/retry", async (_request, response) => {
+    try {
+      await syncConfiguredModelsToAgentBackend();
+      sendOk(response, getModelRuntimeSyncStatus());
+    } catch (error) {
+      sendError(response, 503, "internal_error", errorMessage(error, "AgentBackend model synchronization failed"));
+    }
+  });
+
   app.get("/api/settings/configured-model-apis/:configId", async (request, response) => {
     try {
       sendOk(response, await getConfiguredModelApiSummary(request.params.configId));
@@ -49,7 +63,9 @@ export function registerSettingsRoutes(app: Express, { storage }: SettingsRouteD
 
   app.post("/api/settings/configured-model-apis", async (request, response) => {
     try {
-      sendOk(response, await createConfiguredModelApi(parseConfiguredModelApiPayload(request.body)));
+      const result = await createConfiguredModelApi(parseConfiguredModelApiPayload(request.body));
+      await syncConfiguredModelsToAgentBackend().catch((error) => console.error("AgentBackend model sync failed after create", error));
+      sendOk(response, { ...result, runtimeSync: getModelRuntimeSyncStatus().models.find((model) => model.configuredModelApiId === result.id) });
     } catch (error) {
       sendError(response, 500, "internal_error", errorMessage(error, "Unable to create configured model API"));
     }
@@ -57,7 +73,9 @@ export function registerSettingsRoutes(app: Express, { storage }: SettingsRouteD
 
   app.put("/api/settings/configured-model-apis/:configId", async (request, response) => {
     try {
-      sendOk(response, await saveConfiguredModelApi(request.params.configId, parseConfiguredModelApiPayload(request.body)));
+      const result = await saveConfiguredModelApi(request.params.configId, parseConfiguredModelApiPayload(request.body));
+      await syncConfiguredModelsToAgentBackend().catch((error) => console.error("AgentBackend model sync failed after save", error));
+      sendOk(response, { ...result, runtimeSync: getModelRuntimeSyncStatus().models.find((model) => model.configuredModelApiId === result.id) });
     } catch (error) {
       sendError(response, 500, "internal_error", errorMessage(error, "Unable to save configured model API"));
     }
@@ -65,7 +83,9 @@ export function registerSettingsRoutes(app: Express, { storage }: SettingsRouteD
 
   app.delete("/api/settings/configured-model-apis/:configId", async (request, response) => {
     try {
-      sendOk(response, await deleteConfiguredModelApi(request.params.configId));
+      const result = await deleteConfiguredModelApi(request.params.configId);
+      await syncConfiguredModelsToAgentBackend().catch((error) => console.error("AgentBackend model sync failed after delete", error));
+      sendOk(response, result);
     } catch (error) {
       sendError(response, 500, "internal_error", errorMessage(error, "Unable to delete configured model API"));
     }

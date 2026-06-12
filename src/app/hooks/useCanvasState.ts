@@ -104,7 +104,7 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces, undoD
 
 function createDefaultCanvasWorkflow(): CanvasWorkflow {
   return {
-    threadId: "",
+    projectId: "",
     ...defaultCanvasWorkflow(),
     updatedAt: ""
   };

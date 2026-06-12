@@ -26,7 +26,7 @@ export type CanvasArrowGeometry = { startX: number; startY: number; endX: number
 
 type CanvasObjectBase<K extends CanvasObjectKind, G, D> = {
   id: string;
-  threadId: string;
+  projectId: string;
   kind: K;
   geometry: G;
   data: D;
@@ -124,7 +124,7 @@ export function validateCanvasObjectWrite(input: { kind: unknown; geometry?: unk
 }
 
 export function normalizeStoredCanvasObject(input: StoredCanvasObject): CanvasObject {
-  const base = { id: input.id, threadId: input.threadId, createdAt: input.createdAt, updatedAt: input.updatedAt };
+  const base = { id: input.id, projectId: input.projectId, createdAt: input.createdAt, updatedAt: input.updatedAt };
   const geometry = isRecord(input.geometry) ? input.geometry : {};
   const data = isRecord(input.data) ? input.data : {};
   if (input.kind === "arrow") {

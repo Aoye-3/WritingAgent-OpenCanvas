@@ -143,9 +143,7 @@ export async function createConfiguredModelApi(payload: SaveConfiguredModelApiPa
     updatedAt: now
   });
   store.configs[config.id] = config;
-  store.activeConfigId = config.id;
   await writeProviderApiConfigStore(store);
-  applyActiveProviderEnv(config);
   return toConfiguredSummary(config);
 }
 
@@ -171,9 +169,7 @@ export async function saveConfiguredModelApi(configId: string, payload: SaveConf
   if (nextApiKey) next.apiKey = nextApiKey;
   if (!next.apiKey) next.apiKey = findReusableProviderApiKey(store, providerId);
   store.configs[configId] = next;
-  store.activeConfigId = configId;
   await writeProviderApiConfigStore(store);
-  applyActiveProviderEnv(next);
   return toConfiguredSummary(next);
 }
 
@@ -183,7 +179,7 @@ export async function deleteConfiguredModelApi(configId: string) {
 
   const store = await readProviderApiConfigStore();
   delete store.configs[configId];
-  if (store.activeConfigId === configId) store.activeConfigId = Object.keys(store.configs)[0];
+  if (store.activeConfigId === configId) store.activeConfigId = undefined;
   await writeProviderApiConfigStore(store);
   return { ok: true, activeConfigId: store.activeConfigId };
 }
@@ -205,12 +201,14 @@ export async function listProviderApiConfigSummaries() {
 
 export async function getProviderApiConfigSummary(providerId: ProviderId) {
   const config = await resolveConfiguredModelApiForProvider(providerId);
-  return config ? toProviderSummary(config) : toProviderSummary(createDefaultBinding(providerId));
+  if (!config) throw new Error(`Provider API is not configured: ${providerId}`);
+  return toProviderSummary(config);
 }
 
 export async function resolveProviderApiConfig(providerId: ProviderId): Promise<ProviderApiConfig & { baseURL: string; defaultModel: string }> {
   const config = await resolveConfiguredModelApiForProvider(providerId);
-  const binding = config ?? createDefaultBinding(providerId);
+  if (!config) throw new Error(`Provider API is not configured: ${providerId}`);
+  const binding = config;
   return {
     providerId,
     apiKey: binding.apiKey,
@@ -223,7 +221,8 @@ export async function resolveProviderApiConfig(providerId: ProviderId): Promise<
 
 export async function saveProviderApiConfig(providerId: ProviderId, payload: SaveProviderApiConfigPayload) {
   const store = await readProviderApiConfigStore();
-  const modelId = readCleanString(payload.defaultModel) ?? getProviderProfile(providerId).defaultModel;
+  const modelId = readCleanString(payload.defaultModel);
+  if (!modelId) throw new Error("defaultModel is required");
   const existing = Object.values(store.configs).find((config) => config.providerId === providerId && config.modelId === modelId)
     ?? Object.values(store.configs).find((config) => config.providerId === providerId);
   if (existing) {
@@ -258,7 +257,7 @@ export async function deleteProviderApiConfig(providerId: ProviderId) {
   for (const config of Object.values(store.configs)) {
     if (config.providerId === providerId) delete store.configs[config.id];
   }
-  if (store.activeConfigId && !store.configs[store.activeConfigId]) store.activeConfigId = Object.keys(store.configs)[0];
+  if (store.activeConfigId && !store.configs[store.activeConfigId]) store.activeConfigId = undefined;
   await writeProviderApiConfigStore(store);
   return { ok: true, activeProviderId: store.activeConfigId ? store.configs[store.activeConfigId]?.providerId : undefined };
 }
@@ -274,9 +273,7 @@ export async function readProviderApiConfigStore(): Promise<ProviderApiConfigSto
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
 
-  const migrated = migrateEnvConfig(store);
-  if (migrated.changed) await writeProviderApiConfigStore(migrated.store);
-  return migrated.store;
+  return store;
 }
 
 export async function writeProviderApiConfigStore(store: ProviderApiConfigStore) {
@@ -299,38 +296,6 @@ export async function writeProviderApiConfigStore(store: ProviderApiConfigStore)
 
 function providerApiConfigPath() {
   return path.resolve(process.cwd(), ".facetwrite", "provider-apis.json");
-}
-
-function migrateEnvConfig(store: ProviderApiConfigStore) {
-  const envApiKey = process.env.OPENAI_API_KEY?.trim();
-  const providerId = getProviderProfile(process.env.OPENAI_PROVIDER_ID?.trim()).id;
-  if (!envApiKey || Object.values(store.configs).some((config) => config.providerId === providerId && config.apiKey)) {
-    return { store, changed: false };
-  }
-
-  const profile = getProviderProfile(providerId);
-  const modelId = process.env.OPENAI_MODEL?.trim() || profile.defaultModel;
-  const now = new Date().toISOString();
-  const config = hydrateConfiguredModelApi({
-    id: createConfigId(providerId, modelId, store.configs),
-    providerId,
-    modelId,
-    modelName: findModel(providerId, modelId)?.name ?? modelId,
-    modelType: inferModelType(providerId, modelId),
-    apiKey: envApiKey,
-    baseURL: process.env.OPENAI_BASE_URL?.trim() || profile.defaultBaseURL,
-    enabled: true,
-    createdAt: now,
-    updatedAt: now
-  });
-  return {
-    store: normalizeStore({
-      ...store,
-      activeConfigId: store.activeConfigId ?? config.id,
-      configs: { ...store.configs, [config.id]: config }
-    }),
-    changed: true
-  };
 }
 
 function normalizeStore(value: unknown): ProviderApiConfigStore {
@@ -367,7 +332,7 @@ function normalizeStore(value: unknown): ProviderApiConfigStore {
   const activeConfigId = readCleanString(input.activeConfigId);
   return {
     version: STORE_VERSION,
-    activeConfigId: activeConfigId && configs[activeConfigId] ? activeConfigId : Object.keys(configs)[0],
+    activeConfigId: activeConfigId && configs[activeConfigId] ? activeConfigId : undefined,
     configs
   };
 }
@@ -396,23 +361,7 @@ function migrateLegacyProviderStore(input: LegacyProviderApiConfigStore): Provid
   const active = input.activeProviderId
     ? Object.values(configs).find((config) => config.providerId === input.activeProviderId)
     : undefined;
-  return { version: STORE_VERSION, activeConfigId: active?.id ?? Object.keys(configs)[0], configs };
-}
-
-function createDefaultBinding(providerId: ProviderId): ConfiguredModelApi {
-  const profile = getProviderProfile(providerId);
-  const modelId = profile.defaultModel;
-  return hydrateConfiguredModelApi({
-    id: createConfigId(providerId, modelId, {}),
-    providerId,
-    modelId,
-    modelName: findModel(providerId, modelId)?.name ?? modelId,
-    modelType: inferModelType(providerId, modelId),
-    baseURL: profile.defaultBaseURL,
-    enabled: true,
-    createdAt: "",
-    updatedAt: ""
-  });
+  return { version: STORE_VERSION, activeConfigId: active?.id, configs };
 }
 
 function findReusableProviderApiKey(store: ProviderApiConfigStore, providerId: ProviderId) {
@@ -502,13 +451,6 @@ function maskApiKey(apiKey: string) {
   const trimmed = apiKey.trim();
   if (trimmed.length <= 8) return "configured";
   return `...${trimmed.slice(-4)}`;
-}
-
-function applyActiveProviderEnv(config: ConfiguredModelApi) {
-  if (config.apiKey) process.env.OPENAI_API_KEY = config.apiKey;
-  process.env.OPENAI_PROVIDER_ID = config.providerId;
-  process.env.OPENAI_BASE_URL = config.baseURL;
-  process.env.OPENAI_MODEL = config.modelId;
 }
 
 function readCleanString(value: unknown) {

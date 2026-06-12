@@ -24,7 +24,7 @@ The current UI is a layered management surface: a left Knowledge Base list, sour
 2. `promptRunBuilder` searches selected `knowledge.baseIds`; if none are selected, all bases are eligible. `knowledge.documentCount` becomes the search limit and `knowledge.threshold` is passed through to retrieval.
 3. Results are injected into the user message as explicit Knowledge References.
 4. The run records a `knowledge_search_completed` tool event with source metadata and scores.
-5. Provider fallback and AgentBackend bridge tools reuse the same `KnowledgeService.search` path. The local `knowledge_base` tool can also receive `baseIds` and prefers RAG results over explicit fallback context values.
+5. AgentBackend bridge tools reuse the same `KnowledgeService.search` path. The local `knowledge_base` tool can also receive `baseIds` and prefers RAG results over explicit fallback context values.
 6. Knowledge failures or empty results must be reported as unavailable retrieval, not answered from AgentBackend legacy memory or previous-project context.
 
 ## Retrieval Test

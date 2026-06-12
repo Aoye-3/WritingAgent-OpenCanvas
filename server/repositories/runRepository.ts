@@ -21,10 +21,10 @@ export class RunRepository {
     this.deps.withTransaction(() => {
       this.db
         .prepare(
-          `INSERT INTO runs (id, thread_id, agent_card_id, mode, provider, used_mock, status, error_message, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO runs (id, thread_id, agent_card_id, configured_model_api_id, model_id, mode, provider, used_mock, status, error_message, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(runId, input.threadId, input.agentCardId, input.mode, input.provider, input.usedMock ? 1 : 0, "completed", input.errorMessage ?? null, now);
+        .run(runId, input.threadId, input.agentCardId, input.configuredModelApiId ?? null, input.modelId ?? null, input.mode, input.provider, input.usedMock ? 1 : 0, "completed", input.errorMessage ?? null, now);
 
       if (input.userMessage) {
         this.addMessage(input.threadId, "user", input.userMessage, false, now);
@@ -41,6 +41,8 @@ export class RunRepository {
       this.recordToolEvent(input.threadId, runId, "run_completed", {
         mode: input.mode,
         provider: input.provider,
+        configuredModelApiId: input.configuredModelApiId,
+        modelId: input.modelId,
         usedMock: input.usedMock,
         finishReason: input.finishReason,
         usage: input.usage
@@ -76,7 +78,7 @@ export class RunRepository {
   }
 
   listOutputVersions(threadId: string) {
-    type StoredOutputVersionRow = Omit<StoredOutputVersion, "usedMock"> & { usedMock: number };
+    type StoredOutputVersionRow = Omit<StoredOutputVersion, "usedMock" | "includeInProjectContext"> & { usedMock: number; includeInProjectContext: number };
     const rows = this.db
       .prepare(
         `SELECT output_versions.id,
@@ -86,7 +88,8 @@ export class RunRepository {
                 output_versions.created_at as createdAt,
                 runs.mode,
                 runs.provider,
-                runs.used_mock as usedMock
+                runs.used_mock as usedMock,
+                output_versions.include_in_project_context as includeInProjectContext
          FROM output_versions
          JOIN runs ON runs.id = output_versions.run_id
          WHERE output_versions.thread_id = ?
@@ -97,8 +100,17 @@ export class RunRepository {
     return rows.map((row) => ({
       ...row,
       content: sanitizeVisibleText(row.content),
-      usedMock: Boolean(row.usedMock)
+      usedMock: Boolean(row.usedMock),
+      includeInProjectContext: Boolean(row.includeInProjectContext)
     }));
+  }
+
+  setOutputVersionProjectContext(threadId: string, outputVersionId: string, included: boolean) {
+    const result = this.db.prepare(
+      `UPDATE output_versions SET include_in_project_context = ?
+       WHERE id = ? AND thread_id = ?`
+    ).run(included ? 1 : 0, outputVersionId, threadId);
+    return result.changes > 0;
   }
 
   listToolEvents(threadId: string) {

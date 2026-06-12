@@ -7,6 +7,7 @@ export type GenerateRequest = {
   mode: "faceted" | "freeText" | "structured" | "chat";
   taskId?: string;
   agentCardId?: string;
+  projectId?: string;
   threadId?: string;
   locale: Locale;
   formValues?: Record<string, string | string[]>;
@@ -57,6 +58,7 @@ export function parseGenerateRequest(value: unknown): GenerateRequest {
     locale,
     taskId: readString(body.taskId),
     agentCardId: readString(body.agentCardId),
+    projectId: readString(body.projectId),
     threadId: readString(body.threadId),
     formValues: readStringRecord(body.formValues),
     structuredValues: readStringRecord(body.structuredValues),

@@ -121,7 +121,8 @@ function fakeCanvasStorage() {
     updatedAt: ""
   };
   return {
-    getThread: () => ({ id: "thread_route_canvas_workflow" }),
+    getThread: () => ({ id: "thread_route_canvas_workflow", projectId: "project_route_canvas_workflow" }),
+    getProject: () => ({ id: "project_route_canvas_workflow" }),
     migrateCanvasWorkflowRoleNodes: () => ({ createdRoleNodes: 0, createdEdges: 0, updatedNodes: 0 }),
     listCanvasNodes: () => [node, roleNode],
     listCanvasEdges: () => [{ id: "edge_1", threadId: "thread_route_canvas_workflow", sourceNodeId: "role_1", targetNodeId: "node_1", label: "", createdAt: "2026-05-28T00:00:00.000Z", updatedAt: "2026-05-28T00:00:00.000Z" }],

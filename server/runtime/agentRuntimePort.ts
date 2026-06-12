@@ -8,6 +8,8 @@ import type { ToolEventRecord } from "../toolRuntime.js";
 export type AgentRuntimeRunInput = {
   payload: GenerateRequest;
   threadId: string;
+  projectId: string;
+  configuredModelApiId: string;
   runtimeConfig: AgentRuntimeConfig;
   messages: ChatMessage[];
   prompt: string;

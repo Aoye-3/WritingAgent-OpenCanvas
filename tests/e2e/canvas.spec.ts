@@ -42,6 +42,43 @@ async function fetchCanvasState(page: Page): Promise<CanvasState> {
   return response.json() as Promise<CanvasState>;
 }
 
+test("Project-first workspace separates sessions, models, and run Agent without page scrolling", async ({ page }) => {
+  await page.setViewportSize({ width: 1536, height: 1024 });
+  await openNewCanvas(page);
+
+  await expect(page.getByRole("complementary", { name: "Project settings and structured inputs" })).toBeVisible();
+  await expect(page.getByText(/Conversation model|会话模型/)).toBeVisible();
+  await expect(page.getByText(/Available to this Project|项目可用模型/)).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Project settings and structured inputs" }).getByText("AGENTCARD")).toHaveCount(0);
+
+  const firstThreadId = await getCurrentThreadId(page);
+  await expect(page.getByRole("button", { name: /History|历史/ })).toBeVisible();
+  const rightDrawer = page.getByRole("complementary", { name: "AI collaboration drawer" });
+  const compactHeader = rightDrawer.getByTestId("conversation-compact-header");
+  const agentRow = rightDrawer.getByTestId("composer-agent-row");
+  const composerInput = rightDrawer.getByTestId("ai-collaboration-input");
+  await expect(compactHeader).toBeVisible();
+  await expect(rightDrawer.getByText(/History and collaboration|历史与协作/)).toHaveCount(0);
+  await expect(agentRow.locator(".composer-agent-select")).toBeVisible();
+  expect((await agentRow.boundingBox())!.y).toBeLessThan((await composerInput.boundingBox())!.y);
+  await expect(rightDrawer.getByRole("button", { name: /Web search|联网搜索/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(rightDrawer.getByRole("button", { name: /Knowledge base|知识库引用/ })).toHaveAttribute("aria-pressed", "false");
+  await expect(rightDrawer.getByRole("button", { name: /^Send$|^发送$/ })).toHaveClass(/chat-send-icon/);
+  const newConversationButton = page.getByRole("button", { name: /New|新建/ });
+  await expect(newConversationButton).toBeEnabled();
+  await newConversationButton.click();
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("facetwrite:lastThreadId"))).not.toBe(firstThreadId);
+
+  await page.getByRole("button", { name: /History|历史/ }).click();
+  await expect(page.getByRole("button", { name: /New conversation/ })).toHaveCount(2);
+
+  const pageOverflow = await page.evaluate(() => ({
+    horizontal: document.documentElement.scrollWidth > window.innerWidth + 1,
+    vertical: document.documentElement.scrollHeight > window.innerHeight + 1,
+  }));
+  expect(pageOverflow).toEqual({ horizontal: false, vertical: false });
+});
+
 test("canvas creates node types and supports undo", async ({ page }) => {
   await openNewCanvas(page);
 
@@ -390,7 +427,7 @@ test("canvas can connect nodes, delete an edge, and draft a mind chain", async (
 
   await expect(page.locator(".react-flow__edge")).toHaveCount(1);
 
-  await page.getByTestId("canvas-node").first().click({ button: "right" });
+  await page.getByTestId("canvas-node").first().click({ button: "right", position: { x: 36, y: 72 } });
   await page.getByText(sendMindChainName).click();
   await expect(page.getByTestId("ai-collaboration-input")).toHaveValue("");
   await expect(page.getByTestId("mind-chain-context-chip")).toContainText(/Mind chain \u00b7 2 nodes|\u601d\u7ef4\u94fe \u00b7 2 \u8282\u70b9/);

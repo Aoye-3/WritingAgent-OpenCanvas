@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchThreadState, renameThread, saveThreadInputs } from "../features/agents/agentClient";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { bindProjectModels, createProject, fetchProjectFirstHealth, fetchThreadState, renameProject, saveThreadInputs, selectThreadModel, setOutputVersionProjectContext } from "../features/agents/agentClient";
 import { AgentSettingsView } from "../features/agents/AgentSettingsView";
 import { useAgentCards } from "../features/agents/hooks/useAgentCards";
-import type { AgentCard, AgentValues, StoredThread, ThreadStateResponse } from "../features/agents/types";
+import type { AgentCard, AgentValues, ProjectSummary, StoredThread, ThreadStateResponse } from "../features/agents/types";
 import { AiDashboardView } from "../features/ai-dashboard/AiDashboardView";
 import { useAppNavigation } from "../features/app/useAppNavigation";
 import type { GenerateRequest } from "../features/generation/types";
@@ -13,6 +13,8 @@ import { StartView } from "../features/start/StartView";
 import { HomeView } from "../features/home/HomeView";
 import { KnowledgeSettingsView } from "../features/knowledge/KnowledgeSettingsView";
 import { ModelConfigView } from "../features/model-config/ModelConfigView";
+import { getConfiguredModelApis } from "../features/model-config/modelConfigClient";
+import type { ConfiguredModelApiSummary } from "../features/settings/types";
 import { ProjectsView } from "../features/projects/ProjectsView";
 import { useProjects } from "../features/projects/hooks/useProjects";
 import { WorkspaceView } from "../features/workspace/WorkspaceView";
@@ -22,6 +24,7 @@ import { useGenerationRun } from "./hooks/useGenerationRun";
 import { useProjectTrash } from "./hooks/useProjectTrash";
 import { useThreadSession } from "./hooks/useThreadSession";
 import { buildCanvasWorkflowContext } from "../../shared/canvasWorkflow";
+import { assertProjectFirstContract } from "./projectWorkspace";
 
 export type AppView = "start" | "home" | "workspace" | "projects" | "agentSettings" | "modelConfig" | "aiDashboard" | "knowledgeSettings" | "canvasNodeSettings";
 
@@ -55,15 +58,29 @@ function AppContent() {
   const [activeAgent, setActiveAgent] = useState<AgentCard>(fallbackAgentCards[0]);
   const [agentValues, setAgentValues] = useState<AgentValues>(() => getInitialValues(fallbackAgentCards[0]));
   const [activeProjectTitle, setActiveProjectTitle] = useState(fallbackAgentCards[0].title[locale]);
-  const [toolState, setToolState] = useState<GenerateRequest["toolState"]>({ knowledge_base: true, canvas_write: true });
+  const [activeProjectId, setActiveProjectId] = useState("");
+  const [projectModelIds, setProjectModelIds] = useState<string[]>([]);
+  const [configuredModels, setConfiguredModels] = useState<ConfiguredModelApiSummary[]>([]);
+  const [selectedModelConfigId, setSelectedModelConfigId] = useState<string | null>(null);
+  const [projectInputs, setProjectInputs] = useState<Record<string, AgentValues>>({});
+  const activeProjectIdRef = useRef("");
+  const inputRevisionRef = useRef<Record<string, number>>({});
+  const [toolState, setToolState] = useState<GenerateRequest["toolState"]>({ web_search: true, knowledge_base: false, canvas_write: true });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [canvasUndoDepth, setCanvasUndoDepth] = useState(20);
 
   const applyThreadState = (state: ThreadStateResponse) => {
-    const agentCard = agentCards.find((card) => card.id === state.thread.agentCardId) ?? fallbackAgentCards[0];
-    setActiveAgent(agentCard);
-    setAgentValues({ ...getInitialValues(agentCard), ...(state.structuredValues ?? {}) });
-    setActiveProjectTitle(state.thread.title);
+    const agentCard = activeAgent;
+    const nextProjectInputs = state.projectInputs ?? {};
+    inputRevisionRef.current = Object.fromEntries(
+      Object.entries(state.projectInputRevisions ?? {}).map(([agentCardId, revision]) => [`${state.thread.projectId}:${agentCardId}`, revision])
+    );
+    setProjectInputs(nextProjectInputs);
+    setAgentValues({ ...getInitialValues(agentCard), ...(nextProjectInputs[agentCard.id] ?? {}) });
+    setActiveProjectId(state.thread.projectId);
+    setProjectModelIds(state.project?.modelConfigIds ?? []);
+    setSelectedModelConfigId(state.thread.configuredModelApiId ?? null);
+    setActiveProjectTitle(state.project?.title ?? state.thread.title);
     threadSession.setThreadId(state.thread.id);
     generationRun.setOutputVersions(state.outputVersions);
     generationRun.setToolEvents(state.toolEvents);
@@ -89,7 +106,7 @@ function AppContent() {
   });
 
   const canvasState = useCanvasState({
-    ensureThreadId: () => threadSession.ensureThreadForAgent(activeAgent.id),
+    ensureThreadId: () => threadSession.ensureThreadForProject(activeProjectId),
     onRefreshProjectSurfaces: refreshProjectSurfaces,
     undoDepth: canvasUndoDepth
   });
@@ -174,7 +191,8 @@ function AppContent() {
     selectedCanvasNodeId: canvasState.selectedCanvasNodeId,
     getContextValues,
     currentThreadId: threadSession.threadId,
-    ensureThreadId: () => threadSession.ensureThreadForAgent(activeAgent.id),
+    currentProjectId: activeProjectId,
+    ensureThreadId: () => threadSession.ensureThreadForProject(activeProjectId),
     onPersistThreadId: threadSession.persistThreadId,
     onRefreshThreadState: refreshThreadState,
     onFetchAndApplyThreadState: fetchThreadState,
@@ -193,6 +211,7 @@ function AppContent() {
     refreshRecentThreads();
     refreshProjects();
     getCanvasSettings().then((settings) => setCanvasUndoDepth(settings.undoDepth)).catch(() => undefined);
+    getConfiguredModelApis().then((result) => setConfiguredModels(result.configs.filter((model) => model.enabled && model.keyConfigured))).catch(() => setConfiguredModels([]));
   }, [refreshProjects, refreshRecentThreads]);
 
   useEffect(() => {
@@ -209,19 +228,33 @@ function AppContent() {
   }, [activeAgent.id, agentCards, view]);
 
   useEffect(() => {
+    activeProjectIdRef.current = activeProjectId;
+  }, [activeProjectId]);
+
+  useEffect(() => {
     if (view !== "workspace" || !threadSession.threadId) return;
     const saveTimer = window.setTimeout(() => {
-      void saveThreadInputs(threadSession.threadId, agentValues).then(() => refreshProjectSurfaces()).catch(() => undefined);
+      const targetProjectId = activeProjectId;
+      const revisionKey = `${targetProjectId}:${activeAgent.id}`;
+      const revision = (inputRevisionRef.current[revisionKey] ?? 0) + 1;
+      inputRevisionRef.current[revisionKey] = revision;
+      void saveThreadInputs(threadSession.threadId, activeAgent.id, agentValues, revision)
+        .then(() => {
+          if (targetProjectId !== activeProjectIdRef.current) return;
+          setProjectInputs((current) => ({ ...current, [activeAgent.id]: agentValues }));
+          return refreshProjectSurfaces();
+        })
+        .catch(() => undefined);
     }, 350);
     return () => window.clearTimeout(saveTimer);
-  }, [agentValues, refreshProjectSurfaces, threadSession.threadId, view]);
+  }, [activeAgent.id, activeProjectId, agentValues, refreshProjectSurfaces, threadSession.threadId, view]);
 
   const handleActiveProjectTitleChange = useCallback(async (title: string) => {
-    if (!threadSession.threadId) return;
-    const thread = await renameThread(threadSession.threadId, title);
-    setActiveProjectTitle(thread.title);
+    if (!activeProjectId) return;
+    const project = await renameProject(activeProjectId, title);
+    setActiveProjectTitle(project.title);
     await refreshProjectSurfaces();
-  }, [refreshProjectSurfaces, threadSession.threadId]);
+  }, [activeProjectId, refreshProjectSurfaces]);
 
   const promptPreview = useMemo(() => {
     const pairs = activeAgent.fields
@@ -244,19 +277,30 @@ function AppContent() {
   }, [activeAgent, agentValues, locale, toolState]);
 
   const openWorkspace = async (agentCard: AgentCard) => {
+    const projectTitle = locale === "zh" ? "新项目" : "New Project";
     threadSession.setThreadId("");
     setActiveAgent(agentCard);
     setAgentValues(getInitialValues(agentCard));
-    setActiveProjectTitle(agentCard.title[locale]);
+    setActiveProjectTitle(projectTitle);
     generationRun.resetGeneration();
     canvasState.resetCanvas();
-    setToolState({ knowledge_base: true, canvas_write: true });
-    setView("workspace");
-    await threadSession.createThreadForAgent(agentCard.id);
+    setToolState({ web_search: true, knowledge_base: false, canvas_write: true });
+    const project = await createProject(projectTitle);
+    setActiveProjectId(project.id);
+    setProjectInputs({});
+    setProjectModelIds([]);
+    setSelectedModelConfigId(null);
+    await threadSession.openProject(project.id);
   };
 
-  const openRecentThread = async (thread: StoredThread) => {
-    await threadSession.restoreThread(thread.id);
+  const openRecentThread = async (thread: StoredThread | ProjectSummary) => {
+    if ("projectId" in thread) {
+      await threadSession.restoreThread(thread.id);
+      return;
+    }
+    setActiveProjectId(thread.id);
+    setActiveProjectTitle(thread.title);
+    await threadSession.openProject(thread.id);
   };
 
   const handleAgentSaved = (agentCard: AgentCard) => {
@@ -295,6 +339,8 @@ function AppContent() {
         onOpenThread={openRecentThread}
         onRenameThread={handleRenameThread}
         onRestore={projectTrash.handleRestoreThread}
+        sessionBusy={threadSession.sessionBusy}
+        sessionError={threadSession.sessionError}
       />
       <AgentSettingsView
         activeView={view}
@@ -309,6 +355,7 @@ function AppContent() {
       <CanvasNodeSettingsView activeView={view} onNavigate={setView} />
       <WorkspaceView
         activeAgent={activeAgent}
+        agentCards={agentCards}
         activeView={view}
         agentValues={agentValues}
         collaborationMessages={generationRun.collaborationMessages}
@@ -328,7 +375,36 @@ function AppContent() {
         canUndoCanvas={canvasState.canUndoCanvas}
         toolEvents={generationRun.toolEvents}
         projectTitle={activeProjectTitle}
+        configuredModels={configuredModels}
+        projectModelIds={projectModelIds}
+        onToggleProjectModel={async (configuredModelApiId, bound) => {
+          if (!activeProjectId) return;
+          const next = bound
+            ? [...new Set([...projectModelIds, configuredModelApiId])]
+            : projectModelIds.filter((id) => id !== configuredModelApiId);
+          const saved = await bindProjectModels(activeProjectId, next);
+          setProjectModelIds(saved);
+          if (!bound && selectedModelConfigId === configuredModelApiId) setSelectedModelConfigId(null);
+        }}
+        selectedModelConfigId={selectedModelConfigId}
+        currentThreadId={threadSession.threadId}
+        projectThreads={threadSession.projectThreads}
+        sessionBusy={threadSession.sessionBusy}
+        sessionError={threadSession.sessionError}
+        onCreateConversation={async () => { if (activeProjectId) await threadSession.createConversation(activeProjectId); }}
+        onSelectThread={async (threadId) => { await threadSession.restoreThread(threadId); }}
+        onSelectModel={async (configuredModelApiId) => {
+          if (!threadSession.threadId || !configuredModelApiId) return;
+          const thread = await selectThreadModel(threadSession.threadId, configuredModelApiId);
+          setSelectedModelConfigId(thread.configuredModelApiId ?? null);
+        }}
         onAgentValuesChange={setAgentValues}
+        onSelectAgent={(agentCardId) => {
+          const nextAgent = agentCards.find((agent) => agent.id === agentCardId);
+          if (!nextAgent) return;
+          setActiveAgent(nextAgent);
+          setAgentValues({ ...getInitialValues(nextAgent), ...(projectInputs[nextAgent.id] ?? {}) });
+        }}
         onProjectTitleChange={handleActiveProjectTitleChange}
         onApproveCanvasWriteRequest={canvasState.handleApproveCanvasWriteRequest}
         onChatSend={generationRun.handleChatSend}
@@ -361,6 +437,11 @@ function AppContent() {
           await canvasState.handleApproveCanvasWriteRequest(request.id);
         }}
         onRestoreVersion={generationRun.restoreVersion}
+        onToggleOutputProjectContext={async (versionId, included) => {
+          if (!threadSession.threadId) return;
+          await setOutputVersionProjectContext(threadSession.threadId, versionId, included);
+          await refreshThreadState(threadSession.threadId);
+        }}
         onSelectCanvasNode={canvasState.setSelectedCanvasNodeId}
         onToolStateChange={setToolState}
         onUpdateCanvasNode={canvasState.handleUpdateCanvasNode}
@@ -378,6 +459,33 @@ function AppContent() {
 }
 
 export function App() {
+  const [contractState, setContractState] = useState<"checking" | "ready" | "error">("checking");
+  const [contractError, setContractError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    fetchProjectFirstHealth()
+      .then((health) => {
+        assertProjectFirstContract(health);
+        if (active) setContractState("ready");
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setContractError(error instanceof Error ? error.message : "Unable to verify the FacetWrite backend.");
+        setContractState("error");
+      });
+    return () => { active = false; };
+  }, []);
+
+  if (contractState !== "ready") {
+    return (
+      <main className="backend-contract-gate" role={contractState === "error" ? "alert" : "status"}>
+        <strong>{contractState === "error" ? "FacetWrite backend unavailable" : "Checking FacetWrite backend..."}</strong>
+        {contractError ? <p>{contractError}</p> : null}
+      </main>
+    );
+  }
+
   return (
     <I18nProvider>
       <AppContent />

@@ -6,6 +6,7 @@ import { agentCards } from "../agentCards.js";
 import { createAgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
 import { createStorage } from "../storage.js";
 import { registerThreadRoutes } from "./threadRoutes.js";
+import { registerProjectRoutes } from "./projectRoutes.js";
 
 async function withThreadRoutes() {
   const storage = await createStorage();
@@ -14,6 +15,7 @@ async function withThreadRoutes() {
   const app = express();
   app.use(express.json());
   registerThreadRoutes(app, { storage, agentRuntime });
+  registerProjectRoutes(app, { storage, agentRuntime });
   return { app, storage };
 }
 
@@ -103,8 +105,11 @@ test("persists structured inputs on an active thread", async () => {
   const { app, storage } = await withThreadRoutes();
   const threadId = `thread_inputs_route_${Date.now()}`;
   await storage.ensureThread(threadId, "blog-post");
+  const revision = Date.now();
 
   const saved = await request(app, `/api/threads/${threadId}/inputs`, {
+    agentCardId: "blog-post",
+    revision,
     structuredValues: {
       topic: "Project-scoped draft",
       tone: "Friendly",
@@ -118,7 +123,8 @@ test("persists structured inputs on an active thread", async () => {
     topic: "Project-scoped draft",
     tone: "Friendly"
   });
-  assert.deepEqual(state.body.structuredValues, {
+  assert.equal(saved.body.revision, revision);
+  assert.deepEqual((state.body.projectInputs as Record<string, unknown>)["blog-post"], {
     topic: "Project-scoped draft",
     tone: "Friendly"
   });
@@ -153,8 +159,8 @@ test("batch moves active threads to trash and batch deletes trashed threads", as
 
   assert.equal(trashResult.status, 200);
   assert.equal(trashResult.body.movedCount, 2);
-  assert.ok(storage.listProjects(agentCards, true).some((project) => project.id === firstThreadId));
-  assert.ok(storage.listProjects(agentCards, true).some((project) => project.id === secondThreadId));
+  assert.equal(storage.getThread(firstThreadId), undefined);
+  assert.equal(storage.getThread(secondThreadId), undefined);
 
   const deleteResult = await post(app, "/api/threads/batch-delete", { threadIds: [firstThreadId, secondThreadId] });
 
@@ -172,4 +178,38 @@ test("batch routes reject empty or invalid thread id lists", async () => {
 
   assert.equal(empty.status, 400);
   assert.equal(invalid.status, 400);
+});
+
+test("creates a named Project thread and returns the complete thread", async () => {
+  const { app, storage } = await withThreadRoutes();
+  const projectId = `project_thread_create_${Date.now()}`;
+  storage.createProject(projectId, "Thread project");
+
+  const result = await post(app, "/api/threads", { projectId, title: "Research conversation" });
+
+  assert.equal(result.status, 200);
+  assert.equal((result.body.thread as { projectId: string }).projectId, projectId);
+  assert.equal((result.body.thread as { title: string }).title, "Research conversation");
+  assert.equal(typeof (result.body.thread as { id: string }).id, "string");
+});
+
+test("lists only active threads for the requested Project in update order", async () => {
+  const { app, storage } = await withThreadRoutes();
+  const projectId = `project_thread_list_${Date.now()}`;
+  const otherProjectId = `${projectId}_other`;
+  storage.createProject(projectId, "Thread list project");
+  storage.createProject(otherProjectId, "Other project");
+  await storage.ensureThread(`${projectId}_older`, projectId, "Older");
+  await storage.ensureThread(`${projectId}_newer`, projectId, "Newer");
+  await storage.ensureThread(`${projectId}_trashed`, projectId, "Trashed");
+  await storage.ensureThread(`${projectId}_other`, otherProjectId, "Other");
+  storage.moveThreadToTrash(`${projectId}_trashed`);
+  storage.renameThread(`${projectId}_newer`, "Newest");
+
+  const result = await get(app, `/api/projects/${projectId}/threads`);
+  const threads = result.body.threads as Array<{ id: string; projectId: string; title: string }>;
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(threads.map((thread) => thread.id), [`${projectId}_newer`, `${projectId}_older`]);
+  assert.ok(threads.every((thread) => thread.projectId === projectId));
 });

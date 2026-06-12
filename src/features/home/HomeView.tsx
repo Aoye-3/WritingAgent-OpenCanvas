@@ -213,10 +213,10 @@ function renderProjectRow(
     setOpenMenuThreadId: (value: string | ((current: string) => string)) => void;
   }
 ) {
-  const { agentCards, copy, locale, onDeleteThread, onOpenThread, onRename, onTogglePinnedThread, openMenuThreadId, pinnedThreadIds, setOpenMenuThreadId } = context;
+  const { copy, locale, onDeleteThread, onOpenThread, onRename, onTogglePinnedThread, openMenuThreadId, pinnedThreadIds, setOpenMenuThreadId } = context;
   const isThread = "id" in item;
   const thread = isThread ? item : undefined;
-  const agentTitle = isThread ? agentCards.find((agent) => agent.id === item.agentCardId)?.title[locale] ?? item.agentCardId : item.title;
+  const agentTitle = isThread ? (locale === "zh" ? "项目会话" : "Project conversation") : item.title;
   const projectTitle = isThread ? item.title || agentTitle : item.title;
   const updatedAt = isThread ? new Date(item.updatedAt).toLocaleString() : item.updatedAt;
   const assets = isThread ? (locale === "zh" ? "1 个节点" : "1 node") : item.assets;

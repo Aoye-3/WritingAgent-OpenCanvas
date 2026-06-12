@@ -42,6 +42,21 @@ export async function deleteConfiguredModelApi(configId: string): Promise<{ ok: 
   return apiDelete<{ ok: boolean; activeConfigId?: string }>(`/api/settings/configured-model-apis/${encodeURIComponent(configId)}`);
 }
 
+export type ModelRuntimeSyncEntry = {
+  configuredModelApiId: string;
+  status: "synced" | "failed" | "unsupported" | "disabled";
+  lastAttemptAt: string;
+  errorMessage?: string;
+};
+
+export async function getModelRuntimeSyncStatus(): Promise<{ models: ModelRuntimeSyncEntry[] }> {
+  return apiGet<{ models: ModelRuntimeSyncEntry[] }>("/api/settings/model-runtime-sync-status");
+}
+
+export async function retryModelRuntimeSync(): Promise<{ models: ModelRuntimeSyncEntry[] }> {
+  return apiPost<{ models: ModelRuntimeSyncEntry[] }>("/api/settings/model-runtime-sync/retry");
+}
+
 export async function getProviderApiConfig(providerId: string): Promise<ProviderApiConfigSummary> {
   return apiGet<ProviderApiConfigSummary>(`/api/settings/provider-api-configs/${encodeURIComponent(providerId)}`);
 }

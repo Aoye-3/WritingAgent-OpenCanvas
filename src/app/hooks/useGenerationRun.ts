@@ -20,6 +20,7 @@ type UseGenerationRunOptions = {
   selectedCanvasNodeId?: string;
   getContextValues: () => Record<string, unknown>;
   currentThreadId: string;
+  currentProjectId: string;
   ensureThreadId: () => Promise<string>;
   onPersistThreadId: (threadId: string) => void;
   onRefreshThreadState: (threadId: string) => Promise<void>;
@@ -43,6 +44,13 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const [isChatSending, setIsChatSending] = useState(false);
   const typewriterRef = useRef<Partial<Record<TypewriterTarget, TypewriterState<TypewriterTarget>>>>({});
   const drainWaitersRef = useRef<Partial<Record<TypewriterTarget, Array<() => void>>>>({});
+  const operationIdRef = useRef(0);
+
+  useEffect(() => {
+    operationIdRef.current += 1;
+    setIsGenerating(false);
+    setIsChatSending(false);
+  }, [options.currentProjectId, options.currentThreadId]);
 
   useEffect(() => () => {
     for (const state of Object.values(typewriterRef.current)) {
@@ -52,6 +60,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   }, []);
 
   const resetGeneration = () => {
+    operationIdRef.current += 1;
     setGeneration(null);
     setEditableOutput("");
     setCollaborationMessages([]);
@@ -172,12 +181,14 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   };
 
   const handleGenerate = async () => {
+    const operationId = ++operationIdRef.current;
     setIsGenerating(true);
     try {
       const threadId = await options.ensureThreadId();
       const payload: GenerateRequest = {
         mode: "structured",
         agentCardId: options.activeAgent.id,
+        projectId: options.currentProjectId,
         threadId,
         locale: options.locale,
         structuredValues: options.agentValues,
@@ -198,6 +209,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
             onToolEvent: (event) => appendToolEvent(event, threadId)
           })
         : await generateText(payload);
+      if (operationId !== operationIdRef.current) return;
 
       if (!streamingEnabled) {
         enqueueStreamingText("editable", result.text);
@@ -209,11 +221,12 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       options.onPersistThreadId(result.threadId);
       await options.onRefreshThreadState(result.threadId);
     } finally {
-      setIsGenerating(false);
+      if (operationId === operationIdRef.current) setIsGenerating(false);
     }
   };
 
   const handleChatSend = async (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => {
+    const operationId = ++operationIdRef.current;
     setIsChatSending(true);
     const previousPendingWriteIds = new Set(options.getPendingCanvasWriteRequestIds());
     const userMessageId = crypto.randomUUID();
@@ -240,6 +253,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       const payload: GenerateRequest = {
         mode: "chat",
         agentCardId: options.activeAgent.id,
+        projectId: options.currentProjectId,
         threadId,
         locale: options.locale,
         structuredValues: options.agentValues,
@@ -260,6 +274,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         },
         onToolEvent: (event) => appendToolEvent(event, threadId)
       });
+      if (operationId !== operationIdRef.current) return;
 
       await drainStreamingText(`message:${assistantMessageId}`);
       await syncFinalTypewriterText(`message:${assistantMessageId}`, streamedText, result.text);
@@ -272,6 +287,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       options.onPersistThreadId(result.threadId);
 
       const state = await options.onFetchAndApplyThreadState(result.threadId);
+      if (operationId !== operationIdRef.current) return;
       const directWriteRequests = isDirectCanvasWriteInstruction(text)
         ? (state.canvasWriteRequests ?? []).filter((request) => !previousPendingWriteIds.has(request.id) && request.status === "pending")
         : [];
@@ -291,7 +307,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         statusLabel: undefined
       });
     } finally {
-      setIsChatSending(false);
+      if (operationId === operationIdRef.current) setIsChatSending(false);
     }
   };
 

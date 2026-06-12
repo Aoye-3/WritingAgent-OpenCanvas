@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 
 from app.gateway.deps import get_config
 from deerflow.config.app_config import AppConfig
+from deerflow.config.model_config import ModelConfig
 
 router = APIRouter(prefix="/api", tags=["models"])
 
@@ -29,6 +30,10 @@ class ModelsListResponse(BaseModel):
 
     models: list[ModelResponse]
     token_usage: TokenUsageResponse
+
+
+class RuntimeModelsSyncRequest(BaseModel):
+    models: list[ModelConfig]
 
 
 @router.get(
@@ -88,6 +93,13 @@ async def list_models(config: AppConfig = Depends(get_config)) -> ModelsListResp
         models=models,
         token_usage=TokenUsageResponse(enabled=config.token_usage.enabled),
     )
+
+
+@router.put("/models/runtime-sync")
+async def sync_runtime_models(body: RuntimeModelsSyncRequest, config: AppConfig = Depends(get_config)) -> dict[str, int | bool]:
+    """Replace the in-memory model allowlist with FacetWrite-managed Model Config entries."""
+    config.models = body.models
+    return {"ok": True, "count": len(config.models)}
 
 
 @router.get(

@@ -21,6 +21,7 @@ import { registerKnowledgeRoutes } from "./routes/knowledgeRoutes.js";
 import { registerProjectRoutes } from "./routes/projectRoutes.js";
 import { registerSettingsRoutes } from "./routes/settingsRoutes.js";
 import { registerThreadRoutes } from "./routes/threadRoutes.js";
+import { syncConfiguredModelsToAgentBackend } from "./runtime/agentBackendAdapter/modelSync.js";
 
 export async function createApp() {
   const app = express();
@@ -33,6 +34,9 @@ export async function createApp() {
   const generationService = createGenerationService(storage, agentRuntime, { agentRuntime: executionRuntime, knowledge: knowledgeService, memory: memoryService });
 
   storage.upsertAgentCards(agentCards);
+  await syncConfiguredModelsToAgentBackend().catch((error) => {
+    console.error("AgentBackend model sync failed during startup", error);
+  });
 
   app.use(cors({ origin: ["http://127.0.0.1:5173", "http://localhost:5173"] }));
   app.use(express.json({ limit: "25mb" }));

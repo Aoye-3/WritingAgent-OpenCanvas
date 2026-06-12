@@ -11,7 +11,7 @@ export function CanvasObjectContent({
     return <CanvasTableEditor rows={object.data.rows} onChange={onUpdateTable} />;
   }
   return object.data.previewable
-    ? <img alt={object.data.name} src={`/api/threads/${encodeURIComponent(object.threadId)}/canvas/assets/${encodeURIComponent(object.id)}/content`} />
+    ? <img alt={object.data.name} src={`/api/projects/${encodeURIComponent(object.projectId)}/canvas/assets/${encodeURIComponent(object.id)}/content`} />
     : <span>{object.data.name}</span>;
 }
 

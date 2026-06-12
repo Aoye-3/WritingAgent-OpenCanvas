@@ -13,6 +13,7 @@ export type CanvasNodeDraft = {
   width?: number;
   height?: number;
   metadata?: unknown;
+  includeInProjectContext?: boolean;
 };
 
 export type CanvasNodePatch = Partial<CanvasNodeDraft>;

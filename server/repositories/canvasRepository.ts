@@ -51,17 +51,17 @@ export class CanvasRepository {
     readonly db: DatabaseSync,
     private readonly deps: {
       withTransaction: <T>(work: () => T) => T;
-      touchThread: (threadId: string, updatedAt?: string) => void;
+      touchProject: (projectId: string, updatedAt?: string) => void;
     }
   ) {}
 
-  listCanvasNodes(threadId: string) {
-    validateId(threadId, "threadId");
-    type CanvasNodeRow = Omit<CanvasNode, "metadata"> & { metadataJson: string };
+  listCanvasNodes(projectId: string) {
+    validateId(projectId, "projectId");
+    type CanvasNodeRow = Omit<CanvasNode, "metadata" | "includeInProjectContext"> & { metadataJson: string; includeInProjectContext: number };
     const rows = this.db
       .prepare(
         `SELECT id,
-                thread_id as threadId,
+                project_id as projectId,
                 kind,
                 title,
                 content,
@@ -70,13 +70,14 @@ export class CanvasRepository {
                 width,
                 height,
                 metadata_json as metadataJson,
+                include_in_project_context as includeInProjectContext,
                 created_at as createdAt,
                 updated_at as updatedAt
          FROM canvas_nodes
-         WHERE thread_id = ?
+         WHERE project_id = ?
          ORDER BY created_at ASC`
       )
-      .all(threadId) as CanvasNodeRow[];
+      .all(projectId) as CanvasNodeRow[];
 
     return rows.map((row) => ({
       ...row,
@@ -85,42 +86,43 @@ export class CanvasRepository {
       y: Number(row.y),
       width: Number(row.width),
       height: Number(row.height),
-      metadata: parseJson(row.metadataJson)
+      metadata: parseJson(row.metadataJson),
+      includeInProjectContext: Boolean(row.includeInProjectContext)
     }));
   }
 
-  listCanvasEdges(threadId: string) {
-    validateId(threadId, "threadId");
+  listCanvasEdges(projectId: string) {
+    validateId(projectId, "projectId");
     return this.db
       .prepare(
         `SELECT id,
-                thread_id as threadId,
+                project_id as projectId,
                 source_node_id as sourceNodeId,
                 target_node_id as targetNodeId,
                 label,
                 created_at as createdAt,
                 updated_at as updatedAt
          FROM canvas_edges
-         WHERE thread_id = ?
+         WHERE project_id = ?
          ORDER BY created_at ASC`
       )
-      .all(threadId) as CanvasEdge[];
+      .all(projectId) as CanvasEdge[];
   }
 
-  createCanvasEdge(threadId: string, input: CanvasEdgeInput) {
-    validateId(threadId, "threadId");
+  createCanvasEdge(projectId: string, input: CanvasEdgeInput) {
+    validateId(projectId, "projectId");
     validateId(input.sourceNodeId, "sourceNodeId");
     validateId(input.targetNodeId, "targetNodeId");
     if (input.sourceNodeId === input.targetNodeId) {
       throw new Error("Canvas edge must connect two different nodes");
     }
-    if (!this.getCanvasNode(threadId, input.sourceNodeId) || !this.getCanvasNode(threadId, input.targetNodeId)) {
+    if (!this.getCanvasNode(projectId, input.sourceNodeId) || !this.getCanvasNode(projectId, input.targetNodeId)) {
       throw new Error("Canvas edge nodes must exist");
     }
     const now = nowIso();
     const edge: CanvasEdge = {
       id: randomId("edge"),
-      threadId,
+      projectId,
       sourceNodeId: input.sourceNodeId,
       targetNodeId: input.targetNodeId,
       label: cleanText(input.label),
@@ -129,31 +131,31 @@ export class CanvasRepository {
     };
     this.db
       .prepare(
-        `INSERT INTO canvas_edges (id, thread_id, source_node_id, target_node_id, label, created_at, updated_at)
+        `INSERT INTO canvas_edges (id, project_id, source_node_id, target_node_id, label, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(edge.id, threadId, edge.sourceNodeId, edge.targetNodeId, edge.label, now, now);
-    this.deps.touchThread(threadId, now);
+      .run(edge.id, projectId, edge.sourceNodeId, edge.targetNodeId, edge.label, now, now);
+    this.deps.touchProject(projectId, now);
     return edge;
   }
 
-  deleteCanvasEdge(threadId: string, edgeId: string) {
-    validateId(threadId, "threadId");
+  deleteCanvasEdge(projectId: string, edgeId: string) {
+    validateId(projectId, "projectId");
     validateId(edgeId, "edgeId");
-    const result = this.db.prepare(`DELETE FROM canvas_edges WHERE id = ? AND thread_id = ?`).run(edgeId, threadId);
-    if (result.changes > 0) this.deps.touchThread(threadId);
+    const result = this.db.prepare(`DELETE FROM canvas_edges WHERE id = ? AND project_id = ?`).run(edgeId, projectId);
+    if (result.changes > 0) this.deps.touchProject(projectId);
     return result.changes > 0;
   }
 
-  createCanvasNode(threadId: string, input: CanvasNodeInput) {
-    validateId(threadId, "threadId");
+  createCanvasNode(projectId: string, input: CanvasNodeInput) {
+    validateId(projectId, "projectId");
     const kind = validateNodeKind(input.kind);
     const now = nowIso();
-    const workflow = this.getCanvasWorkflow(threadId);
+    const workflow = this.getCanvasWorkflow(projectId);
     const rawMetadata = (input.metadata ?? {}) as Record<string, unknown>;
     const node: CanvasNode = {
       id: input.id ? cleanCanvasRecordId(input.id, "nodeId") : randomId("node"),
-      threadId,
+      projectId,
       kind,
       title: cleanText(input.title) || defaultCanvasTitle(kind),
       content: cleanText(input.content),
@@ -162,24 +164,25 @@ export class CanvasRepository {
       width: readFiniteNumber(input.width, 320),
       height: readFiniteNumber(input.height, 220),
       metadata: kind === "role" ? cleanWorkflowRoleNodeMetadata(rawMetadata) : nextCanvasWorkflowNodeMetadata(workflow, rawMetadata),
+      includeInProjectContext: input.includeInProjectContext === true,
       createdAt: now,
       updatedAt: now
     };
 
     this.db
       .prepare(
-        `INSERT INTO canvas_nodes (id, thread_id, kind, title, content, x, y, width, height, metadata_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO canvas_nodes (id, project_id, kind, title, content, x, y, width, height, metadata_json, include_in_project_context, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(node.id, threadId, node.kind, node.title, node.content, node.x, node.y, node.width, node.height, JSON.stringify(node.metadata), now, now);
-    this.deps.touchThread(threadId, now);
+      .run(node.id, projectId, node.kind, node.title, node.content, node.x, node.y, node.width, node.height, JSON.stringify(node.metadata), node.includeInProjectContext ? 1 : 0, now, now);
+    this.deps.touchProject(projectId, now);
     return node;
   }
 
-  updateCanvasNode(threadId: string, nodeId: string, patch: CanvasNodePatch) {
-    validateId(threadId, "threadId");
+  updateCanvasNode(projectId: string, nodeId: string, patch: CanvasNodePatch) {
+    validateId(projectId, "projectId");
     validateId(nodeId, "nodeId");
-    const existing = this.getCanvasNode(threadId, nodeId);
+    const existing = this.getCanvasNode(projectId, nodeId);
     if (!existing) return undefined;
     const now = nowIso();
     const next: CanvasNode = {
@@ -192,35 +195,36 @@ export class CanvasRepository {
       width: patch.width === undefined ? existing.width : readFiniteNumber(patch.width, existing.width),
       height: patch.height === undefined ? existing.height : readFiniteNumber(patch.height, existing.height),
       metadata: patch.metadata === undefined ? existing.metadata : patch.metadata,
+      includeInProjectContext: patch.includeInProjectContext === undefined ? existing.includeInProjectContext : patch.includeInProjectContext === true,
       updatedAt: now
     };
 
     this.db
       .prepare(
         `UPDATE canvas_nodes
-         SET kind = ?, title = ?, content = ?, x = ?, y = ?, width = ?, height = ?, metadata_json = ?, updated_at = ?
-         WHERE id = ? AND thread_id = ?`
+         SET kind = ?, title = ?, content = ?, x = ?, y = ?, width = ?, height = ?, metadata_json = ?, include_in_project_context = ?, updated_at = ?
+         WHERE id = ? AND project_id = ?`
       )
-      .run(next.kind, next.title, next.content, next.x, next.y, next.width, next.height, JSON.stringify(next.metadata), now, nodeId, threadId);
-    this.deps.touchThread(threadId, now);
+      .run(next.kind, next.title, next.content, next.x, next.y, next.width, next.height, JSON.stringify(next.metadata), next.includeInProjectContext ? 1 : 0, now, nodeId, projectId);
+    this.deps.touchProject(projectId, now);
     return next;
   }
 
-  deleteCanvasNode(threadId: string, nodeId: string) {
-    validateId(threadId, "threadId");
+  deleteCanvasNode(projectId: string, nodeId: string) {
+    validateId(projectId, "projectId");
     validateId(nodeId, "nodeId");
     const result = this.deps.withTransaction(() => {
-      this.db.prepare(`DELETE FROM canvas_edges WHERE thread_id = ? AND (source_node_id = ? OR target_node_id = ?)`).run(threadId, nodeId, nodeId);
-      return this.db.prepare(`DELETE FROM canvas_nodes WHERE id = ? AND thread_id = ?`).run(nodeId, threadId);
+      this.db.prepare(`DELETE FROM canvas_edges WHERE project_id = ? AND (source_node_id = ? OR target_node_id = ?)`).run(projectId, nodeId, nodeId);
+      return this.db.prepare(`DELETE FROM canvas_nodes WHERE id = ? AND project_id = ?`).run(nodeId, projectId);
     });
-    if (result.changes > 0) this.deps.touchThread(threadId);
+    if (result.changes > 0) this.deps.touchProject(projectId);
     return result.changes > 0;
   }
 
-  createCanvasWriteRequest(threadId: string, input: CanvasWriteRequestInput) {
-    validateId(threadId, "threadId");
+  createCanvasWriteRequest(projectId: string, input: CanvasWriteRequestInput) {
+    validateId(projectId, "projectId");
     const operation = validateWriteOperation(input.operation);
-    const targetNode = input.targetNodeId ? this.getCanvasNode(threadId, input.targetNodeId) : undefined;
+    const targetNode = input.targetNodeId ? this.getCanvasNode(projectId, input.targetNodeId) : undefined;
     if ((operation === "replace" || operation === "append" || operation === "replace_range") && !targetNode) {
       throw new Error("A valid target node is required for canvas update operations");
     }
@@ -228,7 +232,7 @@ export class CanvasRepository {
     const now = nowIso();
     const request: CanvasWriteRequest = {
       id: randomId("write"),
-      threadId,
+      projectId,
       operation,
       targetNodeId: targetNode?.id,
       nodeKind,
@@ -248,7 +252,7 @@ export class CanvasRepository {
     }
     if (operation === "replace_range") {
       if (!targetNode || targetNode.kind !== "document") throw new Error("Range replacement requires a document node");
-      const existingPending = this.listCanvasWriteRequests(threadId, "pending")
+      const existingPending = this.listCanvasWriteRequests(projectId, "pending")
         .some((item) => item.operation === "replace_range" && item.targetNodeId === targetNode.id);
       if (existingPending) throw new Error("A pending range replacement already exists for this node");
       if (request.rangeStart === undefined || request.rangeEnd === undefined || request.originalText === undefined || !request.baseNodeUpdatedAt) {
@@ -263,24 +267,24 @@ export class CanvasRepository {
     this.db
       .prepare(
         `INSERT INTO canvas_write_requests
-          (id, thread_id, operation, target_node_id, node_kind, title, content, rationale, range_start, range_end, original_text, base_node_updated_at, status, created_at, updated_at)
+          (id, project_id, operation, target_node_id, node_kind, title, content, rationale, range_start, range_end, original_text, base_node_updated_at, status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(request.id, threadId, request.operation, request.targetNodeId ?? null, request.nodeKind, request.title, request.content, request.rationale,
+      .run(request.id, projectId, request.operation, request.targetNodeId ?? null, request.nodeKind, request.title, request.content, request.rationale,
         request.rangeStart ?? null, request.rangeEnd ?? null, request.originalText ?? null, request.baseNodeUpdatedAt ?? null, request.status, now, now);
-    this.deps.touchThread(threadId, now);
+    this.deps.touchProject(projectId, now);
     return request;
   }
 
-  listCanvasWriteRequests(threadId: string, status?: CanvasWriteRequestStatus) {
-    validateId(threadId, "threadId");
-    const where = status ? `WHERE thread_id = ? AND status = ?` : `WHERE thread_id = ?`;
-    const params = status ? [threadId, status] : [threadId];
+  listCanvasWriteRequests(projectId: string, status?: CanvasWriteRequestStatus) {
+    validateId(projectId, "projectId");
+    const where = status ? `WHERE project_id = ? AND status = ?` : `WHERE project_id = ?`;
+    const params = status ? [projectId, status] : [projectId];
     type CanvasWriteRequestRow = Omit<CanvasWriteRequest, "targetNodeId"> & { targetNodeId: string | null };
     const rows = this.db
       .prepare(
         `SELECT id,
-                thread_id as threadId,
+                project_id as projectId,
                 operation,
                 target_node_id as targetNodeId,
                 node_kind as nodeKind,
@@ -307,18 +311,18 @@ export class CanvasRepository {
     }));
   }
 
-  approveCanvasWriteRequest(threadId: string, requestId: string) {
-    validateId(threadId, "threadId");
+  approveCanvasWriteRequest(projectId: string, requestId: string) {
+    validateId(projectId, "projectId");
     validateId(requestId, "requestId");
-    const request = this.getCanvasWriteRequest(threadId, requestId);
+    const request = this.getCanvasWriteRequest(projectId, requestId);
     if (!request || request.status !== "pending") return undefined;
     const now = nowIso();
     let node: CanvasNode | undefined;
     let resolvedStatus: CanvasWriteRequestStatus = "approved";
     this.deps.withTransaction(() => {
       if (request.operation === "create") {
-        const nextIndex = this.listCanvasNodes(threadId).length;
-        node = this.createCanvasNode(threadId, {
+        const nextIndex = this.listCanvasNodes(projectId).length;
+        node = this.createCanvasNode(projectId, {
           kind: request.nodeKind,
           title: request.title,
           content: request.content,
@@ -326,7 +330,7 @@ export class CanvasRepository {
           y: 120 + (nextIndex % 4) * 36
         });
       } else {
-        const existing = request.targetNodeId ? this.getCanvasNode(threadId, request.targetNodeId) : undefined;
+        const existing = request.targetNodeId ? this.getCanvasNode(projectId, request.targetNodeId) : undefined;
         if (!existing) throw new Error("Target node was not found");
         if (request.operation === "replace_range") {
           const start = request.rangeStart;
@@ -337,36 +341,36 @@ export class CanvasRepository {
             && existing.content.slice(start, end) === request.originalText;
           if (!unchanged) {
             resolvedStatus = "stale";
-            this.updateCanvasWriteRequestStatus(threadId, requestId, "stale", now);
+            this.updateCanvasWriteRequestStatus(projectId, requestId, "stale", now);
             node = existing;
             return;
           }
-          node = this.updateCanvasNode(threadId, existing.id, {
+          node = this.updateCanvasNode(projectId, existing.id, {
             content: replaceTextRange(existing.content, start!, end!, request.content)
           });
-          this.updateCanvasWriteRequestStatus(threadId, requestId, "approved", now);
+          this.updateCanvasWriteRequestStatus(projectId, requestId, "approved", now);
           return;
         }
         const content = request.operation === "append"
           ? [existing.content.trim(), request.content.trim()].filter(Boolean).join("\n\n")
           : request.content;
-        node = this.updateCanvasNode(threadId, existing.id, {
+        node = this.updateCanvasNode(projectId, existing.id, {
           title: request.title || existing.title,
           content
         });
       }
-      this.updateCanvasWriteRequestStatus(threadId, requestId, "approved", now);
+      this.updateCanvasWriteRequestStatus(projectId, requestId, "approved", now);
     });
     return { request: { ...request, status: resolvedStatus, updatedAt: now }, node };
   }
 
-  rejectCanvasWriteRequest(threadId: string, requestId: string) {
-    validateId(threadId, "threadId");
+  rejectCanvasWriteRequest(projectId: string, requestId: string) {
+    validateId(projectId, "projectId");
     validateId(requestId, "requestId");
-    const request = this.getCanvasWriteRequest(threadId, requestId);
+    const request = this.getCanvasWriteRequest(projectId, requestId);
     if (!request || request.status !== "pending") return undefined;
     const now = nowIso();
-    this.updateCanvasWriteRequestStatus(threadId, requestId, "rejected", now);
+    this.updateCanvasWriteRequestStatus(projectId, requestId, "rejected", now);
     return { ...request, status: "rejected" as const, updatedAt: now };
   }
 
@@ -393,14 +397,14 @@ export class CanvasRepository {
     return settings;
   }
 
-  listCanvasObjects(threadId: string) {
-    validateId(threadId, "threadId");
+  listCanvasObjects(projectId: string) {
+    validateId(projectId, "projectId");
     type Row = Omit<CanvasObject, "geometry" | "data"> & { geometryJson: string; dataJson: string };
     const rows = this.db.prepare(
-      `SELECT id, thread_id as threadId, kind, geometry_json as geometryJson, data_json as dataJson,
+      `SELECT id, project_id as projectId, kind, geometry_json as geometryJson, data_json as dataJson,
               created_at as createdAt, updated_at as updatedAt
-       FROM canvas_objects WHERE thread_id = ? ORDER BY created_at ASC`
-    ).all(threadId) as Row[];
+       FROM canvas_objects WHERE project_id = ? ORDER BY created_at ASC`
+    ).all(projectId) as Row[];
     return rows.map(({ geometryJson, dataJson, ...row }) => normalizeStoredCanvasObject({
       ...row,
       geometry: parseJson(geometryJson),
@@ -408,47 +412,47 @@ export class CanvasRepository {
     }));
   }
 
-  createCanvasObject(threadId: string, input: CanvasObjectInput) {
-    validateId(threadId, "threadId");
+  createCanvasObject(projectId: string, input: CanvasObjectInput) {
+    validateId(projectId, "projectId");
     const validated = validateCanvasObjectWrite(input);
     const now = nowIso();
     const object: CanvasObject = {
       id: input.id ? cleanCanvasRecordId(input.id, "objectId") : randomId("object"),
-      threadId,
+      projectId,
       ...validated,
       createdAt: now,
       updatedAt: now
     };
     this.db.prepare(
-      `INSERT INTO canvas_objects (id, thread_id, kind, geometry_json, data_json, created_at, updated_at)
+      `INSERT INTO canvas_objects (id, project_id, kind, geometry_json, data_json, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(object.id, threadId, object.kind, JSON.stringify(object.geometry), JSON.stringify(object.data), now, now);
-    this.deps.touchThread(threadId, now);
+    ).run(object.id, projectId, object.kind, JSON.stringify(object.geometry), JSON.stringify(object.data), now, now);
+    this.deps.touchProject(projectId, now);
     return object;
   }
 
-  createCanvasAssetObject(threadId: string, input: Omit<CanvasAssetObject, "id" | "threadId" | "kind" | "createdAt" | "updatedAt">) {
-    validateId(threadId, "threadId");
+  createCanvasAssetObject(projectId: string, input: Omit<CanvasAssetObject, "id" | "projectId" | "kind" | "createdAt" | "updatedAt">) {
+    validateId(projectId, "projectId");
     const now = nowIso();
     const object = createStoredCanvasAsset({
       id: randomId("object"),
-      threadId,
+      projectId,
       ...input,
       createdAt: now,
       updatedAt: now
     });
     this.db.prepare(
-      `INSERT INTO canvas_objects (id, thread_id, kind, geometry_json, data_json, created_at, updated_at)
+      `INSERT INTO canvas_objects (id, project_id, kind, geometry_json, data_json, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(object.id, threadId, object.kind, JSON.stringify(object.geometry), JSON.stringify(object.data), now, now);
-    this.deps.touchThread(threadId, now);
+    ).run(object.id, projectId, object.kind, JSON.stringify(object.geometry), JSON.stringify(object.data), now, now);
+    this.deps.touchProject(projectId, now);
     return object;
   }
 
-  updateCanvasObject(threadId: string, objectId: string, patch: CanvasObjectPatch) {
-    validateId(threadId, "threadId");
+  updateCanvasObject(projectId: string, objectId: string, patch: CanvasObjectPatch) {
+    validateId(projectId, "projectId");
     validateId(objectId, "objectId");
-    const existing = this.listCanvasObjects(threadId).find((object) => object.id === objectId);
+    const existing = this.listCanvasObjects(projectId).find((object) => object.id === objectId);
     if (!existing) return undefined;
     const now = nowIso();
     if (existing.kind === "asset" && (patch.kind !== undefined || patch.data !== undefined)) {
@@ -464,32 +468,32 @@ export class CanvasRepository {
     const next = { ...existing, ...validated, updatedAt: now } as CanvasObject;
     this.db.prepare(
       `UPDATE canvas_objects SET kind = ?, geometry_json = ?, data_json = ?, updated_at = ?
-       WHERE id = ? AND thread_id = ?`
-    ).run(next.kind, JSON.stringify(next.geometry), JSON.stringify(next.data), now, objectId, threadId);
-    this.deps.touchThread(threadId, now);
+       WHERE id = ? AND project_id = ?`
+    ).run(next.kind, JSON.stringify(next.geometry), JSON.stringify(next.data), now, objectId, projectId);
+    this.deps.touchProject(projectId, now);
     return next;
   }
 
-  deleteCanvasObject(threadId: string, objectId: string) {
-    validateId(threadId, "threadId");
+  deleteCanvasObject(projectId: string, objectId: string) {
+    validateId(projectId, "projectId");
     validateId(objectId, "objectId");
-    const result = this.db.prepare(`DELETE FROM canvas_objects WHERE id = ? AND thread_id = ?`).run(objectId, threadId);
-    if (result.changes > 0) this.deps.touchThread(threadId);
+    const result = this.db.prepare(`DELETE FROM canvas_objects WHERE id = ? AND project_id = ?`).run(objectId, projectId);
+    if (result.changes > 0) this.deps.touchProject(projectId);
     return result.changes > 0;
   }
 
-  getCanvasWorkflow(threadId: string): CanvasWorkflow {
-    validateId(threadId, "threadId");
+  getCanvasWorkflow(projectId: string): CanvasWorkflow {
+    validateId(projectId, "projectId");
     type Row = { stage: string; rolesJson: string; updatedAt: string };
     const row = this.db
-      .prepare(`SELECT stage, roles_json as rolesJson, updated_at as updatedAt FROM canvas_workflows WHERE thread_id = ?`)
-      .get(threadId) as Row | undefined;
+      .prepare(`SELECT stage, roles_json as rolesJson, updated_at as updatedAt FROM canvas_workflows WHERE project_id = ?`)
+      .get(projectId) as Row | undefined;
     const defaults = defaultCanvasWorkflow();
     if (!row) {
-      return { threadId, stage: defaults.stage, stages: defaults.stages, roles: defaults.roles, updatedAt: "" };
+      return { projectId, stage: defaults.stage, stages: defaults.stages, roles: defaults.roles, updatedAt: "" };
     }
     return {
-      threadId,
+      projectId,
       stage: isCanvasWorkflowStage(row.stage) ? row.stage : defaults.stage,
       stages: [...canvasWorkflowStages],
       roles: readWorkflowRoles(parseJson(row.rolesJson), defaults.roles),
@@ -497,40 +501,40 @@ export class CanvasRepository {
     };
   }
 
-  updateCanvasWorkflow(threadId: string, input: CanvasWorkflowInput): CanvasWorkflow {
-    validateId(threadId, "threadId");
-    const current = this.getCanvasWorkflow(threadId);
+  updateCanvasWorkflow(projectId: string, input: CanvasWorkflowInput): CanvasWorkflow {
+    validateId(projectId, "projectId");
+    const current = this.getCanvasWorkflow(projectId);
     const stage = input.stage === undefined ? current.stage : assertWorkflowStage(input.stage);
     const roles = input.roles === undefined ? current.roles : readWorkflowRoles(input.roles, []);
     const now = nowIso();
     this.db
       .prepare(
-        `INSERT INTO canvas_workflows (thread_id, stage, roles_json, updated_at)
+        `INSERT INTO canvas_workflows (project_id, stage, roles_json, updated_at)
          VALUES (?, ?, ?, ?)
-         ON CONFLICT(thread_id) DO UPDATE SET stage = excluded.stage, roles_json = excluded.roles_json, updated_at = excluded.updated_at`
+         ON CONFLICT(project_id) DO UPDATE SET stage = excluded.stage, roles_json = excluded.roles_json, updated_at = excluded.updated_at`
       )
-      .run(threadId, stage, JSON.stringify(roles), now);
-    this.deps.touchThread(threadId, now);
-    return { threadId, stage, stages: [...canvasWorkflowStages], roles, updatedAt: now };
+      .run(projectId, stage, JSON.stringify(roles), now);
+    this.deps.touchProject(projectId, now);
+    return { projectId, stage, stages: [...canvasWorkflowStages], roles, updatedAt: now };
   }
 
-  updateCanvasNodeWorkflow(threadId: string, nodeId: string, patch: CanvasNodeWorkflowPatch) {
-    validateId(threadId, "threadId");
+  updateCanvasNodeWorkflow(projectId: string, nodeId: string, patch: CanvasNodeWorkflowPatch) {
+    validateId(projectId, "projectId");
     validateId(nodeId, "nodeId");
-    const existing = this.getCanvasNode(threadId, nodeId);
+    const existing = this.getCanvasNode(projectId, nodeId);
     if (!existing) return undefined;
     const currentMetadata = (existing.metadata && typeof existing.metadata === "object" ? existing.metadata : {}) as Record<string, unknown>;
-    const workflow = this.getCanvasWorkflow(threadId);
+    const workflow = this.getCanvasWorkflow(projectId);
     const withStage = patch.stage === undefined
       ? currentMetadata
       : nextCanvasWorkflowNodeMetadata({ stage: assertWorkflowStage(patch.stage) }, currentMetadata);
     const metadata = patch.roles === undefined ? withStage : mergeCanvasWorkflowRoles(withStage, patch.roles, workflow.roles);
-    return this.updateCanvasNode(threadId, nodeId, { metadata });
+    return this.updateCanvasNode(projectId, nodeId, { metadata });
   }
 
-  migrateCanvasWorkflowRoleNodes(threadId: string) {
-    validateId(threadId, "threadId");
-    const workflow = this.getCanvasWorkflow(threadId);
+  migrateCanvasWorkflowRoleNodes(projectId: string) {
+    validateId(projectId, "projectId");
+    const workflow = this.getCanvasWorkflow(projectId);
     const roleDefinitions = new Map(workflow.roles.map((role) => [role.id, role]));
     const now = nowIso();
     let createdRoleNodes = 0;
@@ -538,7 +542,7 @@ export class CanvasRepository {
     let updatedNodes = 0;
 
     this.deps.withTransaction(() => {
-      const nodes = this.listCanvasNodes(threadId);
+      const nodes = this.listCanvasNodes(projectId);
       const roleNodesByRoleId = new Map<string, CanvasNode>();
       for (const node of nodes) {
         if (node.kind !== "role") continue;
@@ -555,7 +559,7 @@ export class CanvasRepository {
           const definition = roleDefinitions.get(roleId) ?? { id: roleId, label: roleId, prompt: "" };
           let roleNode = roleNodesByRoleId.get(roleId);
           if (!roleNode) {
-            roleNode = this.createCanvasNode(threadId, {
+            roleNode = this.createCanvasNode(projectId, {
               kind: "role",
               title: definition.label,
               content: "",
@@ -569,29 +573,29 @@ export class CanvasRepository {
             createdRoleNodes += 1;
           }
 
-          const hasEdge = this.listCanvasEdges(threadId).some((edge) => edge.sourceNodeId === roleNode!.id && edge.targetNodeId === node.id);
+          const hasEdge = this.listCanvasEdges(projectId).some((edge) => edge.sourceNodeId === roleNode!.id && edge.targetNodeId === node.id);
           if (!hasEdge) {
-            this.createCanvasEdge(threadId, { sourceNodeId: roleNode.id, targetNodeId: node.id });
+            this.createCanvasEdge(projectId, { sourceNodeId: roleNode.id, targetNodeId: node.id });
             createdEdges += 1;
           }
         }
 
         this.db
-          .prepare(`UPDATE canvas_nodes SET metadata_json = ?, updated_at = ? WHERE id = ? AND thread_id = ?`)
-          .run(JSON.stringify(stripLegacyWorkflowRoles(node.metadata)), now, node.id, threadId);
+          .prepare(`UPDATE canvas_nodes SET metadata_json = ?, updated_at = ? WHERE id = ? AND project_id = ?`)
+          .run(JSON.stringify(stripLegacyWorkflowRoles(node.metadata)), now, node.id, projectId);
         updatedNodes += 1;
       }
     });
 
-    if (createdRoleNodes > 0 || createdEdges > 0 || updatedNodes > 0) this.deps.touchThread(threadId, now);
+    if (createdRoleNodes > 0 || createdEdges > 0 || updatedNodes > 0) this.deps.touchProject(projectId, now);
     return { createdRoleNodes, createdEdges, updatedNodes };
   }
 
-  listCanvasWorkflowSuggestions(threadId: string, nodeId?: string) {
-    validateId(threadId, "threadId");
+  listCanvasWorkflowSuggestions(projectId: string, nodeId?: string) {
+    validateId(projectId, "projectId");
     if (nodeId) validateId(nodeId, "nodeId");
     const sql = `SELECT id,
-                        thread_id as threadId,
+                        project_id as projectId,
                         node_id as nodeId,
                         role_node_id as roleNodeId,
                         target_node_id as targetNodeId,
@@ -602,22 +606,22 @@ export class CanvasRepository {
                         created_at as createdAt,
                         updated_at as updatedAt
                  FROM canvas_workflow_suggestions
-                 WHERE thread_id = ?${nodeId ? " AND node_id = ?" : ""}
+                 WHERE project_id = ?${nodeId ? " AND node_id = ?" : ""}
                  ORDER BY created_at ASC`;
-    return this.db.prepare(sql).all(...(nodeId ? [threadId, nodeId] : [threadId])) as CanvasWorkflowSuggestion[];
+    return this.db.prepare(sql).all(...(nodeId ? [projectId, nodeId] : [projectId])) as CanvasWorkflowSuggestion[];
   }
 
-  createCanvasWorkflowSuggestion(threadId: string, input: CanvasWorkflowSuggestionInput) {
-    validateId(threadId, "threadId");
+  createCanvasWorkflowSuggestion(projectId: string, input: CanvasWorkflowSuggestionInput) {
+    validateId(projectId, "projectId");
     const roleNodeId = cleanText(input.roleNodeId ?? input.nodeId);
     const targetNodeId = cleanText(input.targetNodeId);
     validateId(roleNodeId, "roleNodeId");
     validateId(targetNodeId, "targetNodeId");
-    const roleNode = this.getCanvasNode(threadId, roleNodeId);
-    const targetNode = this.getCanvasNode(threadId, targetNodeId);
+    const roleNode = this.getCanvasNode(projectId, roleNodeId);
+    const targetNode = this.getCanvasNode(projectId, targetNodeId);
     if (!roleNode || roleNode.kind !== "role") throw new Error("Canvas workflow suggestion role node must exist");
     if (!targetNode || targetNode.kind === "role") throw new Error("Canvas workflow suggestion target node must exist");
-    const hasRoleEdge = this.listCanvasEdges(threadId).some((edge) => edge.sourceNodeId === roleNodeId && edge.targetNodeId === targetNodeId);
+    const hasRoleEdge = this.listCanvasEdges(projectId).some((edge) => edge.sourceNodeId === roleNodeId && edge.targetNodeId === targetNodeId);
     if (!hasRoleEdge) throw new Error("Canvas workflow suggestion requires a Role to target edge");
     const content = cleanText(input.content);
     if (!content) throw new Error("Canvas workflow suggestion content is required");
@@ -625,7 +629,7 @@ export class CanvasRepository {
     const now = nowIso();
     const suggestion: CanvasWorkflowSuggestion = {
       id: randomId("suggestion"),
-      threadId,
+      projectId,
       nodeId: roleNodeId,
       roleNodeId,
       targetNodeId,
@@ -639,78 +643,78 @@ export class CanvasRepository {
     this.db
       .prepare(
         `INSERT INTO canvas_workflow_suggestions
-          (id, thread_id, node_id, role_node_id, target_node_id, role_id, content, rationale, status, created_at, updated_at)
+          (id, project_id, node_id, role_node_id, target_node_id, role_id, content, rationale, status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(suggestion.id, threadId, suggestion.nodeId, suggestion.roleNodeId, suggestion.targetNodeId, suggestion.roleId, suggestion.content, suggestion.rationale, suggestion.status, now, now);
-    this.deps.touchThread(threadId, now);
+      .run(suggestion.id, projectId, suggestion.nodeId, suggestion.roleNodeId, suggestion.targetNodeId, suggestion.roleId, suggestion.content, suggestion.rationale, suggestion.status, now, now);
+    this.deps.touchProject(projectId, now);
     return suggestion;
   }
 
-  acceptCanvasWorkflowSuggestion(threadId: string, suggestionId: string) {
-    return this.applySuggestionStatus(threadId, suggestionId, "accepted", true);
+  acceptCanvasWorkflowSuggestion(projectId: string, suggestionId: string) {
+    return this.applySuggestionStatus(projectId, suggestionId, "accepted", true);
   }
 
-  ignoreCanvasWorkflowSuggestion(threadId: string, suggestionId: string) {
-    return this.applySuggestionStatus(threadId, suggestionId, "ignored", false);
+  ignoreCanvasWorkflowSuggestion(projectId: string, suggestionId: string) {
+    return this.applySuggestionStatus(projectId, suggestionId, "ignored", false);
   }
 
-  convertCanvasWorkflowSuggestionToNode(threadId: string, suggestionId: string, input: CanvasSuggestionToNodeInput = {}) {
-    validateId(threadId, "threadId");
+  convertCanvasWorkflowSuggestionToNode(projectId: string, suggestionId: string, input: CanvasSuggestionToNodeInput = {}) {
+    validateId(projectId, "projectId");
     validateId(suggestionId, "suggestionId");
-    const suggestion = this.getCanvasWorkflowSuggestion(threadId, suggestionId);
+    const suggestion = this.getCanvasWorkflowSuggestion(projectId, suggestionId);
     if (!suggestion) return undefined;
-    const node = this.createCanvasNode(threadId, {
+    const node = this.createCanvasNode(projectId, {
       kind: validateNodeKind(input.kind ?? "note"),
       title: input.title ?? "Role suggestion",
       content: suggestion.content,
-      metadata: { workflow: { stage: this.getCanvasWorkflow(threadId).stage } }
+      metadata: { workflow: { stage: this.getCanvasWorkflow(projectId).stage } }
     });
-    const accepted = this.applySuggestionStatus(threadId, suggestionId, "accepted", false);
+    const accepted = this.applySuggestionStatus(projectId, suggestionId, "accepted", false);
     return accepted ? { suggestion: accepted, node } : undefined;
   }
 
-  private getCanvasNode(threadId: string, nodeId: string) {
+  private getCanvasNode(projectId: string, nodeId: string) {
     validateId(nodeId, "nodeId");
-    return this.listCanvasNodes(threadId).find((node) => node.id === nodeId);
+    return this.listCanvasNodes(projectId).find((node) => node.id === nodeId);
   }
 
-  private getCanvasWriteRequest(threadId: string, requestId: string) {
+  private getCanvasWriteRequest(projectId: string, requestId: string) {
     validateId(requestId, "requestId");
-    return this.listCanvasWriteRequests(threadId).find((request) => request.id === requestId);
+    return this.listCanvasWriteRequests(projectId).find((request) => request.id === requestId);
   }
 
-  private getCanvasWorkflowSuggestion(threadId: string, suggestionId: string) {
+  private getCanvasWorkflowSuggestion(projectId: string, suggestionId: string) {
     validateId(suggestionId, "suggestionId");
-    return this.listCanvasWorkflowSuggestions(threadId).find((suggestion) => suggestion.id === suggestionId);
+    return this.listCanvasWorkflowSuggestions(projectId).find((suggestion) => suggestion.id === suggestionId);
   }
 
-  private applySuggestionStatus(threadId: string, suggestionId: string, status: "accepted" | "ignored", appendContent: boolean) {
-    validateId(threadId, "threadId");
+  private applySuggestionStatus(projectId: string, suggestionId: string, status: "accepted" | "ignored", appendContent: boolean) {
+    validateId(projectId, "projectId");
     validateId(suggestionId, "suggestionId");
-    const suggestion = this.getCanvasWorkflowSuggestion(threadId, suggestionId);
+    const suggestion = this.getCanvasWorkflowSuggestion(projectId, suggestionId);
     if (!suggestion) return undefined;
     const now = nowIso();
     this.deps.withTransaction(() => {
       this.db
-        .prepare(`UPDATE canvas_workflow_suggestions SET status = ?, updated_at = ? WHERE id = ? AND thread_id = ?`)
-        .run(status, now, suggestionId, threadId);
+        .prepare(`UPDATE canvas_workflow_suggestions SET status = ?, updated_at = ? WHERE id = ? AND project_id = ?`)
+        .run(status, now, suggestionId, projectId);
       if (appendContent) {
-        const node = this.getCanvasNode(threadId, suggestion.targetNodeId || suggestion.nodeId);
+        const node = this.getCanvasNode(projectId, suggestion.targetNodeId || suggestion.nodeId);
         if (node) {
-          this.updateCanvasNode(threadId, node.id, { content: node.content ? `${node.content}\n\n${suggestion.content}` : suggestion.content });
+          this.updateCanvasNode(projectId, node.id, { content: node.content ? `${node.content}\n\n${suggestion.content}` : suggestion.content });
         }
       }
     });
-    this.deps.touchThread(threadId, now);
+    this.deps.touchProject(projectId, now);
     return { ...suggestion, status, updatedAt: now };
   }
 
-  private updateCanvasWriteRequestStatus(threadId: string, requestId: string, status: CanvasWriteRequestStatus, updatedAt = nowIso()) {
+  private updateCanvasWriteRequestStatus(projectId: string, requestId: string, status: CanvasWriteRequestStatus, updatedAt = nowIso()) {
     this.db
-      .prepare(`UPDATE canvas_write_requests SET status = ?, updated_at = ? WHERE id = ? AND thread_id = ?`)
-      .run(status, updatedAt, requestId, threadId);
-    this.deps.touchThread(threadId, updatedAt);
+      .prepare(`UPDATE canvas_write_requests SET status = ?, updated_at = ? WHERE id = ? AND project_id = ?`)
+      .run(status, updatedAt, requestId, projectId);
+    this.deps.touchProject(projectId, updatedAt);
   }
 }
 

@@ -1,9 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useI18n } from "../../i18n/I18nProvider";
 import { knowledgeClient } from "../../knowledge/knowledgeClient";
 import type { KnowledgeBase } from "../../knowledge/types";
-import { getConfiguredModelApis } from "../../model-config/modelConfigClient";
-import type { ConfiguredModelApiSummary } from "../../settings/types";
 import type { AgentRuntimeConfig, AgentSettings } from "../types";
 
 export const tabs = ["model", "prompt", "knowledge", "tools", "quick", "memory"] as const;
@@ -32,63 +30,9 @@ function AgentModelTab({ runtimeConfig, settings, onChange }: TabProps) {
   const { locale } = useI18n();
   const setModel = (patch: Partial<AgentSettings["model"]>) => onChange({ ...settings, model: { ...settings.model, ...patch } });
   const providerCapabilities = runtimeConfig?.providerProfile.capabilities;
-  const [configuredApis, setConfiguredApis] = useState<ConfiguredModelApiSummary[]>([]);
-  const chatConfiguredApis = useMemo(
-    () => configuredApis.filter((config) => config.enabled && config.keyConfigured && isChatModelConfig(config)),
-    [configuredApis]
-  );
-  const selectedConfiguredApi = chatConfiguredApis.find((config) => config.id === settings.model.configuredModelApiId)
-    ?? chatConfiguredApis.find((config) => config.providerId === settings.model.providerId && config.modelId === settings.model.model);
-
-  useEffect(() => {
-    getConfiguredModelApis()
-      .then((apiConfigs) => setConfiguredApis(apiConfigs.configs))
-      .catch(() => {
-        setConfiguredApis([]);
-      });
-  }, []);
-
-  useEffect(() => {
-    if (chatConfiguredApis.length === 0) return;
-    if (selectedConfiguredApi) return;
-    const nextConfig = chatConfiguredApis[0];
-    setModel({
-      configuredModelApiId: nextConfig.id,
-      providerId: nextConfig.providerId,
-      model: nextConfig.modelId,
-      responseMode: "normal"
-    });
-  }, [chatConfiguredApis, selectedConfiguredApi]);
-
   return (
     <div className="agent-editor-section">
-      <label className="field">
-        <span>{text(locale, "configuredModelApi")}</span>
-        <select
-          value={selectedConfiguredApi?.id ?? ""}
-          onChange={(event) => {
-            const config = chatConfiguredApis.find((candidate) => candidate.id === event.target.value);
-            if (!config) return;
-            setModel({
-              configuredModelApiId: config.id,
-              providerId: config.providerId,
-              model: config.modelId,
-              responseMode: "normal"
-            });
-          }}
-          disabled={chatConfiguredApis.length === 0}
-        >
-          {chatConfiguredApis.length === 0 ? <option value="">{text(locale, "noSavedApis")}</option> : null}
-          {chatConfiguredApis.map((config) => (
-            <option value={config.id} key={config.id}>{config.providerLabel} / {config.modelName} ({config.keyHint ?? "key"})</option>
-          ))}
-        </select>
-        {chatConfiguredApis.length === 0 ? <small>{text(locale, "saveProviderApiFirst")}</small> : <small>{text(locale, "modelsFromSavedApi")}</small>}
-      </label>
-      <label className="field">
-        <span>{text(locale, "model")}</span>
-        <input value={selectedConfiguredApi?.modelId ?? settings.model.model} readOnly />
-      </label>
+      <p>{locale === "zh" ? "模型由项目会话从后端 Model Config 中显式选择；Agent 不保存模型配置。" : "Models are selected explicitly per project conversation from backend Model Config. Agents do not store model configuration."}</p>
       {providerCapabilities?.chatPrefixCompletion ? (
         <label className="field">
           <span>{text(locale, "responseMode")}</span>
@@ -401,11 +345,6 @@ function riskLabel(riskLevel: "low" | "medium" | "high", locale: "en" | "zh") {
     high: { en: "High risk", zh: "高风险" }
   };
   return labels[riskLevel][locale];
-}
-
-function isChatModelConfig(config: ConfiguredModelApiSummary) {
-  const type = config.modelType?.toLowerCase();
-  return !type || type === "chat" || type === "vision";
 }
 
 export function tabLabel(tab: SettingsTab, locale: "en" | "zh") {

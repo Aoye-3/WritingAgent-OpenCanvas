@@ -4,6 +4,7 @@ export type GenerateRequest = {
   mode: "faceted" | "freeText" | "structured" | "chat";
   taskId?: string;
   agentCardId?: string;
+  projectId?: string;
   threadId?: string;
   locale: Locale;
   formValues?: Record<string, string | string[]>;

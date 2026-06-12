@@ -8,6 +8,8 @@ test("builds LangGraph-compatible AgentBackend run request", () => {
   const settings = defaultAgentSettings(card);
   const request = buildRunRequest({
     threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
     agentCard: card,
     settings: {
       ...settings,
@@ -28,7 +30,7 @@ test("builds LangGraph-compatible AgentBackend run request", () => {
 
   assert.equal(request.assistant_id, "lead_agent");
   assert.equal(request.config.configurable.thread_id, "thread_1");
-  assert.equal(request.config.configurable.model_name, "deepseek-v4-flash");
+  assert.equal(request.config.configurable.model_name, "deepseek--configured");
   assert.equal(request.config.configurable.thinking_enabled, true);
   assert.equal(request.config.configurable.reasoning_effort, "high");
   assert.equal(request.context.thinking_enabled, true);
@@ -39,7 +41,7 @@ test("builds LangGraph-compatible AgentBackend run request", () => {
   assert.equal(request.context.facetwrite_chat_instruction, "Use the draft");
   assert.equal(request.context.facetwrite_memory_enabled, false);
   assert.equal(request.context.facetwrite_memory_scope_id, "thread_1");
-  assert.equal(request.context.facetwrite_project_id, "local-project");
+  assert.equal(request.context.facetwrite_project_id, "project_1");
   assert.equal(request.config.configurable.facetwrite_memory_enabled, false);
   assert.equal(request.metadata.agentCardId, "summary");
   assert.equal(request.metadata.subagent.name, "facetwrite-summary");
@@ -47,11 +49,13 @@ test("builds LangGraph-compatible AgentBackend run request", () => {
   assert.equal(request.multitask_strategy, "interrupt");
 });
 
-test("passes FacetWrite-managed memory only when Agent memory is enabled", () => {
+test("does not pass Agent-owned memory into a project run", () => {
   const card = getAgentCard("summary");
   const settings = defaultAgentSettings(card);
   const request = buildRunRequest({
     threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
     agentCard: card,
     settings: {
       ...settings,
@@ -66,9 +70,9 @@ test("passes FacetWrite-managed memory only when Agent memory is enabled", () =>
     assistantId: "lead_agent"
   });
 
-  assert.equal(request.context.facetwrite_memory_enabled, true);
-  assert.equal(request.config.configurable.facetwrite_memory_enabled, true);
-  assert.equal(request.context.facetwrite_memory_content, "User prefers project-local references.");
+  assert.equal(request.context.facetwrite_memory_enabled, false);
+  assert.equal(request.config.configurable.facetwrite_memory_enabled, false);
+  assert.equal("facetwrite_memory_content" in request.context, false);
 });
 
 test("does not expose AgentBackend reasoning kwargs as assistant stream text", async () => {
@@ -95,6 +99,8 @@ test("does not expose AgentBackend reasoning kwargs as assistant stream text", a
   };
 
   const result = await runAgentBackendAgent({
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
     config: {
       enabled: true,
       baseUrl: "http://AgentBackend.local",
@@ -151,6 +157,8 @@ test("reads AgentBackend stream text and task events", async () => {
   };
 
   const result = await runAgentBackendAgent({
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
     config: {
       enabled: true,
       baseUrl: "http://AgentBackend.local",
@@ -209,6 +217,8 @@ test("ignores AgentBackend values events that replay prompt messages", async () 
   };
 
   const result = await runAgentBackendAgent({
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
     config: {
       enabled: true,
       baseUrl: "http://AgentBackend.local",
@@ -255,6 +265,8 @@ test("uses final values AI message when AgentBackend does not emit assistant mes
   };
 
   const result = await runAgentBackendAgent({
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
     config: {
       enabled: true,
       baseUrl: "http://AgentBackend.local",
@@ -302,6 +314,8 @@ test("only accepts assistant text from AgentBackend message tuples", async () =>
   };
 
   const result = await runAgentBackendAgent({
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
     config: {
       enabled: true,
       baseUrl: "http://AgentBackend.local",

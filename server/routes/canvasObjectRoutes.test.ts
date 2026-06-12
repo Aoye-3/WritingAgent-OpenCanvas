@@ -9,6 +9,7 @@ test("Canvas object routes return success, validation errors, and not found resp
   app.use(express.json());
   registerCanvasRoutes(app, {
     canvasService: {
+      projectIdForThread: () => "project_1",
       createObject: (_threadId: string, input: { kind?: string }) => {
         if (input.kind !== "shape") throw new Error("Invalid Canvas object kind");
         return object();
@@ -50,7 +51,7 @@ async function request(app: express.Express, path: string, options: { method?: s
 function object() {
   return {
     id: "object_1",
-    threadId: "thread_1",
+    projectId: "project_1",
     kind: "shape",
     geometry: { x: 0, y: 0, width: 220, height: 140 },
     data: { shapeId: "rectangle" },

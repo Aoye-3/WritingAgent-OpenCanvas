@@ -270,11 +270,11 @@ if (-not $agentBackendEnabled) {
 }
 
 if (Test-PortInUse -Port $clientPort) {
-  Write-Host "Warning: port $clientPort is already in use. The Vite client may already be running, or startup may fail." -ForegroundColor Yellow
+  throw "Frontend port $clientPort is already in use. Close the existing FacetWrite or Vite process before starting this workspace."
 }
 
 if (Test-PortInUse -Port $apiPort) {
-  Write-Host "Warning: port $apiPort is already in use. The FacetWrite API may already be running, or startup may fail." -ForegroundColor Yellow
+  throw "API port $apiPort is already in use. Close the existing FacetWrite API process before starting this workspace."
 }
 
 Write-Host "Runtime configuration" -ForegroundColor Cyan

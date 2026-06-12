@@ -2,10 +2,20 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 const apiPort = process.env.PORT ?? "8837";
+const clientPort = Number(process.env.VITE_PORT ?? "3000");
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      input: {
+        index: "index.html"
+      }
+    }
+  },
   server: {
+    port: clientPort,
+    strictPort: true,
     watch: {
       ignored: [
         "**/.git/**",

@@ -4,7 +4,7 @@ import type { AgentCard, AgentSettings } from "./types.js";
 export function defaultAgentSettings(card: AgentCard): AgentSettings {
   return {
     model: {
-      providerId: "deepseek",
+      providerId: "",
       model: "",
       responseMode: "normal",
       temperature: 0.7,

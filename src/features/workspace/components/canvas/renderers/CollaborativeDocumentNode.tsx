@@ -118,13 +118,13 @@ export function CollaborativeDocumentNode(props: CollaborativeDocumentNodeProps)
   return (
     <div className="canvas-text-node-body collaborative-document-node">
       {editing === "title" ? <input
-        autoFocus className="canvas-node-title nodrag" value={title}
+        autoFocus className="canvas-node-title nodrag" data-testid="canvas-node-title" value={title}
         onChange={(event) => setTitle(event.currentTarget.value)}
         onBlur={() => { if (title !== props.node.title) void props.onUpdateNode(props.node.id, { title }); setEditing(null); }}
-      /> : <div className="canvas-node-title canvas-node-readonly" onDoubleClick={() => setEditing("title")}>{title}</div>}
+      /> : <div className="canvas-node-title canvas-node-readonly" data-testid="canvas-node-title" onDoubleClick={() => setEditing("title")}>{title}</div>}
 
       {editing === "content" ? <textarea
-        autoFocus className="canvas-node-content nodrag nowheel" value={content}
+        autoFocus className="canvas-node-content nodrag nowheel" data-testid="canvas-node-content" value={content}
         onChange={(event) => setContent(event.currentTarget.value)}
         onKeyDown={(event) => { if (event.key === "Escape") event.currentTarget.blur(); }}
         onBlur={() => { if (content !== props.node.content) void props.onUpdateNode(props.node.id, { content }); setEditing(null); }}
@@ -132,7 +132,7 @@ export function CollaborativeDocumentNode(props: CollaborativeDocumentNodeProps)
         className="canvas-node-content canvas-node-readonly collaborative-document-content nodrag nopan nowheel"
         data-testid="canvas-node-content"
         ref={bodyRef}
-        onDoubleClick={() => { if (!request && window.getSelection()?.isCollapsed !== false) setEditing("content"); }}
+        onDoubleClick={() => { if (!request) setEditing("content"); }}
         onMouseUp={readSelection}
       >
         {request?.operation === "replace_range" ? <div className="canvas-range-proposal-shell">

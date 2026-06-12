@@ -8,3 +8,7 @@ export function safeId(value: unknown) {
 export function randomThreadId() {
   return `thread_${randomUUID()}`;
 }
+
+export function randomProjectId() {
+  return `project_${randomUUID()}`;
+}

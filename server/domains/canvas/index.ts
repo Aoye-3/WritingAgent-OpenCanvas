@@ -16,94 +16,99 @@ export type CanvasDomainService = ReturnType<typeof createCanvasDomainService>;
 
 export function createCanvasDomainService(storage: SQLiteStorageRepository) {
   return {
-    getCanvas(threadId: string) {
+    projectIdForThread(threadId: string) {
       const thread = storage.getThread(threadId);
-      if (!thread) return undefined;
-      storage.migrateCanvasWorkflowRoleNodes(threadId);
+      if (!thread) throw new Error("A valid Thread is required for Project Canvas access");
+      return thread.projectId;
+    },
+
+    getCanvas(projectId: string) {
+      if (!storage.getProject(projectId)) return undefined;
+      storage.migrateCanvasWorkflowRoleNodes(projectId);
       return {
-        nodes: storage.listCanvasNodes(threadId),
-        edges: storage.listCanvasEdges(threadId),
-        objects: storage.listCanvasObjects?.(threadId) ?? [],
-        writeRequests: storage.listCanvasWriteRequests(threadId, "pending"),
-        workflow: storage.getCanvasWorkflow(threadId),
-        suggestions: storage.listCanvasWorkflowSuggestions(threadId)
+        nodes: storage.listCanvasNodes(projectId),
+        edges: storage.listCanvasEdges(projectId),
+        objects: storage.listCanvasObjects?.(projectId) ?? [],
+        writeRequests: storage.listCanvasWriteRequests(projectId, "pending"),
+        workflow: storage.getCanvasWorkflow(projectId),
+        suggestions: storage.listCanvasWorkflowSuggestions(projectId)
       };
     },
 
-    updateWorkflow(threadId: string, input: CanvasWorkflowInput) {
-      return storage.updateCanvasWorkflow(threadId, input);
+    updateWorkflow(projectId: string, input: CanvasWorkflowInput) {
+      return storage.updateCanvasWorkflow(projectId, input);
     },
 
-    updateNodeWorkflow(threadId: string, nodeId: string, patch: CanvasNodeWorkflowPatch) {
-      return storage.updateCanvasNodeWorkflow(threadId, nodeId, patch);
+    updateNodeWorkflow(projectId: string, nodeId: string, patch: CanvasNodeWorkflowPatch) {
+      return storage.updateCanvasNodeWorkflow(projectId, nodeId, patch);
     },
 
-    createSuggestion(threadId: string, input: CanvasWorkflowSuggestionInput) {
-      return storage.createCanvasWorkflowSuggestion(threadId, input);
+    createSuggestion(projectId: string, input: CanvasWorkflowSuggestionInput) {
+      return storage.createCanvasWorkflowSuggestion(projectId, input);
     },
 
-    acceptSuggestion(threadId: string, suggestionId: string) {
-      return storage.acceptCanvasWorkflowSuggestion(threadId, suggestionId);
+    acceptSuggestion(projectId: string, suggestionId: string) {
+      return storage.acceptCanvasWorkflowSuggestion(projectId, suggestionId);
     },
 
-    ignoreSuggestion(threadId: string, suggestionId: string) {
-      return storage.ignoreCanvasWorkflowSuggestion(threadId, suggestionId);
+    ignoreSuggestion(projectId: string, suggestionId: string) {
+      return storage.ignoreCanvasWorkflowSuggestion(projectId, suggestionId);
     },
 
-    convertSuggestionToNode(threadId: string, suggestionId: string, input: CanvasSuggestionToNodeInput) {
-      return storage.convertCanvasWorkflowSuggestionToNode(threadId, suggestionId, input);
+    convertSuggestionToNode(projectId: string, suggestionId: string, input: CanvasSuggestionToNodeInput) {
+      return storage.convertCanvasWorkflowSuggestionToNode(projectId, suggestionId, input);
     },
 
-    createNode(threadId: string, input: CanvasNodeInput) {
-      return storage.createCanvasNode(threadId, input);
+    createNode(projectId: string, input: CanvasNodeInput) {
+      return storage.createCanvasNode(projectId, input);
     },
 
-    updateNode(threadId: string, nodeId: string, patch: CanvasNodePatch) {
-      return storage.updateCanvasNode(threadId, nodeId, patch);
+    updateNode(projectId: string, nodeId: string, patch: CanvasNodePatch) {
+      return storage.updateCanvasNode(projectId, nodeId, patch);
     },
 
-    deleteNode(threadId: string, nodeId: string) {
-      return storage.deleteCanvasNode(threadId, nodeId);
+    deleteNode(projectId: string, nodeId: string) {
+      return storage.deleteCanvasNode(projectId, nodeId);
     },
 
-    createEdge(threadId: string, input: CanvasEdgeInput) {
-      return storage.createCanvasEdge(threadId, input);
+    createEdge(projectId: string, input: CanvasEdgeInput) {
+      return storage.createCanvasEdge(projectId, input);
     },
 
-    deleteEdge(threadId: string, edgeId: string) {
-      return storage.deleteCanvasEdge(threadId, edgeId);
+    deleteEdge(projectId: string, edgeId: string) {
+      return storage.deleteCanvasEdge(projectId, edgeId);
     },
 
-    createObject(threadId: string, input: CanvasObjectInput) {
-      return storage.createCanvasObject(threadId, input);
+    createObject(projectId: string, input: CanvasObjectInput) {
+      return storage.createCanvasObject(projectId, input);
     },
 
-    updateObject(threadId: string, objectId: string, patch: CanvasObjectPatch) {
-      return storage.updateCanvasObject(threadId, objectId, patch);
+    updateObject(projectId: string, objectId: string, patch: CanvasObjectPatch) {
+      return storage.updateCanvasObject(projectId, objectId, patch);
     },
 
-    deleteObject(threadId: string, objectId: string) {
-      return storage.deleteCanvasObject(threadId, objectId);
+    deleteObject(projectId: string, objectId: string) {
+      return storage.deleteCanvasObject(projectId, objectId);
     },
 
-    createAsset(threadId: string, input: { fileName: string; fileBase64: string }) {
-      return storage.createCanvasAsset(threadId, input);
+    createAsset(projectId: string, input: { fileName: string; fileBase64: string }) {
+      return storage.createCanvasAsset(projectId, input);
     },
 
-    readAsset(threadId: string, objectId: string) {
-      return storage.readCanvasAsset(threadId, objectId);
+    readAsset(projectId: string, objectId: string) {
+      return storage.readCanvasAsset(projectId, objectId);
     },
 
-    createWriteRequest(threadId: string, input: CanvasWriteRequestInput) {
-      return storage.createCanvasWriteRequest(threadId, input);
+    createWriteRequest(projectId: string, input: CanvasWriteRequestInput) {
+      return storage.createCanvasWriteRequest(projectId, input);
     },
 
-    approveWriteRequest(threadId: string, requestId: string) {
-      return storage.approveCanvasWriteRequest(threadId, requestId);
+    approveWriteRequest(projectId: string, requestId: string) {
+      return storage.approveCanvasWriteRequest(projectId, requestId);
     },
 
-    rejectWriteRequest(threadId: string, requestId: string) {
-      return storage.rejectCanvasWriteRequest(threadId, requestId);
+    rejectWriteRequest(projectId: string, requestId: string) {
+      return storage.rejectCanvasWriteRequest(projectId, requestId);
     }
   };
 }

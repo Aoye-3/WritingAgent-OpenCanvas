@@ -140,21 +140,32 @@ export type AgentRuntimeConfig = {
 };
 
 export type ThreadCreateResponse = {
+  thread: StoredThread;
   threadId: string;
-  agentCardId: string;
+  projectId: string;
 };
 
 export type StoredThread = {
   id: string;
-  agentCardId: string;
+  projectId: string;
   title: string;
+  configuredModelApiId?: string | null;
   updatedAt: string;
   deletedAt?: string | null;
   assetCount?: number;
 };
 
-export type ProjectSummary = StoredThread & {
-  agentTitle: string;
+export type ProjectSummary = {
+  id: string;
+  title: string;
+  summary: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  modelConfigIds: string[];
+  threadCount: number;
+  assetCount: number;
+  agentCardId?: string;
+  agentTitle?: string;
   provider?: string;
 };
 
@@ -166,6 +177,7 @@ export type StoredOutputVersion = {
   mode: "structured" | "chat";
   provider: "deepseek" | "openai" | "openai-compatible" | "mock";
   usedMock: boolean;
+  includeInProjectContext: boolean;
   createdAt: string;
 };
 
@@ -191,7 +203,7 @@ export type CanvasWorkflowRole = {
 };
 
 export type CanvasWorkflow = {
-  threadId: string;
+  projectId: string;
   stage: CanvasWorkflowStage;
   stages: CanvasWorkflowStage[];
   roles: CanvasWorkflowRole[];
@@ -200,7 +212,7 @@ export type CanvasWorkflow = {
 
 export type CanvasNode = {
   id: string;
-  threadId: string;
+  projectId: string;
   kind: CanvasNodeKind;
   title: string;
   content: string;
@@ -209,13 +221,14 @@ export type CanvasNode = {
   width: number;
   height: number;
   metadata: unknown;
+  includeInProjectContext: boolean;
   createdAt: string;
   updatedAt: string;
 };
 
 export type CanvasEdge = {
   id: string;
-  threadId: string;
+  projectId: string;
   sourceNodeId: string;
   targetNodeId: string;
   label: string;
@@ -225,7 +238,7 @@ export type CanvasEdge = {
 
 export type CanvasWriteRequest = {
   id: string;
-  threadId: string;
+  projectId: string;
   operation: CanvasWriteOperation;
   targetNodeId?: string;
   nodeKind: CanvasNodeKind;
@@ -246,7 +259,7 @@ export type { CanvasObject, CanvasObjectKind } from "../../../shared/canvasObjec
 
 export type CanvasWorkflowSuggestion = {
   id: string;
-  threadId: string;
+  projectId: string;
   nodeId: string;
   roleNodeId: string;
   targetNodeId: string;
@@ -269,8 +282,10 @@ export type StoredMessage = {
 
 export type ThreadStateResponse = {
   thread: StoredThread;
+  project?: ProjectSummary;
   messages: StoredMessage[];
-  structuredValues?: AgentValues;
+  projectInputs?: Record<string, AgentValues>;
+  projectInputRevisions?: Record<string, number>;
   outputVersions: StoredOutputVersion[];
   toolEvents: StoredToolEvent[];
   canvasNodes?: CanvasNode[];
