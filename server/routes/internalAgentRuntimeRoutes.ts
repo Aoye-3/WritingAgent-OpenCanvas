@@ -5,6 +5,7 @@ import type { KnowledgeService } from "../knowledge/service.js";
 import { executeToolCall } from "../toolRuntime.js";
 import type { ToolState } from "../tools/catalog.js";
 import { errorMessage, sendError, sendOk } from "../utils/http.js";
+import { commitPlanArtifact, commitPlanArtifactLinks } from "../services/planArtifactService.js";
 
 type InternalAgentRuntimeRouteDeps = {
   storage: SQLiteStorageRepository;
@@ -41,7 +42,21 @@ export function registerInternalToolBridgeRoute(
         resetContext: () => {
           if (!storage.resetThreadContext(body.threadId)) throw new Error("Thread not found");
         },
-        createCanvasWriteRequest: (input) => storage.createCanvasWriteRequest(body.threadId, input)
+        createCanvasWriteRequest: (input) => storage.createCanvasWriteRequest(body.threadId, input),
+        createPlanRun: (input) => storage.createPlanRun(body.threadId, input),
+        revisePlanRun: (planId, input) => storage.revisePlanRun(body.threadId, planId, input),
+        getPlanRun: (planId) => storage.getPlanRun(body.threadId, planId),
+        updatePlanStep: (planId, stepId, patch) => storage.updatePlanStep(body.threadId, planId, stepId, patch),
+        setPlanStatus: (planId, status, message) => status === "awaiting_user" ? storage.setPlanWaitingForUser(body.threadId, planId, message ?? "") : storage.setPlanRunStatus(body.threadId, planId, status, message),
+        stagePlanArtifact: async (planId, input) => {
+          const staged = storage.stagePlanArtifact(body.threadId, planId, input);
+          if (!staged) return undefined;
+          return commitPlanArtifact(storage, body.threadId, planId, staged.id);
+        },
+        stagePlanArtifactLinks: (planId, links) => {
+          storage.stagePlanArtifactLinks(body.threadId, planId, links);
+          return commitPlanArtifactLinks(storage, body.threadId, planId);
+        }
       });
       sendOk(response, result);
     } catch (error) {

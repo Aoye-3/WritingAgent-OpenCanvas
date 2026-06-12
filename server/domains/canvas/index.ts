@@ -91,7 +91,7 @@ export function createCanvasDomainService(storage: SQLiteStorageRepository) {
       return storage.deleteCanvasObject(projectId, objectId);
     },
 
-    createAsset(projectId: string, input: { fileName: string; fileBase64: string }) {
+    createAsset(projectId: string, input: { fileName: string; fileBase64: string; sourceUrl?: string; pageUrl?: string; caption?: string; alt?: string }) {
       return storage.createCanvasAsset(projectId, input);
     },
 

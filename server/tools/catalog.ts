@@ -1,6 +1,6 @@
 import type { ChatCompletionTool } from "../providerRuntime.js";
 
-export type ToolRef = "web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write";
+export type ToolRef = "web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write" | "plan_update" | "artifact_stage";
 export type ToolState = Partial<Record<ToolRef, boolean>>;
 export type ToolRiskLevel = "low" | "medium" | "high";
 export type ToolGroup = "web" | "context" | "chat";
@@ -105,6 +105,33 @@ export const toolCatalog: ToolDefinition[] = [
     requiresExternalConfig: false,
     riskLevel: "low",
     requiresApproval: false
+  },
+  {
+    name: "plan_update",
+    group: "chat",
+    label: "Plan Update",
+    description: "Create and update a persistent multi-step task plan. Creating a plan pauses for user approval.",
+    promptHint: "For /plan work, create a concise ordered plan first. Do not execute steps until the plan is approved.",
+    schema: { type: "object", properties: {
+      action: { type: "string", enum: ["create", "revise", "update_step", "request_input", "finish", "fail"] },
+      planId: { type: "string" }, stepId: { type: "string" }, title: { type: "string" }, goal: { type: "string" }, detail: { type: "string" }, error: { type: "string" }, message: { type: "string" },
+      status: { type: "string", enum: ["pending", "running", "completed", "failed", "skipped"] },
+      steps: { type: "array", items: { type: "object", properties: { id: { type: "string" }, title: { type: "string" }, detail: { type: "string" } }, required: ["id", "title"], additionalProperties: false } }
+    }, required: ["action"], additionalProperties: false },
+    executorKind: "local", enabledByDefault: false, requiresExternalConfig: false, riskLevel: "low", requiresApproval: false
+  },
+  {
+    name: "artifact_stage",
+    group: "chat",
+    label: "Stage Plan Artifact",
+    description: "Stage a text or web-image artifact selected by the Agent for the approved plan.",
+    promptHint: "Stage only durable task outputs, not conversational replies. Use stable artifact ids for retries.",
+    schema: { type: "object", properties: {
+      planId: { type: "string" },
+      artifacts: { type: "array", items: { type: "object", properties: { artifactId: { type: "string" }, stepId: { type: "string" }, type: { type: "string", enum: ["text", "image"] }, title: { type: "string" }, payload: { type: "object" }, source: { type: "object" }, layout: { type: "object" } }, required: ["artifactId", "stepId", "type", "title", "payload"], additionalProperties: false } },
+      links: { type: "array", items: { type: "object", properties: { id: { type: "string" }, fromArtifactId: { type: "string" }, toArtifactId: { type: "string" }, label: { type: "string" } }, required: ["id", "fromArtifactId", "toArtifactId"], additionalProperties: false } }
+    }, required: ["planId", "artifacts"], additionalProperties: false },
+    executorKind: "local", enabledByDefault: false, requiresExternalConfig: false, riskLevel: "low", requiresApproval: false
   },
   {
     name: "canvas_write",

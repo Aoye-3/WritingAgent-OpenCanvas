@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { defaultAgentSettings, getAgentCard } from "../../agentCards.js";
 import { buildRunRequest, runAgentBackendAgent } from "./client.js";
 
@@ -42,6 +43,7 @@ test("builds LangGraph-compatible AgentBackend run request", () => {
   assert.equal(request.context.facetwrite_memory_enabled, false);
   assert.equal(request.context.facetwrite_memory_scope_id, "thread_1");
   assert.equal(request.context.facetwrite_project_id, "project_1");
+  assert.equal(request.context.facetwrite_plan_phase, "chat");
   assert.equal(request.config.configurable.facetwrite_memory_enabled, false);
   assert.equal(request.metadata.agentCardId, "summary");
   assert.equal(request.metadata.subagent.name, "facetwrite-summary");
@@ -387,3 +389,82 @@ test("only accepts assistant text from AgentBackend message tuples", async () =>
   assert.equal(result.text.includes("FacetWrite system"), false);
   assert.equal(result.text.includes('"results"'), false);
 });
+
+test("marks slash Plan requests as the AgentBackend planning phase", () => {
+  const card = getAgentCard("summary");
+  const request = buildRunRequest({
+    threadId: "thread_plan",
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings: defaultAgentSettings(card),
+    messages: [{ role: "user", content: "/plan Compare two laptops" }],
+    prompt: "/plan Compare two laptops",
+    chatInstruction: "/plan Compare two laptops",
+    toolState: { plan_update: true }
+  }, {
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8000",
+    assistantId: "lead_agent"
+  });
+
+  assert.equal(request.context.facetwrite_plan_phase, "planning");
+  assert.equal(request.config.configurable.facetwrite_plan_phase, "planning");
+});
+
+test("returns only the last visible AI message across a tool loop", async () => {
+  const body = readFileSync(new URL("./fixtures/plan-tool-loop.sse", import.meta.url), "utf8");
+  const result = await runWithBody(body);
+  assert.equal(result.text, "Which market and budget should I use?");
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_plan_waiting_for_user"));
+});
+
+test("maps structured Plan envelopes from bridged tool results", async () => {
+  const envelope = JSON.stringify({ content: "Plan is ready.", event: { tool: "plan_update", eventType: "plan_created", planId: "plan_1" } });
+  const body = `event: messages\ndata: [{"type":"tool","name":"plan_update","tool_call_id":"call_plan","content":${JSON.stringify(`Plan is ready.\n__FACETWRITE_EVENT__${envelope}`)}}]\n\n`;
+  const result = await runWithBody(body);
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_plan_created" && event.payload.planId === "plan_1"));
+});
+
+test("maps committed artifacts as a separate structured event", async () => {
+  const envelope = JSON.stringify({ content: "2 artifacts staged.", event: { tool: "artifact_stage", eventType: "artifact_staged", planId: "plan_1", artifacts: [{ id: "a", status: "committed" }] } });
+  const body = `event: messages\ndata: [{"type":"tool","name":"artifact_stage","tool_call_id":"call_artifact","content":${JSON.stringify(`2 artifacts staged.\n__FACETWRITE_EVENT__${envelope}`)}}]\n\n`;
+  const result = await runWithBody(body);
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_artifact_staged"));
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_artifact_committed"));
+});
+
+async function runWithBody(body: string) {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+      controller.close();
+    }
+  });
+  const fetchImpl = async (url: string | URL | Request) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) return Response.json({ needs_setup: false });
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, { headers });
+    }
+    return new Response(stream, { status: 200 });
+  };
+  return runAgentBackendAgent({
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    config: {
+      enabled: true,
+      baseUrl: "http://AgentBackend.local",
+      assistantId: "lead_agent",
+      auth: { email: "admin@example.com", password: "strong-password", autoSetup: false, timeoutMs: 5000 }
+    },
+    threadId: "thread_1",
+    agentCard: getAgentCard("summary"),
+    messages: [{ role: "user", content: "Plan research" }],
+    prompt: "Plan research",
+    fetchImpl
+  });
+}

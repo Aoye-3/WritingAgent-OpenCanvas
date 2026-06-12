@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
 import { Topbar } from "../../shared/Topbar";
-import type { AgentCard, AgentValues, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, StoredOutputVersion, StoredThread, StoredToolEvent } from "../agents/types";
+import type { AgentCard, AgentValues, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, PlanRun, StoredOutputVersion, StoredThread, StoredToolEvent } from "../agents/types";
 import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../generation/types";
 import { useI18n } from "../i18n/I18nProvider";
@@ -38,6 +38,7 @@ type WorkspaceViewProps = {
   selectedCanvasNodeId?: string;
   canUndoCanvas: boolean;
   toolEvents: StoredToolEvent[];
+  plans: PlanRun[];
   projectTitle: string;
   configuredModels: ConfiguredModelApiSummary[];
   runtimeStatus?: AgentBackendRuntimeStatus;
@@ -82,6 +83,7 @@ type WorkspaceViewProps = {
   onUpdateCanvasNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflow["stage"]; roles?: string[] }) => Promise<unknown>;
   onUpdateCanvasWorkflow: (patch: { stage?: CanvasWorkflow["stage"]; roles?: CanvasWorkflow["roles"] }) => Promise<unknown>;
   onUndoCanvas: () => Promise<void>;
+  onPlansChanged: () => Promise<void>;
   promptPreview: string;
   agentValues: AgentValues;
   toolState: GenerateRequest["toolState"];
@@ -103,6 +105,7 @@ export function WorkspaceView({
   selectedCanvasNodeId,
   canUndoCanvas,
   toolEvents,
+  plans,
   projectTitle,
   configuredModels,
   runtimeStatus,
@@ -138,6 +141,7 @@ export function WorkspaceView({
   onRequestCanvasRangeRewrite,
   onSelectCanvasNode,
   onToolStateChange,
+  onPlansChanged,
   onUpdateCanvasNode,
   onUpdateCanvasObject,
   onUploadCanvasAsset,
@@ -291,6 +295,7 @@ export function WorkspaceView({
           inputDraft={composerDraft}
           mindChainContext={mindChainContext}
           messages={collaborationMessages}
+          plans={plans}
           projectThreads={projectThreads}
           currentThreadId={currentThreadId}
           sessionBusy={sessionBusy}
@@ -310,6 +315,8 @@ export function WorkspaceView({
           onResizeStart={startRightDrawerResize}
           onToggleCollapsed={() => setRightCollapsed((value) => !value)}
           onToolStateChange={onToolStateChange}
+          onPlansChanged={onPlansChanged}
+          onFocusPlanArtifact={onSelectCanvasNode}
           toolEvents={toolEvents}
           toolState={toolState}
         />

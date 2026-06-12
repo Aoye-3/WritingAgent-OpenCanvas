@@ -10,6 +10,7 @@ import { RunRepository } from "./repositories/runRepository.js";
 import { ProjectRepository } from "./repositories/projectRepository.js";
 import { cleanText, nowIso, parseJson, validateId } from "./repositories/storageRepositoryUtils.js";
 import { ThreadRepository } from "./repositories/threadRepository.js";
+import { PlanRepository } from "./repositories/planRepository.js";
 import type { KnowledgeBase, KnowledgeBaseInput, KnowledgeEventInput, KnowledgeItemInput, KnowledgeItemStatus } from "./knowledge/types.js";
 import { createThreadDirectoryManager, resolveFacetWritePaths } from "./storagePaths.js";
 import type {
@@ -80,6 +81,7 @@ export class SQLiteStorageRepository {
   private canvas: CanvasRepository;
   private knowledge: KnowledgeRepository;
   private runs: RunRepository;
+  private plans: PlanRepository;
 
   constructor() {
     this.db = createFacetWriteDatabase(dbPath);
@@ -97,7 +99,25 @@ export class SQLiteStorageRepository {
       withTransaction: (work) => this.withTransaction(work),
       touchThread: (threadId, updatedAt) => this.touchThread(threadId, updatedAt)
     });
+    this.plans = new PlanRepository(this.db);
   }
+
+  createPlanRun(threadId: string, input: Parameters<PlanRepository["create"]>[1]) { return this.plans.create(threadId, input); }
+  revisePlanRun(threadId: string, planId: string, input: Parameters<PlanRepository["revise"]>[2]) { return this.plans.revise(threadId, planId, input); }
+  listPlanRuns(threadId: string) { return this.plans.list(threadId); }
+  getPlanRun(threadId: string, planId: string) { return this.plans.get(threadId, planId); }
+  approvePlanRun(threadId: string, planId: string) { return this.plans.setStatus(threadId, planId, "running", "approved"); }
+  cancelPlanRun(threadId: string, planId: string) { return this.plans.setStatus(threadId, planId, "cancelled", "rejected"); }
+  setPlanWaitingForUser(threadId: string, planId: string, message: string) { return this.plans.setStatus(threadId, planId, "awaiting_user", undefined, message); }
+  resumePlanWithAnswer(threadId: string, planId: string, answer: string) { return this.plans.resumeWithAnswer(threadId, planId, answer); }
+  setPlanRunStatus(threadId: string, planId: string, status: import("./storageTypes.js").PlanRunStatus, message = "") { return this.plans.setStatus(threadId, planId, status, undefined, message); }
+  updatePlanStep(threadId: string, planId: string, stepId: string, patch: Parameters<PlanRepository["updateStep"]>[3]) { return this.plans.updateStep(threadId, planId, stepId, patch); }
+  retryPlanStep(threadId: string, planId: string, stepId: string) { return this.plans.retryStep(threadId, planId, stepId); }
+  stagePlanArtifact(threadId: string, planId: string, input: Parameters<PlanRepository["stageArtifact"]>[2]) { return this.plans.stageArtifact(threadId, planId, input); }
+  markPlanArtifactCommitted(threadId: string, planId: string, artifactId: string, canvasTargetId: string) { return this.plans.markArtifact(threadId, planId, artifactId, "committed", canvasTargetId); }
+  markPlanArtifactFailed(threadId: string, planId: string, artifactId: string, error: string) { return this.plans.markArtifact(threadId, planId, artifactId, "failed", undefined, error); }
+  stagePlanArtifactLinks(threadId: string, planId: string, links: Parameters<PlanRepository["stageArtifactLinks"]>[2]) { return this.plans.stageArtifactLinks(threadId, planId, links); }
+  markPlanArtifactLinkCommitted(threadId: string, planId: string, linkId: string, canvasEdgeId: string) { return this.plans.markArtifactLinkCommitted(threadId, planId, linkId, canvasEdgeId); }
 
   createProject(projectId: string, title: unknown, summary = "") {
     validateId(projectId, "projectId");
@@ -309,6 +329,10 @@ export class SQLiteStorageRepository {
     const threadIds = (this.db.prepare(`SELECT id FROM threads WHERE project_id = ?`).all(projectId) as { id: string }[]).map((row) => row.id);
     this.withTransaction(() => {
       for (const threadId of threadIds) {
+        this.db.prepare(`DELETE FROM plan_artifact_links WHERE plan_run_id IN (SELECT id FROM plan_runs WHERE thread_id = ?)`).run(threadId);
+        this.db.prepare(`DELETE FROM plan_artifacts WHERE plan_run_id IN (SELECT id FROM plan_runs WHERE thread_id = ?)`).run(threadId);
+        this.db.prepare(`DELETE FROM plan_steps WHERE plan_run_id IN (SELECT id FROM plan_runs WHERE thread_id = ?)`).run(threadId);
+        this.db.prepare(`DELETE FROM plan_runs WHERE thread_id = ?`).run(threadId);
         this.db.prepare(`DELETE FROM tool_events WHERE thread_id = ?`).run(threadId);
         this.db.prepare(`DELETE FROM output_versions WHERE thread_id = ?`).run(threadId);
         this.db.prepare(`DELETE FROM prompt_versions WHERE thread_id = ?`).run(threadId);
@@ -353,6 +377,10 @@ export class SQLiteStorageRepository {
     if (!thread) return false;
 
     this.withTransaction(() => {
+      this.db.prepare(`DELETE FROM plan_artifact_links WHERE plan_run_id IN (SELECT id FROM plan_runs WHERE thread_id = ?)`).run(threadId);
+      this.db.prepare(`DELETE FROM plan_artifacts WHERE plan_run_id IN (SELECT id FROM plan_runs WHERE thread_id = ?)`).run(threadId);
+      this.db.prepare(`DELETE FROM plan_steps WHERE plan_run_id IN (SELECT id FROM plan_runs WHERE thread_id = ?)`).run(threadId);
+      this.db.prepare(`DELETE FROM plan_runs WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM tool_events WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM output_versions WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM prompt_versions WHERE thread_id = ?`).run(threadId);
@@ -425,7 +453,7 @@ export class SQLiteStorageRepository {
     return this.canvas.createCanvasObject(threadId, input);
   }
 
-  async createCanvasAsset(threadId: string, input: { fileName: string; fileBase64: string }) {
+  async createCanvasAsset(threadId: string, input: { fileName: string; fileBase64: string; sourceUrl?: string; pageUrl?: string; caption?: string; alt?: string }) {
     validateId(threadId, "threadId");
     const fileName = cleanText(input.fileName);
     const extension = path.extname(fileName).toLowerCase();
@@ -441,7 +469,7 @@ export class SQLiteStorageRepository {
     await writeFile(fullPath, buffer);
       return this.canvas.createCanvasAssetObject(threadId, {
         geometry: { x: 160, y: 160, width: extension.match(/\.(png|jpe?g|gif|webp)$/) ? 320 : 260, height: 180 },
-        data: { name: fileName, extension, size: buffer.byteLength, relativePath, previewable: Boolean(extension.match(/\.(png|jpe?g|gif|webp)$/)) }
+        data: { name: fileName, extension, size: buffer.byteLength, relativePath, previewable: Boolean(extension.match(/\.(png|jpe?g|gif|webp)$/)), sourceUrl: cleanText(input.sourceUrl), pageUrl: cleanText(input.pageUrl), caption: cleanText(input.caption), alt: cleanText(input.alt) }
       });
   }
 

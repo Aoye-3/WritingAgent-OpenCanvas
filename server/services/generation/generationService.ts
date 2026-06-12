@@ -75,7 +75,7 @@ export function createGenerationService(
 
     try {
       const agentBackendRun = await runAgentRuntimeGeneration({
-        payload,
+        payload: { ...payload, toolState: context.effectiveToolState },
         threadId,
         projectId: selection.projectId,
         configuredModelApiId: context.modelSettings.configuredModelApiId!,
@@ -97,15 +97,7 @@ export function createGenerationService(
           runtimeEvents.push(...(normalized.events ?? []), event);
           onToolEvent?.(event);
         } else {
-          const events = maybeCreateCanvasWriteRequest({
-            storage,
-            payload,
-            threadId: selection.projectId,
-            agentTitle: agentCard.title[payload.locale],
-            text: normalized.text,
-            events: [...runtimeEvents, ...(normalized.events ?? [])],
-            onToolEvent
-          });
+          const events = [...runtimeEvents, ...(normalized.events ?? [])];
           return recordGenerationRun({
             storage,
             payload,
@@ -171,7 +163,7 @@ export function createGenerationService(
 
     try {
       const agentBackendRun = await runAgentRuntimeGeneration({
-        payload,
+        payload: { ...payload, toolState: context.effectiveToolState },
         threadId,
         projectId: selection.projectId,
         configuredModelApiId: context.modelSettings.configuredModelApiId!,
@@ -198,15 +190,7 @@ export function createGenerationService(
         } else {
           textGate.flush();
           callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
-          const events = maybeCreateCanvasWriteRequest({
-            storage,
-            payload,
-            threadId: selection.projectId,
-            agentTitle: agentCard.title[payload.locale],
-            text: normalized.text,
-            events: [...runtimeEvents, ...(normalized.events ?? [])],
-            onToolEvent: callbacks.onToolEvent
-          });
+          const events = [...runtimeEvents, ...(normalized.events ?? [])];
           return recordGenerationRun({
             storage,
             payload,
@@ -357,66 +341,4 @@ function recordMockFallback(input: {
     errorMessage: formatGenerationFailure(input.events),
     finishReason: "mock_fallback"
   });
-}
-
-function maybeCreateCanvasWriteRequest(input: {
-  storage: SQLiteStorageRepository;
-  payload: GenerateRequest;
-  threadId: string;
-  agentTitle: string;
-  text: string;
-  events?: ToolEventRecord[];
-  onToolEvent?: (event: ToolEventRecord) => void;
-}) {
-  const events = [...(input.events ?? [])];
-  if (!input.payload.toolState?.canvas_write) return events;
-  if (!hasCanvasWriteIntent(input.payload)) return events;
-  if (events.some((event) => event.payload?.tool === "canvas_write" && "requestId" in event.payload)) return events;
-  const content = input.text.trim();
-  if (!content) return events;
-
-  const operation = input.payload.selectedCanvasNodeId ? "append" : "create";
-  const request = input.storage.createCanvasWriteRequest(input.threadId, {
-    operation,
-    ...(input.payload.selectedCanvasNodeId ? { targetNodeId: input.payload.selectedCanvasNodeId } : {}),
-    nodeKind: "document",
-    title: input.agentTitle,
-    content,
-    rationale: "Requested by the user from the chat instruction."
-  });
-  const event: ToolEventRecord = {
-    eventType: "tool_call_completed",
-    payload: {
-      tool: "canvas_write",
-      requestId: request.id,
-      operation: request.operation,
-      nodeKind: request.nodeKind,
-      title: request.title,
-      status: request.status,
-      source: "canvas_intent_fallback"
-    }
-  };
-  events.push(event);
-  input.onToolEvent?.(event);
-  return events;
-}
-
-function hasCanvasWriteIntent(payload: GenerateRequest) {
-  const instruction = `${payload.chatInstruction ?? ""}\n${payload.freeTextPrompt ?? ""}`.toLowerCase();
-  const intentKeywords = [
-    "canvas",
-    "画板",
-    "写入",
-    "存到画板",
-    "保存到画板",
-    "加入",
-    "添加到",
-    "放到",
-    "save to canvas",
-    "write this",
-    "write to canvas",
-    "add to canvas"
-  ];
-  return intentKeywords.some((keyword) => instruction.includes(keyword)) ||
-    /save\s+to\s+canvas|write\s+this|write\s+to\s+canvas|add\s+to\s+canvas/.test(instruction);
 }

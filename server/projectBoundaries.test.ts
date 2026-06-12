@@ -4,12 +4,14 @@ import { DatabaseSync } from "node:sqlite";
 import { migrateStorageSchema } from "./db/schema.js";
 import { createStorage } from "./storage.js";
 
-test("schema v4 uses project-owned Canvas tables and adds the conversation context reset boundary", () => {
+test("schema v5 uses project-owned Canvas tables and persistent plan artifacts", () => {
   const db = new DatabaseSync(":memory:");
   migrateStorageSchema(db);
 
   const version = db.prepare(`SELECT MAX(version) as version FROM schema_version`).get() as { version: number };
-  assert.equal(version.version, 4);
+  assert.equal(version.version, 5);
+  assert.equal(tableExists(db, "plan_runs"), true);
+  assert.equal(tableExists(db, "plan_artifact_links"), true);
   assert.equal(tableExists(db, "thread_inputs"), false);
   assert.equal(columnNames(db, "threads").includes("agent_card_id"), false);
   assert.equal(columnNames(db, "threads").includes("context_reset_at"), true);

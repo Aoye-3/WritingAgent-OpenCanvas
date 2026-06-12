@@ -193,7 +193,7 @@ test("generation accepts the selected conversation model without a project bindi
   assert.equal(result.provider, "agent-backend");
 });
 
-test("generation facade creates a pending Canvas write request for AgentBackend canvas intent", async () => {
+test("generation facade does not copy assistant text into Canvas without a tool call", async () => {
   const { storage, records, canvasWriteRequests } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {
     modelRuntime: fakeModelRuntime,
@@ -215,7 +215,8 @@ test("generation facade creates a pending Canvas write request for AgentBackend 
     toolState: { canvas_write: true }
   });
 
-  assert.equal(canvasWriteRequests.length, 1);
+  assert.equal(canvasWriteRequests.length, 0);
+  return;
   assert.deepEqual(canvasWriteRequests[0], {
     operation: "create",
     nodeKind: "document",
@@ -226,7 +227,7 @@ test("generation facade creates a pending Canvas write request for AgentBackend 
   assert.ok((records[0] as { events: Array<{ payload: { tool?: string; requestId?: string } }> }).events.some((event) => event.payload.tool === "canvas_write" && event.payload.requestId === "write_1"));
 });
 
-test("generation facade recognizes Chinese and English Canvas write intents", async () => {
+test("Canvas intent phrases do not bypass explicit tools", async () => {
   for (const chatInstruction of ["请写入画板", "save to canvas", "write this"]) {
     const { storage, canvasWriteRequests } = fakeStorage();
     const service = createGenerationService(storage, fakeAgentRuntime(), {
@@ -249,7 +250,8 @@ test("generation facade recognizes Chinese and English Canvas write intents", as
       toolState: { canvas_write: true }
     });
 
-    assert.equal(canvasWriteRequests.length, 1);
+    assert.equal(canvasWriteRequests.length, 0);
+    continue;
     assert.equal((canvasWriteRequests[0] as { content: string }).content, "Reusable answer");
   }
 });

@@ -222,3 +222,110 @@ test("canvas_write rejects malformed write arguments", async () => {
   assert.equal(result.ok, false);
   assert.equal(result.payload.reason, "invalid_operation");
 });
+
+test("plan_update creates a plan before approval and updates steps after approval", async () => {
+  const calls: unknown[] = [];
+  const created = await executeToolCall({ id: "plan", type: "function", function: { name: "plan_update", arguments: JSON.stringify({ action: "create", title: "Research", goal: "Compare", steps: [{ id: "search", title: "Search" }] }) } }, {
+    allowedToolRefs: ["plan_update"], toolState: { plan_update: true },
+    createPlanRun: (input) => (calls.push(input), { id: "plan_1", status: "awaiting_approval" })
+  });
+  assert.equal(created.ok, true);
+  assert.equal(created.payload.eventType, "plan_created");
+  assert.equal(calls.length, 1);
+});
+
+test("plan_update can pause a pending plan for clarification before approval", async () => {
+  let nextStatus = "";
+  const result = await executeToolCall({ id: "clarify", type: "function", function: { name: "plan_update", arguments: JSON.stringify({ action: "request_input", planId: "plan_1", message: "Which market?" }) } }, {
+    allowedToolRefs: ["plan_update"], toolState: { plan_update: true },
+    getPlanRun: () => ({ id: "plan_1", approval: "pending", status: "draft", steps: [] }) as never,
+    setPlanStatus: (_planId, status) => { nextStatus = status; }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.eventType, "plan_waiting_for_user");
+  assert.equal(nextStatus, "awaiting_user");
+});
+
+test("plan_update revises the same pending plan after clarification", async () => {
+  let revisedPlanId = "";
+  const result = await executeToolCall({ id: "revise", type: "function", function: { name: "plan_update", arguments: JSON.stringify({ action: "revise", planId: "plan_1", title: "Phone comparison", goal: "Compare in China", steps: [{ id: "sources", title: "Collect sources" }] }) } }, {
+    allowedToolRefs: ["plan_update"], toolState: { plan_update: true },
+    getPlanRun: () => ({ id: "plan_1", approval: "pending", status: "draft", steps: [] }) as never,
+    revisePlanRun: (planId) => { revisedPlanId = planId; return { id: planId, status: "awaiting_approval" }; }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.eventType, "plan_updated");
+  assert.equal(revisedPlanId, "plan_1");
+});
+
+test("artifact_stage requires an approved plan", async () => {
+  const result = await executeToolCall({ id: "artifact", type: "function", function: { name: "artifact_stage", arguments: JSON.stringify({ planId: "plan_1", artifactId: "summary", stepId: "search", type: "text", title: "Summary", payload: { content: "Result" } }) } }, {
+    allowedToolRefs: ["artifact_stage"], toolState: { artifact_stage: true },
+    getPlanRun: () => ({ id: "plan_1", approval: "pending", status: "awaiting_approval" }) as never,
+    stagePlanArtifact: () => { throw new Error("must not stage"); }
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.payload.reason, "plan_not_approved");
+});
+
+test("plan_update refuses to finish while steps are incomplete", async () => {
+  const result = await executeToolCall({ id: "finish", type: "function", function: { name: "plan_update", arguments: JSON.stringify({ action: "finish", planId: "plan_1" }) } }, {
+    allowedToolRefs: ["plan_update"], toolState: { plan_update: true },
+    getPlanRun: () => ({ id: "plan_1", approval: "approved", status: "running", steps: [{ status: "pending" }] }) as never,
+    setPlanStatus: () => { throw new Error("must not finish"); }
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.payload.reason, "steps_incomplete");
+});
+
+test("plan_update cannot start a step outside the designated execution unit", async () => {
+  const result = await executeToolCall({ id: "wrong-step", type: "function", function: { name: "plan_update", arguments: JSON.stringify({ action: "update_step", planId: "plan_1", stepId: "compare", status: "running" }) } }, {
+    allowedToolRefs: ["plan_update"], toolState: { plan_update: true },
+    contextValues: { planExecution: { planId: "plan_1", stepId: "sources" } },
+    getPlanRun: () => ({ id: "plan_1", approval: "approved", status: "running", steps: [{ id: "sources", status: "pending" }, { id: "compare", status: "pending" }] }) as never,
+    updatePlanStep: () => { throw new Error("must not update another step"); }
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.payload.reason, "wrong_execution_step");
+});
+
+test("artifact_stage accepts a batch of artifacts and links", async () => {
+  const staged: string[] = [];
+  const result = await executeToolCall({ id: "artifacts", type: "function", function: { name: "artifact_stage", arguments: JSON.stringify({
+    planId: "plan_1",
+    artifacts: [
+      { artifactId: "source", stepId: "search", type: "text", title: "Source", payload: { content: "Source text", nodeKind: "reference" } },
+      { artifactId: "summary", stepId: "search", type: "text", title: "Summary", payload: { content: "Summary text" } }
+    ],
+    links: [{ id: "link_1", fromArtifactId: "source", toArtifactId: "summary", label: "supports" }]
+  }) } }, {
+    allowedToolRefs: ["artifact_stage"], toolState: { artifact_stage: true },
+    getPlanRun: () => ({ id: "plan_1", approval: "approved", status: "running", steps: [{ id: "search", status: "running" }] }) as never,
+    stagePlanArtifact: (_planId, input) => (staged.push(input.artifactId), { id: input.artifactId, status: "committed" }),
+    stagePlanArtifactLinks: (planRunId, links) => links.map((link) => ({ ...link, planRunId, label: typeof link.label === "string" ? link.label : "" }))
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(staged, ["source", "summary"]);
+  assert.equal(result.payload.artifactCount, 2);
+  assert.equal(result.payload.linkCount, 1);
+});
+
+test("artifact_stage keeps successful artifacts when one item fails", async () => {
+  const result = await executeToolCall({ id: "partial", type: "function", function: { name: "artifact_stage", arguments: JSON.stringify({
+    planId: "plan_1",
+    artifacts: [
+      { artifactId: "summary", stepId: "search", type: "text", title: "Summary", payload: { content: "Done" } },
+      { artifactId: "broken-image", stepId: "search", type: "image", title: "Image", payload: { imageUrl: "https://example.com/broken.png" } }
+    ]
+  }) } }, {
+    allowedToolRefs: ["artifact_stage"], toolState: { artifact_stage: true },
+    getPlanRun: () => ({ id: "plan_1", approval: "approved", status: "running", steps: [{ id: "search", status: "running" }] }) as never,
+    stagePlanArtifact: (_planId, input) => input.artifactId === "broken-image"
+      ? Promise.reject(new Error("Image download failed"))
+      : Promise.resolve({ id: input.artifactId, status: "committed" })
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.artifactCount, 2);
+  assert.equal(result.payload.failedCount, 1);
+  assert.deepEqual((result.payload.artifacts as Array<{ status: string }>).map((artifact) => artifact.status), ["committed", "failed"]);
+});

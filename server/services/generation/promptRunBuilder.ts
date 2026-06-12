@@ -12,6 +12,7 @@ import type { ToolEventRecord } from "../../toolRuntime.js";
 import { isChatMode } from "./mockFallback.js";
 import type { ConfiguredModelApi } from "../../domains/model-config/index.js";
 import { shouldExcludeFromModelContext } from "./outputNormalizer.js";
+import { planPhaseSystemPrompt, resolvePlanRequestPolicy } from "./planRequestPolicy.js";
 
 export type GenerateModelSettings = NonNullable<ReturnType<AgentRuntimeAdapter["resolveAgentCard"]>["settings"]>["model"];
 
@@ -37,7 +38,11 @@ export async function buildGenerationRunContext(
   const runtimeConfig = await agentRuntime.getAgentRuntimeConfig(payload.agentCardId ?? payload.taskId ?? "");
   const agentCard = runtimeConfig.agentCard;
   const effectivePayload = payload;
-  const effectiveToolState: ToolState = { ...runtimeConfig.settings.tools, ...payload.toolState };
+  const effectiveToolState: ToolState = resolvePlanRequestPolicy({
+    chatInstruction: payload.chatInstruction,
+    contextValues: payload.contextValues,
+    toolState: { ...runtimeConfig.settings.tools, ...payload.toolState }
+  }).toolState;
   const skills = await loadSkillsByRefs(agentCard.skillRefs);
   const prompt = buildAgentPrompt({
     agentCard,
@@ -60,7 +65,7 @@ export async function buildGenerationRunContext(
     threshold: runtimeConfig.settings.knowledge.threshold
   });
   const messages = buildChatMessages(storage, {
-    systemPrompt: buildSystemPrompt(payload.systemPrompt?.trim() || getSystemPrompt(payload.locale), prompt),
+    systemPrompt: buildSystemPrompt(payload.systemPrompt?.trim() || getSystemPrompt(payload.locale), prompt, planPhaseSystemPrompt(payload)),
     userPrompt,
     prompt,
     knowledgeContext: knowledge.context,
@@ -135,11 +140,12 @@ export function buildChatMessages(
   return messages;
 }
 
-function buildSystemPrompt(systemPrompt: string, internalPrompt: string) {
+function buildSystemPrompt(systemPrompt: string, internalPrompt: string, phasePrompt = "") {
   return [
     systemPrompt,
     "Use the following FacetWrite runtime context to guide the response. This context is private implementation detail: never quote, reveal, or reproduce headings such as AgentCard, Loaded Skills, Current User Instruction, Context, Enabled Tool State, or Output Contract in the final answer.",
-    internalPrompt
+    internalPrompt,
+    phasePrompt
   ].filter(Boolean).join("\n\n");
 }
 

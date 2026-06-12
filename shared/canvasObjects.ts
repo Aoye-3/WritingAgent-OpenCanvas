@@ -43,6 +43,10 @@ export type CanvasAssetData = {
   size: number;
   relativePath: string;
   previewable: boolean;
+  sourceUrl?: string;
+  pageUrl?: string;
+  caption?: string;
+  alt?: string;
 };
 export type CanvasAssetObject = CanvasObjectBase<"asset", CanvasBoxGeometry, CanvasAssetData>;
 export type CanvasTextObject = CanvasObjectBase<"text", CanvasBoxGeometry, { text: string; fontSize: CanvasTextFontSize; color: string }>;
@@ -154,6 +158,10 @@ export function normalizeStoredCanvasObject(input: StoredCanvasObject): CanvasOb
         size: safeNumber(data.size),
         relativePath: typeof data.relativePath === "string" ? data.relativePath : "",
         previewable: data.previewable === true,
+        sourceUrl: typeof data.sourceUrl === "string" ? data.sourceUrl : undefined,
+        pageUrl: typeof data.pageUrl === "string" ? data.pageUrl : undefined,
+        caption: typeof data.caption === "string" ? data.caption : undefined,
+        alt: typeof data.alt === "string" ? data.alt : undefined,
       },
     };
   }

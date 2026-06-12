@@ -21,6 +21,7 @@ import { registerKnowledgeRoutes } from "./routes/knowledgeRoutes.js";
 import { registerProjectRoutes } from "./routes/projectRoutes.js";
 import { registerSettingsRoutes } from "./routes/settingsRoutes.js";
 import { registerThreadRoutes } from "./routes/threadRoutes.js";
+import { registerPlanRoutes } from "./routes/planRoutes.js";
 import { syncConfiguredModelsToAgentBackend } from "./runtime/agentBackendAdapter/modelSync.js";
 
 export async function createApp() {
@@ -50,6 +51,7 @@ export async function createApp() {
   registerCatalogRoutes(app);
   registerAgentRoutes(app, { agentRuntime });
   registerThreadRoutes(app, { storage, agentRuntime });
+  registerPlanRoutes(app, storage);
   registerProjectRoutes(app, { storage, agentRuntime });
   registerCanvasRoutes(app, { canvasService });
   registerSettingsRoutes(app, { storage });

@@ -37,6 +37,8 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
         onToken: (token) => writeSse(response, "token", { text: token }),
         onToolEvent: (event) => {
           writeSse(response, "tool_event", event);
+          const structuredEvent = typeof event.payload?.eventType === "string" ? event.payload.eventType : "";
+          if (/^(?:plan_|artifact_)/.test(structuredEvent)) writeSse(response, structuredEvent, event.payload);
         }
       });
       writeSse(response, "final", result);

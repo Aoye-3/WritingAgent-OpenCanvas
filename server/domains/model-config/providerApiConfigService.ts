@@ -106,7 +106,7 @@ export async function listConfiguredModelApiSummaries() {
 export async function listConversationModelSummaries() {
   const result = await listConfiguredModelApiSummaries();
   const configs = result.configs
-    .filter((config) => config.enabled && config.keyConfigured && config.modelType === "chat")
+    .filter((config) => config.enabled && config.keyConfigured && (config.modelType === "chat" || config.modelType === "vision"))
     .sort((a, b) => {
       const groupOrder = { reasoning: 0, chat: 1, "other-chat": 2 };
       return groupOrder[a.capabilityGroup] - groupOrder[b.capabilityGroup]

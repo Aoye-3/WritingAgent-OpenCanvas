@@ -9,6 +9,7 @@ import type {
   ThreadStateResponse,
   ToolCatalogItem
 } from "./types";
+import type { PlanRun } from "./types";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "../../shared/apiClient";
 
 export async function fetchAgentCards(): Promise<AgentCard[]> {
@@ -134,4 +135,17 @@ export async function fetchThreadState(threadId: string): Promise<ThreadStateRes
 
 export async function setOutputVersionProjectContext(threadId: string, versionId: string, included: boolean): Promise<void> {
   await apiPatch<{ ok: true }>(`/api/threads/${encodeURIComponent(threadId)}/output-versions/${encodeURIComponent(versionId)}/context`, { included });
+}
+
+export async function approvePlan(threadId: string, planId: string): Promise<PlanRun> {
+  return (await apiPost<{ plan: PlanRun }>(`/api/threads/${encodeURIComponent(threadId)}/plans/${encodeURIComponent(planId)}/approve`)).plan;
+}
+export async function cancelPlan(threadId: string, planId: string): Promise<PlanRun> {
+  return (await apiPost<{ plan: PlanRun }>(`/api/threads/${encodeURIComponent(threadId)}/plans/${encodeURIComponent(planId)}/cancel`)).plan;
+}
+export async function retryPlanStep(threadId: string, planId: string, stepId: string) {
+  return apiPost<{ step: unknown }>(`/api/threads/${encodeURIComponent(threadId)}/plans/${encodeURIComponent(planId)}/steps/${encodeURIComponent(stepId)}/retry`);
+}
+export async function answerPlan(threadId: string, planId: string, answer: string): Promise<PlanRun> {
+  return (await apiPost<{ plan: PlanRun }>(`/api/threads/${encodeURIComponent(threadId)}/plans/${encodeURIComponent(planId)}/answer`, { answer })).plan;
 }

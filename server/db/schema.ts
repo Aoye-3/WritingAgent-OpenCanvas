@@ -162,6 +162,28 @@ export function migrateStorageSchema(db: DatabaseSync) {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS plan_runs (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, thread_id TEXT NOT NULL, run_id TEXT,
+      title TEXT NOT NULL, goal TEXT NOT NULL, status TEXT NOT NULL, approval TEXT NOT NULL,
+      status_message TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS plan_steps (
+      id TEXT NOT NULL, plan_run_id TEXT NOT NULL, step_order INTEGER NOT NULL, title TEXT NOT NULL,
+      detail TEXT NOT NULL, status TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 0,
+      started_at TEXT, completed_at TEXT, error TEXT, PRIMARY KEY(plan_run_id, id)
+    );
+    CREATE TABLE IF NOT EXISTS plan_artifacts (
+      id TEXT NOT NULL, plan_run_id TEXT NOT NULL, step_id TEXT NOT NULL, type TEXT NOT NULL,
+      status TEXT NOT NULL, title TEXT NOT NULL, payload_json TEXT NOT NULL, source_json TEXT NOT NULL,
+      canvas_target_id TEXT, layout_json TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL, PRIMARY KEY(plan_run_id, id)
+    );
+    CREATE TABLE IF NOT EXISTS plan_artifact_links (
+      id TEXT NOT NULL, plan_run_id TEXT NOT NULL, from_artifact_id TEXT NOT NULL,
+      to_artifact_id TEXT NOT NULL, label TEXT NOT NULL, canvas_edge_id TEXT,
+      PRIMARY KEY(plan_run_id, id)
+    );
+
     CREATE TABLE IF NOT EXISTS canvas_workflows (
       thread_id TEXT PRIMARY KEY,
       stage TEXT NOT NULL,
@@ -460,6 +482,21 @@ export function migrateStorageSchema(db: DatabaseSync) {
       db.exec(`ALTER TABLE threads ADD COLUMN context_reset_at TEXT`);
     }
     db.exec(`INSERT INTO schema_version (version, applied_at) VALUES (4, datetime('now'))`);
+  }
+
+  const version5 = db.prepare(`SELECT version FROM schema_version WHERE version = 5`).get();
+  if (!version5) {
+    db.exec(`
+      ALTER TABLE plan_artifact_links RENAME TO plan_artifact_links_v4;
+      CREATE TABLE plan_artifact_links (
+        id TEXT NOT NULL, plan_run_id TEXT NOT NULL, from_artifact_id TEXT NOT NULL,
+        to_artifact_id TEXT NOT NULL, label TEXT NOT NULL, canvas_edge_id TEXT,
+        PRIMARY KEY(plan_run_id, id)
+      );
+      INSERT OR IGNORE INTO plan_artifact_links SELECT id, plan_run_id, from_artifact_id, to_artifact_id, label, canvas_edge_id FROM plan_artifact_links_v4;
+      DROP TABLE plan_artifact_links_v4;
+      INSERT INTO schema_version (version, applied_at) VALUES (5, datetime('now'));
+    `);
   }
 }
 

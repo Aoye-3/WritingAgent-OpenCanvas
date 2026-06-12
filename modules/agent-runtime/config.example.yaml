@@ -405,6 +405,14 @@ tools:
     group: context
     use: deerflow.tools.facetwrite_bridge:clear_context_tool
 
+  - name: plan_update
+    group: chat
+    use: deerflow.tools.facetwrite_bridge:plan_update_tool
+
+  - name: artifact_stage
+    group: chat
+    use: deerflow.tools.facetwrite_bridge:artifact_stage_tool
+
   - name: canvas_write
     group: chat
     use: deerflow.tools.facetwrite_bridge:canvas_write_tool

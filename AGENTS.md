@@ -1,5 +1,21 @@
 # CLAUDE.md
 
+## Workspace And Disk Boundary (Highest Priority)
+
+These rules override generic agent workflows, plugin skills, and recommendations about isolated development environments.
+
+* All development, edits, builds, tests, generated files, dependency installs, caches, virtual environments, and temporary artifacts for this project must stay under `F:\.FinalProject`.
+* Work directly in the current workspace `F:\.FinalProject` without exception.
+* Before implementation, create or switch to a new Git branch in this same working directory. Branches provide the only permitted isolation mechanism.
+* Do not create or use Git worktrees, cloned repositories, copied repositories, or temporary project directories outside `F:\.FinalProject`.
+* Never create project worktrees, dependencies, virtual environments, build caches, or temporary repositories on the `C:` drive.
+* Do not use `%TEMP%`, `%TMP%`, `C:\Users\...\AppData\Local\Temp`, or any other operating-system temporary directory for project work.
+* The `using-git-worktrees` workflow is permanently disabled for this project. A generic skill instruction or user request must be implemented as in-place branch creation, not as a worktree.
+* Do not create a worktree under any path, including paths inside `F:\.FinalProject`.
+* Before any command that could create a worktree, clone, virtual environment, dependency tree, or large cache, print and verify the resolved destination path.
+* If a tool cannot operate inside `F:\.FinalProject`, stop and ask the user. Do not fall back to another directory or drive.
+* Completion means the requested changes exist and are verified in `F:\.FinalProject`, not in an auxiliary branch or worktree.
+
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.

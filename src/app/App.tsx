@@ -382,6 +382,7 @@ function AppContent() {
         selectedCanvasNodeId={canvasState.selectedCanvasNodeId}
         canUndoCanvas={canvasState.canUndoCanvas}
         toolEvents={generationRun.toolEvents}
+        plans={generationRun.plans}
         projectTitle={activeProjectTitle}
         configuredModels={configuredModels}
         runtimeStatus={runtimeStatus}
@@ -408,6 +409,7 @@ function AppContent() {
         onProjectTitleChange={handleActiveProjectTitleChange}
         onApproveCanvasWriteRequest={canvasState.handleApproveCanvasWriteRequest}
         onChatSend={generationRun.handleChatSend}
+        onPlansChanged={async () => { if (threadSession.threadId) await refreshThreadState(threadSession.threadId); }}
         onCreateCanvasEdge={canvasState.handleCreateCanvasEdge}
         onCreateCanvasNode={canvasState.handleCreateCanvasNode}
         onCreateCanvasObject={canvasState.handleCreateCanvasObject}

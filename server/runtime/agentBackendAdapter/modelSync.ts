@@ -1,6 +1,7 @@
 import { readProviderApiConfigStore, type ConfiguredModelApi } from "../../domains/model-config/index.js";
 import { authenticatedAgentBackendFetch } from "./auth.js";
 import { getAgentBackendRuntimeConfig } from "./config.js";
+import { getProviderReference } from "../../../shared/modelReferences.js";
 
 export type ModelRuntimeSyncStatus = "synced" | "failed" | "unsupported" | "disabled";
 
@@ -129,7 +130,8 @@ function toRuntimeModel(config: SyncModel): RuntimeModel {
 }
 
 function isOpenAiCompatibleProvider(providerId: string) {
-  return providerId === "openai" || providerId === "deepseek" || providerId === "openai-compatible";
+  const provider = getProviderReference(providerId);
+  return provider?.type === "openai" || provider?.type === "openai-compatible" || provider?.type === "new-api";
 }
 
 function isChatModel(modelType?: string) {

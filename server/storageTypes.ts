@@ -56,6 +56,58 @@ export type ProjectSummary = {
 
 export type StoredStructuredValues = Record<string, string | string[]>;
 
+export type PlanRunStatus = "draft" | "awaiting_approval" | "running" | "awaiting_user" | "completed" | "failed" | "cancelled";
+export type PlanStepStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+export type PlanArtifactStatus = "staged" | "committing" | "committed" | "failed";
+export type PlanArtifactType = "text" | "image";
+
+export type PlanStep = {
+  id: string;
+  planRunId: string;
+  order: number;
+  title: string;
+  detail: string;
+  status: PlanStepStatus;
+  attempt: number;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string;
+};
+
+export type PlanArtifact = {
+  id: string;
+  planRunId: string;
+  stepId: string;
+  type: PlanArtifactType;
+  status: PlanArtifactStatus;
+  title: string;
+  payload: JsonValue;
+  source: JsonValue;
+  canvasTargetId?: string;
+  layout: JsonValue;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PlanArtifactLink = { id: string; planRunId: string; fromArtifactId: string; toArtifactId: string; label: string; canvasEdgeId?: string };
+export type PlanRun = {
+  id: string;
+  projectId: string;
+  threadId: string;
+  runId?: string;
+  title: string;
+  goal: string;
+  status: PlanRunStatus;
+  approval: "pending" | "approved" | "rejected";
+  statusMessage: string;
+  steps: PlanStep[];
+  artifacts: PlanArtifact[];
+  links: PlanArtifactLink[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type StoredOutputVersion = {
   id: string;
   threadId: string;

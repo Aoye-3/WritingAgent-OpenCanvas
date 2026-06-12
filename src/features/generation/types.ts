@@ -12,7 +12,7 @@ export type GenerateRequest = {
   contextValues?: Record<string, unknown>;
   freeTextPrompt?: string;
   chatInstruction?: string;
-  toolState?: Partial<Record<"web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write", boolean>>;
+  toolState?: Partial<Record<"web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write" | "plan_update" | "artifact_stage", boolean>>;
   systemPrompt?: string;
   modelOverrides?: {
     thinkingMode?: "enabled" | "disabled";
@@ -52,4 +52,5 @@ export type CollaborationMessage = {
   isStreaming?: boolean;
   status?: StreamStatus["phase"] | "error";
   statusLabel?: string;
+  createdAt?: string;
 };

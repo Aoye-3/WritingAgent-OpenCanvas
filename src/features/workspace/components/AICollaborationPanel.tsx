@@ -1,5 +1,5 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
-import type { AgentCard, CanvasWriteRequest, StoredThread, StoredToolEvent } from "../../agents/types";
+import type { AgentCard, CanvasWriteRequest, PlanRun, StoredThread, StoredToolEvent } from "../../agents/types";
 import type { AgentSettings } from "../../agents/types";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
 import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain";
@@ -15,6 +15,7 @@ type AICollaborationPanelProps = {
   mindChainContext: CanvasMindChainContext | null;
   isSending: boolean;
   messages: CollaborationMessage[];
+  plans: PlanRun[];
   projectThreads: StoredThread[];
   currentThreadId: string;
   sessionBusy: boolean;
@@ -36,6 +37,8 @@ type AICollaborationPanelProps = {
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
   toolEvents: StoredToolEvent[];
   toolState: GenerateRequest["toolState"];
+  onPlansChanged: () => Promise<void>;
+  onFocusPlanArtifact: (targetId: string) => void;
 };
 
 export function AICollaborationPanel(props: AICollaborationPanelProps) {

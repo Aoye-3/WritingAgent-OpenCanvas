@@ -41,6 +41,11 @@ CONFIG_FILE_DATABASE_DEFAULTS = {
     "sqlite_dir": ".deer-flow/data",
 }
 
+FACETWRITE_REQUIRED_TOOLS = (
+    {"name": "plan_update", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:plan_update_tool"},
+    {"name": "artifact_stage", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:artifact_stage_tool"},
+)
+
 
 class CircuitBreakerConfig(BaseModel):
     """Configuration for the LLM Circuit Breaker."""
@@ -159,6 +164,9 @@ class AppConfig(BaseModel):
 
         config_data = cls.resolve_env_variables(config_data)
         cls._apply_database_defaults(config_data)
+        configured_tools = config_data.setdefault("tools", [])
+        configured_names = {tool.get("name") for tool in configured_tools if isinstance(tool, dict)}
+        configured_tools.extend(tool for tool in FACETWRITE_REQUIRED_TOOLS if tool["name"] not in configured_names)
 
         # Load circuit_breaker config if present
         if "circuit_breaker" in config_data:

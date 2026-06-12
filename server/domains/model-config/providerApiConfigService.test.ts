@@ -38,6 +38,16 @@ test("conversation models include only enabled keyed chat configs and expose cap
   });
 });
 
+test("conversation models include enabled vision configs", async () => {
+  await withTempWorkspace(async () => {
+    await writeProviderApiConfigStore({ version: 2, activeConfigId: "vision", configs: {
+      vision: { id: "vision", providerId: "silicon", modelId: "Qwen/Qwen3-VL", modelType: "vision", apiKey: "key", baseURL: "https://api.siliconflow.cn", enabled: true, createdAt: "", updatedAt: "" }
+    } });
+    const result = await listConversationModelSummaries();
+    assert.deepEqual(result.configs.map((config) => config.id), ["vision"]);
+  });
+});
+
 test("model capability classification uses stable reasoning names", () => {
   assert.equal(classifyConfiguredModelCapability({ modelId: "deepseek-r1", modelName: "DeepSeek R1" }), "reasoning");
   assert.equal(classifyConfiguredModelCapability({ modelId: "gpt-4o", modelName: "GPT-4o" }), "chat");

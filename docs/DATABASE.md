@@ -1,5 +1,14 @@
 # FacetWrite Database
 
+## Plan Tables
+
+- `plan_runs`: thread task goal, approval, overall status, status message, and optional run mapping.
+- `plan_steps`: ordered sequential steps with status, attempts, timestamps, detail, and error.
+- `plan_artifacts`: stable-id text/image artifacts with source/layout metadata and Canvas target mapping.
+- `plan_artifact_links`: stable-id directed artifact links and committed Canvas edge mapping.
+
+Clarification revises the same pending `plan_runs` row. Artifact upserts use `(plan_run_id, id)` and committed targets are retained, preventing replayed or reordered events from duplicating Canvas content.
+
 ## Location
 FacetWrite stores local runtime data in SQLite:
 

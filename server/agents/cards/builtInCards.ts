@@ -82,7 +82,7 @@ export const builtInAgentCards: AgentCard[] = [
     },
     identityPrompt: agentIdentityPrompts.blogPost,
     skillRefs: ["blog-post"],
-    toolRefs: ["web_search", "knowledge_base", "quick_messages", "clear_context", "canvas_write"],
+    toolRefs: ["web_search", "knowledge_base", "quick_messages", "clear_context", "canvas_write", "plan_update", "artifact_stage"],
     outputContract: { type: "article", defaultFormat: "markdown" },
     defaultValues: emptyValues,
     fields: sharedFields
@@ -99,7 +99,7 @@ export const builtInAgentCards: AgentCard[] = [
     },
     identityPrompt: agentIdentityPrompts.summary,
     skillRefs: ["summary"],
-    toolRefs: ["knowledge_base", "quick_messages", "clear_context", "canvas_write"],
+    toolRefs: ["knowledge_base", "quick_messages", "clear_context", "canvas_write", "plan_update", "artifact_stage"],
     outputContract: { type: "summary", defaultFormat: "markdown" },
     defaultValues: emptyValues,
     fields: sharedFields
@@ -116,7 +116,7 @@ export const builtInAgentCards: AgentCard[] = [
     },
     identityPrompt: agentIdentityPrompts.emailWriter,
     skillRefs: ["email-writer"],
-    toolRefs: ["quick_messages", "clear_context", "canvas_write"],
+    toolRefs: ["quick_messages", "clear_context", "canvas_write", "plan_update", "artifact_stage"],
     outputContract: { type: "email", defaultFormat: "markdown" },
     defaultValues: emptyValues,
     fields: sharedFields
@@ -133,7 +133,7 @@ export const builtInAgentCards: AgentCard[] = [
     },
     identityPrompt: agentIdentityPrompts.lessonPlan,
     skillRefs: ["lesson-plan"],
-    toolRefs: ["web_search", "knowledge_base", "quick_messages", "clear_context", "canvas_write"],
+    toolRefs: ["web_search", "knowledge_base", "quick_messages", "clear_context", "canvas_write", "plan_update", "artifact_stage"],
     outputContract: { type: "lesson_plan", defaultFormat: "markdown" },
     defaultValues: emptyValues,
     fields: sharedFields
@@ -150,7 +150,7 @@ export const builtInAgentCards: AgentCard[] = [
     },
     identityPrompt: agentIdentityPrompts.reportOutline,
     skillRefs: ["report-outline"],
-    toolRefs: ["web_search", "knowledge_base", "quick_messages", "clear_context", "canvas_write"],
+    toolRefs: ["web_search", "knowledge_base", "quick_messages", "clear_context", "canvas_write", "plan_update", "artifact_stage"],
     outputContract: { type: "outline", defaultFormat: "markdown" },
     defaultValues: emptyValues,
     fields: sharedFields
@@ -167,7 +167,7 @@ export const builtInAgentCards: AgentCard[] = [
     },
     identityPrompt: agentIdentityPrompts.rewritePolish,
     skillRefs: ["rewrite-polish"],
-    toolRefs: ["quick_messages", "clear_context", "canvas_write"],
+    toolRefs: ["quick_messages", "clear_context", "canvas_write", "plan_update", "artifact_stage"],
     outputContract: { type: "revision", defaultFormat: "markdown" },
     defaultValues: emptyValues,
     fields: sharedFields

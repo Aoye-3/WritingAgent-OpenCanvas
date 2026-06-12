@@ -1,5 +1,13 @@
 # FacetWrite Architecture
 
+## Plan Runtime Boundary
+
+Agent Runtime plans and executes; FacetWrite validates phase permissions, persists PlanRun state, and commits Canvas artifacts. Planning is side-effect free except for Plan persistence. Approval authorizes creation of new nodes, image assets, and edges for that PlanRun. Replacement, append, and deletion continue through normal Canvas approval.
+
+Execution is sequential and request-scoped: one request may operate only on its designated step. `artifact_stage` accepts only the currently running step and commits stable-id artifacts immediately. Conversation text is never treated as an Artifact, so no tool call means no automatic Canvas write.
+
+Bridged Plan/Artifact tools append a private `__FACETWRITE_EVENT__` envelope to readable tool content. The AgentBackend adapter restores that envelope as structured SSE/tool events and accumulates assistant text by message id, returning only the final visible AI message.
+
 ## Naming
 OpenCanvas is the external product name for the AI canvas workspace and should be the primary visible brand. FacetWrite remains a small technical lineage mark in the brand lockup and the internal architecture/code name, so existing modules, API routes, env vars, local data paths, and runtime boundaries intentionally keep the FacetWrite name.
 

@@ -1,14 +1,18 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, HistoryIcon, KnowledgeIcon, SearchIcon, SendIcon, SparkleIcon } from "../../../shared/icons";
+import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, SearchIcon, SendIcon, SparkleIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
-import type { AgentCard, CanvasWriteRequest, StoredThread, StoredToolEvent } from "../../agents/types";
+import type { AgentCard, CanvasWriteRequest, PlanRun, StoredThread, StoredToolEvent } from "../../agents/types";
 import type { AgentSettings } from "../../agents/types";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
 import { useI18n } from "../../i18n/I18nProvider";
 import { AnnotationChipRow, CanvasWriteProposalPanel, type MessageAnnotation } from "./CanvasWriteProposalPanel";
 import { ToolEventDrawer } from "./ToolEventDrawer";
 import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain";
+import { PlanTaskBoard } from "./PlanTaskBoard";
+import { answerPlan } from "../../agents/agentClient";
+import { visibleComposerTools } from "../planUiPolicy";
+import { buildPlanTimeline } from "../planTimeline";
 
 type ToolKey = NonNullable<GenerateRequest["toolState"]> extends Partial<Record<infer Key, boolean>> ? Key : never;
 
@@ -33,6 +37,7 @@ type AICollaborationDrawerProps = {
   inputDraft: string;
   mindChainContext: CanvasMindChainContext | null;
   messages: CollaborationMessage[];
+  plans: PlanRun[];
   projectThreads: StoredThread[];
   currentThreadId: string;
   sessionBusy: boolean;
@@ -54,6 +59,8 @@ type AICollaborationDrawerProps = {
   onSelectThread: (threadId: string) => Promise<void>;
   onToggleCollapsed: () => void;
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
+  onPlansChanged: () => Promise<void>;
+  onFocusPlanArtifact: (targetId: string) => void;
   toolState: GenerateRequest["toolState"];
 };
 
@@ -81,6 +88,7 @@ export function AICollaborationDrawer({
   inputDraft,
   mindChainContext,
   messages,
+  plans,
   projectThreads,
   currentThreadId,
   sessionBusy,
@@ -102,6 +110,8 @@ export function AICollaborationDrawer({
   onSelectThread,
   onToggleCollapsed,
   onToolStateChange,
+  onPlansChanged,
+  onFocusPlanArtifact,
   toolState
 }: AICollaborationDrawerProps) {
   const { locale } = useI18n();
@@ -121,10 +131,10 @@ export function AICollaborationDrawer({
   const messageListRef = useRef<HTMLDivElement | null>(null);
 
   const pendingWriteRequest = canvasWriteRequests.find((request) => request.operation !== "replace_range");
-  const lastAssistantText = useMemo(() => [...messages].reverse().find((message) => message.role === "assistant" && message.text.trim())?.text ?? "", [messages]);
-  const proposalFullText = writeDraft?.text || pendingWriteRequest?.content || lastAssistantText;
+  const proposalFullText = writeDraft?.text || pendingWriteRequest?.content || "";
   const annotatedText = annotations.map((annotation) => annotation.text).join("\n\n");
   const hasWriteProposal = Boolean(writeDraft || pendingWriteRequest || annotations.length);
+  const timeline = useMemo(() => buildPlanTimeline(messages, plans), [messages, plans]);
 
   useEffect(() => {
     setThinkEnabled(modelSettings?.thinkingMode === "enabled");
@@ -199,13 +209,21 @@ export function AICollaborationDrawer({
     if (!text) return;
     setInput("");
     if (isWriteConfirmation(text)) {
-      await applyWrite(annotations.length ? "snippets" : "default", hasWriteProposal ? undefined : lastAssistantText);
+      if (hasWriteProposal) await applyWrite(annotations.length ? "snippets" : "default");
       return;
+    }
+    const awaitingPlan = plans.find((plan) => plan.status === "awaiting_user");
+    if (awaitingPlan) {
+      await answerPlan(currentThreadId, awaitingPlan.id, text);
+      await onPlansChanged();
     }
     await onSend(text, supportsThinking ? {
       thinkingMode: thinkEnabled ? "enabled" : "disabled",
       reasoningEffort
-    } : undefined, mindChainContext ? { canvasMindChain: mindChainContext.text } : undefined);
+    } : undefined, {
+      ...(mindChainContext ? { canvasMindChain: mindChainContext.text } : {}),
+      ...(awaitingPlan ? { awaitingPlan: { id: awaitingPlan.id, answer: text } } : {})
+    });
     if (mindChainContext) onMindChainContextConsumed();
   };
 
@@ -342,7 +360,17 @@ export function AICollaborationDrawer({
             {locale === "zh" ? "在这里追问、要求改写，或让 Agent 解释本次生成。" : "Ask follow-ups, request rewrites, or have the agent explain the current draft."}
           </div>
         ) : null}
-        {messages.map((message) => {
+        {timeline.map((entry) => {
+          if (entry.kind === "plan") {
+            const plan = entry.value;
+            return <PlanTaskBoard key={`plan:${plan.id}`} plan={plan} threadId={currentThreadId} onChanged={onPlansChanged} onFocusArtifact={onFocusPlanArtifact} onRevise={(value) => setInput(`/plan revise ${value.id}: `)} onContinue={(approved) => {
+              const step = approved.steps.find((item) => item.status === "pending" || item.status === "failed");
+              return step
+                ? onSend(`Continue approved plan ${approved.id}. Execute only step ${step.id}.`, undefined, { approvedPlan: approved, planExecution: { planId: approved.id, stepId: step.id } })
+                : Promise.resolve();
+            }} />;
+          }
+          const message = entry.value;
           const messageAnnotations = annotations.filter((annotation) => annotation.messageId === message.id);
           const isPendingAssistant = message.role === "assistant" && message.isStreaming && !message.text.trim();
           return (
@@ -437,6 +465,7 @@ export function AICollaborationDrawer({
         />
         <div className="composer-tool-row">
           <ToolUseIconBar allowedTools={allowedTools} toolState={toolState} onToolStateChange={onToolStateChange} />
+          <button className="tool-icon-button plan-command-button" type="button" onClick={() => setInput((value) => value.startsWith("/plan") ? value : `/plan ${value}`)} title="Create a task plan">Plan</button>
           {supportsThinking ? (
             <div className="composer-think-controls" aria-label="Think mode">
               <button
@@ -506,7 +535,7 @@ function isWriteConfirmation(text: string) {
 
 function ToolUseIconBar({ allowedTools, toolState, onToolStateChange }: Pick<AICollaborationDrawerProps, "allowedTools" | "toolState" | "onToolStateChange">) {
   const { locale } = useI18n();
-  const visibleTools = allowedTools.filter((tool) => tool !== "canvas_write" && tool !== "clear_context");
+  const visibleTools = visibleComposerTools(allowedTools);
   const toggle = (tool: string) => {
     const key = tool as ToolKey;
     onToolStateChange({ ...toolState, [key]: !toolState?.[key] });
@@ -541,5 +570,5 @@ function ToolIcon({ tool }: { tool: string }) {
   if (tool === "web_search") return <SearchIcon aria-hidden="true" size={16} />;
   if (tool === "knowledge_base") return <KnowledgeIcon aria-hidden="true" size={16} />;
   if (tool === "quick_messages") return <SparkleIcon aria-hidden="true" size={16} />;
-  return <CloseIcon aria-hidden="true" size={16} />;
+  return null;
 }

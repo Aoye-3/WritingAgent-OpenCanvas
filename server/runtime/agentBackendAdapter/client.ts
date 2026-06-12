@@ -7,6 +7,7 @@ import { authenticatedAgentBackendFetch } from "./auth.js";
 import { getAgentBackendRuntimeConfig, type AgentBackendRuntimeConfig } from "./config.js";
 import { parseSseChunk } from "./sse.js";
 import { buildAgentBackendRuntimeMetadata } from "./taskAgentMapping.js";
+import { resolvePlanRequestPolicy } from "../../services/generation/planRequestPolicy.js";
 
 export type AgentBackendRunInput = {
   threadId: string;
@@ -50,6 +51,7 @@ type AgentBackendRunContext = {
   facetwrite_memory_enabled: boolean;
   facetwrite_memory_scope_id: string;
   facetwrite_project_id: string;
+  facetwrite_plan_phase: "chat" | "planning" | "execution";
   facetwrite_memory_content?: string;
 };
 
@@ -130,15 +132,21 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
   };
 }
 
-function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId" | "projectId" | "configuredModelApiId" | "settings" | "facetwriteMemoryContent">): AgentBackendRunContext {
+function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId" | "projectId" | "configuredModelApiId" | "settings" | "facetwriteMemoryContent" | "chatInstruction" | "contextValues" | "toolState">): AgentBackendRunContext {
   const memoryEnabled = false;
   const memoryContent = memoryEnabled ? input.facetwriteMemoryContent?.trim() : "";
+  const planPhase = resolvePlanRequestPolicy({
+    chatInstruction: input.chatInstruction,
+    contextValues: input.contextValues,
+    toolState: input.toolState
+  }).phase;
   if (!input.settings) {
     return {
       model_name: input.configuredModelApiId,
       facetwrite_memory_enabled: false,
       facetwrite_memory_scope_id: input.threadId,
-      facetwrite_project_id: input.projectId
+      facetwrite_project_id: input.projectId,
+      facetwrite_plan_phase: planPhase
     };
   }
   const settings = input.settings;
@@ -150,6 +158,7 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     facetwrite_memory_enabled: memoryEnabled,
     facetwrite_memory_scope_id: input.threadId,
     facetwrite_project_id: input.projectId,
+    facetwrite_plan_phase: planPhase,
     ...(memoryContent ? { facetwrite_memory_content: memoryContent } : {})
   };
 }
@@ -171,7 +180,9 @@ async function readAgentBackendStream(
   const reader = body.getReader();
   const decoder = new TextDecoder();
   const events: ToolEventRecord[] = [];
-  const textParts: string[] = [];
+  const textByMessageId = new Map<string, string[]>();
+  const unkeyedText: string[] = [];
+  let lastMessageId: string | undefined;
   let finalValuesText: string | undefined;
   let usage: unknown;
   let buffer = "";
@@ -195,7 +206,7 @@ async function readAgentBackendStream(
   }
 
   return {
-    text: (textParts.join("").trim() || finalValuesText || "").trim(),
+    text: (finalValuesText || (lastMessageId ? textByMessageId.get(lastMessageId)?.join("") : unkeyedText.join("")) || "").trim(),
     finishReason: "agent_backend_completed",
     usage,
     events
@@ -203,9 +214,17 @@ async function readAgentBackendStream(
 
   function handleEvents(parsedEvents: ReturnType<typeof parseSseChunk>) {
     for (const parsed of parsedEvents) {
+      const messageId = extractMessageId(parsed.event, parsed.data);
       const text = extractText(parsed.event, parsed.data);
       if (text) {
-        textParts.push(text);
+        if (messageId) {
+          const parts = textByMessageId.get(messageId) ?? [];
+          parts.push(text);
+          textByMessageId.set(messageId, parts);
+          lastMessageId = messageId;
+        } else {
+          unkeyedText.push(text);
+        }
         callbacks.onStatus?.({ phase: "writing", label: streamLabels.writing });
         callbacks.onToken?.(text);
       }
@@ -224,6 +243,12 @@ async function readAgentBackendStream(
       if (nextUsage) usage = nextUsage;
     }
   }
+}
+
+function extractMessageId(event: string, data: unknown) {
+  if (event !== "messages" && event !== "messages-tuple") return undefined;
+  const message = Array.isArray(data) ? data[0] : data;
+  return isRecord(message) && typeof message.id === "string" ? message.id : undefined;
 }
 
 function statusFromToolEvent(event: ToolEventRecord): StreamStatus {
@@ -291,7 +316,7 @@ function textFromUnknown(value: unknown): string | undefined {
 function mapToolEvents(event: string, data: unknown): ToolEventRecord[] {
   if (event === "custom" && isRecord(data)) {
     const type = typeof data.type === "string" ? data.type : typeof data.event === "string" ? data.event : undefined;
-    return type?.startsWith("task_") ? [{ eventType: `agent_backend_${type}`, payload: data }] : [];
+    return type && /^(?:task_|plan_|artifact_)/.test(type) ? [{ eventType: `agent_backend_${type}`, payload: data }] : [];
   }
   if (event !== "messages" && event !== "messages-tuple") return [];
   const message = Array.isArray(data) ? data[0] : data;
@@ -316,14 +341,33 @@ function mapToolEvents(event: string, data: unknown): ToolEventRecord[] {
   const messageType = typeof message.type === "string" ? message.type.toLowerCase() : "";
   const role = typeof message.role === "string" ? message.role.toLowerCase() : "";
   if (messageType !== "tool" && role !== "tool") return [];
-  return [{
+  const completed: ToolEventRecord = {
     eventType: "agent_backend_tool_completed",
     payload: {
       type: "tool_completed",
       toolName: typeof message.name === "string" ? message.name : "unknown",
       toolCallId: typeof message.tool_call_id === "string" ? message.tool_call_id : undefined
     }
-  }];
+  };
+  return [completed, ...structuredToolEvents(message.content)];
+}
+
+function structuredToolEvents(content: unknown): ToolEventRecord[] {
+  if (typeof content !== "string") return [];
+  const markerIndex = content.indexOf("__FACETWRITE_EVENT__");
+  if (markerIndex < 0) return [];
+  try {
+    const envelope = JSON.parse(content.slice(markerIndex + "__FACETWRITE_EVENT__".length)) as unknown;
+    if (!isRecord(envelope) || !isRecord(envelope.event) || typeof envelope.event.eventType !== "string") return [];
+    if (!/^(?:plan_|artifact_)/.test(envelope.event.eventType)) return [];
+    const events: ToolEventRecord[] = [{ eventType: `agent_backend_${envelope.event.eventType}`, payload: envelope.event }];
+    if (envelope.event.eventType === "artifact_staged" && Array.isArray(envelope.event.artifacts) && envelope.event.artifacts.some((artifact) => isRecord(artifact) && artifact.status === "committed")) {
+      events.push({ eventType: "agent_backend_artifact_committed", payload: { ...envelope.event, eventType: "artifact_committed" } });
+    }
+    return events;
+  } catch {
+    return [];
+  }
 }
 
 function extractUsage(data: unknown): unknown {

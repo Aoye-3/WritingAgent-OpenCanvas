@@ -1,5 +1,19 @@
 # FacetWrite Canvas
 
+## Plan Artifacts
+
+Approved PlanRuns have a create-only Artifact path:
+
+```text
+approved PlanRun + running PlanStep
+ -> artifact_stage with stable artifactId
+ -> FacetWrite validation and persistence
+ -> immediate idempotent node/asset creation
+ -> optional artifact-link edge
+```
+
+Text artifacts create `document`, `reference`, or `note` nodes. Web images must resolve to public HTTP(S) addresses and pass redirect, MIME, and size validation before becoming existing Canvas `asset` objects. Source URL, page URL, caption, and alt metadata are preserved. Assistant conversation text is independent and is never copied automatically.
+
 ## Naming
 OpenCanvas is the external product name for the AI canvas workspace and should be the primary visible brand. This document keeps the FacetWrite name for internal Canvas APIs, storage, and runtime ownership because those boundaries are not being renamed in this pass.
 

@@ -39,7 +39,7 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     messages: input.messages,
     prompt: input.prompt,
     facetwriteMemoryContent: input.facetwriteMemoryContent,
-    allowedToolRefs: input.runtimeConfig.enabledTools,
+    allowedToolRefs: allowedToolsForRequest(input),
     toolState: input.payload.toolState,
     selectedCanvasNodeId: input.payload.selectedCanvasNodeId,
     contextValues: input.payload.contextValues,
@@ -49,9 +49,16 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     onStatus: input.onStatus
   });
 
-  if (!run.text) {
-    throw new Error("AgentBackend returned an empty response");
+  if (!run.text && !run.events.some((event) => /(?:^|_)(?:plan|artifact)_/.test(event.eventType))) {
+    throw new Error("AgentBackend completed with no visible assistant text or structured Plan events");
   }
 
   return run;
+}
+
+function allowedToolsForRequest(input: AgentBackendRunnerInput) {
+  const allowed = new Set(input.runtimeConfig.enabledTools);
+  if (input.payload.toolState?.plan_update) allowed.add("plan_update");
+  if (input.payload.toolState?.artifact_stage) allowed.add("artifact_stage");
+  return [...allowed];
 }

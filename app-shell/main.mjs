@@ -4,6 +4,7 @@ import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLifecycle } from "./runtime.mjs";
+import { parseLocalRuntimeMetadata } from "./local-runtime-metadata.mjs";
 import { resolveRuntimeMode } from "./runtime-config.mjs";
 import { parseRunningServices, run, runDetachedCommand, startProcess, waitForHttp } from "./platform.mjs";
 import { sendWindowStage } from "./window-status.mjs";
@@ -175,7 +176,7 @@ async function inspectLocalRuntime() {
   if (!healthy) return [];
   const metadataPath = path.join(root, "modules", "agent-runtime", "logs", "agent-runtime-local.json");
   if (!existsSync(metadataPath)) throw new Error("A local Agent Runtime is running but is not owned by this project. Use external mode or stop it.");
-  const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+  const metadata = parseLocalRuntimeMetadata(readFileSync(metadataPath, "utf8"));
   if (metadata.projectRoot !== root || metadata.bridgeBaseUrl !== bridgeUrl) {
     throw new Error("The running local Agent Runtime uses incompatible project or bridge settings.");
   }

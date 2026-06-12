@@ -1,0 +1,14 @@
+event: messages
+data: [{"type":"ai","id":"run-planner","content":"I will inspect the request."},{"langgraph_node":"planner"}]
+
+event: messages
+data: [{"type":"ai","id":"run-planner","content":" Need scope."},{"langgraph_node":"planner"}]
+
+event: messages
+data: [{"type":"tool","name":"plan_update","tool_call_id":"call_plan","content":"Which market and budget should I use?\n__FACETWRITE_EVENT__{\"content\":\"Which market and budget should I use?\",\"event\":{\"tool\":\"plan_update\",\"eventType\":\"plan_waiting_for_user\",\"planId\":\"plan_1\"}}"}]
+
+event: messages
+data: [{"type":"ai","id":"run-final","content":[{"type":"text","text":"Which market and budget should I use?"}]},{"langgraph_node":"lead_agent"}]
+
+event: values
+data: {"messages":[{"type":"ai","id":"run-final","content":"Which market and budget should I use?"}]}

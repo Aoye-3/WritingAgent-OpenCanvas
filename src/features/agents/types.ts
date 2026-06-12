@@ -3,7 +3,7 @@ import type { Locale } from "../i18n/types";
 export type AgentCategory = "writing" | "education" | "summarise" | "rewrite";
 export type AgentIcon = "pen" | "lines" | "mail" | "book" | "report" | "refresh";
 export type AgentAccent = "blue" | "green" | "orange" | "violet" | "rose";
-export type ToolRef = "web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write";
+export type ToolRef = "web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write" | "plan_update" | "artifact_stage";
 export type ToolRiskLevel = "low" | "medium" | "high";
 export type ToolGroup = "web" | "context" | "chat";
 export type AgentModelResponseMode = "normal" | "prefix_completion";
@@ -255,6 +255,17 @@ export type CanvasWriteRequest = {
   updatedAt: string;
 };
 
+export type PlanStepStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+export type PlanRun = {
+  id: string; projectId: string; threadId: string; title: string; goal: string;
+  status: "draft" | "awaiting_approval" | "running" | "awaiting_user" | "completed" | "failed" | "cancelled";
+  approval: "pending" | "approved" | "rejected"; statusMessage: string;
+  steps: Array<{ id: string; title: string; detail: string; status: PlanStepStatus; attempt: number; error?: string }>;
+  artifacts: Array<{ id: string; stepId: string; type: "text" | "image"; status: "staged" | "committing" | "committed" | "failed"; title: string; canvasTargetId?: string; error?: string }>;
+  links: Array<{ id: string; fromArtifactId: string; toArtifactId: string; label: string; canvasEdgeId?: string }>;
+  createdAt: string; updatedAt: string;
+};
+
 import type { CanvasObject } from "../../../shared/canvasObjects";
 export type { CanvasObject, CanvasObjectKind } from "../../../shared/canvasObjects";
 
@@ -295,4 +306,5 @@ export type ThreadStateResponse = {
   canvasWriteRequests?: CanvasWriteRequest[];
   canvasWorkflow?: CanvasWorkflow;
   canvasWorkflowSuggestions?: CanvasWorkflowSuggestion[];
+  plans?: PlanRun[];
 };

@@ -66,3 +66,14 @@ test("model runtime sync records a safe degraded status when push fails", async 
   assert.equal(service.getStatus().models[0]?.status, "failed");
   assert.equal(service.getStatus().models[0]?.errorMessage, "AgentBackend model synchronization failed.");
 });
+
+test("syncs registry providers that use the OpenAI protocol", async () => {
+  let pushed: Array<{ model: string }> = [];
+  const service = createModelRuntimeSyncService({
+    loadModels: async () => [{ ...configuredModels[0], id: "silicon-model", providerId: "silicon", modelId: "Qwen/Qwen3.5-35B-A3B" }],
+    pushModels: async (models) => (pushed = models, { count: models.length })
+  });
+  await service.sync();
+  assert.equal(service.isModelReady("silicon-model"), true);
+  assert.equal(pushed[0]?.model, "Qwen/Qwen3.5-35B-A3B");
+});

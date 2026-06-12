@@ -1,5 +1,15 @@
 # FacetWrite Agent And Tool Architecture
 
+## Plan Runtime
+
+FacetWrite separates Conversation, Plan, and Artifact output. Conversation is user-facing dialogue; Plan is persistent task state and approval; Artifact is Agent-selected text, image, and link output committed to Canvas.
+
+`/plan` forces a two-phase workflow. Planning enables `plan_update` and disables search, browsing, Canvas writes, and `artifact_stage`. If scope is missing, the Agent creates a preliminary PlanRun, requests one concise user answer, then revises that same plan in place. Execution starts only after approval and every request is bound to one `planExecution.stepId`.
+
+Outside `/plan`, Agent-configured tools remain available. `plan_update` and `artifact_stage` are disabled by default and hidden from the composer ToolUse icons to avoid duplicate Plan controls, but they may be enabled in Agent settings. Plan mode always overrides those settings with its required phase policy.
+
+Development must occur in the current `F:\.FinalProject` checkout on a normal `codex/` branch. Git worktrees and project copies outside this workspace are prohibited.
+
 ## AgentCard
 Agent cards are exposed through `server/agentCards.ts` for compatibility, but the maintained implementation is split across `server/agents/`:
 
@@ -164,6 +174,8 @@ build messages
 ```
 
 Tool events are recorded as `tool_call_requested`, `tool_call_completed`, `tool_call_failed`, and `tool_loop_stopped`.
+
+Plan mode has stricter completion rules than ordinary chat. AgentBackend receives the resolved `chat | planning | execution` phase in runtime context. The first planning model call is forced to `plan_update`, so a slash Plan request cannot silently become a normal assistant answer. During execution, search and browsing tools remain available, but a model attempt to finish before `artifact_stage` is retried with `artifact_stage` forced. FacetWrite accepts a successful execution unit only after an `artifact_committed` event; waiting-for-user and failed states are the only valid no-artifact exits.
 
 For `/api/generate/stream`, the TypeScript run loop uses provider streaming when available. It forwards assistant content deltas as `token` events, emits transient `status` events around thinking, ToolUse/searching, writing, and finalizing phases, and still accumulates the same final text for normalization and persistence.
 

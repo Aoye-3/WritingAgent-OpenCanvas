@@ -10,7 +10,10 @@ test("local Agent Runtime script manages the Gateway lifecycle", () => {
   assert.match(script, /ValidateSet\("up", "down", "status", "doctor"\)/);
   assert.match(script, /python", "install", "3\.12/);
   assert.match(script, /"sync", "--python", "3\.12", "--locked", "--all-packages"/);
-  assert.match(script, /"uvicorn", "app\.gateway\.app:app"/);
+  assert.match(script, /\.venv\\pyvenv\.cfg/);
+  assert.match(script, /PYTHONPATH/);
+  assert.match(script, /packages\\harness/);
+  assert.match(script, /"-m", "uvicorn", "app\.gateway\.app:app"/);
   assert.match(script, /"--host", "127\.0\.0\.1", "--port"/);
   assert.match(script, /agent-runtime-local\.pid/);
 });
@@ -25,6 +28,9 @@ test("local Agent Runtime preserves runtime paths and executable tools", () => {
   assert.match(script, /Join-Path \$root "\.env\.local"/);
   assert.match(script, /Assert-Command "node"/);
   assert.match(script, /Assert-Command "npx\.cmd"/);
+  assert.match(script, /\$env:Path =/);
+  assert.doesNotMatch(script, /\$env:PATH =/);
+  assert.match(script, /SetEnvironmentVariable\("PATH", \$null, "Process"\)/);
 });
 
 test("package scripts expose local default and explicit Docker lifecycle", () => {

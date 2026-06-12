@@ -14,6 +14,7 @@ type CollaborationMessageLike = {
   isStreaming?: boolean;
   status?: "thinking" | "searching" | "writing" | "finalizing" | "error";
   statusLabel?: string;
+  createdAt?: string;
 };
 
 type StoredMessageLike = {
@@ -71,7 +72,8 @@ export function storedMessagesToCollaborationMessages(messages: StoredMessageLik
     id: message.id,
     role: message.role,
     text: message.text,
-    usedMock: message.usedMock
+    usedMock: message.usedMock,
+    createdAt: typeof message.createdAt === "string" ? message.createdAt : undefined
   }));
 }
 

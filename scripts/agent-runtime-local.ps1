@@ -139,7 +139,10 @@ function Initialize-Environment {
   $npx = Assert-Command "npx.cmd" "Install Node.js 22 or newer."
   $uv = Assert-Command "uv" "Install uv from https://docs.astral.sh/uv/."
   $toolDirs = @($node.Source, $npm.Source, $npx.Source) | ForEach-Object { Split-Path -Parent $_ } | Select-Object -Unique
-  $env:PATH = (($toolDirs + @($env:PATH)) -join [IO.Path]::PathSeparator)
+  $currentPath = [Environment]::GetEnvironmentVariable("Path", "Process")
+  [Environment]::SetEnvironmentVariable("PATH", $null, "Process")
+  [Environment]::SetEnvironmentVariable("Path", $currentPath, "Process")
+  $env:Path = (($toolDirs + @($currentPath)) -join [IO.Path]::PathSeparator)
 
   $env:DEER_FLOW_PROJECT_ROOT = $runtimeRoot
   $env:DEER_FLOW_HOME = Join-Path $backendRoot ".deer-flow"
@@ -209,24 +212,33 @@ switch ($Action) {
     try {
       $syncStatus = Invoke-Uv -UvPath $uv.Source -Arguments @("sync", "--python", "3.12", "--locked", "--all-packages")
       if ($syncStatus -ne 0) { throw "Agent Runtime dependency synchronization failed." }
+      $venvConfigPath = Join-Path $backendRoot ".venv\pyvenv.cfg"
+      $pythonHomeLine = Get-Content -LiteralPath $venvConfigPath | Where-Object { $_ -match "^home\s*=\s*(.+)$" } | Select-Object -First 1
+      if (-not $pythonHomeLine -or $pythonHomeLine -notmatch "^home\s*=\s*(.+)$") { throw "Agent Runtime virtual environment does not declare its Python home." }
+      $pythonHome = $Matches[1].Trim()
+      $runtimePython = Join-Path $pythonHome "python.exe"
+      if (-not (Test-Path -LiteralPath $runtimePython)) { throw "Agent Runtime Python executable is missing: $runtimePython" }
+      $venvSitePackages = Join-Path $backendRoot ".venv\Lib\site-packages"
+      $harnessPackage = Join-Path $backendRoot "packages\harness"
+      $env:PYTHONPATH = (@($backendRoot, $harnessPackage, $venvSitePackages, $env:PYTHONPATH) | Where-Object { $_ }) -join [IO.Path]::PathSeparator
       $arguments = @(
-        "run", "--python", "3.12", "--no-sync",
-        "uvicorn", "app.gateway.app:app",
+        "-m", "uvicorn", "app.gateway.app:app",
         "--host", "127.0.0.1", "--port", "$Port"
       )
-      $process = Start-Process -FilePath $uv.Source -ArgumentList $arguments -WorkingDirectory $backendRoot -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
+      $process = Start-Process -FilePath $runtimePython -ArgumentList $arguments -WorkingDirectory $backendRoot -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
     } finally {
       Pop-Location
     }
 
     Set-Content -LiteralPath $pidPath -Value $process.Id -Encoding ascii
-    @{
+    $metadataJson = @{
       pid = $process.Id
       projectRoot = $root
       port = $Port
       bridgeBaseUrl = $BridgeBaseUrl
       startedAt = (Get-Date).ToUniversalTime().ToString("o")
-    } | ConvertTo-Json | Set-Content -LiteralPath $metadataPath -Encoding utf8
+    } | ConvertTo-Json
+    [System.IO.File]::WriteAllText($metadataPath, $metadataJson, [System.Text.UTF8Encoding]::new($false))
 
     for ($attempt = 0; $attempt -lt 90; $attempt++) {
       if (Test-HttpOk) {

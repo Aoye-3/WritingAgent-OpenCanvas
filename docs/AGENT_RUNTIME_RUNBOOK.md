@@ -85,3 +85,10 @@ It starts from `start-opencanvas-shell.vbs`, requires Docker and port `2026` to 
 - Local bridge failure: use `http://127.0.0.1:<api-port>`.
 - Generation failures: inspect stable `model_required`, `model_not_ready`, `runtime_unavailable`, or `runtime_auth_failed` diagnostics. Do not enable Mock fallback for acceptance testing.
 - Deliberate local Mock demonstration only: set `FACETWRITE_MOCK_FALLBACK_ENABLED=true`; unset it before real Runtime verification.
+# Plan Runtime Enforcement
+
+FacetWrite passes `facetwrite_plan_phase` (`chat`, `planning`, or `execution`) in both LangGraph configurable context and runtime context. `PlanToolChoiceMiddleware` forces the first planning call to `plan_update`. During execution it permits research tools, but intercepts a text-only finish before `artifact_stage` and forces the artifact call.
+
+The TypeScript runtime boundary independently requires a Plan state event during planning and an `artifact_committed` event for every successful execution unit. `plan_waiting_for_user` and `plan_failed` are valid no-artifact exits. This prevents models with weak or inconsistent tool calling from bypassing the task board or completing without writing Canvas output.
+
+After changing AgentBackend middleware, restart the local Gateway; `agent:up` reuses a healthy process and does not hot-reload Python modules.

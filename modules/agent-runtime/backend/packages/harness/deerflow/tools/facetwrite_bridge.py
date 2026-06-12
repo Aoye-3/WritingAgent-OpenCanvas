@@ -10,7 +10,7 @@ from deerflow.tools.types import Runtime
 
 _DEFAULT_BASE_URL = "http://host.docker.internal:8787"
 _INTERNAL_ENDPOINT = "/api/internal/agent-runtime/tool-call"
-_BRIDGED_TOOL_NAMES = ("knowledge_base", "quick_messages", "clear_context", "canvas_write")
+_BRIDGED_TOOL_NAMES = ("knowledge_base", "quick_messages", "clear_context", "plan_update", "artifact_stage", "canvas_write")
 _SECRET_PATTERN = re.compile(r"(?i)(api[_-]?key|authorization|token|password|secret)=?[^\s,;]+")
 
 
@@ -119,10 +119,16 @@ def _format_bridge_response(data: Any) -> str:
         return "Error: FacetWrite bridge returned an invalid response."
     ok = data.get("ok")
     content = data.get("content")
+    payload = data.get("payload")
+    if ok is True and isinstance(payload, dict) and isinstance(payload.get("eventType"), str):
+        visible_content = content if isinstance(content, str) else ""
+        return visible_content + "\n__FACETWRITE_EVENT__" + json.dumps({
+            "content": visible_content,
+            "event": payload,
+        }, ensure_ascii=False)
     if ok is True:
         if isinstance(content, str):
             return content
-        payload = data.get("payload")
         if isinstance(payload, dict):
             legacy_content = payload.get("content")
             if isinstance(legacy_content, str):
@@ -137,7 +143,6 @@ def _format_bridge_response(data: Any) -> str:
             if isinstance(legacy_content, str):
                 return f"Error: {legacy_content}"
             return f"Error: {json.dumps(payload, ensure_ascii=False)}"
-    payload = data.get("payload")
     if ok is True and isinstance(payload, dict):
         content = payload.get("content")
         if isinstance(content, str):
@@ -196,6 +201,60 @@ def clear_context_tool(runtime: Runtime, reason: str) -> str:
     """
 
     return _call_facetwrite_tool(runtime, "clear_context", {"reason": reason})
+
+
+@tool("plan_update", parse_docstring=True)
+def plan_update_tool(
+    runtime: Runtime,
+    action: str,
+    planId: str | None = None,
+    title: str | None = None,
+    goal: str | None = None,
+    steps: list[dict[str, Any]] | None = None,
+    stepId: str | None = None,
+    status: str | None = None,
+    detail: str | None = None,
+    message: str | None = None,
+    error: str | None = None,
+) -> str:
+    """Create or update a persistent FacetWrite plan.
+
+    Args:
+        action: create, revise, update_step, request_input, finish, or fail.
+        planId: Existing plan id for actions other than create.
+        title: Plan title when creating a plan.
+        goal: Plan goal when creating a plan.
+        steps: Ordered plan steps when creating a plan.
+        stepId: Step id when updating a step.
+        status: Step status when updating a step.
+        detail: Optional step detail.
+        message: User-facing plan status or question.
+        error: Failure detail.
+    """
+
+    return _call_facetwrite_tool(runtime, "plan_update", {
+        "action": action, "planId": planId, "title": title, "goal": goal,
+        "steps": steps, "stepId": stepId, "status": status, "detail": detail,
+        "message": message, "error": error,
+    })
+
+
+@tool("artifact_stage", parse_docstring=True)
+def artifact_stage_tool(
+    runtime: Runtime,
+    planId: str,
+    artifacts: list[dict[str, Any]],
+    links: list[dict[str, Any]] | None = None,
+) -> str:
+    """Stage durable text and image outputs for an approved FacetWrite plan.
+
+    Args:
+        planId: Approved plan id.
+        artifacts: Text or image artifacts with stable artifactId values.
+        links: Optional directed links between artifact ids.
+    """
+
+    return _call_facetwrite_tool(runtime, "artifact_stage", {"planId": planId, "artifacts": artifacts, "links": links or []})
 
 
 @tool("canvas_write", parse_docstring=True)

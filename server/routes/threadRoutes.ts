@@ -204,7 +204,8 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
       canvasObjects: storage.listCanvasObjects(projectId),
       canvasWriteRequests: storage.listCanvasWriteRequests(projectId, "pending"),
       canvasWorkflow: storage.getCanvasWorkflow(projectId),
-      canvasWorkflowSuggestions: storage.listCanvasWorkflowSuggestions(projectId)
+      canvasWorkflowSuggestions: storage.listCanvasWorkflowSuggestions(projectId),
+      plans: storage.listPlanRuns(request.params.threadId)
     });
   });
 }

@@ -1,5 +1,17 @@
 # FacetWrite API
 
+## Plan Runtime
+
+- `GET /api/threads/:threadId/plans` and `GET /api/threads/:threadId/plans/:planId` return PlanRun state, ordered steps, artifacts, and links.
+- `POST /api/threads/:threadId/plans/:planId/approve` authorizes create-only Plan artifacts and starts execution.
+- `POST /api/threads/:threadId/plans/:planId/answer` resumes an `awaiting_user` plan. Pending plans return to `draft`; approved plans return to `running`.
+- `POST /api/threads/:threadId/plans/:planId/cancel` cancels remaining work.
+- `POST /api/threads/:threadId/plans/:planId/steps/:stepId/retry` resets only that step and increments its attempt count.
+
+`POST /api/generate/stream` retains its existing events and may additionally emit `plan_created`, `plan_updated`, `plan_step_updated`, `plan_waiting_for_user`, `artifact_staged`, `artifact_committed`, `plan_completed`, and `plan_failed`. Thread state is authoritative when events are duplicated or reordered.
+
+The backend derives Plan phase independently of frontend flags. `/plan` forces planning-only tools; approved continuation forces Plan execution tools and a single step id. Ordinary chat keeps the active Agent's configured tool state.
+
 ## Canvas Objects And Assets
 
 - `GET /api/threads/:threadId/canvas`

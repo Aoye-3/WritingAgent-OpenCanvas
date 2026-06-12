@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentCard, AgentValues, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
+import type { AgentCard, AgentValues, PlanRun, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
 import { generateText, generateTextStream } from "../../features/generation/generationClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../../features/generation/types";
 import type { Locale } from "../../features/i18n/types";
+import { buildRequestToolState } from "../../features/workspace/planUiPolicy";
 import {
   enqueueTypewriterToken,
   getTypewriterFinalPatch,
@@ -39,6 +40,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const [collaborationMessages, setCollaborationMessages] = useState<CollaborationMessage[]>([]);
   const [outputVersions, setOutputVersions] = useState<StoredOutputVersion[]>([]);
   const [toolEvents, setToolEvents] = useState<StoredToolEvent[]>([]);
+  const [plans, setPlans] = useState<PlanRun[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string | undefined>();
   const [isGenerating, setIsGenerating] = useState(false);
   const [isChatSending, setIsChatSending] = useState(false);
@@ -66,6 +68,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     setCollaborationMessages([]);
     setOutputVersions([]);
     setToolEvents([]);
+    setPlans([]);
     setActiveVersionId(undefined);
   };
 
@@ -178,6 +181,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
 
   const applyCollaborationMessagesFromThreadState = (state: ThreadStateResponse) => {
     setCollaborationMessages((current) => reconcileCollaborationMessages(current, state.messages));
+    setPlans(state.plans ?? []);
   };
 
   const handleGenerate = async () => {
@@ -231,13 +235,15 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     const previousPendingWriteIds = new Set(options.getPendingCanvasWriteRequestIds());
     const userMessageId = crypto.randomUUID();
     const assistantMessageId = crypto.randomUUID();
+    const startedAt = new Date().toISOString();
     setCollaborationMessages((current) => [
       ...current,
       {
         id: userMessageId,
         role: "user",
         text,
-        usedMock: false
+        usedMock: false,
+        createdAt: startedAt
       },
       {
         id: assistantMessageId,
@@ -245,7 +251,8 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         text: "",
         usedMock: false,
         isStreaming: true,
-        status: "thinking"
+        status: "thinking",
+        createdAt: startedAt
       }
     ]);
     try {
@@ -259,7 +266,9 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         structuredValues: options.agentValues,
         contextValues: { ...options.getContextValues(), ...requestContext },
         chatInstruction: text,
-        toolState: { ...options.toolState, quick_messages: true, canvas_write: true },
+        toolState: buildRequestToolState(options.toolState, {
+          kind: requestContext?.approvedPlan ? "execution" : isPlanInstruction(text) || Boolean(requestContext?.awaitingPlan) ? "planning" : "chat"
+        }),
         modelOverrides,
         selectedCanvasNodeId: options.selectedCanvasNodeId
       };
@@ -332,6 +341,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     isChatSending,
     isGenerating,
     outputVersions,
+    plans,
     toolEvents,
     setActiveVersionId,
     setCollaborationMessages,
@@ -339,6 +349,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     setGeneration,
     setOutputVersions,
     setToolEvents,
+    setPlans,
     resetGeneration,
     applyCollaborationMessagesFromThreadState,
     handleGenerate,
@@ -349,4 +360,8 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
 
 function isDirectCanvasWriteInstruction(text: string) {
   return /canvas|\u753b\u677f|\u756b\u677f|\u5199\u5165|\u5beb\u5165|\u4fdd\u5b58\u5230|\u52a0\u5165|\u6dfb\u52a0\u5230|\u653e\u5230|save\s+to\s+canvas|write\s+this|write\s+to\s+canvas|add\s+to\s+canvas/i.test(text);
+}
+
+function isPlanInstruction(text: string) {
+  return /^\s*\/plan\b/i.test(text) || /^\s*continue approved plan\b/i.test(text);
 }
