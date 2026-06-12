@@ -65,6 +65,14 @@ Invoke-RestMethod http://127.0.0.1:8837/api/agent-runtime/status
 
 Expected FacetWrite status includes `reachable:true`, authenticated runtime state, `runtimeProvider:"agent-backend"`, `deploymentMode:"local"`, and the LocalSandbox provider. Acceptance should also execute Python and Node Skills, a temporary stdio MCP, built-in tools, all four bridge tools, repeated no-Mock generations, and verify Canvas approval.
 
+The maintained end-to-end local acceptance is:
+
+```powershell
+npm.cmd run acceptance:local-runtime
+```
+
+It starts from `start-opencanvas-shell.vbs`, requires Docker and port `2026` to remain absent, and verifies five UI generations with `provider:"agent-backend"` and `usedMock:false`. It then verifies a Skill-driven `read_file` followed by live `web_search`, Agent Runtime `memory.json` persistence, visible tool start/completion events, and a `canvas_write` pending request without a direct Canvas mutation.
+
 ## Troubleshooting
 
 - `uv`/Node/npm/npx missing: run `npm.cmd run agent-runtime:doctor` and install the reported prerequisite.

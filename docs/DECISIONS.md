@@ -132,6 +132,8 @@ Impact: `/api/agent-backend/dashboard` aggregates runtime status, AgentBackend c
 Update 2026-05-25: FacetWrite-managed Memory is an explicit exception to the read-only dashboard rule. The AI Dashboard may show, edit, and clear `.facetwrite/memory/` content because users need a visible control for what Agents may remember. AgentBackend legacy global memory remains outside the active FacetWrite run path unless FacetWrite passes explicit managed memory content.
 
 ## 2026-05-15: Docker Is The Preferred Local AgentBackend Runtime
+Status: Superseded by `2026-06-12: Project-Managed Local Gateway Is The Default Runtime`.
+
 Decision: Run AgentBackend as a Docker sidecar through its Compose nginx entrypoint at `http://127.0.0.1:2026` for local FacetWrite integration work.
 
 Reason: AgentBackend is a Python/LangGraph runtime with its own dependency and service boundary. Docker avoids the Windows-native `uv` cache permission failure previously seen during local setup and matches the intended sidecar architecture.
@@ -210,6 +212,8 @@ Impact: Settings save requires explicit confirmation for local key writes, and d
 
 # 2026-06-08: Electron Owns The Windows Source-Development Shell
 
+Status: Partially superseded by `2026-06-12: Project-Managed Local Gateway Is The Default Runtime`. Electron ownership remains current; mandatory Docker startup does not.
+
 Decision: Use Electron as a Windows source-development application shell around the existing Vite, Express, and Docker Agent Runtime services.
 
 Reason: The immediate goal is an independent application window with startup feedback, Vite HMR, and window-bound service lifecycle without prematurely designing an installer or native Agent Runtime.
@@ -222,6 +226,8 @@ Decision: Default to `AGENT_RUNTIME_MODE=local`, running the Agent Runtime Gatew
 Reason: Core Agent capabilities live in the Python Gateway, not the Runtime Next.js frontend or nginx. Managing that Gateway directly removes the mandatory Docker Desktop startup dependency without rewriting the Agent protocol or dropping Skills, MCP, Memory, subagents, auth, SSE, or the FacetWrite bridge.
 
 Impact: Local mode uses `127.0.0.1:8001`, shared `.deer-flow` state, `LocalSandboxProvider`, and `allow_host_bash:false`. Docker remains required for `AioSandboxProvider`, Kubernetes provisioning, Docker socket workflows, and Linux-container Bash Skills. Status surfaces expose deployment mode and sandbox provider.
+
+The Windows double-click entry `start-opencanvas-shell.vbs` is a stricter local-only contract: it overrides stale parent mode variables, never invokes Docker, and is covered by `npm.cmd run acceptance:local-runtime`. The acceptance must start from that VBS, perform five real no-Mock generations, execute Skill/Web Search, observe Memory persistence, preserve Canvas approval, and reclaim owned processes.
 
 # 2026-06-11: Project-First Context And Explicit Model Selection
 

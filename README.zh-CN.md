@@ -30,22 +30,21 @@ OpenCanvas 先对标用户熟悉的画板体验：无限画布、节点、连线
 
 ## 运行
 
-### 推荐：OpenCanvas + Agent Runtime
+### 推荐：OpenCanvas + 本地 Agent Runtime
 
-本地开发和验收优先使用这个路径。OpenCanvas 运行前端/后端，内部 Agent Runtime 模块通过 Docker Compose 作为主要 AI 执行子系统运行。当前内部 runtime 实现是 AgentBackend。Provider 和 mock fallback 只应作为运行时安全网。
+本地开发和验收优先使用项目托管的 Python Gateway。双击 `start-opencanvas-shell.vbs` 会强制使用 `local` 模式，启动 App Shell、本地 Agent Runtime、FacetWrite API 和前端；该入口不会启动 Docker Desktop，也不会执行 Docker 命令。Agent Runtime 仍是 Skills、MCP、Memory、Web Search、子 Agent 和 FacetWrite Bridge 的唯一真实执行路径。
 
 前置条件：
 
-- Docker Desktop 已运行
 - Node.js 22+
+- `uv`，Python 3.12 由 `uv` 管理
 - 如果 `node_modules/` 缺失，启动器会安装 npm 依赖
-- `.env.local` 配置 `AGENT_BACKEND_ENABLED=true` 和 `AGENT_BACKEND_BASE_URL=http://127.0.0.1:2026`
-- `modules/agent-runtime/.env` 配置 provider 值和 `FACETWRITE_INTERNAL_BASE_URL=http://host.docker.internal:8837`
+- 已在项目设置中保存并启用至少一个带 API Key 的聊天模型
 
-启动全部服务：
+推荐启动入口：
 
 ```powershell
-.\start-facetwrite.ps1
+.\start-opencanvas-shell.vbs
 ```
 
 或通过 npm：
@@ -54,14 +53,14 @@ OpenCanvas 先对标用户熟悉的画板体验：无限画布、节点、连线
 npm run dev
 ```
 
-启动器要求 `AGENT_BACKEND_ENABLED=true`，会启动 Agent Runtime Docker 服务，等待 `http://127.0.0.1:2026/health`，然后启动 OpenCanvas。本地启动有意强绑定 Agent Runtime；Provider/mock fallback 只用于 app 内部运行失败处理，不用于正常启动时跳过 sidecar。
+本地入口固定使用 `AGENT_RUNTIME_MODE=local` 和 `AGENT_BACKEND_BASE_URL=http://127.0.0.1:8001`。Docker 仅通过显式的 `agent-runtime:docker:*` 命令启用；正常生成失败会返回明确错误，不会静默保存 Mock 回复。
 
 常用地址：
 
-- OpenCanvas UI：默认 `http://127.0.0.1:5173`。如果本地端口不可用，可让 Vite 跑在 `http://127.0.0.1:3000`。
-- FacetWrite API health：`http://127.0.0.1:8837/api/health`
-- FacetWrite 代理的 Agent Runtime 状态：`http://127.0.0.1:8837/api/agent-runtime/status`
-- Agent Runtime sidecar health：`http://127.0.0.1:2026/health`
+- OpenCanvas UI：`http://127.0.0.1:17776`
+- FacetWrite API health：`http://127.0.0.1:17777/api/health`
+- FacetWrite 代理的 Agent Runtime 状态：`http://127.0.0.1:17777/api/agent-runtime/status`
+- 本地 Agent Runtime health：`http://127.0.0.1:8001/health`
 
 常用命令：
 
@@ -69,15 +68,15 @@ npm run dev
 npm run agent-runtime:up
 npm run agent-runtime:status
 npm run agent-runtime:down
+npm run agent-runtime:doctor
 ```
 
-如果 Docker Hub 不可用，可在 `modules/agent-runtime/.env` 配置 FacetWrite 拥有的 runtime 镜像覆盖：
+显式 Docker 隔离模式保留为可选路径：
 
 ```bash
-NODE_IMAGE=<可访问的 node:22-alpine 镜像或本地 tag>
-PYTHON_IMAGE=<可访问的 python:3.12-slim-bookworm 镜像或本地 tag>
-DOCKER_CLI_IMAGE=<可访问的 docker:cli 镜像或本地 tag>
-UV_IMAGE=<可访问的 ghcr.io/astral-sh/uv:0.7.20 镜像或本地 tag>
+npm run agent-runtime:docker:up
+npm run agent-runtime:docker:status
+npm run agent-runtime:docker:down
 ```
 
 ### 低层服务调试
@@ -87,14 +86,20 @@ npm install
 npm run dev:services
 ```
 
-这只启动 Vite 前端和 FacetWrite API，仅用于窄范围前后端调试。正常本地启动应使用 `npm run dev` 或 `.\start-facetwrite.ps1`，确保 Agent Runtime 先启动并完成检查。
+这只启动 Vite 前端和 FacetWrite API，仅用于窄范围前后端调试。正常本地启动应使用 `start-opencanvas-shell.vbs`，确保本地 Agent Runtime 先启动并完成检查。
 
 ## 验收检查
 
-- `/api/agent-runtime/status` 返回 `reachable:true`、`authState:"authenticated"` 和 `runtimeProvider:"agent-backend"`。
+- `/api/agent-runtime/status` 返回 `reachable:true`、`deploymentMode:"local"`、`sandboxProvider:"LocalSandboxProvider"` 和 `runtimeProvider:"agent-backend"`。
 - Summary 或 Blog 生成返回 `provider:"agent-backend"`。
 - 主 runtime 检查期间没有 `agent_backend_runtime_failed` 事件。
 - `canvas_write` 只创建 pending write proposal/request；Canvas 内容只有在用户明确确认后才通过审批路径改变。
+
+运行与真实点击入口相同的无 Docker 完整验收：
+
+```bash
+npm run acceptance:local-runtime
+```
 
 ## 技术文档
 

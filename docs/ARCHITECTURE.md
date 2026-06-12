@@ -12,11 +12,13 @@ Primary flow:
 User input
  -> AgentCard + AgentSettings
  -> PromptBuilder + Skills + Tool policy
- -> Agent Runtime, when AGENT_BACKEND_ENABLED=true
- -> Mock fallback, when Agent Runtime is disabled, fails, or returns no safe user-visible answer
+ -> Agent Runtime as the only real generation path
+ -> explicit runtime/model error when the Runtime cannot complete
  -> SQLite run records and Canvas write requests
  -> Thread state refresh in the UI
 ```
+
+Mock output is available only when local development explicitly sets `FACETWRITE_MOCK_FALLBACK_ENABLED=true`; it is not a normal runtime fallback.
 
 Runtime ownership is intentionally split into four layers:
 
@@ -33,7 +35,7 @@ The frontend owns interaction state and explicit user intent. The Express backen
 
 `app-shell/main.mjs` is a Windows source-development control layer around the existing services. Electron owns a Splash window, the main BrowserWindow, Vite on `17776`, Express on `17777`, and any local or Docker Agent Runtime process that it starts. It does not replace the web architecture or production HTTP API.
 
-The shell uses a single-instance lock, checks ports before startup, resolves `local`, `docker`, or `external` Runtime mode, waits for each health endpoint, and opens the main window only after readiness. Local reuse requires compatible project, port, and ToolUse bridge metadata. Partial or incompatible runtimes block startup. Shutdown attempts every owned cleanup step and never stops a reused or external runtime.
+The shell uses a single-instance lock, checks ports before startup, resolves `local`, `docker`, or `external` Runtime mode, waits for each health endpoint, and opens the main window only after readiness. The double-click `start-opencanvas-shell.vbs` entry explicitly forces `local` and `127.0.0.1:8001`; Docker mode remains an explicit command/configuration path. Local reuse requires compatible project, port, and ToolUse bridge metadata. Partial or incompatible runtimes block startup. Shutdown attempts every owned cleanup step and never stops a reused or external runtime.
 
 Renderer windows use context isolation, disabled Node integration, and sandboxing. Vite HMR remains active for frontend source changes; Electron main-process changes require a shell restart. Docker Desktop is optional and used only for explicit Docker mode.
 
@@ -97,7 +99,7 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 - The normalizer separates user-visible assistant text from tool/internal events. System prompts, AgentCard prompt blocks, ToolUse JSON, search result JSON, reasoning payloads, and AgentBackend replay values are blocked from chat/output surfaces and recorded only as redacted runtime events.
 - `/api/generate/stream` uses a server-side progressive text gate before releasing text so obvious internal prompt, ToolUse, search JSON, and reasoning payload leaks are not streamed into the UI. After the initial safety buffer, the gate emits small user-visible UI chunks instead of large paragraph-sized blocks; long flush/final remainders are also split before they reach the browser.
 - The frontend treats streamed chunks as input to a UI-only typewriter queue. In chat mode the visible queue target is the assistant bubble in `AICollaborationDrawer`; `final` remains authoritative for persistence, but the UI waits for that typewriter queue to drain and only corrects visible text if the final recorded output differs from the streamed text.
-- If AgentBackend returns an empty answer, fails, or returns only blocked internal/runtime output, FacetWrite records `agent_backend_runtime_failed` and enters Mock fallback. Generation never calls the local Provider runtime.
+- If AgentBackend returns an empty answer, fails, or returns only blocked internal/runtime output, FacetWrite records `agent_backend_runtime_failed` and returns a stable runtime error. It does not call a local Provider runtime or persist a Mock answer by default.
 - Stored historical messages and output versions are sanitized again at read time so older leaked local records cannot reappear in the workspace UI.
 
 ## Knowledge Runtime Boundary
@@ -124,7 +126,7 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 ## Agent Runtime Boundary
 - Agent Runtime is now a FacetWrite internal subsystem, not reference source. Its source lives under `modules/agent-runtime/`.
 - FacetWrite calls the current AgentBackend adapter as an independent Python sidecar over HTTP/SSE when `AGENT_BACKEND_ENABLED=true`.
-- The validated local sidecar path is Docker Compose through Agent Runtime nginx at `http://127.0.0.1:2026`.
+- The recommended local path is the project-managed Python Gateway at `http://127.0.0.1:8001`; Docker Compose through nginx at `http://127.0.0.1:2026` is an explicit isolation and deployment mode.
 - Runtime enablement is controlled only by `AGENT_BACKEND_*` variables. Historical `DEERFLOW_*` variables are migration artifacts and must not be used for active FacetWrite configuration.
 - The local dev compose project is `facetwrite-agent-runtime` and container names use `facetwrite-agent-runtime-*`. The FacetWrite acceptance compose keeps host Docker socket and local CLI credential directories out of the gateway container by default; those mounts should only be reintroduced for isolated sandbox/CLI-auth experiments.
 - FacetWrite authenticates to protected AgentBackend APIs with a backend-managed local session cookie and CSRF token; these credentials are never returned to the frontend.

@@ -6,6 +6,14 @@ The Electron shell is a Windows source-development launcher, not an installer. D
 
 ## Start
 
+Recommended one-click local entry:
+
+```text
+start-opencanvas-shell.vbs
+```
+
+This entry explicitly sets `AGENT_RUNTIME_MODE=local` and `AGENT_BACKEND_BASE_URL=http://127.0.0.1:8001` for its child process. It never selects or starts Docker, even if the parent machine environment contains stale Docker mode variables.
+
 ```powershell
 npm.cmd install
 npm.cmd run shell:dev
@@ -25,6 +33,25 @@ The shell uses Vite `17776` and API `17777`.
 
 `external` mode performs readiness checks but never starts or stops the Runtime. Docker mode checks the daemon but does not launch Docker Desktop automatically.
 
+## Logs
+
+- App Shell stages and startup errors: `logs/app-shell.log`.
+- Express stdout/stderr: `logs/api.out.log` and `logs/api.err.log`.
+- Vite stdout/stderr: `logs/frontend.out.log` and `logs/frontend.err.log`.
+- Local Gateway stdout/stderr: `modules/agent-runtime/logs/gateway-local.out.log` and `gateway-local.err.log`.
+
+The App Shell records `runtime-check`, `runtime-bootstrap`, `runtime-ready`, `api`, `frontend`, `ready`, and `stopping` stages. Child stderr is retained instead of being discarded.
+
+## Real Acceptance
+
+With Docker stopped and the shell closed:
+
+```powershell
+npm.cmd run acceptance:local-runtime
+```
+
+The acceptance starts through the same VBS used by double-click, asserts that Docker and port `2026` remain absent, performs five real Agent Runtime generations, verifies Skill/Web Search, Memory, and pending-only Canvas writes, and confirms owned processes are reclaimed. Generated test Projects are deleted automatically; the report is written to `test-results/local-runtime-acceptance-report.json`.
+
 ## Ownership And Shutdown
 
 - Vite and Express are shell-owned.
@@ -37,6 +64,7 @@ The shell uses Vite `17776` and API `17777`.
 
 - Local prerequisites: `npm.cmd run agent-runtime:doctor`.
 - Runtime logs: `modules/agent-runtime/logs/gateway-local.err.log`.
+- Shell/API/frontend logs: `logs/app-shell.log`, `logs/api.err.log`, and `logs/frontend.err.log`.
 - Docker mode: set `AGENT_RUNTIME_MODE=docker` and ensure Docker is already running.
 - External mode: set `AGENT_RUNTIME_MODE=external` and an accessible `AGENT_BACKEND_BASE_URL`.
 - Ports `17776`/`17777` occupied: resolve the conflict; the shell never terminates unrelated services.

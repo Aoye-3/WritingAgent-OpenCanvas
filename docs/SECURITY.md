@@ -55,3 +55,6 @@ When Agent Runtime is enabled, FacetWrite accesses protected runtime APIs throug
 - Service ownership is explicit: the shell stops only its Vite/API processes and a local or Docker Agent Runtime that it started.
 - Existing partial services, occupied ports, or an incompatible Runtime callback stop startup instead of being terminated automatically.
 - Docker Desktop is an external trusted dependency only in Docker mode. External mode is user-managed and receives no lifecycle control from the shell.
+- `start-opencanvas-shell.vbs` sets local mode only for its child process, preventing stale machine-level Docker mode variables from changing the one-click path.
+- App Shell, API, frontend, and Gateway logs are local ignored files. Startup logging records stages and errors but must not print environment values, auth cookies, CSRF tokens, provider keys, or MCP secrets.
+- The maintained local acceptance uses a temporary empty Project so its real provider and Web Search calls cannot transmit existing Project/thread context.

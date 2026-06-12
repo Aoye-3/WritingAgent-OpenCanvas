@@ -109,7 +109,7 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - `token` events are emitted as progressive, user-visible assistant text segments after the backend safety gate has enough text to rule out obvious internal prompt, ToolUse, or reasoning leaks. Segments are intentionally small UI chunks so the right AI collaboration drawer can render a visible typewriter effect even when an upstream provider or runtime flushes a large block at once.
   - `error` payloads include `code` and `message`.
   - Agent Runtime custom subagent events from the current adapter are emitted as `tool_event` records with `eventType` prefixed by `AgentBackend_`.
-  - Recoverable Agent Runtime failure is emitted as a `tool_event` with `eventType:"agent_backend_runtime_failed"` and a redacted payload containing `fallback:"mock"`.
+  - Agent Runtime failure is emitted as a `tool_event` with `eventType:"agent_backend_runtime_failed"` and a redacted diagnostic payload. The request then ends with a stable error code; no Mock message or output version is recorded unless the explicit test-only fallback flag is enabled.
   - The `final` payload remains the recorded `GenerateResponse`. Clients should let the chat assistant typewriter queue drain before reconciling temporary streaming text with this final thread state so the drawer does not suddenly replace a large block of content.
 
 ## Agent Runtime Configuration
@@ -117,8 +117,8 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - Enables the Agent Runtime path when set to `true` or `1`.
   - Historical `DEERFLOW_ENABLED` and other `DEERFLOW_*` keys are not compatibility inputs after the AgentBackend rename. Migrate local `.env.local` values to `AGENT_BACKEND_*` and restart the API process.
 - `AGENT_BACKEND_BASE_URL`
-  - Agent Runtime Gateway base URL. Defaults to `http://127.0.0.1:8000`.
-  - For the validated Docker sidecar path, use Agent Runtime nginx: `http://127.0.0.1:2026`.
+  - Agent Runtime Gateway base URL. The recommended local App Shell path uses `http://127.0.0.1:8001`.
+  - Explicit Docker isolation mode uses Agent Runtime nginx at `http://127.0.0.1:2026`.
 - `AGENT_BACKEND_ASSISTANT_ID`
   - AgentBackend assistant ID. Defaults to `lead_agent`.
 - `AGENT_BACKEND_AUTH_EMAIL`
@@ -130,13 +130,13 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `AGENT_BACKEND_AUTH_TIMEOUT_MS`
   - Timeout for AgentBackend auth/setup/login requests. Defaults to `5000`.
 - `FACETWRITE_INTERNAL_BASE_URL`
-  - Agent Runtime-to-FacetWrite callback base URL for bridged ToolUse. Docker sidecar default is `http://host.docker.internal:8837`.
+  - Agent Runtime-to-FacetWrite callback base URL for bridged ToolUse. Local App Shell uses `http://127.0.0.1:17777`; Docker mode uses `http://host.docker.internal:8837`.
 - `FACETWRITE_INTERNAL_TOOL_TOKEN`
   - Optional shared token for Agent Runtime internal ToolUse calls. When set, the runtime sends it as `x-facetwrite-tool-token`; the value is never exposed by FacetWrite APIs.
 - `GET /api/agent-runtime/status`
   - Returns Agent Runtime status: enabled, baseUrl, assistantId, reachable, runtimeProvider, authState, and lastError.
   - `authState` is one of `not_configured`, `setup_required`, `authenticated`, or `auth_failed`.
-  - Docker validation on 2026-05-20 confirmed this endpoint reports `enabled:true`, `reachable:true`, `runtimeProvider:"agent-backend"`, and `authState:"authenticated"` against `http://127.0.0.1:2026` after local session setup.
+  - The response also exposes `deploymentMode` and `sandboxProvider`, so callers can distinguish the recommended local Gateway from explicit Docker isolation.
 - `GET /api/agent-runtime/config`
   - Returns read-only Agent Runtime skills and MCP server overview.
   - Secret-like MCP values such as keys, tokens, passwords, authorization headers, and OAuth client secrets are redacted.

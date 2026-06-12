@@ -79,7 +79,7 @@ AgentBackend and provider responses are classified before recording:
 
 Only `assistant_text` may enter `messages` and `output_versions`. `tool_event` and `internal_event` are exposed through the runtime timeline with redacted payload previews.
 
-Recoverable AgentBackend failures are also runtime events. If AgentBackend returns no user-visible text or returns content classified as internal/runtime-only, FacetWrite records `agent_backend_runtime_failed` and records a Mock fallback. The local Provider runtime is not called by generation.
+Recoverable AgentBackend failures are runtime events and explicit API errors. If AgentBackend returns no user-visible text or returns content classified as internal/runtime-only, FacetWrite records `agent_backend_runtime_failed` without creating a successful assistant response. Mock output requires explicit local development opt-in; the local Provider runtime is not called by generation.
 
 ## Agent Runtime Main Agent And Subagents
 Agent Runtime is FacetWrite's internal execution subsystem when `AGENT_BACKEND_ENABLED=true`; the current adapter is AgentBackend.
@@ -92,7 +92,7 @@ Agent Runtime is FacetWrite's internal execution subsystem when `AGENT_BACKEND_E
 - The current mapping lives in `server/runtime/agentBackendAdapter/taskAgentMapping.ts`, with `server/agentBackend/taskAgentMapping.ts` kept as a compatibility export.
 - Subagent metadata includes name, description, system prompt, skills, tools, model inheritance, timeout, and max turns.
 - FacetWrite records AgentBackend runs as provider `agent-backend`.
-- The current TypeScript run loop remains available when AgentBackend is disabled, unavailable, or returns no valid user-visible answer.
+- The TypeScript run loop remains legacy compatibility code and is not a product fallback. Agent Runtime is the only real generation path.
 - Runtime status is exposed through `/api/agent-runtime/status`.
 - Skills and MCP server overview are read through `/api/agent-runtime/config`; MCP environment and secret-like values are redacted before reaching the frontend.
 - AI runtime status, Agent mapping, and ToolUse bridge progress are exposed through `/api/agent-runtime/dashboard` and shown in the AI Dashboard. `/api/agent-backend/*` remains a compatibility alias.
@@ -153,7 +153,7 @@ The workspace also supports user-created temporary annotations on assistant resp
 When Agent Runtime is active, the FacetWrite bridge tools still call the same policy and executor path. This keeps disabled tools, disallowed Agent tools, and approval-gated writes consistent across Agent Runtime and the TypeScript fallback runtime.
 
 ## Run Loop
-When AgentBackend is disabled, `server/agentRunLoop.ts` performs the fallback Agent run:
+`server/agentRunLoop.ts` preserves the historical TypeScript loop for compatibility tests and isolated development. Normal generation does not route to it when Agent Runtime fails:
 
 ```text
 build messages
@@ -169,7 +169,7 @@ For `/api/generate/stream`, the TypeScript run loop uses provider streaming when
 
 When Agent Runtime is enabled, `server/runtime/agentBackendAdapter/client.ts` calls `/api/runs/stream` through the backend AgentBackend auth session, maps token/message stream output into the FacetWrite response, forwards assistant message chunks as `token` events, and maps AgentBackend custom task events into `AgentBackend_*` tool events for the run history.
 
-The TypeScript run loop remains the fallback when AgentBackend is disabled, unavailable, returns an empty answer, or returns only internal/runtime output. A recoverable AgentBackend failure should not create a Mock fallback response by itself; Mock fallback is reserved for cases where both AgentBackend and the Provider runtime cannot produce a safe assistant answer.
+AgentBackend failure returns stable `runtime_unavailable`, `runtime_auth_failed`, `model_required`, or `model_not_ready` diagnostics. It does not call the TypeScript/provider loop or persist Mock output unless `FACETWRITE_MOCK_FALLBACK_ENABLED=true` is deliberately enabled for local demonstration.
 
 `server/services/generationService.ts` is now a compatibility export. The domain public entry is `server/domains/generation/index.ts`, which exposes prompt/message/model preparation, Agent Runtime runner, provider runner, mock fallback integration, and run recording while preserving the existing `/api/generate` contract.
 
