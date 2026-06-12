@@ -24,5 +24,7 @@ reference/
 AgentBackend/
 modules/agent-runtime/backend/.venv/
 modules/agent-runtime/backend/.uv-cache/
+modules/agent-runtime/backend/.uv-python/
+modules/agent-runtime/backend/.pytest-tmp/
 modules/agent-runtime/backend/.pytest_cache/
 modules/agent-runtime/frontend/node_modules/

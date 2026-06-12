@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const sourceExtensions = new Set([".ts", ".tsx"]);
@@ -49,6 +49,7 @@ test("generated QA and Playwright artifacts stay out of source commits", () => {
 });
 
 function readSourceFiles(root: string): string[] {
+  if (!existsSync(root)) return [];
   return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
     const fullPath = path.join(root, entry.name);
     if (entry.isDirectory()) {

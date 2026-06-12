@@ -9,6 +9,8 @@ export function AgentBackendRuntimePanel({ config, status }: AgentBackendRuntime
   const rows = [
     ["Runtime", AgentBackendRuntimeLabel(status)],
     ["Auth", AgentBackendAuthLabel(status)],
+    ["Deployment", status.deploymentMode],
+    ["Sandbox", status.sandboxProvider],
     ["Base URL", status.baseUrl],
     ["Assistant", status.assistantId],
     ["Skills", String(config.skills.length)],

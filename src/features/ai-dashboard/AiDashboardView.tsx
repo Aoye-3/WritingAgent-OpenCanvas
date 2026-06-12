@@ -55,6 +55,8 @@ export function AiDashboardView({ activeView, onNavigate }: AiDashboardViewProps
             <section className="ai-dashboard-grid" aria-label="Runtime status">
               <Metric label="Runtime" value={runtimeLabel(dashboard)} tone={dashboard.runtime.reachable ? "success" : "neutral"} />
               <Metric label="Auth" value={dashboard.runtime.authState} tone={dashboard.runtime.authState === "authenticated" ? "success" : "warning"} />
+              <Metric label="Deployment" value={dashboard.runtime.deploymentMode} />
+              <Metric label="Sandbox" value={dashboard.runtime.sandboxProvider} />
               <Metric label="Lead Agent" value={dashboard.leadAgent.assistantId} />
               <Metric label="Base URL" value={dashboard.runtime.baseUrl} />
             </section>

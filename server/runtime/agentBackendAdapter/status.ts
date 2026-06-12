@@ -8,6 +8,8 @@ export type AgentBackendRuntimeStatus = {
   reachable: boolean;
   runtimeProvider: "agent-backend" | "typescript";
   authState: AgentBackendAuthState;
+  deploymentMode: "local" | "docker" | "external";
+  sandboxProvider: string;
   lastError?: string;
 };
 
@@ -16,6 +18,8 @@ export async function getAgentBackendRuntimeStatus(input: {
   fetchImpl?: typeof fetch;
 } = {}): Promise<AgentBackendRuntimeStatus> {
   const config = input.config ?? getAgentBackendRuntimeConfig();
+  const deploymentMode = config.deploymentMode ?? "local";
+  const sandboxProvider = config.sandboxProvider ?? "deerflow.sandbox.local:LocalSandboxProvider";
   if (!config.enabled) {
     return {
       enabled: false,
@@ -23,7 +27,9 @@ export async function getAgentBackendRuntimeStatus(input: {
       assistantId: config.assistantId,
       reachable: false,
       runtimeProvider: "typescript",
-      authState: "not_configured"
+      authState: "not_configured",
+      deploymentMode,
+      sandboxProvider
     };
   }
 
@@ -40,6 +46,8 @@ export async function getAgentBackendRuntimeStatus(input: {
       reachable: true,
       runtimeProvider: "agent-backend",
       authState: auth.authState,
+      deploymentMode,
+      sandboxProvider,
       lastError: auth.lastError
     };
   } catch (error) {
@@ -50,6 +58,8 @@ export async function getAgentBackendRuntimeStatus(input: {
       reachable: false,
       runtimeProvider: "agent-backend",
       authState: "auth_failed",
+      deploymentMode,
+      sandboxProvider,
       lastError: error instanceof Error ? error.message : "Unable to reach AgentBackend"
     };
   }

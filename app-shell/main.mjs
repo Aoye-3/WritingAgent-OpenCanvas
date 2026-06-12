@@ -1,9 +1,10 @@
 import { app, BrowserWindow } from "electron";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLifecycle } from "./runtime.mjs";
+import { resolveRuntimeMode } from "./runtime-config.mjs";
 import { parseRunningServices, run, startProcess, waitForHttp } from "./platform.mjs";
 import { sendWindowStage } from "./window-status.mjs";
 
@@ -13,7 +14,11 @@ const frontendPort = 17776;
 const apiPort = 17777;
 const frontendUrl = `http://127.0.0.1:${frontendPort}`;
 const apiUrl = `http://127.0.0.1:${apiPort}`;
-const bridgeUrl = `http://host.docker.internal:${apiPort}`;
+const runtime = resolveRuntimeMode(process.env);
+const runtimePort = Number(new URL(runtime.baseUrl).port || 80);
+const localBridgeUrl = `http://127.0.0.1:${apiPort}`;
+const dockerBridgeUrl = `http://host.docker.internal:${apiPort}`;
+const bridgeUrl = runtime.mode === "docker" ? dockerBridgeUrl : localBridgeUrl;
 const iconPath = path.join(root, "public", "assets", "ui", "brand", "opencanvas-icon.png");
 const tsxCli = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
 const viteCli = path.join(root, "node_modules", "vite", "bin", "vite.js");
@@ -22,6 +27,8 @@ const shellEnv = {
   PORT: String(apiPort),
   VITE_PORT: String(frontendPort),
   FACETWRITE_INTERNAL_BASE_URL: bridgeUrl,
+  AGENT_RUNTIME_MODE: runtime.mode,
+  AGENT_BACKEND_BASE_URL: runtime.baseUrl,
 };
 
 let splashWindow;
@@ -58,7 +65,7 @@ async function startShell() {
     stopRuntime,
     startApi: () => startProcess("node.exe", [tsxCli, "server/index.ts"], { cwd: root, env: shellEnv }),
     startFrontend: () => startProcess("node.exe", [viteCli, "--host", "127.0.0.1", "--port", String(frontendPort)], { cwd: root, env: shellEnv }),
-    waitForRuntime: () => waitForHttp("http://127.0.0.1:2026/health", { attempts: 90 }),
+    waitForRuntime: () => waitForHttp(`${runtime.baseUrl}/health`, { attempts: 90 }),
     waitForApi: () => waitForHttp(`${apiUrl}/api/health`, { attempts: 90 }),
     waitForFrontend: () => waitForHttp(frontendUrl, { attempts: 90 }),
     onStage: updateStage,
@@ -129,7 +136,11 @@ function createMainWindow() {
 }
 
 async function inspectRuntime() {
-  updateStage("docker");
+  if (runtime.mode === "local") return inspectLocalRuntime();
+  if (runtime.mode === "external") {
+    await waitForHttp(`${runtime.baseUrl}/health`, { attempts: 1, delayMs: 0 });
+    return ["facetwrite-agent-runtime-nginx", "facetwrite-agent-runtime-frontend", "facetwrite-agent-runtime-gateway"];
+  }
   await ensureDockerReady();
   const { stdout } = await run("docker.exe", [
     "ps",
@@ -146,22 +157,21 @@ async function inspectRuntime() {
   return services;
 }
 
+async function inspectLocalRuntime() {
+  const healthy = await waitForHttp(`${runtime.baseUrl}/health`, { attempts: 1, delayMs: 0 }).then(() => true, () => false);
+  if (!healthy) return [];
+  const metadataPath = path.join(root, "modules", "agent-runtime", "logs", "agent-runtime-local.json");
+  if (!existsSync(metadataPath)) throw new Error("A local Agent Runtime is running but is not owned by this project. Use external mode or stop it.");
+  const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+  if (metadata.projectRoot !== root || metadata.bridgeBaseUrl !== bridgeUrl) {
+    throw new Error("The running local Agent Runtime uses incompatible project or bridge settings.");
+  }
+  return ["facetwrite-agent-runtime-nginx", "facetwrite-agent-runtime-frontend", "facetwrite-agent-runtime-gateway"];
+}
+
 async function ensureDockerReady() {
   if (await isDockerReady()) return;
-  const dockerDesktop = path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Docker", "Docker", "Docker Desktop.exe");
-  if (!existsSync(dockerDesktop)) {
-    throw new Error("Docker Desktop is required but was not found. Install Docker Desktop and try again.");
-  }
-  await run("powershell.exe", [
-    "-NoProfile",
-    "-Command",
-    `Start-Process -FilePath '${dockerDesktop.replaceAll("'", "''")}'`,
-  ], { cwd: root, timeout: 20_000 });
-  for (let attempt = 0; attempt < 90; attempt += 1) {
-    if (await isDockerReady()) return;
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
-  }
-  throw new Error("Docker Desktop did not become ready within three minutes.");
+  throw new Error("Docker mode requires a reachable Docker daemon. Start Docker Desktop or select AGENT_RUNTIME_MODE=local.");
 }
 
 async function isDockerReady() {
@@ -179,24 +189,31 @@ async function existingRuntimeTargetsBridge() {
 }
 
 async function startRuntime() {
+  const script = runtime.mode === "local" ? "scripts/agent-runtime-local.ps1" : "scripts/agent-runtime.ps1";
+  const extraArgs = runtime.mode === "local" ? ["-Port", String(runtimePort), "-BridgeBaseUrl", bridgeUrl] : [];
   await run("powershell.exe", [
     "-NoProfile",
     "-ExecutionPolicy",
     "Bypass",
     "-File",
-    "scripts/agent-runtime.ps1",
+    script,
     "up",
+    ...extraArgs,
   ], { cwd: root, env: shellEnv, timeout: 300_000 });
 }
 
 async function stopRuntime() {
+  if (!runtime.managed) return;
+  const script = runtime.mode === "local" ? "scripts/agent-runtime-local.ps1" : "scripts/agent-runtime.ps1";
+  const extraArgs = runtime.mode === "local" ? ["-Port", String(runtimePort), "-BridgeBaseUrl", bridgeUrl] : [];
   await run("powershell.exe", [
     "-NoProfile",
     "-ExecutionPolicy",
     "Bypass",
     "-File",
-    "scripts/agent-runtime.ps1",
+    script,
     "down",
+    ...extraArgs,
   ], { cwd: root, env: shellEnv, timeout: 120_000 });
 }
 

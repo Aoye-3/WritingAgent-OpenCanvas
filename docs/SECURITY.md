@@ -41,12 +41,13 @@ When Agent Runtime is enabled, FacetWrite accesses protected runtime APIs throug
 - `GET /api/agent-runtime/status`, `GET /api/agent-runtime/config`, and `GET /api/agent-runtime/dashboard` are read-only FacetWrite surfaces and must redact secret-like values. `/api/agent-backend/*` remains a compatibility alias.
 - `FACETWRITE_INTERNAL_TOOL_TOKEN`, when configured, is only used between Agent Runtime and FacetWrite backend bridge calls and must not be shown in frontend payloads, logs, or ToolUse output.
 - Agent Runtime-proposed writes or external side effects must still pass through FacetWrite Human-in-the-loop confirmation before changing product data.
-- The FacetWrite Agent Runtime dev compose is an acceptance profile. It intentionally does not mount the host Docker socket or local CLI credential directories into the gateway container. Add those mounts only for isolated sandbox or CLI-auth work after explicitly accepting the credential and host-control risk.
+- Default local mode uses `LocalSandboxProvider` with `allow_host_bash:false`. Node/npm/npx are available to declared Skills, MCP, and ACP processes, but this does not grant arbitrary host Bash.
+- The FacetWrite Agent Runtime dev compose is an optional isolation profile. It intentionally does not mount the host Docker socket or local CLI credential directories into the gateway container. Add those mounts only for isolated sandbox or CLI-auth work after explicitly accepting the credential and host-control risk.
 
 ## Electron Development Shell
 
 - Electron renderer windows keep `contextIsolation:true`, `nodeIntegration:false`, and `sandbox:true`.
 - The shell exposes no general Node or process API to the OpenCanvas frontend.
-- Service ownership is explicit: the shell stops only its Vite/API processes and an Agent Runtime Compose project that it started.
+- Service ownership is explicit: the shell stops only its Vite/API processes and a local or Docker Agent Runtime that it started.
 - Existing partial services, occupied ports, or an incompatible Runtime callback stop startup instead of being terminated automatically.
-- Docker Desktop remains an external trusted local dependency. A future no-Docker Runtime requires a separate security and packaging review.
+- Docker Desktop is an external trusted dependency only in Docker mode. External mode is user-managed and receives no lifecycle control from the shell.

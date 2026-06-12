@@ -63,6 +63,35 @@ function Get-ConfigValue {
   return $DefaultValue
 }
 
+function Ensure-AgentRuntimeFile {
+  param([string] $RelativePath, [string] $ExampleRelativePath = "", [switch] $AllowEmpty)
+  $target = Join-Path $runtimeRoot $RelativePath
+  if (Test-Path -LiteralPath $target) {
+    if ((Get-Item -LiteralPath $target).PSIsContainer) { throw "$target must be a file." }
+    return
+  }
+  New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+  if ($ExampleRelativePath) {
+    $example = Join-Path $runtimeRoot $ExampleRelativePath
+    if (Test-Path -LiteralPath $example) {
+      Copy-Item -LiteralPath $example -Destination $target
+      return
+    }
+  }
+  if ($AllowEmpty) {
+    New-Item -ItemType File -Path $target -Force | Out-Null
+    return
+  }
+  throw "Missing Agent Runtime file: $target"
+}
+
+function Ensure-AgentRuntimeFiles {
+  Ensure-AgentRuntimeFile -RelativePath ".env" -AllowEmpty
+  Ensure-AgentRuntimeFile -RelativePath "frontend\.env" -AllowEmpty
+  Ensure-AgentRuntimeFile -RelativePath "config.yaml" -ExampleRelativePath "config.example.yaml"
+  Ensure-AgentRuntimeFile -RelativePath "extensions_config.json" -ExampleRelativePath "extensions_config.example.json"
+}
+
 function Test-DockerImageAvailable {
   param(
     [Parameter(Mandatory = $true)]
@@ -92,6 +121,10 @@ function Get-AgentRuntimeComposeFile {
 
   Write-Host "Local Agent Runtime images were not found. Docker will build runtime images from configured base images." -ForegroundColor DarkYellow
   return "modules/agent-runtime/docker/docker-compose-dev.yaml"
+}
+
+if ($Action -eq "up" -or $Action -eq "up-local") {
+  Ensure-AgentRuntimeFiles
 }
 
 $composeFile = Get-AgentRuntimeComposeFile -PreferLocal:($Action -eq "up-local")

@@ -85,7 +85,8 @@ Recoverable AgentBackend failures are also runtime events. If AgentBackend retur
 Agent Runtime is FacetWrite's internal execution subsystem when `AGENT_BACKEND_ENABLED=true`; the current adapter is AgentBackend.
 
 - AgentBackend `lead_agent` acts as the main orchestration Agent for the current adapter.
-- Local Docker validation uses Agent Runtime nginx at `http://127.0.0.1:2026` through the `facetwrite-agent-runtime` Compose project and `facetwrite-agent-runtime-*` containers.
+- Default local validation uses the project-managed Gateway at `http://127.0.0.1:8001`; explicit Docker validation uses nginx at `http://127.0.0.1:2026`.
+- Runtime status reports `deploymentMode` and `sandboxProvider` so the UI does not confuse local process execution with container isolation.
 - AgentBackend enablement uses `AGENT_BACKEND_*` env keys only; stale `DEERFLOW_*` values are historical and leave the runtime disabled.
 - Each FacetWrite Task card maps to an Agent Runtime subagent configuration.
 - The current mapping lives in `server/runtime/agentBackendAdapter/taskAgentMapping.ts`, with `server/agentBackend/taskAgentMapping.ts` kept as a compatibility export.
@@ -103,7 +104,7 @@ Agent Runtime is FacetWrite's internal execution subsystem when `AGENT_BACKEND_E
 - AgentRuntime does not own FacetWrite product data. Threads, messages, Canvas nodes/edges/write requests, settings, and Knowledge metadata stay in FacetWrite storage; AgentRuntime can affect them only through the backend adapter and internal ToolUse bridge. It must not bypass frontend Canvas context filtering, and it must not call Canvas repositories or storage facades directly.
 - Canvas Workflow suggestions are low-risk additions when routed through FacetWrite APIs: creating nodes, edges, appending body text, and writing suggestions are allowed product operations. Replace, overwrite, and delete operations still require the existing approval path.
 - `web_search` is verified separately as a AgentBackend built-in tool, not as a FacetWrite local bridge.
-- Current Docker sidecar acceptance target: `/health`, backend auth, `/api/agent-backend/config`, provider `agent-backend` generation, repeated no-fallback runs, AgentBackend built-in ToolUse, and FacetWrite bridge ToolUse. The 2026-05-20 smoke test confirmed `usedMock:false` and `finishReason:"agent_backend_completed"`.
+- Local and Docker acceptance targets remain `/health`, backend auth, runtime config, provider `agent-backend` generation, repeated no-fallback runs, built-in ToolUse, Skills/MCP/Memory/subagents, and FacetWrite bridge ToolUse. Docker-only sandbox facilities are tested separately.
 
 ## AI Dashboard
 The AI Dashboard is primarily a runtime/control-plane surface. FacetWrite-managed Memory is the one editable exception because users need to inspect and correct what the runtime may reuse.

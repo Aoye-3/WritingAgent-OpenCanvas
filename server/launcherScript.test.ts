@@ -7,47 +7,31 @@ const launcher = readFileSync(join(process.cwd(), "start-facetwrite.ps1"), "utf8
 const packageJson = readFileSync(join(process.cwd(), "package.json"), "utf8");
 const viteConfig = readFileSync(join(process.cwd(), "vite.config.ts"), "utf8");
 
-test("launcher fails fast when Docker is unavailable for Agent Runtime", () => {
-  assert.match(
-    launcher,
-    /if \(-not \(Test-CommandAvailable -Name "docker"\)\) \{\s+throw "Docker was not found\./,
-  );
-  assert.doesNotMatch(
-    launcher,
-    /docker was not found\.[\s\S]*?FacetWrite may fall back[\s\S]*?return/,
-  );
+test("launcher defaults to the project-managed local Agent Runtime", () => {
+  assert.match(launcher, /Get-ConfigValue -Name "AGENT_RUNTIME_MODE" -DefaultValue "local"/);
+  assert.match(launcher, /scripts\\agent-runtime-local\.ps1/);
+  assert.match(launcher, /http:\/\/127\.0\.0\.1:8001/);
 });
 
-test("launcher fails fast when Docker daemon is unreachable for Agent Runtime", () => {
-  assert.match(
-    launcher,
-    /if \(\$LASTEXITCODE -ne 0\) \{\s+throw "Docker daemon is not reachable\./,
-  );
-  assert.doesNotMatch(
-    launcher,
-    /Warning: Docker daemon is not reachable\.[\s\S]*?return/,
-  );
+test("launcher keeps Docker behind the explicit docker mode", () => {
+  assert.match(launcher, /"docker" \{/);
+  assert.match(launcher, /scripts\\agent-runtime\.ps1/);
+  assert.doesNotMatch(launcher, /function Start-AgentRuntimeSidecar/);
 });
 
-test("launcher fails when Agent Runtime sidecar never becomes healthy", () => {
-  assert.match(
-    launcher,
-    /throw "Agent Runtime sidecar did not report healthy/,
-  );
-  assert.doesNotMatch(
-    launcher,
-    /Agent Runtime sidecar did not report healthy[\s\S]*?generation falls back/,
-  );
+test("launcher supports an unmanaged external Agent Runtime", () => {
+  assert.match(launcher, /"external" \{/);
+  assert.match(launcher, /does not manage its lifecycle/);
 });
 
-test("launcher requires Agent Runtime instead of allowing skip startup", () => {
+test("launcher still requires an enabled Agent Runtime", () => {
   assert.match(
     launcher,
     /throw "Agent Runtime is required for the local launcher\./,
   );
   assert.doesNotMatch(launcher, /SkipAgentRuntime|SkipAgentBackend/);
   assert.doesNotMatch(launcher, /Skipping Agent Runtime sidecar startup/);
-  assert.match(launcher, /Start-AgentRuntimeSidecar/);
+  assert.match(launcher, /Start-SelectedAgentRuntime/);
 });
 
 test("launcher fails fast when FacetWrite ports are already occupied", () => {

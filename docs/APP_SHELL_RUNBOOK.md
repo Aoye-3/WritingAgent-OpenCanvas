@@ -2,51 +2,41 @@
 
 ## Scope
 
-The current Electron shell is a Windows source-development launcher. It is not an installed or packaged application. Docker Desktop remains required for Agent Runtime.
+The Electron shell is a Windows source-development launcher, not an installer. Default `local` mode requires Node.js and `uv`; Docker Desktop is required only for explicit `docker` mode.
 
 ## Start
 
-Install dependencies once:
-
 ```powershell
 npm.cmd install
-```
-
-Then double-click `start-opencanvas-shell.vbs`, or run:
-
-```powershell
 npm.cmd run shell:dev
 ```
 
-The shortcut starts Electron hidden from a transient terminal. Electron, not that terminal, owns the services.
+The shell uses Vite `17776` and API `17777`.
 
 ## Startup Sequence
 
-1. Acquire the Electron single-instance lock and show Splash.
-2. Confirm ports `17776` and `17777` are free.
-3. Confirm Docker Desktop is ready, starting it when installed but stopped.
-4. Reuse a complete compatible Agent Runtime, or start and own it.
-5. Wait for Agent Runtime `http://127.0.0.1:2026/health`.
-6. Start Express and wait for `http://127.0.0.1:17777/api/health`.
-7. Start Vite and wait for `http://127.0.0.1:17776`.
-8. Open the main window and close Splash.
+1. Acquire the single-instance lock and show Splash.
+2. Validate frontend/API ports.
+3. Resolve `AGENT_RUNTIME_MODE` and `AGENT_BACKEND_BASE_URL`.
+4. Run `runtime-check`; reuse only a compatible healthy Runtime.
+5. Run `runtime-bootstrap` for managed local or Docker mode.
+6. Wait for `runtime-ready`, then start Express and Vite.
+7. Open the main window.
 
-Vite remains a development server, so React/CSS source edits use HMR. Electron main-process edits require restarting the shell.
+`external` mode performs readiness checks but never starts or stops the Runtime. Docker mode checks the daemon but does not launch Docker Desktop automatically.
 
 ## Ownership And Shutdown
 
-- Vite and Express are always owned by the shell.
-- Electron starts the Vite and TSX Node CLIs directly so their process trees remain owned during shutdown and restart.
-- Agent Runtime is owned only when no required Compose services were running and this shell started them.
-- A complete pre-existing runtime is reused only when its callback is `http://host.docker.internal:17777`.
-- A partial or incompatible runtime blocks startup and is never stopped automatically.
-- Closing the main window or cancelling Splash attempts to stop every owned service before Electron exits.
-- Forced process termination or system failure cannot guarantee asynchronous cleanup.
+- Vite and Express are shell-owned.
+- Local/Docker Runtime is owned only when this shell started it.
+- Compatible pre-existing services are reused and never stopped by the shell.
+- Occupied ports, partial services, or incompatible project/bridge metadata block startup.
+- Startup failure rolls back every process created by that launch attempt.
 
 ## Troubleshooting
 
-- Docker not found: install Docker Desktop. A no-Docker local Runtime is deferred.
-- Port `17776` or `17777` occupied/reserved: resolve the conflict; the shell will not stop external services.
-- Partial Agent Runtime: repair it or run `npm.cmd run agent-runtime:down`, then retry.
-- Incompatible reused Runtime callback: stop it and let the shell restart it.
-- The existing browser workflow remains available through `npm.cmd run dev`.
+- Local prerequisites: `npm.cmd run agent-runtime:doctor`.
+- Runtime logs: `modules/agent-runtime/logs/gateway-local.err.log`.
+- Docker mode: set `AGENT_RUNTIME_MODE=docker` and ensure Docker is already running.
+- External mode: set `AGENT_RUNTIME_MODE=external` and an accessible `AGENT_BACKEND_BASE_URL`.
+- Ports `17776`/`17777` occupied: resolve the conflict; the shell never terminates unrelated services.

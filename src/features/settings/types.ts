@@ -134,6 +134,8 @@ export type AgentBackendRuntimeStatus = {
   reachable: boolean;
   runtimeProvider: "agent-backend" | "typescript";
   authState: "not_configured" | "setup_required" | "authenticated" | "auth_failed";
+  deploymentMode: "local" | "docker" | "external";
+  sandboxProvider: string;
   lastError?: string;
 };
 

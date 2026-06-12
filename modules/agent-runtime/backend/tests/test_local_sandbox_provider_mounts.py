@@ -410,13 +410,14 @@ class TestMultipleMounts:
             return original_run(*args, **kwargs)
 
         monkeypatch.setattr("deerflow.sandbox.local.local_sandbox.subprocess.run", mock_run)
-        monkeypatch.setattr("deerflow.sandbox.local.local_sandbox.LocalSandbox._get_shell", lambda self: "/bin/sh")
+        available_shell = LocalSandbox._get_shell()
+        monkeypatch.setattr("deerflow.sandbox.local.local_sandbox.LocalSandbox._get_shell", lambda self: available_shell)
 
         sandbox.execute_command("cat /mnt/data/test.txt")
         # Verify the command received the resolved local path
         command = captured.get("command", [])
         assert isinstance(command, list) and len(command) >= 3
-        assert str(data_dir) in command[2]
+        assert str(data_dir) in " ".join(command)
 
     def test_reverse_resolve_path_does_not_match_partial_prefix(self, tmp_path):
         foo_dir = tmp_path / "foo"

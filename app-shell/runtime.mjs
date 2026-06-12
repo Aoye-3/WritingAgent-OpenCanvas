@@ -41,14 +41,15 @@ export function createLifecycle(deps) {
   return {
     async start() {
       try {
-        deps.onStage("docker");
+        deps.onStage("runtime-check");
         const runtimeState = classifyRuntimeState(await deps.inspectRuntime());
-        deps.onStage("runtime");
+        deps.onStage("runtime-bootstrap");
         if (runtimeState.action === "start") {
           await deps.startRuntime();
           runtimeOwned = true;
         }
         await deps.waitForRuntime();
+        deps.onStage("runtime-ready");
 
         deps.onStage("api");
         api = await deps.startApi();

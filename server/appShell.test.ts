@@ -21,6 +21,9 @@ test("Electron shell owns fixed non-reserved development ports and shutdown", ()
   assert.match(main, /startProcess\("node\.exe", \[viteCli/);
   assert.doesNotMatch(main, /startProcess\("npm\.cmd"/);
   assert.match(main, /await lifecycle\?\.stop\(\)/);
+  assert.match(main, /resolveRuntimeMode/);
+  assert.match(main, /agent-runtime-local\.ps1/);
+  assert.doesNotMatch(main, /Docker Desktop\.exe/);
 });
 
 test("shell commands and hidden shortcut are present", () => {

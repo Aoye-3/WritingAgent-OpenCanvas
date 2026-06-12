@@ -215,6 +215,14 @@ Decision: Use Electron as a Windows source-development application shell around 
 Reason: The immediate goal is an independent application window with startup feedback, Vite HMR, and window-bound service lifecycle without prematurely designing an installer or native Agent Runtime.
 
 Impact: The shell uses fixed development ports `17776` and `17777`, starts Docker Desktop when available, owns only services it starts, and preserves complete compatible pre-existing Agent Runtime services. The planned Vite port `3100` was rejected because Windows dynamically reserved `3007-3106`. Docker Desktop remains required. Packaging, automatic updates, and a no-Docker local Runtime are deferred.
+## 2026-06-12: Project-Managed Local Gateway Is The Default Runtime
+
+Decision: Default to `AGENT_RUNTIME_MODE=local`, running the Agent Runtime Gateway with project-managed Python 3.12 and `uv`; retain Docker Compose as an explicit isolation/deployment mode and support user-managed external Gateways.
+
+Reason: Core Agent capabilities live in the Python Gateway, not the Runtime Next.js frontend or nginx. Managing that Gateway directly removes the mandatory Docker Desktop startup dependency without rewriting the Agent protocol or dropping Skills, MCP, Memory, subagents, auth, SSE, or the FacetWrite bridge.
+
+Impact: Local mode uses `127.0.0.1:8001`, shared `.deer-flow` state, `LocalSandboxProvider`, and `allow_host_bash:false`. Docker remains required for `AioSandboxProvider`, Kubernetes provisioning, Docker socket workflows, and Linux-container Bash Skills. Status surfaces expose deployment mode and sandbox provider.
+
 # 2026-06-11: Project-First Context And Explicit Model Selection
 
 - Project is the strict workspace and shared-context boundary.

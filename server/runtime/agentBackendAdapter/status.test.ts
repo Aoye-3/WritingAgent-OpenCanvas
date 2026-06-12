@@ -11,6 +11,8 @@ test("reports TypeScript fallback when AgentBackend is disabled", async () => {
   assert.equal(status.reachable, false);
   assert.equal(status.runtimeProvider, "typescript");
   assert.equal(status.authState, "not_configured");
+  assert.equal(status.deploymentMode, "local");
+  assert.equal(status.sandboxProvider, "deerflow.sandbox.local:LocalSandboxProvider");
 });
 
 test("reports AgentBackend reachable when health check succeeds", async () => {
@@ -36,6 +38,8 @@ test("reports AgentBackend reachable when health check succeeds", async () => {
   assert.equal(status.reachable, true);
   assert.equal(status.runtimeProvider, "agent-backend");
   assert.equal(status.authState, "authenticated");
+  assert.equal(status.deploymentMode, "local");
+  assert.equal(status.sandboxProvider, "deerflow.sandbox.local:LocalSandboxProvider");
   assert.equal(status.lastError, undefined);
 });
 

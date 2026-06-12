@@ -39,10 +39,11 @@ test("starts services in order and stops only owned runtime", async () => {
   await lifecycle.stop();
 
   assert.deepEqual(events, [
-    "stage:docker",
-    "stage:runtime",
+    "stage:runtime-check",
+    "stage:runtime-bootstrap",
     "runtime:start",
     "runtime:ready",
+    "stage:runtime-ready",
     "stage:api",
     "api:ready",
     "stage:frontend",

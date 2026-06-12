@@ -33,16 +33,18 @@ export const modelPresets = [
 
 export const fallbackAgentBackendStatus: AgentBackendRuntimeStatus = {
   enabled: false,
-  baseUrl: "http://127.0.0.1:8000",
+  baseUrl: "http://127.0.0.1:8001",
   assistantId: "lead_agent",
   reachable: false,
   runtimeProvider: "typescript",
-  authState: "not_configured"
+  authState: "not_configured",
+  deploymentMode: "local",
+  sandboxProvider: "deerflow.sandbox.local:LocalSandboxProvider"
 };
 
 export const fallbackAgentBackendConfig: AgentBackendConfigOverview = {
   enabled: false,
-  baseUrl: "http://127.0.0.1:8000",
+  baseUrl: "http://127.0.0.1:8001",
   skills: [],
   mcpServers: {}
 };
