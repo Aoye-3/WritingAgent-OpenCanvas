@@ -99,6 +99,9 @@ This starts only the Vite frontend and FacetWrite API and is reserved for narrow
 - A Summary or Blog generation returns `provider:"agent-backend"`.
 - No `agent_backend_runtime_failed` event appears during the primary runtime check.
 - `canvas_write` creates a pending write proposal/request only; Canvas content changes only after explicit user confirmation through the approval path.
+- Conversation models are selected directly from enabled, keyed chat Model Configs and grouped by capability.
+- Runtime/model failures surface explicit diagnostics and do not create Mock messages unless `FACETWRITE_MOCK_FALLBACK_ENABLED=true` is deliberately set.
+- Clear context preserves visible history while later runs read only messages after the persisted reset boundary.
 
 ## Technical Docs
 

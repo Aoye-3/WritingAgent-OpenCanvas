@@ -32,6 +32,10 @@ Agent Runtime bridge tool calls use the same executor path through `/api/interna
 
 Streaming assistant text is a temporary UI preview, not a persistence boundary. `/api/generate/stream` must keep an initial safety buffer and must not stream obvious internal prompt headings, raw ToolUse/search JSON, provider reasoning metadata, or AgentBackend replay payloads. The final assistant message is still normalized before it is recorded, and thread-state reconciliation should replace temporary UI text with the persisted safe output.
 
+Private context assembly is runtime input, not a user-visible prompt dump. The UI exposes explicit mind-chain/selection intent and a one-shot clear-context action, but it does not reveal internal budgets or automatically read every Canvas node. Ordinary notes remain excluded. Context reset preserves visible history while preventing messages before `threads.context_reset_at` from reaching later model calls.
+
+Runtime/model failures are not converted into successful assistant output. Stable error codes and redacted runtime events may be shown, but no Mock message or output version is persisted unless local development explicitly enables `FACETWRITE_MOCK_FALLBACK_ENABLED=true`.
+
 ## Agent Runtime Auth
 
 When Agent Runtime is enabled, FacetWrite accesses protected runtime APIs through a backend-managed local session. The current implementation is the AgentBackend adapter. The frontend must never receive AgentBackend cookies, CSRF tokens, auth email/password, provider keys, or MCP secret-like values.

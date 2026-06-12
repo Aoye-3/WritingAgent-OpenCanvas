@@ -75,3 +75,5 @@ Expected FacetWrite status includes `reachable:true`, authenticated runtime stat
 - stdio MCP cannot find `npx`: confirm Node is on PATH; the launcher prepends discovered Node/npm/npx directories.
 - Docker bridge failure: use `FACETWRITE_INTERNAL_BASE_URL=http://host.docker.internal:<api-port>`.
 - Local bridge failure: use `http://127.0.0.1:<api-port>`.
+- Generation failures: inspect stable `model_required`, `model_not_ready`, `runtime_unavailable`, or `runtime_auth_failed` diagnostics. Do not enable Mock fallback for acceptance testing.
+- Deliberate local Mock demonstration only: set `FACETWRITE_MOCK_FALLBACK_ENABLED=true`; unset it before real Runtime verification.

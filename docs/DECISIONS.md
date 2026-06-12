@@ -230,7 +230,7 @@ Impact: Local mode uses `127.0.0.1:8001`, shared `.deer-flow` state, `LocalSandb
 - Agent is selected per run and begins with no personal or cross-project context.
 - Project Agent input values are keyed by Project and Agent, then immediately become Project shared context.
 - Model Config backend storage is the sole generation model source.
-- Projects bind multiple Model Config entries; Threads explicitly select one and have no default.
+- Threads select directly from valid chat Model Config entries and inherit a persisted default; Project bindings remain compatibility data.
 - Existing legacy workspace data is cleared instead of migrated from the shared `local-project` design.
 
 ## 2026-06-11: Complete Physical Project Boundary And Runtime Sync Gate
@@ -239,5 +239,12 @@ Impact: Local mode uses `127.0.0.1:8001`, shared `.deer-flow` state, `LocalSandb
 - Project Agent inputs are shared by default and protected by monotonically increasing revisions.
 - Canvas nodes and output versions enter Project shared context only after explicit user inclusion; shared context uses deterministic category budgets totaling 24,000 characters.
 - Model Config remains saved when AgentBackend synchronization fails, but the model is marked degraded and cannot generate until synchronized.
-- New Projects do not bind or select a default model. Project model binding and Thread model selection are explicit user actions.
-- AgentBackend is the only real generation runtime. Runtime failure enters Mock fallback and never calls the local Provider runner.
+- New Threads resolve a valid chat model from recent/active configured Model Configs. Project model bindings remain compatibility data only.
+- Agent Runtime is the only real generation runtime. Runtime failure returns explicit errors and never calls the local Provider runner or records Mock output by default.
+
+## 2026-06-12: Direct Conversation Models, Private Context, And Explicit Failures
+
+- Threads select directly from enabled, keyed chat Model Configs grouped as reasoning, chat, or other chat.
+- Context assembly is private and bounded: explicit mind chains/selections, selected and directed-related nodes, Workflow/Role state, structured inputs, post-reset Thread history, then Knowledge.
+- `threads.context_reset_at` is a soft boundary that preserves visible history. The `clear_context` bridge tool uses the same persisted reset operation.
+- Mock fallback requires explicit `FACETWRITE_MOCK_FALLBACK_ENABLED=true`; normal runtime/model failures use stable error codes.

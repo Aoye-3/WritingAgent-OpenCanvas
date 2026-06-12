@@ -198,4 +198,8 @@ FacetWrite uses `Project` as the only workspace and shared-context boundary.
 
 Canvas database columns and public Canvas records use `project_id`/`projectId`. Thread-scoped Canvas routes explicitly resolve the Thread's Project before calling the Project-owned Canvas domain.
 
-Project shared context is explicit and bounded. Project Agent inputs are shared by default; Canvas nodes and output versions enter shared context only when the user marks them included. Category budgets total at most 24,000 characters. Frontend generation and Thread restoration use operation ownership checks so stale asynchronous results cannot apply after a Project or Thread switch.
+Model selection and context assembly are hidden runtime policies. Threads select directly from valid stored chat Model Configs and persist inherited defaults. Historical Project model bindings and context-inclusion flags remain readable compatibility data but are not current UI gates.
+
+Generation context is bounded to explicit mind chains/selections, the selected node and directed related nodes, Workflow/Role state, current draft and structured inputs, messages after `context_reset_at`, and Knowledge results. Ordinary notes and the rest of an unselected Canvas are excluded. Frontend generation and Thread restoration use operation ownership checks so stale asynchronous results cannot apply after a Project or Thread switch.
+
+Agent Runtime is the sole real generation path. Default failures return stable model/runtime errors, emit redacted failure events, and do not persist Mock messages or output versions.

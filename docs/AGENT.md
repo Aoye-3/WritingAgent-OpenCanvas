@@ -187,3 +187,11 @@ Provider-private fields are allowed only inside the runtime request chain. DeepS
 The workspace chat composer may send per-run model overrides for DeepSeek Think mode and reasoning effort. These overrides affect only the current request; saved Agent settings remain the default configuration source.
 
 DeepSeek prefix completion remains a separate response mode: only the final assistant message may carry `prefix: true`, and only DeepSeek uses the beta base URL for that mode. Canvas writes continue to use tool calls plus FacetWrite approval, not prefix completion.
+
+## Conversation Runtime Policy (2026-06-12)
+
+- Conversation model choices come directly from enabled, keyed `modelType:"chat"` Model Configs and are grouped by capability.
+- New conversations inherit the Project's most recent valid model, then global recent/active/first valid chat configuration.
+- Context composition is private and bounded. The default UI does not expose Project model allowlists or manual Canvas/output context checkboxes.
+- Clear context is a one-shot persisted Thread operation. It keeps history visible and excludes messages before `context_reset_at` from later model requests.
+- Runtime/model failures never become successful Mock assistant messages unless explicit local fallback is enabled.

@@ -30,7 +30,7 @@ Successful responses return the route payload directly. Errors use:
 ```json
 {
   "error": {
-    "code": "bad_request | not_found | internal_error | validation_failed",
+    "code": "bad_request | not_found | internal_error | validation_failed | model_required | model_not_ready | runtime_unavailable | runtime_auth_failed",
     "message": "Human-readable message",
     "details": {}
   }
@@ -97,8 +97,8 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - `contextValues`, when present, represents explicit left AgentCard structured inputs and current workspace state such as draft or Canvas node data. It must not contain bottom-bar placeholder content or historical defaults such as course notes or audience profiles.
   - `modelOverrides`, when present, is a per-run override for runtime-safe model controls such as `thinkingMode` and `reasoningEffort`. It does not mutate saved Agent settings.
   - Runs generation, records the result, and returns generation metadata and output.
-  - Uses AgentBackend as the only real generation runtime. If it is disabled or unavailable, generation records Mock fallback.
-  - If Agent Runtime fails without a user-visible answer, returns only internal/runtime output, or returns an empty stream, the backend records `agent_backend_runtime_failed` with `fallback:"mock"`.
+  - Uses Agent Runtime as the only real generation path. Runtime/model failures return stable error codes and do not record an assistant message, output version, or Mock result.
+  - Mock fallback is disabled by default and exists only when `FACETWRITE_MOCK_FALLBACK_ENABLED=true` is explicitly configured.
   - Provider-private runtime metadata, including DeepSeek `reasoning_content`, is not part of the public request or response schema. It may be used internally for provider continuation only.
   - Direct Canvas-write intent in `chatInstruction`, such as `鍐欏叆`, `淇濆瓨鍒扮敾鏉縛, `save to canvas`, or `write this`, may cause the frontend to approve the newly returned pending Canvas write request after this endpoint completes. The API still records the request first; Canvas mutation remains behind the approve path.
   - When Agent knowledge is enabled and `knowledge_base` is active, generation searches selected Knowledge Bases before model execution. Retrieved references are injected into runtime context and recorded as `knowledge_search_completed` tool events.
@@ -173,7 +173,9 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
   - Returns `{ threads }`.
 - `POST /api/threads`
   - Body: `{ projectId: string, title?: string }`.
-  - Creates a Project conversation, defaults the title to `New conversation`, and returns `{ thread, threadId, projectId }`.
+  - Creates a Project conversation, resolves and persists a valid chat Model Config, defaults the title to `New conversation`, and returns `{ thread, threadId, projectId }`.
+- `POST /api/threads/:threadId/context-reset`
+  - Preserves messages and UI history, persists `contextResetAt`, and makes later model requests read only messages after the boundary.
 - `PATCH /api/threads/:threadId`
   - Body: `{ title: string }`.
   - Renames an active thread/project by updating `threads.title` and `updated_at`.
@@ -266,7 +268,7 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
   - Compatibility endpoint. Deletes configured model API bindings for that provider without touching other providers.
 - `GET /api/settings/configured-model-apis`
   - Returns `{ activeConfigId?, configs }`, where every config is a local callable `API + model` binding.
-  - Summaries include binding id, provider id/label, model id/name/type, key configured state, key hint, base URL, enabled state, and timestamps. API key plaintext is never returned.
+  - Summaries include binding id, provider id/label, model id/name/type, `capabilityGroup`, key configured state, key hint, base URL, enabled state, and timestamps. API key plaintext is never returned.
 - `GET /api/settings/model-runtime-sync-status`
   - Returns per-Model Config AgentBackend synchronization state: `synced`, `failed`, `unsupported`, or `disabled`. It never returns API keys.
 - `POST /api/settings/model-runtime-sync/retry`
@@ -297,10 +299,11 @@ Implementation note: these HTTP contracts are stable while the internals move to
 
 - `POST /api/projects`: create an empty Project.
 - `PATCH /api/projects/:projectId`: rename a Project.
-- `PUT /api/projects/:projectId/models`: replace the Project's allowed Model Config IDs.
+- `PUT /api/projects/:projectId/models`: compatibility API for historical Project model bindings; current generation and UI do not depend on it.
 - `POST /api/threads`: create a conversation; requires a valid `projectId`.
 - `GET /api/projects/:projectId/threads`: list the current Project's active conversations in most-recently-updated order.
 - `PATCH /api/threads/:threadId/model`: explicitly select the conversation Model Config.
+- `POST /api/threads/:threadId/context-reset`: persist a soft context boundary without deleting visible history.
 - `PATCH /api/threads/:threadId/inputs`: save Project-scoped Agent inputs; requires `agentCardId` and a monotonically increasing integer `revision`.
 - `PATCH /api/threads/:threadId/output-versions/:versionId/context`: explicitly include or exclude an output version from Project shared context.
 - `GET /api/threads/:threadId/state`: returns Thread history plus Project metadata, all Project Agent inputs, and Project Canvas state.

@@ -33,9 +33,9 @@ Knowledge Base vector stores and uploads are created under:
 - `schema_version`
   - Tracks local schema version and application time.
 - `projects`
-  - Top-level workspace records. New Projects have no default model or inherited context.
+  - Top-level workspace records. New Projects start with no content context; their first Thread resolves a valid default chat model.
 - `threads`
-  - Conversations belonging to one Project, with an optional explicitly selected `configured_model_api_id`.
+  - Conversations belonging to one Project, with `configured_model_api_id` and optional `context_reset_at`. The reset boundary preserves history while excluding older messages from later model context.
 - `messages`
   - User and assistant messages for a thread.
 - `runs`
@@ -103,7 +103,7 @@ Free arrows, shapes, tables, and asset cards are explicit saved user artifacts a
 Projects are backed by `projects` and renamed independently from their Threads. Threads are conversations inside a Project and do not own Agent identity, Canvas resources, project model bindings, or project shared context.
 
 ## Migration Notes
-Schema creation and migration live in `server/db/schema.ts`. Schema version 3 intentionally clears workspace data, removes `thread_inputs` and `threads.agent_card_id`, rebuilds Canvas tables with `project_id`, adds explicit context-inclusion flags, and adds Project Agent input revisions. Model Config, Agent definitions, and Knowledge data are retained.
+Schema creation and migration live in `server/db/schema.ts`. Schema version 3 completed the Project-owned Canvas migration. Schema version 4 adds `threads.context_reset_at` without deleting conversation history. Model Config, Agent definitions, and Knowledge data are retained.
 
 `server/storage.ts` remains the public storage facade. `server/db/sqlite.ts` owns SQLite initialization, `server/storageTypes.ts` owns shared record shapes, `server/storagePaths.ts` owns app-root/thread-directory resolution, and repository classes under `server/repositories/` handle focused persistence areas behind the facade without changing table names or local paths.
 
@@ -119,11 +119,11 @@ Knowledge Base metadata is stored in FacetWrite's main SQLite database, while em
 The main database intentionally does not store provider secrets. Embedding requests use process/runtime provider configuration such as `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL`, and optional Ollama base URL settings.
 
 File uploads are stored outside the main database under `.facetwrite/knowledge/uploads/<baseId>/`. The database keeps source metadata only; vector chunks remain in the per-base libSQL store.
-# Project-First Workspace Schema V3 (2026-06-11)
+# Project-First Workspace Schema V4 (2026-06-12)
 
 - `projects`: top-level workspace, title, summary, timestamps, trash state.
-- `threads`: conversations belonging to a Project. `configured_model_api_id` is nullable and must be explicitly selected before generation.
-- `project_model_bindings`: Model Config entries allowed for a Project.
+- `threads`: conversations belonging to a Project. `configured_model_api_id` stores the resolved chat model and `context_reset_at` stores the soft history boundary.
+- `project_model_bindings`: compatibility data from the former Project model allowlist.
 - `project_agent_inputs`: structured input values keyed by `(project_id, agent_card_id)`.
 - `messages`, `runs`, `prompt_versions`, `output_versions`, and `tool_events`: Thread history.
 - Canvas resources are physically and logically Project-owned through `project_id`.
@@ -131,3 +131,4 @@ File uploads are stored outside the main database under `.facetwrite/knowledge/u
 - `project_agent_inputs.revision` rejects stale autosave writes.
 
 Schema version 3 intentionally clears legacy workspace data to complete the physical Project migration. Model Config, Agent definitions, and knowledge-base data are retained.
+Schema version 4 adds `threads.context_reset_at` without deleting history.

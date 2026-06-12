@@ -40,3 +40,4 @@ The shell uses Vite `17776` and API `17777`.
 - Docker mode: set `AGENT_RUNTIME_MODE=docker` and ensure Docker is already running.
 - External mode: set `AGENT_RUNTIME_MODE=external` and an accessible `AGENT_BACKEND_BASE_URL`.
 - Ports `17776`/`17777` occupied: resolve the conflict; the shell never terminates unrelated services.
+- The workspace Runtime badge polls `/api/agent-runtime/status`; it does not infer current health from historical Mock outputs.
