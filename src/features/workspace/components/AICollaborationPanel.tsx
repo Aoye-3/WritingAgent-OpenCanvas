@@ -22,6 +22,7 @@ type AICollaborationPanelProps = {
   modelSettings?: AgentSettings["model"];
   onApproveWriteRequest: (requestId: string) => Promise<void>;
   onCreateConversation: () => Promise<void>;
+  onResetContext: () => Promise<void>;
   onApplyWriteText: (text: string) => Promise<void>;
   onRejectWriteRequest: (requestId: string) => Promise<void>;
   onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;

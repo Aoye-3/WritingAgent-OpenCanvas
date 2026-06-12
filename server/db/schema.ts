@@ -273,6 +273,9 @@ export function migrateStorageSchema(db: DatabaseSync) {
   if (!columnExists(db, "threads", "configured_model_api_id")) {
     db.exec(`ALTER TABLE threads ADD COLUMN configured_model_api_id TEXT`);
   }
+  if (!columnExists(db, "threads", "context_reset_at")) {
+    db.exec(`ALTER TABLE threads ADD COLUMN context_reset_at TEXT`);
+  }
   if (!columnExists(db, "runs", "configured_model_api_id")) {
     db.exec(`ALTER TABLE runs ADD COLUMN configured_model_api_id TEXT`);
   }
@@ -449,6 +452,14 @@ export function migrateStorageSchema(db: DatabaseSync) {
 
       INSERT INTO schema_version (version, applied_at) VALUES (3, datetime('now'));
     `);
+  }
+
+  const version4 = db.prepare(`SELECT version FROM schema_version WHERE version = 4`).get();
+  if (!version4) {
+    if (!columnExists(db, "threads", "context_reset_at")) {
+      db.exec(`ALTER TABLE threads ADD COLUMN context_reset_at TEXT`);
+    }
+    db.exec(`INSERT INTO schema_version (version, applied_at) VALUES (4, datetime('now'))`);
   }
 }
 

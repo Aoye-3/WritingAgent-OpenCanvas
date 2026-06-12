@@ -33,7 +33,10 @@ export type ConfiguredModelApiSummary = {
   enabled: boolean;
   createdAt?: string;
   updatedAt?: string;
+  capabilityGroup: ConfiguredModelCapabilityGroup;
 };
+
+export type ConfiguredModelCapabilityGroup = "reasoning" | "chat" | "other-chat";
 
 export type ProviderApiConfig = {
   providerId: ProviderId;
@@ -98,6 +101,37 @@ export async function listConfiguredModelApiSummaries() {
       .map(toConfiguredSummary)
       .sort((a, b) => `${a.providerLabel}:${a.modelName}`.localeCompare(`${b.providerLabel}:${b.modelName}`))
   };
+}
+
+export async function listConversationModelSummaries() {
+  const result = await listConfiguredModelApiSummaries();
+  const configs = result.configs
+    .filter((config) => config.enabled && config.keyConfigured && config.modelType === "chat")
+    .sort((a, b) => {
+      const groupOrder = { reasoning: 0, chat: 1, "other-chat": 2 };
+      return groupOrder[a.capabilityGroup] - groupOrder[b.capabilityGroup]
+        || `${a.providerLabel}:${a.modelName}`.localeCompare(`${b.providerLabel}:${b.modelName}`);
+    });
+  return {
+    activeConfigId: configs.some((config) => config.id === result.activeConfigId) ? result.activeConfigId : undefined,
+    configs
+  };
+}
+
+export async function resolveConversationModelId(preferredIds: Array<string | null | undefined> = []): Promise<string | undefined> {
+  const result = await listConversationModelSummaries();
+  const validIds = new Set(result.configs.map((config) => config.id));
+  return preferredIds.find((id): id is string => Boolean(id && validIds.has(id)))
+    ?? result.activeConfigId
+    ?? result.configs[0]?.id;
+}
+
+export function classifyConfiguredModelCapability(input: { modelId: string; modelName?: string; modelType?: string }): ConfiguredModelCapabilityGroup {
+  if (input.modelType && input.modelType !== "chat") return "other-chat";
+  const name = `${input.modelId} ${input.modelName ?? ""}`.toLowerCase();
+  return /reason(?:er|ing)|deepseek[-_/ ]?r1|(?:^|[-_/ ])r1(?:$|[-_/ ])|(?:^|[-_/ ])o[134](?:$|[-_/ ])|think/.test(name)
+    ? "reasoning"
+    : "chat";
 }
 
 export async function getConfiguredModelApiSummary(configId: string) {
@@ -393,7 +427,8 @@ function toConfiguredSummary(config: ConfiguredModelApi): ConfiguredModelApiSumm
     baseURL: hydrated.baseURL,
     enabled: hydrated.enabled,
     createdAt: hydrated.createdAt || undefined,
-    updatedAt: hydrated.updatedAt || undefined
+    updatedAt: hydrated.updatedAt || undefined,
+    capabilityGroup: classifyConfiguredModelCapability(hydrated)
   };
 }
 

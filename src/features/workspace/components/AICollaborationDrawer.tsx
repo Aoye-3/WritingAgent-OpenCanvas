@@ -42,6 +42,7 @@ type AICollaborationDrawerProps = {
   toolEvents: StoredToolEvent[];
   onApproveWriteRequest: (requestId: string) => Promise<void>;
   onCreateConversation: () => Promise<void>;
+  onResetContext: () => Promise<void>;
   onApplyWriteText: (text: string) => Promise<void>;
   onRejectWriteRequest: (requestId: string) => Promise<void>;
   onInputDraftConsumed: () => void;
@@ -89,6 +90,7 @@ export function AICollaborationDrawer({
   toolEvents,
   onApproveWriteRequest,
   onCreateConversation,
+  onResetContext,
   onApplyWriteText,
   onRejectWriteRequest,
   onInputDraftConsumed,
@@ -115,6 +117,7 @@ export function AICollaborationDrawer({
   const [statusIndex, setStatusIndex] = useState(0);
   const [composerHeight, setComposerHeight] = useState(72);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [contextResetNotice, setContextResetNotice] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
 
   const pendingWriteRequest = canvasWriteRequests.find((request) => request.operation !== "replace_range");
@@ -142,6 +145,8 @@ export function AICollaborationDrawer({
   useEffect(() => {
     messageListRef.current?.scrollTo({ top: messageListRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, isSending]);
+
+  useEffect(() => setContextResetNotice(false), [currentThreadId]);
 
   const resetWriteDraft = () => {
     setAnnotations([]);
@@ -298,7 +303,12 @@ export function AICollaborationDrawer({
       />
       <div className="conversation-compact-header" data-testid="conversation-compact-header">
         <strong>{projectThreads.find((thread) => thread.id === currentThreadId)?.title ?? (locale === "zh" ? "新对话" : "New conversation")}</strong>
-        <div className="conversation-header-actions">
+          <div className="conversation-header-actions">
+            <button className="icon-button conversation-icon-action" type="button" disabled={sessionBusy} onClick={() => {
+              void onResetContext().then(() => setContextResetNotice(true));
+            }} aria-label={locale === "zh" ? "清除上下文" : "Clear context"} title={locale === "zh" ? "保留历史，但从此处重新开始上下文" : "Keep history, but start model context from here"}>
+              <HistoryIcon aria-hidden="true" size={17} />
+            </button>
           <button className="icon-button conversation-icon-action" type="button" disabled={sessionBusy} onClick={() => { void onCreateConversation(); }} aria-label={locale === "zh" ? "新建" : "New"} title={locale === "zh" ? "新建对话" : "New conversation"}>
             <AddIcon aria-hidden="true" size={17} />
           </button>
@@ -326,6 +336,7 @@ export function AICollaborationDrawer({
       {sessionError ? <p className="session-error" role="alert">{sessionError}</p> : null}
 
       <div className="drawer-message-list" aria-live="polite" ref={messageListRef}>
+        {contextResetNotice ? <div className="context-reset-divider">{locale === "zh" ? "上下文已从此处重新开始" : "Context starts again from here"}</div> : null}
         {messages.length === 0 ? (
           <div className="empty-chat-state">
             {locale === "zh" ? "在这里追问、要求改写，或让 Agent 解释本次生成。" : "Ask follow-ups, request rewrites, or have the agent explain the current draft."}
@@ -495,7 +506,7 @@ function isWriteConfirmation(text: string) {
 
 function ToolUseIconBar({ allowedTools, toolState, onToolStateChange }: Pick<AICollaborationDrawerProps, "allowedTools" | "toolState" | "onToolStateChange">) {
   const { locale } = useI18n();
-  const visibleTools = allowedTools.filter((tool) => tool !== "canvas_write");
+  const visibleTools = allowedTools.filter((tool) => tool !== "canvas_write" && tool !== "clear_context");
   const toggle = (tool: string) => {
     const key = tool as ToolKey;
     onToolStateChange({ ...toolState, [key]: !toolState?.[key] });

@@ -84,6 +84,11 @@ export async function selectThreadModel(threadId: string, configuredModelApiId?:
   return payload.thread;
 }
 
+export async function resetThreadContext(threadId: string): Promise<StoredThread> {
+  const payload = await apiPost<{ thread: StoredThread }>(`/api/threads/${encodeURIComponent(threadId)}/context-reset`);
+  return payload.thread;
+}
+
 export async function moveProjectToTrash(projectId: string): Promise<void> {
   await apiPost<{ ok: true }>(`/api/projects/${encodeURIComponent(projectId)}/trash`);
 }

@@ -42,7 +42,17 @@ export type GenerationServiceDeps = {
     resolveConfiguredModel: (configuredModelApiId: string) => Promise<ConfiguredModelApi>;
     isModelReady: (configuredModelApiId: string) => boolean;
   };
+  mockFallbackEnabled?: boolean;
 };
+
+export type GenerationErrorCode = "model_required" | "model_not_ready" | "runtime_unavailable" | "runtime_auth_failed";
+
+export class GenerationError extends Error {
+  constructor(public code: GenerationErrorCode, message: string) {
+    super(message);
+    this.name = "GenerationError";
+  }
+}
 
 const streamLabels = {
   thinking: "Thinking...",
@@ -83,7 +93,7 @@ export function createGenerationService(
           events: agentBackendRun.events
         });
         if (hasBlockedInternalOutput(normalized.events)) {
-          const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend returned internal runtime output"));
+          const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend returned internal runtime output"), isMockFallbackEnabled(deps));
           runtimeEvents.push(...(normalized.events ?? []), event);
           onToolEvent?.(event);
         } else {
@@ -116,16 +126,17 @@ export function createGenerationService(
           });
         }
       } else {
-        const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend is disabled or unavailable"));
+        const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend is disabled or unavailable"), isMockFallbackEnabled(deps));
         runtimeEvents.push(event);
         onToolEvent?.(event);
       }
     } catch (error) {
-      const event = createRuntimeFallbackEvent("agent-backend", error);
+      const event = createRuntimeFallbackEvent("agent-backend", error, isMockFallbackEnabled(deps));
       runtimeEvents.push(event);
       onToolEvent?.(event);
     }
 
+    if (!isMockFallbackEnabled(deps)) throw runtimeGenerationError(runtimeEvents);
     return recordMockFallback({
       storage,
       payload,
@@ -180,7 +191,7 @@ export function createGenerationService(
           events: agentBackendRun.events
         });
         if (hasBlockedInternalOutput(normalized.events)) {
-          const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend returned internal runtime output"));
+          const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend returned internal runtime output"), isMockFallbackEnabled(deps));
           runtimeEvents.push(...(normalized.events ?? []), event);
           callbacks.onToolEvent?.(event);
           textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
@@ -216,17 +227,18 @@ export function createGenerationService(
           });
         }
       } else {
-        const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend is disabled or unavailable"));
+        const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend is disabled or unavailable"), isMockFallbackEnabled(deps));
         runtimeEvents.push(event);
         callbacks.onToolEvent?.(event);
       }
     } catch (error) {
-      const event = createRuntimeFallbackEvent("agent-backend", error);
+      const event = createRuntimeFallbackEvent("agent-backend", error, isMockFallbackEnabled(deps));
       runtimeEvents.push(event);
       callbacks.onToolEvent?.(event);
       textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     }
 
+    if (!isMockFallbackEnabled(deps)) throw runtimeGenerationError(runtimeEvents);
     const result = recordMockFallback({
       storage,
       payload,
@@ -252,13 +264,13 @@ function hasBlockedInternalOutput(events?: ToolEventRecord[]) {
   return events?.some((event) => event.eventType === "internal_output_blocked") ?? false;
 }
 
-function createRuntimeFallbackEvent(source: "agent-backend", error: unknown): ToolEventRecord {
+function createRuntimeFallbackEvent(source: "agent-backend", error: unknown, mockFallbackEnabled: boolean): ToolEventRecord {
   return {
     eventType: "agent_backend_runtime_failed",
     payload: {
       source,
       message: safeRuntimeErrorMessage(error),
-      fallback: "mock"
+      fallback: mockFallbackEnabled ? "mock" : "none"
     }
   };
 }
@@ -279,6 +291,16 @@ function formatGenerationFailure(runtimeEvents: ToolEventRecord[]) {
   return "AgentBackend failed with an unknown runtime error.";
 }
 
+function runtimeGenerationError(runtimeEvents: ToolEventRecord[]) {
+  const message = formatGenerationFailure(runtimeEvents);
+  const code = /credential|auth|unauthorized|forbidden/i.test(message) ? "runtime_auth_failed" : "runtime_unavailable";
+  return new GenerationError(code, message);
+}
+
+function isMockFallbackEnabled(deps?: GenerationServiceDeps) {
+  return deps?.mockFallbackEnabled ?? process.env.FACETWRITE_MOCK_FALLBACK_ENABLED === "true";
+}
+
 async function prepareThreadModelSelection(
   payload: GenerateRequest,
   threadId: string,
@@ -297,17 +319,19 @@ async function prepareThreadModelSelection(
   if (!thread) throw new Error("Conversation could not be created.");
   const configuredModelApiId = thread.configuredModelApiId?.trim();
   if (!configuredModelApiId) {
-    throw new Error("Please select a project model before generating.");
+    throw new GenerationError("model_required", "Please select a conversation model before generating.");
   }
-  if (!storage.getProjectModelBindings(thread.projectId).includes(configuredModelApiId)) {
-    throw new Error("The selected conversation model is not bound to this project.");
+  let configuredModel: ConfiguredModelApi;
+  try {
+    configuredModel = await (modelRuntime?.resolveConfiguredModel ?? resolveConfiguredModelApi)(configuredModelApiId);
+  } catch {
+    throw new GenerationError("model_not_ready", "The selected conversation model no longer exists.");
   }
-  const configuredModel = await (modelRuntime?.resolveConfiguredModel ?? resolveConfiguredModelApi)(configuredModelApiId);
   if (!configuredModel.enabled || !configuredModel.apiKey?.trim()) {
-    throw new Error("The selected project model is disabled or has no configured API key.");
+    throw new GenerationError("model_not_ready", "The selected conversation model is disabled or has no configured API key.");
   }
   if (!(modelRuntime?.isModelReady ?? isConfiguredModelRuntimeReady)(configuredModelApiId)) {
-    throw new Error("The selected project model is not synchronized with AgentBackend.");
+    throw new GenerationError("model_not_ready", "The selected conversation model is not synchronized with Agent Runtime.");
   }
   return { projectId: thread.projectId, configuredModel };
 }

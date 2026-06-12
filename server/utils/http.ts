@@ -4,7 +4,11 @@ export type ApiErrorCode =
   | "bad_request"
   | "not_found"
   | "internal_error"
-  | "validation_failed";
+  | "validation_failed"
+  | "model_required"
+  | "model_not_ready"
+  | "runtime_unavailable"
+  | "runtime_auth_failed";
 
 export function sendOk<T>(response: Response, payload: T) {
   response.json(payload);

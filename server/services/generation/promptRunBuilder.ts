@@ -36,11 +36,7 @@ export async function buildGenerationRunContext(
 ): Promise<GenerationRunContext> {
   const runtimeConfig = await agentRuntime.getAgentRuntimeConfig(payload.agentCardId ?? payload.taskId ?? "");
   const agentCard = runtimeConfig.agentCard;
-  const thread = storage.getThread?.(threadId);
-  const projectContext = thread ? storage.getProjectSharedContext?.(thread.projectId) : undefined;
-  const effectivePayload = projectContext
-    ? { ...payload, contextValues: { project: projectContext, ...payload.contextValues } }
-    : payload;
+  const effectivePayload = payload;
   const effectiveToolState: ToolState = { ...runtimeConfig.settings.tools, ...payload.toolState };
   const skills = await loadSkillsByRefs(agentCard.skillRefs);
   const prompt = buildAgentPrompt({
@@ -70,7 +66,7 @@ export async function buildGenerationRunContext(
     knowledgeContext: knowledge.context,
     threadId,
     contextCount: modelSettings.contextCount,
-    clearContext: Boolean(effectiveToolState.clear_context)
+    clearContext: false
   });
 
   return {
@@ -112,7 +108,7 @@ export async function resolveModelSettings(
 }
 
 export function buildChatMessages(
-  storage: Pick<SQLiteStorageRepository, "listMessages">,
+  storage: Pick<SQLiteStorageRepository, "getThread" | "listMessages">,
   input: {
     systemPrompt: string;
     userPrompt?: string;
@@ -125,7 +121,9 @@ export function buildChatMessages(
 ): ChatMessage[] {
   const messages: ChatMessage[] = [{ role: "system", content: input.systemPrompt }];
   if (!input.clearContext && input.contextCount > 0) {
+    const contextResetAt = storage.getThread(input.threadId)?.contextResetAt;
     const history = storage.listMessages(input.threadId)
+      .filter((message) => !contextResetAt || message.createdAt > contextResetAt)
       .filter((message) => !shouldExcludeFromModelContext(message.text))
       .slice(-input.contextCount);
     for (const message of history) {

@@ -3,6 +3,7 @@ import { parseGenerateRequest, type GenerateRequest } from "../contracts/generat
 import type { GenerationService } from "../services/generationService.js";
 import type { CanvasDomainService } from "../domains/canvas/index.js";
 import { errorMessage, sendError, sendOk } from "../utils/http.js";
+import { GenerationError } from "../domains/generation/index.js";
 
 type GenerationRouteDeps = {
   generationService: GenerationService;
@@ -15,10 +16,10 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
       const payload = parseGenerateRequest(request.body);
       sendOk(response, await generationService.generateAndRecord(payload));
     } catch (error) {
-      const status = error instanceof Error && error.message.startsWith("Request body") || error instanceof Error && error.message.startsWith("mode ") || error instanceof Error && error.message.startsWith("locale ")
+      const status = error instanceof GenerationError ? generationErrorStatus(error.code) : error instanceof Error && error.message.startsWith("Request body") || error instanceof Error && error.message.startsWith("mode ") || error instanceof Error && error.message.startsWith("locale ")
         ? 400
         : 500;
-      sendError(response, status, status === 400 ? "bad_request" : "internal_error", errorMessage(error, "Generation failed"));
+      sendError(response, status, error instanceof GenerationError ? error.code : status === 400 ? "bad_request" : "internal_error", errorMessage(error, "Generation failed"));
     }
   });
 
@@ -41,7 +42,7 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
       writeSse(response, "final", result);
     } catch (error) {
       writeSse(response, "error", {
-        code: error instanceof Error && (error.message.startsWith("Request body") || error.message.startsWith("mode ") || error.message.startsWith("locale ")) ? "bad_request" : "internal_error",
+        code: error instanceof GenerationError ? error.code : error instanceof Error && (error.message.startsWith("Request body") || error.message.startsWith("mode ") || error.message.startsWith("locale ")) ? "bad_request" : "internal_error",
         message: errorMessage(error, "Generation failed")
       });
     } finally {
@@ -100,6 +101,12 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
       sendError(response, 400, "bad_request", errorMessage(error, "Unable to create range rewrite"));
     }
   });
+}
+
+function generationErrorStatus(code: GenerationError["code"]) {
+  if (code === "model_required" || code === "model_not_ready") return 409;
+  if (code === "runtime_auth_failed") return 401;
+  return 503;
 }
 
 function readModelOverrides(value: unknown): GenerateRequest["modelOverrides"] {

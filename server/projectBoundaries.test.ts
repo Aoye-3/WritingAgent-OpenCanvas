@@ -4,14 +4,15 @@ import { DatabaseSync } from "node:sqlite";
 import { migrateStorageSchema } from "./db/schema.js";
 import { createStorage } from "./storage.js";
 
-test("schema v3 uses project-owned Canvas tables and removes legacy thread inputs", () => {
+test("schema v4 uses project-owned Canvas tables and adds the conversation context reset boundary", () => {
   const db = new DatabaseSync(":memory:");
   migrateStorageSchema(db);
 
   const version = db.prepare(`SELECT MAX(version) as version FROM schema_version`).get() as { version: number };
-  assert.equal(version.version, 3);
+  assert.equal(version.version, 4);
   assert.equal(tableExists(db, "thread_inputs"), false);
   assert.equal(columnNames(db, "threads").includes("agent_card_id"), false);
+  assert.equal(columnNames(db, "threads").includes("context_reset_at"), true);
   for (const table of ["canvas_nodes", "canvas_edges", "canvas_objects", "canvas_workflows", "canvas_workflow_suggestions", "canvas_write_requests"]) {
     const columns = columnNames(db, table);
     assert.equal(columns.includes("project_id"), true, `${table} should have project_id`);
@@ -67,6 +68,20 @@ test("projects own threads, models, and agent inputs without cross-project leaka
   assert.deepEqual(storage.getProjectModelBindings(firstProjectId), ["model_config_a", "model_config_b"]);
   assert.deepEqual(storage.getProjectAgentInputValues(firstProjectId, "blog-post"), { topic: "First only" });
   assert.deepEqual(storage.getProjectAgentInputValues(secondProjectId, "blog-post"), { topic: "Second only" });
+});
+
+test("conversation model selection no longer requires a project model binding", async () => {
+  const storage = await createStorage();
+  const suffix = Date.now().toString(36);
+  const projectId = `project_direct_model_${suffix}`;
+  const threadId = `thread_direct_model_${suffix}`;
+  storage.createProject(projectId, "Direct model project");
+  await storage.ensureThread(threadId, projectId);
+
+  const thread = storage.setThreadModelConfig(threadId, "configured_chat_model");
+
+  assert.equal(thread?.configuredModelApiId, "configured_chat_model");
+  assert.deepEqual(storage.getProjectModelBindings(projectId), []);
 });
 
 test("project canvas is shared by project threads and isolated from other projects", async () => {

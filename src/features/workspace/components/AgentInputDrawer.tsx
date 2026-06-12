@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChevronLeftIcon, ChevronRightIcon } from "../../../shared/icons";
 import { ChipGroup, IconButton, SelectField, SegmentedControl, TextareaField, TextField } from "../../../shared/ui";
-import type { AgentCard, AgentCardField, AgentValues, StoredOutputVersion } from "../../agents/types";
+import type { AgentCard, AgentCardField, AgentValues } from "../../agents/types";
 import type { Locale } from "../../i18n/types";
 import type { ConfiguredModelApiSummary } from "../../settings/types";
 
@@ -12,18 +12,11 @@ type AgentInputDrawerProps = {
   locale: Locale;
   projectTitle: string;
   configuredModels: ConfiguredModelApiSummary[];
-  projectModelIds: string[];
   selectedModelConfigId?: string | null;
-  selectedCanvasIncluded?: boolean;
-  selectedCanvasNodeId?: string;
-  outputVersions: StoredOutputVersion[];
   onCollapse: () => void;
   onExpand: () => void;
   onProjectTitleChange: (title: string) => Promise<void>;
   onSelectModel: (configuredModelApiId: string) => Promise<void>;
-  onToggleProjectModel: (configuredModelApiId: string, bound: boolean) => Promise<void>;
-  onToggleSelectedCanvasContext: (included: boolean) => Promise<void>;
-  onToggleOutputProjectContext: (versionId: string, included: boolean) => Promise<void>;
   onValuesChange: (values: AgentValues) => void;
   labels: {
     coreSettings: string;
@@ -37,10 +30,8 @@ type AgentInputDrawerProps = {
 
 export function AgentInputDrawer(props: AgentInputDrawerProps) {
   const {
-    activeAgent, agentValues, collapsed, locale, projectTitle, configuredModels, projectModelIds,
-    selectedModelConfigId, selectedCanvasIncluded, selectedCanvasNodeId, outputVersions, onCollapse,
-    onExpand, onProjectTitleChange, onSelectModel, onToggleProjectModel, onToggleSelectedCanvasContext,
-    onToggleOutputProjectContext, onValuesChange, labels
+    activeAgent, agentValues, collapsed, locale, projectTitle, configuredModels,
+    selectedModelConfigId, onCollapse, onExpand, onProjectTitleChange, onSelectModel, onValuesChange, labels
   } = props;
   const [projectTitleDraft, setProjectTitleDraft] = useState(projectTitle);
 
@@ -78,37 +69,18 @@ export function AgentInputDrawer(props: AgentInputDrawerProps) {
             onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
         </div>
 
-        <section className="project-model-settings" aria-label={locale === "zh" ? "项目模型" : "Project models"}>
+        <section className="project-model-settings" aria-label={locale === "zh" ? "会话模型" : "Conversation model"}>
           <SelectField label={locale === "zh" ? "会话模型" : "Conversation model"} value={selectedModelConfigId ?? ""}
             onChange={(event) => { void onSelectModel(event.target.value); }}>
             <option value="">{locale === "zh" ? "生成前请选择模型" : "Select a model before generating"}</option>
-            {configuredModels.filter((model) => projectModelIds.includes(model.id)).map((model) => (
-              <option key={model.id} value={model.id}>{model.providerLabel} / {model.modelName}</option>
-            ))}
+            {modelGroups(locale).map((group) => {
+              const models = configuredModels.filter((model) => model.capabilityGroup === group.id);
+              return models.length ? <optgroup key={group.id} label={group.label}>
+                {models.map((model) => <option key={model.id} value={model.id}>{model.providerLabel} / {model.modelName}</option>)}
+              </optgroup> : null;
+            })}
           </SelectField>
-          <fieldset className="project-model-bindings">
-            <legend>{locale === "zh" ? "项目可用模型" : "Available to this Project"}</legend>
-            {configuredModels.length ? configuredModels.map((model) => (
-              <label key={model.id}><input type="checkbox" checked={projectModelIds.includes(model.id)}
-                onChange={(event) => { void onToggleProjectModel(model.id, event.target.checked); }} />
-                <span>{model.providerLabel} / {model.modelName}</span></label>
-            )) : <small>{locale === "zh" ? "请先在模型配置中添加可用模型。" : "Configure a model before binding it to this Project."}</small>}
-          </fieldset>
         </section>
-
-        {(selectedCanvasNodeId || outputVersions.length > 0) ? (
-          <section className="project-context-settings" aria-label={locale === "zh" ? "项目上下文" : "Project context"}>
-            <strong>{locale === "zh" ? "项目上下文" : "Project context"}</strong>
-            {selectedCanvasNodeId ? <label><input type="checkbox" checked={selectedCanvasIncluded ?? false}
-              onChange={(event) => { void onToggleSelectedCanvasContext(event.target.checked); }} />
-              <span>{locale === "zh" ? "包含当前 Canvas 节点" : "Include selected Canvas node"}</span></label> : null}
-            {outputVersions.slice(0, 3).map((version) => (
-              <label key={version.id}><input type="checkbox" checked={version.includeInProjectContext}
-                onChange={(event) => { void onToggleOutputProjectContext(version.id, event.target.checked); }} />
-                <span>{locale === "zh" ? "包含输出版本" : "Include output"}: {version.content.slice(0, 42)}</span></label>
-            ))}
-          </section>
-        ) : null}
 
         <form className="facet-form">
           <p className="agent-parameter-heading">{locale === "zh" ? `${activeAgent.title[locale]} 参数` : `${activeAgent.title[locale]} parameters`}</p>
@@ -121,6 +93,14 @@ export function AgentInputDrawer(props: AgentInputDrawerProps) {
       </div>
     </aside>
   );
+}
+
+function modelGroups(locale: Locale) {
+  return [
+    { id: "reasoning", label: locale === "zh" ? "推理模型" : "Reasoning models" },
+    { id: "chat", label: locale === "zh" ? "对话模型" : "Chat models" },
+    { id: "other-chat", label: locale === "zh" ? "其他聊天模型" : "Other chat models" }
+  ] as const;
 }
 
 function renderField(field: AgentCardField, values: AgentValues, updateValue: (id: string, value: string) => void, locale: Locale) {

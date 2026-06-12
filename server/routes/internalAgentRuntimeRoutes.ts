@@ -38,6 +38,9 @@ export function registerInternalToolBridgeRoute(
         contextValues: body.contextValues,
         chatInstruction: body.chatInstruction,
         knowledgeService,
+        resetContext: () => {
+          if (!storage.resetThreadContext(body.threadId)) throw new Error("Thread not found");
+        },
         createCanvasWriteRequest: (input) => storage.createCanvasWriteRequest(body.threadId, input)
       });
       sendOk(response, result);

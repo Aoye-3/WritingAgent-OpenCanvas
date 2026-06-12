@@ -154,6 +154,11 @@ export class SQLiteStorageRepository {
     return this.threads.getThread(threadId);
   }
 
+  resetThreadContext(threadId: string) {
+    validateId(threadId, "threadId");
+    return this.threads.resetContext(threadId);
+  }
+
   listRecentThreads(limit = 8) {
     return this.threads.listRecentThreads(limit);
   }
@@ -193,13 +198,10 @@ export class SQLiteStorageRepository {
 
   setThreadModelConfig(threadId: string, configuredModelApiId?: string) {
     validateId(threadId, "threadId");
-    if (configuredModelApiId) validateId(configuredModelApiId, "configuredModelApiId");
-    const thread = this.getThread(threadId);
-    if (!thread) return undefined;
-    if (configuredModelApiId && !this.getProjectModelBindings(thread.projectId).includes(configuredModelApiId)) {
-      throw new Error("Model configuration is not bound to this project");
-    }
-    this.db.prepare(`UPDATE threads SET configured_model_api_id = ?, updated_at = ? WHERE id = ?`).run(configuredModelApiId ?? null, nowIso(), threadId);
+      if (configuredModelApiId) validateId(configuredModelApiId, "configuredModelApiId");
+      const thread = this.getThread(threadId);
+      if (!thread) return undefined;
+      this.db.prepare(`UPDATE threads SET configured_model_api_id = ?, updated_at = ? WHERE id = ?`).run(configuredModelApiId ?? null, nowIso(), threadId);
     return this.getThread(threadId);
   }
 

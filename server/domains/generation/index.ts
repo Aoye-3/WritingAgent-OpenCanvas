@@ -1,5 +1,7 @@
 export {
   createGenerationService,
+  GenerationError,
+  type GenerationErrorCode,
   type GenerationService,
   type GenerationServiceDeps
 } from "../../services/generation/generationService.js";

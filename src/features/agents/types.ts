@@ -149,7 +149,8 @@ export type StoredThread = {
   id: string;
   projectId: string;
   title: string;
-  configuredModelApiId?: string | null;
+    configuredModelApiId?: string | null;
+    contextResetAt?: string | null;
   updatedAt: string;
   deletedAt?: string | null;
   assetCount?: number;

@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
+import { resolveConversationModelId } from "../domains/model-config/index.js";
 import type { SQLiteStorageRepository } from "../storage.js";
 import { errorMessage, sendError, sendOk } from "../utils/http.js";
 import { randomThreadId, safeId } from "../utils/ids.js";
@@ -7,9 +8,10 @@ import { randomThreadId, safeId } from "../utils/ids.js";
 type ThreadRouteDeps = {
   storage: SQLiteStorageRepository;
   agentRuntime: AgentRuntimeAdapter;
+  resolveModelId?: typeof resolveConversationModelId;
 };
 
-export function registerThreadRoutes(app: Express, { storage, agentRuntime: _agentRuntime }: ThreadRouteDeps) {
+export function registerThreadRoutes(app: Express, { storage, agentRuntime: _agentRuntime, resolveModelId = resolveConversationModelId }: ThreadRouteDeps) {
   app.get("/api/threads/recent", (_request, response) => {
     sendOk(response, { threads: storage.listRecentThreads() });
   });
@@ -20,7 +22,15 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
 
     try {
       if (!projectId || !storage.getProject(projectId)) throw new Error("A valid projectId is required");
-      const thread = await storage.ensureThread(threadId, projectId, request.body?.title ?? "New conversation");
+      let thread = await storage.ensureThread(threadId, projectId, request.body?.title ?? "New conversation");
+      const configuredModelApiId = await resolveModelId([
+        thread?.configuredModelApiId,
+        storage.listProjectThreads(projectId).find((candidate) => candidate.configuredModelApiId)?.configuredModelApiId,
+        storage.listRecentThreads().find((candidate) => candidate.configuredModelApiId)?.configuredModelApiId
+      ]);
+      if (configuredModelApiId && thread?.configuredModelApiId !== configuredModelApiId) {
+        thread = storage.setThreadModelConfig(threadId, configuredModelApiId);
+      }
       sendOk(response, { thread, threadId: thread?.id ?? threadId, projectId });
     } catch (error) {
       sendError(response, 400, "bad_request", errorMessage(error, "Unable to create thread"));
@@ -130,6 +140,12 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
     }
   });
 
+  app.post("/api/threads/:threadId/context-reset", (request, response) => {
+    const thread = storage.resetThreadContext(request.params.threadId);
+    if (!thread) return sendError(response, 404, "not_found", "Thread not found");
+    sendOk(response, { thread, contextResetAt: thread.contextResetAt });
+  });
+
   app.patch("/api/threads/:threadId/output-versions/:versionId/context", (request, response) => {
     if (typeof request.body?.included !== "boolean") {
       return sendError(response, 400, "bad_request", "included must be a boolean");
@@ -157,14 +173,22 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
     sendOk(response, { messages: storage.listMessages(request.params.threadId) });
   });
 
-  app.get("/api/threads/:threadId/state", (request, response) => {
-    const thread = storage.getThread(request.params.threadId);
+  app.get("/api/threads/:threadId/state", async (request, response) => {
+    let thread = storage.getThread(request.params.threadId);
     if (!thread) {
       sendError(response, 404, "not_found", "Thread not found");
       return;
     }
 
     const projectId = thread.projectId;
+    const configuredModelApiId = await resolveModelId([
+      thread.configuredModelApiId,
+      storage.listProjectThreads(projectId).find((candidate) => candidate.configuredModelApiId)?.configuredModelApiId,
+      storage.listRecentThreads().find((candidate) => candidate.configuredModelApiId)?.configuredModelApiId
+    ]);
+    if (configuredModelApiId && thread.configuredModelApiId !== configuredModelApiId) {
+      thread = storage.setThreadModelConfig(thread.id, configuredModelApiId) ?? thread;
+    }
     const project = storage.listProjects().find((candidate) => candidate.id === projectId);
     storage.migrateCanvasWorkflowRoleNodes(projectId);
     sendOk(response, {

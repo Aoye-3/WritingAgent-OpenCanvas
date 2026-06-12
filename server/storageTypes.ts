@@ -36,6 +36,7 @@ export type StoredThread = {
   projectId: string;
   title: string;
   configuredModelApiId?: string | null;
+  contextResetAt?: string | null;
   updatedAt: string;
   deletedAt?: string | null;
   assetCount?: number;

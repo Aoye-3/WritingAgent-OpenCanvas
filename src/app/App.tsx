@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { bindProjectModels, createProject, fetchProjectFirstHealth, fetchThreadState, renameProject, saveThreadInputs, selectThreadModel, setOutputVersionProjectContext } from "../features/agents/agentClient";
+import { createProject, fetchProjectFirstHealth, fetchThreadState, renameProject, resetThreadContext, saveThreadInputs, selectThreadModel } from "../features/agents/agentClient";
 import { AgentSettingsView } from "../features/agents/AgentSettingsView";
 import { useAgentCards } from "../features/agents/hooks/useAgentCards";
 import type { AgentCard, AgentValues, ProjectSummary, StoredThread, ThreadStateResponse } from "../features/agents/types";
@@ -8,13 +8,13 @@ import { useAppNavigation } from "../features/app/useAppNavigation";
 import type { GenerateRequest } from "../features/generation/types";
 import { I18nProvider, useI18n } from "../features/i18n/I18nProvider";
 import { ProjectSettingsPanel } from "../features/settings/ProjectSettingsPanel";
-import { getCanvasSettings } from "../features/settings/settingsClient";
+import { getAgentBackendRuntimeStatus, getCanvasSettings } from "../features/settings/settingsClient";
 import { StartView } from "../features/start/StartView";
 import { HomeView } from "../features/home/HomeView";
 import { KnowledgeSettingsView } from "../features/knowledge/KnowledgeSettingsView";
 import { ModelConfigView } from "../features/model-config/ModelConfigView";
 import { getConfiguredModelApis } from "../features/model-config/modelConfigClient";
-import type { ConfiguredModelApiSummary } from "../features/settings/types";
+import type { AgentBackendRuntimeStatus, ConfiguredModelApiSummary } from "../features/settings/types";
 import { ProjectsView } from "../features/projects/ProjectsView";
 import { useProjects } from "../features/projects/hooks/useProjects";
 import { WorkspaceView } from "../features/workspace/WorkspaceView";
@@ -59,8 +59,8 @@ function AppContent() {
   const [agentValues, setAgentValues] = useState<AgentValues>(() => getInitialValues(fallbackAgentCards[0]));
   const [activeProjectTitle, setActiveProjectTitle] = useState(fallbackAgentCards[0].title[locale]);
   const [activeProjectId, setActiveProjectId] = useState("");
-  const [projectModelIds, setProjectModelIds] = useState<string[]>([]);
   const [configuredModels, setConfiguredModels] = useState<ConfiguredModelApiSummary[]>([]);
+  const [runtimeStatus, setRuntimeStatus] = useState<AgentBackendRuntimeStatus>();
   const [selectedModelConfigId, setSelectedModelConfigId] = useState<string | null>(null);
   const [projectInputs, setProjectInputs] = useState<Record<string, AgentValues>>({});
   const activeProjectIdRef = useRef("");
@@ -78,7 +78,6 @@ function AppContent() {
     setProjectInputs(nextProjectInputs);
     setAgentValues({ ...getInitialValues(agentCard), ...(nextProjectInputs[agentCard.id] ?? {}) });
     setActiveProjectId(state.thread.projectId);
-    setProjectModelIds(state.project?.modelConfigIds ?? []);
     setSelectedModelConfigId(state.thread.configuredModelApiId ?? null);
     setActiveProjectTitle(state.project?.title ?? state.thread.title);
     threadSession.setThreadId(state.thread.id);
@@ -145,9 +144,13 @@ function AppContent() {
       chainNodeIds
     }) : undefined;
     const contextNodeIds = new Set(workflowContext?.nodes.map((node) => node.id));
+    const selectedAndRelatedNodeIds = new Set(selectedCanvasNode ? [
+      selectedCanvasNode.id,
+      ...canvasState.canvasEdges.filter((edge) => edge.sourceNodeId === selectedCanvasNode.id).map((edge) => edge.targetNodeId)
+    ] : []);
     const contextNodes = canvasState.canvasWorkflow
       ? canvasState.canvasNodes.filter((node) => contextNodeIds.has(node.id))
-      : canvasState.canvasNodes.filter((node) => node.kind !== "note");
+      : canvasState.canvasNodes.filter((node) => node.kind !== "note" && selectedAndRelatedNodeIds.has(node.id));
     if (contextNodes.length > 0 || (selectedCanvasNode && selectedCanvasNode.kind !== "note")) {
       values.canvas = {
         nodes: contextNodes.map((node) => ({
@@ -211,8 +214,15 @@ function AppContent() {
     refreshRecentThreads();
     refreshProjects();
     getCanvasSettings().then((settings) => setCanvasUndoDepth(settings.undoDepth)).catch(() => undefined);
-    getConfiguredModelApis().then((result) => setConfiguredModels(result.configs.filter((model) => model.enabled && model.keyConfigured))).catch(() => setConfiguredModels([]));
+    getConfiguredModelApis().then((result) => setConfiguredModels(result.configs.filter((model) => model.enabled && model.keyConfigured && model.modelType === "chat"))).catch(() => setConfiguredModels([]));
   }, [refreshProjects, refreshRecentThreads]);
+
+  useEffect(() => {
+    const refresh = () => { void getAgentBackendRuntimeStatus().then(setRuntimeStatus).catch(() => setRuntimeStatus(undefined)); };
+    refresh();
+    const timer = window.setInterval(refresh, 10000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (view === "projects") {
@@ -288,7 +298,6 @@ function AppContent() {
     const project = await createProject(projectTitle);
     setActiveProjectId(project.id);
     setProjectInputs({});
-    setProjectModelIds([]);
     setSelectedModelConfigId(null);
     await threadSession.openProject(project.id);
   };
@@ -363,7 +372,6 @@ function AppContent() {
         generation={generationRun.generation}
         isChatSending={generationRun.isChatSending}
         isGenerating={generationRun.isGenerating}
-        outputVersions={generationRun.outputVersions}
         activeVersionId={generationRun.activeVersionId}
         canvasNodes={canvasState.canvasNodes}
         canvasEdges={canvasState.canvasEdges}
@@ -376,22 +384,14 @@ function AppContent() {
         toolEvents={generationRun.toolEvents}
         projectTitle={activeProjectTitle}
         configuredModels={configuredModels}
-        projectModelIds={projectModelIds}
-        onToggleProjectModel={async (configuredModelApiId, bound) => {
-          if (!activeProjectId) return;
-          const next = bound
-            ? [...new Set([...projectModelIds, configuredModelApiId])]
-            : projectModelIds.filter((id) => id !== configuredModelApiId);
-          const saved = await bindProjectModels(activeProjectId, next);
-          setProjectModelIds(saved);
-          if (!bound && selectedModelConfigId === configuredModelApiId) setSelectedModelConfigId(null);
-        }}
+        runtimeStatus={runtimeStatus}
         selectedModelConfigId={selectedModelConfigId}
         currentThreadId={threadSession.threadId}
         projectThreads={threadSession.projectThreads}
         sessionBusy={threadSession.sessionBusy}
         sessionError={threadSession.sessionError}
         onCreateConversation={async () => { if (activeProjectId) await threadSession.createConversation(activeProjectId); }}
+        onResetContext={async () => { if (threadSession.threadId) await resetThreadContext(threadSession.threadId); }}
         onSelectThread={async (threadId) => { await threadSession.restoreThread(threadId); }}
         onSelectModel={async (configuredModelApiId) => {
           if (!threadSession.threadId || !configuredModelApiId) return;
@@ -437,11 +437,6 @@ function AppContent() {
           await canvasState.handleApproveCanvasWriteRequest(request.id);
         }}
         onRestoreVersion={generationRun.restoreVersion}
-        onToggleOutputProjectContext={async (versionId, included) => {
-          if (!threadSession.threadId) return;
-          await setOutputVersionProjectContext(threadSession.threadId, versionId, included);
-          await refreshThreadState(threadSession.threadId);
-        }}
         onSelectCanvasNode={canvasState.setSelectedCanvasNodeId}
         onToolStateChange={setToolState}
         onUpdateCanvasNode={canvasState.handleUpdateCanvasNode}

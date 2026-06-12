@@ -7,19 +7,19 @@ export class ThreadRepository {
 
   getThread(threadId: string) {
     return this.db
-      .prepare(`SELECT id, project_id as projectId, title, configured_model_api_id as configuredModelApiId, updated_at as updatedAt, deleted_at as deletedAt FROM threads WHERE id = ? AND deleted_at IS NULL`)
+      .prepare(`SELECT id, project_id as projectId, title, configured_model_api_id as configuredModelApiId, context_reset_at as contextResetAt, updated_at as updatedAt, deleted_at as deletedAt FROM threads WHERE id = ? AND deleted_at IS NULL`)
       .get(threadId) as StoredThread | undefined;
   }
 
   listRecentThreads(limit = 8) {
     return this.db
-      .prepare(`SELECT id, project_id as projectId, title, configured_model_api_id as configuredModelApiId, updated_at as updatedAt, deleted_at as deletedAt FROM threads WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?`)
+      .prepare(`SELECT id, project_id as projectId, title, configured_model_api_id as configuredModelApiId, context_reset_at as contextResetAt, updated_at as updatedAt, deleted_at as deletedAt FROM threads WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?`)
       .all(limit) as StoredThread[];
   }
 
   listProjectThreads(projectId: string) {
     return this.db
-      .prepare(`SELECT id, project_id as projectId, title, configured_model_api_id as configuredModelApiId, updated_at as updatedAt, deleted_at as deletedAt
+      .prepare(`SELECT id, project_id as projectId, title, configured_model_api_id as configuredModelApiId, context_reset_at as contextResetAt, updated_at as updatedAt, deleted_at as deletedAt
         FROM threads WHERE project_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC`)
       .all(projectId) as StoredThread[];
   }
@@ -47,5 +47,11 @@ export class ThreadRepository {
 
   touchThread(threadId: string, updatedAt = nowIso()) {
     this.db.prepare(`UPDATE threads SET updated_at = ? WHERE id = ?`).run(updatedAt, threadId);
+  }
+
+  resetContext(threadId: string) {
+    const now = nowIso();
+    const result = this.db.prepare(`UPDATE threads SET context_reset_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`).run(now, now, threadId);
+    return result.changes > 0 ? this.getThread(threadId) : undefined;
   }
 }

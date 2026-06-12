@@ -14,7 +14,7 @@ import { WorkspaceUtilityBar } from "./components/WorkspaceUtilityBar";
 import type { CanvasTool } from "./components/canvas/toolState";
 import type { CanvasClipboardPayload } from "../../../shared/canvasClipboard";
 import type { CanvasMindChainContext } from "../../../shared/canvasMindChain";
-import type { ConfiguredModelApiSummary } from "../settings/types";
+import type { AgentBackendRuntimeStatus, ConfiguredModelApiSummary } from "../settings/types";
 
 const RIGHT_DRAWER_MIN_WIDTH = 360;
 const RIGHT_DRAWER_MAX_WIDTH = 720;
@@ -28,7 +28,6 @@ type WorkspaceViewProps = {
   generation: GenerateResponse | null;
   isChatSending: boolean;
   isGenerating: boolean;
-  outputVersions: StoredOutputVersion[];
   activeVersionId?: string;
   canvasNodes: CanvasNode[];
   canvasEdges: CanvasEdge[];
@@ -41,7 +40,7 @@ type WorkspaceViewProps = {
   toolEvents: StoredToolEvent[];
   projectTitle: string;
   configuredModels: ConfiguredModelApiSummary[];
-  projectModelIds: string[];
+  runtimeStatus?: AgentBackendRuntimeStatus;
   selectedModelConfigId?: string | null;
   currentThreadId: string;
   projectThreads: StoredThread[];
@@ -49,8 +48,8 @@ type WorkspaceViewProps = {
   sessionError: string;
   onSelectModel: (configuredModelApiId: string) => Promise<void>;
   onCreateConversation: () => Promise<void>;
+  onResetContext: () => Promise<void>;
   onSelectThread: (threadId: string) => Promise<void>;
-  onToggleProjectModel: (configuredModelApiId: string, bound: boolean) => Promise<void>;
   onApproveCanvasWriteRequest: (requestId: string) => Promise<{ request: CanvasWriteRequest; node?: CanvasNode }>;
   onAcceptCanvasWorkflowSuggestion: (suggestionId: string) => Promise<void>;
   onChatSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => Promise<void>;
@@ -75,7 +74,6 @@ type WorkspaceViewProps = {
   onRejectCanvasWriteRequest: (requestId: string) => Promise<void>;
   onRequestCanvasRangeRewrite: (draft: CanvasRangeRewriteDraft) => Promise<CanvasWriteRequest>;
   onRestoreVersion: (version: StoredOutputVersion) => void;
-  onToggleOutputProjectContext: (versionId: string, included: boolean) => Promise<void>;
   onSelectCanvasNode: (nodeId?: string) => void;
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
   onUpdateCanvasNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
@@ -107,16 +105,16 @@ export function WorkspaceView({
   toolEvents,
   projectTitle,
   configuredModels,
-  projectModelIds,
+  runtimeStatus,
   selectedModelConfigId,
   currentThreadId,
   projectThreads,
   sessionBusy,
   sessionError,
   onSelectModel,
-  onCreateConversation,
+    onCreateConversation,
+    onResetContext,
   onSelectThread,
-  onToggleProjectModel,
   onApproveCanvasWriteRequest,
   onAcceptCanvasWorkflowSuggestion,
   onChatSend,
@@ -138,8 +136,6 @@ export function WorkspaceView({
   onApplyCanvasWriteFromMessage,
   onRejectCanvasWriteRequest,
   onRequestCanvasRangeRewrite,
-  outputVersions,
-  onToggleOutputProjectContext,
   onSelectCanvasNode,
   onToolStateChange,
   onUpdateCanvasNode,
@@ -168,11 +164,9 @@ export function WorkspaceView({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const providerLabel = generation
-    ? generation.usedMock
-      ? t("workspace.mockNotice")
-      : generation.provider
-    : t("workspace.generatedFromPrompt");
+  const providerLabel = runtimeStatus?.reachable
+    ? `Agent Runtime / ${runtimeStatus.deploymentMode}`
+    : locale === "zh" ? "Agent Runtime 不可用" : "Agent Runtime unavailable";
 
   const startRightDrawerResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -237,20 +231,11 @@ export function WorkspaceView({
           locale={locale}
           projectTitle={projectTitle}
           configuredModels={configuredModels}
-          projectModelIds={projectModelIds}
           selectedModelConfigId={selectedModelConfigId}
-          selectedCanvasNodeId={selectedCanvasNodeId}
-          selectedCanvasIncluded={canvasNodes.find((node) => node.id === selectedCanvasNodeId)?.includeInProjectContext}
-          outputVersions={outputVersions}
           onCollapse={() => setLeftCollapsed(true)}
           onExpand={() => setLeftCollapsed(false)}
           onProjectTitleChange={onProjectTitleChange}
           onSelectModel={onSelectModel}
-          onToggleProjectModel={onToggleProjectModel}
-          onToggleSelectedCanvasContext={async (included) => {
-            if (selectedCanvasNodeId) await onUpdateCanvasNode(selectedCanvasNodeId, { includeInProjectContext: included });
-          }}
-          onToggleOutputProjectContext={onToggleOutputProjectContext}
           onValuesChange={onAgentValuesChange}
         />
 
@@ -312,7 +297,8 @@ export function WorkspaceView({
           sessionError={sessionError}
           modelSettings={activeAgent.settings?.model}
           onApproveWriteRequest={async (requestId) => { await onApproveCanvasWriteRequest(requestId); }}
-          onCreateConversation={onCreateConversation}
+            onCreateConversation={onCreateConversation}
+            onResetContext={onResetContext}
           onApplyWriteText={onApplyCanvasWriteFromMessage}
           onRejectWriteRequest={onRejectCanvasWriteRequest}
           onSend={onChatSend}

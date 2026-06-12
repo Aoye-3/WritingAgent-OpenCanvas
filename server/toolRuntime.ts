@@ -12,6 +12,7 @@ export type ToolExecutionContext = {
   contextValues?: Record<string, unknown>;
   chatInstruction?: string;
   knowledgeService?: KnowledgeService;
+  resetContext?: () => unknown;
   createCanvasWriteRequest?: (input: CanvasWriteRequestInput) => {
     id: string;
     operation: string;
@@ -106,9 +107,17 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
   }
 
   if (name === "clear_context") {
+    if (!context.resetContext) {
+      return {
+        ok: false,
+        content: "Conversation context reset is not available in this workspace.",
+        payload: { tool: name, cleared: false }
+      };
+    }
+    context.resetContext();
     return {
       ok: true,
-      content: "Previous conversation context has been cleared for this run.",
+      content: "Previous conversation context has been cleared.",
       payload: { tool: name, cleared: true }
     };
   }

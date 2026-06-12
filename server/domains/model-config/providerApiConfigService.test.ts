@@ -4,12 +4,44 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  classifyConfiguredModelCapability,
   deleteProviderApiConfig,
+  listConversationModelSummaries,
   listProviderApiConfigSummaries,
   readProviderApiConfigStore,
   resolveProviderApiConfig,
-  saveProviderApiConfig
+  saveProviderApiConfig,
+  writeProviderApiConfigStore
 } from "./providerApiConfigService.js";
+
+test("conversation models include only enabled keyed chat configs and expose capability groups", async () => {
+  await withTempWorkspace(async () => {
+    await writeProviderApiConfigStore({
+      version: 2,
+      activeConfigId: "reasoner",
+      configs: {
+        reasoner: configured("reasoner", "deepseek", "deepseek-reasoner", "chat", true, "sk-reasoner"),
+        chat: configured("chat", "deepseek", "deepseek-chat", "chat", true, "sk-chat"),
+        embedding: configured("embedding", "silicon", "BAAI/bge-m3", "embedding", true, "sk-embedding"),
+        disabled: configured("disabled", "deepseek", "disabled-chat", "chat", false, "sk-disabled"),
+        keyless: configured("keyless", "deepseek", "keyless-chat", "chat", true)
+      }
+    });
+
+    const result = await listConversationModelSummaries();
+
+    assert.equal(result.activeConfigId, "reasoner");
+    assert.deepEqual(result.configs.map((config) => [config.id, config.capabilityGroup]), [
+      ["reasoner", "reasoning"],
+      ["chat", "chat"]
+    ]);
+  });
+});
+
+test("model capability classification uses stable reasoning names", () => {
+  assert.equal(classifyConfiguredModelCapability({ modelId: "deepseek-r1", modelName: "DeepSeek R1" }), "reasoning");
+  assert.equal(classifyConfiguredModelCapability({ modelId: "gpt-4o", modelName: "GPT-4o" }), "chat");
+});
 
 test("provider API config store saves multiple providers and returns redacted summaries", async () => {
   await withTempWorkspace(async () => {
@@ -100,4 +132,19 @@ async function withTempWorkspace(fn: () => Promise<void>) {
     process.env = env;
     await rm(temp, { recursive: true, force: true });
   }
+}
+
+function configured(id: string, providerId: string, modelId: string, modelType: string, enabled: boolean, apiKey?: string) {
+  return {
+    id,
+    providerId,
+    modelId,
+    modelName: modelId,
+    modelType,
+    apiKey,
+    baseURL: "https://example.test/v1",
+    enabled,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z"
+  };
 }

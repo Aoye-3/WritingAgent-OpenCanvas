@@ -73,7 +73,7 @@ function fakeAgentRuntime(config = runtimeConfig()): AgentRuntimeAdapter {
   } as unknown as AgentRuntimeAdapter;
 }
 
-function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string }> = []) {
+function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string }> = [], contextResetAt?: string) {
   const records: unknown[] = [];
   const canvasWriteRequests: unknown[] = [];
   return {
@@ -81,7 +81,7 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
     canvasWriteRequests,
     storage: {
       ensureThread: async () => undefined,
-      getThread: () => ({ id: "thread_test", projectId: "project_test", title: "Test", configuredModelApiId: "configured-test", updatedAt: "" }),
+      getThread: () => ({ id: "thread_test", projectId: "project_test", title: "Test", configuredModelApiId: "configured-test", contextResetAt, updatedAt: "" }),
       getProject: () => ({ id: "project_test", title: "Test", summary: "", updatedAt: "" }),
       getProjectModelBindings: () => ["configured-test"],
       getProjectSharedContext: () => undefined,
@@ -168,6 +168,31 @@ test("generation facade records AgentBackend runs when AgentBackend is enabled",
   assert.equal((records[0] as { configuredModelApiId: string }).configuredModelApiId, "configured-test");
 });
 
+test("generation accepts the selected conversation model without a project binding", async () => {
+  const { storage } = fakeStorage();
+  storage.getProjectModelBindings = () => [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: "AgentBackend text",
+        finishReason: "stop",
+        events: []
+      })
+    }
+  });
+
+  const result = await service.generateAndRecord({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "blog-post",
+    freeTextPrompt: "Hello"
+  });
+
+  assert.equal(result.provider, "agent-backend");
+});
+
 test("generation facade creates a pending Canvas write request for AgentBackend canvas intent", async () => {
   const { storage, records, canvasWriteRequests } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {
@@ -232,8 +257,9 @@ test("generation facade recognizes Chinese and English Canvas write intents", as
 test("generation facade falls back to mock without calling provider when AgentBackend fails", async () => {
   const { storage, records } = fakeStorage();
   let providerCalls = 0;
-  const service = createGenerationService(storage, fakeAgentRuntime(), {
-    modelRuntime: fakeModelRuntime,
+    const service = createGenerationService(storage, fakeAgentRuntime(), {
+      mockFallbackEnabled: true,
+      modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async () => {
@@ -259,10 +285,30 @@ test("generation facade falls back to mock without calling provider when AgentBa
   assert.ok((records[0] as { events: Array<{ eventType: string; payload: { fallback?: string } }> }).events.some((event) => event.eventType === "agent_backend_runtime_failed" && event.payload.fallback === "mock"));
 });
 
-test("generation facade blocks AgentBackend internal prompt output before recording", async () => {
+test("generation facade exposes runtime failure without recording a mock result by default", async () => {
   const { storage, records } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {
     modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => {
+        throw new Error("AgentBackend down");
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "Hello" }),
+    (error: unknown) => (error as { code?: string }).code === "runtime_unavailable"
+  );
+  assert.equal(records.length, 0);
+});
+
+test("generation facade blocks AgentBackend internal prompt output before recording", async () => {
+  const { storage, records } = fakeStorage();
+    const service = createGenerationService(storage, fakeAgentRuntime(), {
+      mockFallbackEnabled: true,
+      modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async () => ({
@@ -295,8 +341,9 @@ test("generation facade blocks AgentBackend internal prompt output before record
 
 test("generation facade falls back to mock when AgentBackend returns a provider-unavailable message", async () => {
   const { storage, records } = fakeStorage();
-  const service = createGenerationService(storage, fakeAgentRuntime(), {
-    modelRuntime: fakeModelRuntime,
+    const service = createGenerationService(storage, fakeAgentRuntime(), {
+      mockFallbackEnabled: true,
+      modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async () => ({
@@ -328,8 +375,9 @@ test("streaming generation falls back to mock without calling provider when Agen
   const { storage } = fakeStorage();
   let providerCalls = 0;
   const tokens: string[] = [];
-  const service = createGenerationService(storage, fakeAgentRuntime(), {
-    modelRuntime: fakeModelRuntime,
+    const service = createGenerationService(storage, fakeAgentRuntime(), {
+      mockFallbackEnabled: true,
+      modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async () => {
@@ -361,6 +409,7 @@ test("streaming generation falls back to mock without calling provider when Agen
 test("generation facade strips search result JSON from recorded assistant text", async () => {
   const { storage, records } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {
+    mockFallbackEnabled: true,
     modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
@@ -508,10 +557,11 @@ test("generation facade skips knowledge search when disabled by settings or tool
   }
 });
 
-test("generation facade honors clear_context and falls back to mock on AgentBackend failure", async () => {
-  const { storage, records } = fakeStorage([{ role: "assistant", text: "Should not appear" }]);
+test("generation facade excludes messages before the persisted context reset boundary", async () => {
+  const { storage, records } = fakeStorage([{ role: "assistant", text: "Should not appear" }], new Date(1).toISOString());
   let observedMessages: unknown[] = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
+    mockFallbackEnabled: true,
     modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
@@ -527,7 +577,7 @@ test("generation facade honors clear_context and falls back to mock on AgentBack
     locale: "zh",
     agentCardId: "blog-post",
     chatInstruction: "继续写",
-    toolState: { clear_context: true }
+    toolState: {}
   });
 
   assert.equal(result.provider, "mock");

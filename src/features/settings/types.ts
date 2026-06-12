@@ -61,6 +61,7 @@ export type ConfiguredModelApiSummary = {
   enabled: boolean;
   createdAt?: string;
   updatedAt?: string;
+  capabilityGroup: "reasoning" | "chat" | "other-chat";
 };
 
 export type ProviderApiConfigListResponse = {

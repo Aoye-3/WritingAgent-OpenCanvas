@@ -8,13 +8,13 @@ import { createStorage } from "../storage.js";
 import { registerThreadRoutes } from "./threadRoutes.js";
 import { registerProjectRoutes } from "./projectRoutes.js";
 
-async function withThreadRoutes() {
+async function withThreadRoutes(resolveModelId?: (preferredIds?: Array<string | null | undefined>) => Promise<string | undefined>) {
   const storage = await createStorage();
   const agentRuntime = createAgentRuntimeAdapter(storage);
   storage.upsertAgentCards(agentCards);
   const app = express();
   app.use(express.json());
-  registerThreadRoutes(app, { storage, agentRuntime });
+  registerThreadRoutes(app, { storage, agentRuntime, resolveModelId });
   registerProjectRoutes(app, { storage, agentRuntime });
   return { app, storage };
 }
@@ -191,6 +191,49 @@ test("creates a named Project thread and returns the complete thread", async () 
   assert.equal((result.body.thread as { projectId: string }).projectId, projectId);
   assert.equal((result.body.thread as { title: string }).title, "Research conversation");
   assert.equal(typeof (result.body.thread as { id: string }).id, "string");
+});
+
+test("new conversations inherit the project's most recently used valid model", async () => {
+  const observed: Array<Array<string | null | undefined>> = [];
+  const { app, storage } = await withThreadRoutes(async (preferredIds = []) => {
+    observed.push(preferredIds);
+    return preferredIds.find(Boolean) ?? "configured-default";
+  });
+  const projectId = `project_thread_model_${Date.now()}`;
+  storage.createProject(projectId, "Thread model project");
+  await storage.ensureThread(`${projectId}_existing`, projectId, "Existing");
+  storage.setThreadModelConfig(`${projectId}_existing`, "configured-recent");
+
+  const result = await post(app, "/api/threads", { projectId, title: "Inherited model" });
+
+  assert.equal(result.status, 200);
+  assert.equal((result.body.thread as { configuredModelApiId: string }).configuredModelApiId, "configured-recent");
+  assert.equal(observed[0]?.includes("configured-recent"), true);
+});
+
+test("resets conversation context without deleting visible message history", async () => {
+  const { app, storage } = await withThreadRoutes();
+  const projectId = `project_context_reset_${Date.now()}`;
+  const threadId = `${projectId}_thread`;
+  storage.createProject(projectId, "Context reset project");
+  await storage.ensureThread(threadId, projectId);
+  storage.recordRun({
+    threadId,
+    agentCardId: "blog-post",
+    mode: "chat",
+    prompt: "old prompt",
+    output: "old output",
+    provider: "mock",
+    usedMock: true,
+    userMessage: "old message"
+  });
+
+  const result = await post(app, `/api/threads/${threadId}/context-reset`, {});
+
+  assert.equal(result.status, 200);
+  assert.equal(typeof result.body.contextResetAt, "string");
+  assert.equal(storage.listMessages(threadId).length, 2);
+  assert.equal(storage.getThread(threadId)?.contextResetAt, result.body.contextResetAt);
 });
 
 test("lists only active threads for the requested Project in update order", async () => {
