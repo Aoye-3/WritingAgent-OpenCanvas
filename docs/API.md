@@ -12,6 +12,8 @@
 
 Tool event payloads are sanitized before persistence and SSE delivery. Internal Bridge calls require `FACETWRITE_INTERNAL_TOOL_TOKEN`.
 
+When a run uses `web_search`, completed search tool events may include sanitized `payload.sources` entries shaped as `{ title, url }`. The final visible assistant text must contain clickable source URLs; the backend appends a Sources section when possible and blocks the answer when no source URL is available.
+
 `POST /api/threads/:threadId/plans/intake` creates a server-owned draft intake. Approval, resume, and retry routes wake the persistent Plan executor; the frontend does not run Plan steps.
 
 The backend derives Plan phase independently of frontend flags. `/plan` forces planning-only tools; approved continuation forces Plan execution tools and a single step id. Ordinary chat keeps the active Agent's configured tool state.
@@ -126,6 +128,8 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - `token` events are emitted as progressive, user-visible assistant text segments after the backend safety gate has enough text to rule out obvious internal prompt, ToolUse, or reasoning leaks. Segments are intentionally small UI chunks so the right AI collaboration drawer can render a visible typewriter effect even when an upstream provider or runtime flushes a large block at once.
   - `error` payloads include `code` and `message`.
   - Agent Runtime custom subagent events from the current adapter are emitted as `tool_event` records with `eventType` prefixed by `AgentBackend_`.
+  - Repeated tool lifecycle events are detailed runtime timeline data, not chat transcript messages. Clients should aggregate same-tool progress into the current streaming assistant status and keep full event detail in the Tool event timeline.
+  - Canvas and Artifact lifecycle `tool_event` records, such as `canvas_mutation_committed`, `canvas_write_pending_approval`, `canvas_mutation_failed`, and `artifact_committed`, are live state hints. Clients may refresh Thread state immediately so Canvas/Plan surfaces update while assistant text is still streaming.
   - Agent Runtime failure is emitted as a `tool_event` with `eventType:"agent_backend_runtime_failed"` and a redacted diagnostic payload. The request then ends with a stable error code; no Mock message or output version is recorded unless the explicit test-only fallback flag is enabled.
   - The `final` payload remains the recorded `GenerateResponse`. Clients should let the chat assistant typewriter queue drain before reconciling temporary streaming text with this final thread state so the drawer does not suddenly replace a large block of content.
 

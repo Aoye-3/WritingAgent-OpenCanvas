@@ -90,3 +90,37 @@ test("creates an authoritative visible summary from a committed Canvas event", (
 
   assert.match(result.text, /created or updated/i);
 });
+
+test("appends source links when web search was used and the answer omitted citations", () => {
+  const result = normalizeAgentRunOutput({
+    text: "OpenAI publishes product and research updates on its official site.",
+    locale: "en",
+    source: "agent-backend",
+    events: [{
+      eventType: "agent_backend_tool_completed",
+      payload: {
+        toolName: "web_search",
+        sources: [{ title: "OpenAI", url: "https://openai.com" }]
+      }
+    }]
+  });
+
+  assert.match(result.text, /## Sources/);
+  assert.match(result.text, /\[OpenAI\]\(https:\/\/openai\.com\)/);
+  assert.ok(result.events.some((event) => event.eventType === "web_search_sources_appended"));
+});
+
+test("blocks web search answers when no source URLs are available", () => {
+  const result = normalizeAgentRunOutput({
+    text: "Here is a current-events summary from search.",
+    locale: "en",
+    source: "agent-backend",
+    events: [{
+      eventType: "agent_backend_tool_completed",
+      payload: { toolName: "web_search", sources: [] }
+    }]
+  });
+
+  assert.match(result.text, /source links were not available/i);
+  assert.ok(result.events.some((event) => event.eventType === "web_search_sources_missing"));
+});

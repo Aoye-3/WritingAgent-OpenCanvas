@@ -217,6 +217,16 @@ function AppContent() {
     await refreshProjectSurfaces();
   };
 
+  const applyLiveThreadState = (state: ThreadStateResponse) => {
+    if (activeThreadIdRef.current && state.thread.id !== activeThreadIdRef.current) return;
+    activeProjectIdRef.current = state.thread.projectId;
+    activeThreadIdRef.current = state.thread.id;
+    generationRun.setToolEvents(state.toolEvents);
+    generationRun.setCanvasWriteSuggestions(state.canvasWriteSuggestions ?? []);
+    generationRun.setPlans(state.plans ?? []);
+    canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? [], state.canvasWorkflow, state.canvasWorkflowSuggestions ?? [], state.canvasObjects ?? []);
+  };
+
   const updateProjectBrief = useCallback((brief: ProjectBrief) => {
     projectBriefRef.current = brief;
     projectBriefDirtyRef.current = true;
@@ -309,6 +319,7 @@ function AppContent() {
     onRefreshThreadState: refreshThreadState,
     onFetchAndApplyThreadState: fetchThreadState,
     onApplyThreadState: applyThreadState,
+    onApplyLiveThreadState: applyLiveThreadState,
     onApproveCanvasWriteRequest: async (requestId) => { await canvasState.handleApproveCanvasWriteRequest(requestId); },
     getPendingCanvasWriteRequestIds: () => canvasState.canvasWriteRequests.map((request) => request.id),
     onRefreshProjectSurfaces: refreshProjectSurfaces,

@@ -62,7 +62,7 @@ Knowledge Base vector stores and uploads are created under:
 - `output_versions`
   - Generated output versions connected to runs.
 - `tool_events`
-  - Tool and run events stored as JSON payloads.
+  - Tool and run events stored as JSON payloads. `web_search` events may include sanitized `sources` arrays with title and URL only; raw search result payloads and secrets must not be persisted.
 - `settings`
   - Generic settings key/value table.
 - `agent_settings`

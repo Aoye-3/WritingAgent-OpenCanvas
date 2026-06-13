@@ -58,6 +58,7 @@ export type ToolEventRecord = {
     | "internal_output_blocked"
     | "knowledge_search_completed"
     | "knowledge_search_failed"
+    | `web_search_${string}`
     | `canvas_${string}`
     | `agent_backend_${string}`;
   payload: Record<string, unknown>;

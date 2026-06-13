@@ -89,6 +89,8 @@ AgentBackend and provider responses are classified before recording:
 
 Only `assistant_text` may enter `messages` and `output_versions`. `tool_event` and `internal_event` are exposed through the runtime timeline with redacted payload previews.
 
+If `web_search` is used, the visible assistant answer must include clickable source URLs. The AgentBackend adapter extracts sanitized `sources` from the `web_search` tool result, and the output normalizer appends a Sources section when the model omitted citations. If no usable source URL is available, the answer is blocked instead of being stored as an unsourced search conclusion.
+
 Recoverable AgentBackend failures are runtime events and explicit API errors. If AgentBackend returns no user-visible text or returns content classified as internal/runtime-only, FacetWrite records `agent_backend_runtime_failed` without creating a successful assistant response. Mock output requires explicit local development opt-in; the local Provider runtime is not called by generation.
 
 ## Agent Runtime Main Agent And Subagents
@@ -179,7 +181,7 @@ Plan mode has stricter completion rules than ordinary chat. AgentBackend receive
 
 For `/api/generate/stream`, the TypeScript run loop uses provider streaming when available. It forwards assistant content deltas as `token` events, emits transient `status` events around thinking, ToolUse/searching, writing, and finalizing phases, and still accumulates the same final text for normalization and persistence.
 
-When Agent Runtime is enabled, `server/runtime/agentBackendAdapter/client.ts` calls `/api/runs/stream` through the backend AgentBackend auth session, maps token/message stream output into the FacetWrite response, forwards assistant message chunks as `token` events, and maps AgentBackend custom task events into `AgentBackend_*` tool events for the run history.
+When Agent Runtime is enabled, `server/runtime/agentBackendAdapter/client.ts` calls `/api/runs/stream` through the backend AgentBackend auth session, maps token/message stream output into the FacetWrite response, forwards assistant message chunks as `token` events, and maps AgentBackend custom task events into `AgentBackend_*` tool events for the run history. Canvas and Artifact lifecycle events are safe to consume during the stream; the frontend may refresh Canvas/Plan surfaces immediately and still reconcile the final Thread state after `final`.
 
 AgentBackend failure returns stable `runtime_unavailable`, `runtime_auth_failed`, `model_required`, or `model_not_ready` diagnostics. It does not call the TypeScript/provider loop or persist Mock output unless `FACETWRITE_MOCK_FALLBACK_ENABLED=true` is deliberately enabled for local demonstration.
 

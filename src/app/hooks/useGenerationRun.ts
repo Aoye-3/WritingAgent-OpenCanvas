@@ -12,6 +12,11 @@ import {
   TYPEWRITER_TICK_MS,
   type TypewriterState
 } from "./streamingTypewriter";
+import {
+  createLiveToolEventState,
+  reduceLiveToolEvent,
+  shouldRefreshThreadStateForToolEvent
+} from "./toolEventPresentation";
 
 type UseGenerationRunOptions = {
   activeAgent: AgentCard;
@@ -26,6 +31,7 @@ type UseGenerationRunOptions = {
   onRefreshThreadState: (threadId: string) => Promise<void>;
   onFetchAndApplyThreadState: (threadId: string) => Promise<ThreadStateResponse>;
   onApplyThreadState: (state: ThreadStateResponse) => void;
+  onApplyLiveThreadState: (state: ThreadStateResponse) => void;
   onApproveCanvasWriteRequest: (requestId: string) => Promise<void>;
   onRefreshProjectSurfaces: () => Promise<void>;
   getPendingCanvasWriteRequestIds: () => string[];
@@ -50,11 +56,15 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const operationIdRef = useRef(0);
   const chatAbortControllerRef = useRef<AbortController | null>(null);
   const activeChatMessageIdRef = useRef<string | null>(null);
+  const liveToolEventStateRef = useRef(createLiveToolEventState());
+  const liveStateRefreshRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     chatAbortControllerRef.current?.abort();
     chatAbortControllerRef.current = null;
     activeChatMessageIdRef.current = null;
+    liveToolEventStateRef.current = createLiveToolEventState();
+    liveStateRefreshRef.current = null;
     operationIdRef.current += 1;
     setIsGenerating(false);
     setIsChatSending(false);
@@ -71,6 +81,8 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     chatAbortControllerRef.current?.abort();
     chatAbortControllerRef.current = null;
     activeChatMessageIdRef.current = null;
+    liveToolEventStateRef.current = createLiveToolEventState();
+    liveStateRefreshRef.current = null;
     operationIdRef.current += 1;
     setGeneration(null);
     setEditableOutput("");
@@ -96,9 +108,24 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     setIsChatSending(false);
   };
 
-  const appendToolEvent = (event: unknown, threadId: string) => {
+  const refreshLiveThreadState = (threadId: string, operationId: number) => {
+    if (liveStateRefreshRef.current) return;
+    const refresh = options.onFetchAndApplyThreadState(threadId)
+      .then((state) => {
+        if (operationId !== operationIdRef.current || state.thread.id !== threadId) return;
+        options.onApplyLiveThreadState(state);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (liveStateRefreshRef.current === refresh) liveStateRefreshRef.current = null;
+      });
+    liveStateRefreshRef.current = refresh;
+  };
+
+  const appendToolEvent = (event: unknown, threadId: string, operationId: number) => {
     const eventType = String((event as { eventType?: unknown }).eventType ?? "tool_event");
     const payload = (event as { payload?: Record<string, unknown> }).payload ?? {};
+    const liveEvent = { eventType, payload };
     setToolEvents((current) => [{
       id: crypto.randomUUID(),
       threadId,
@@ -107,15 +134,31 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       payload,
       createdAt: new Date().toISOString()
     }, ...current]);
-    const summary = liveActivitySummary(eventType, payload, options.locale);
-    if (summary) setCollaborationMessages((current) => [...current, {
-      id: crypto.randomUUID(),
-      role: "assistant",
-      text: summary,
-      usedMock: false,
-      kind: "activity",
-      createdAt: new Date().toISOString()
-    }]);
+
+    const reduction = reduceLiveToolEvent(liveToolEventStateRef.current, liveEvent, options.locale);
+    liveToolEventStateRef.current = reduction.state;
+    const activeMessageId = activeChatMessageIdRef.current;
+    if (activeMessageId && reduction.statusLabel) {
+      updateStreamingMessage(activeMessageId, {
+        status: eventStatusPhase(eventType),
+        statusLabel: reduction.statusLabel
+      });
+    } else {
+      const chatActivityText = reduction.chatActivityText;
+      if (!chatActivityText) return;
+      setCollaborationMessages((current) => [...current, {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        text: chatActivityText,
+        usedMock: false,
+        kind: "activity",
+        createdAt: new Date().toISOString()
+      }]);
+    }
+
+    if (shouldRefreshThreadStateForToolEvent(liveEvent)) {
+      refreshLiveThreadState(threadId, operationId);
+    }
   };
 
   const updateStreamingMessage = (messageId: string, patch: Partial<CollaborationMessage>) => {
@@ -231,6 +274,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const handleGenerate = async () => {
     await options.beforeGenerate();
     const operationId = ++operationIdRef.current;
+    liveToolEventStateRef.current = createLiveToolEventState();
     setIsGenerating(true);
     try {
       const threadId = await options.ensureThreadId();
@@ -254,7 +298,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
               streamedText += token;
               enqueueStreamingText("editable", token);
             },
-            onToolEvent: (event) => appendToolEvent(event, threadId)
+            onToolEvent: (event) => appendToolEvent(event, threadId, operationId)
           })
         : await generateText(payload);
       if (operationId !== operationIdRef.current) return undefined;
@@ -276,6 +320,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const handleChatSend = async (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => {
     await options.beforeGenerate();
     const operationId = ++operationIdRef.current;
+    liveToolEventStateRef.current = createLiveToolEventState();
     setIsChatSending(true);
     chatAbortControllerRef.current?.abort();
     const abortController = new AbortController();
@@ -338,7 +383,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
           streamedText += token;
           enqueueStreamingText(`message:${assistantMessageId}`, token);
         },
-        onToolEvent: (event) => appendToolEvent(event, threadId)
+        onToolEvent: (event) => appendToolEvent(event, threadId, operationId)
       }, { signal: abortController.signal });
       if (operationId !== operationIdRef.current) return;
 
@@ -436,25 +481,10 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-function liveActivitySummary(eventType: string, payload: Record<string, unknown>, locale: Locale) {
-  const tool = typeof payload.toolName === "string" ? payload.toolName : typeof payload.tool === "string" ? payload.tool : "";
-  const skill = typeof payload.skill === "string" ? payload.skill : "";
-  if (skill) return locale === "zh" ? `正在使用技能：${skill === "brainstorming" ? "头脑风暴" : skill === "writing-plans" ? "计划编写" : skill}` : `Using skill: ${skill}`;
-  if (/(?:^|_)tool_started$/.test(eventType)) return locale === "zh" ? `正在调用工具${tool ? `：${tool}` : ""}` : `Using tool${tool ? `: ${tool}` : ""}`;
-  if (/(?:^|_)tool_failed$/.test(eventType)) {
-    const reason = typeof payload.reason === "string" ? payload.reason : "";
-    return locale === "zh"
-      ? `工具调用失败${tool ? `：${tool}` : ""}${reason ? `（${reason}）` : ""}`
-      : `Tool failed${tool ? `: ${tool}` : ""}${reason ? ` (${reason})` : ""}`;
-  }
-  if (/(?:^|_)tool_completed$/.test(eventType)) return locale === "zh" ? `工具调用完成${tool ? `：${tool}` : ""}` : `Tool completed${tool ? `: ${tool}` : ""}`;
-  if (/(?:^|_)artifact_committed$/.test(eventType)) return locale === "zh" ? "当前步骤产物已写入画板" : "Current step artifact committed to Canvas";
-  if (/(?:^|_)canvas_action_recognized$/.test(eventType)) return locale === "zh" ? "已识别 Canvas 操作" : "Canvas action recognized";
-  if (/(?:^|_)canvas_mutation_started$/.test(eventType)) return locale === "zh" ? "正在执行 Canvas 操作" : "Applying Canvas action";
-  if (/(?:^|_)canvas_mutation_committed$/.test(eventType)) return locale === "zh" ? "Canvas 节点已创建或更新" : "Canvas node created or updated";
-  if (/(?:^|_)canvas_write_pending_approval$/.test(eventType)) return locale === "zh" ? "Canvas 覆盖操作等待批准" : "Canvas replacement is waiting for approval";
-  if (/(?:^|_)canvas_mutation_failed$/.test(eventType)) return locale === "zh" ? "Canvas 写入失败" : "Canvas write failed";
-  return undefined;
+function eventStatusPhase(eventType: string): CollaborationMessage["status"] {
+  if (/(?:^|_)tool_failed$/.test(eventType) || /(?:^|_)canvas_mutation_failed$/.test(eventType)) return "error";
+  if (/(?:^|_)tool_(?:started|completed)$/.test(eventType)) return "searching";
+  return "writing";
 }
 
 function recoverableGenerationError(message: string, locale: Locale) {

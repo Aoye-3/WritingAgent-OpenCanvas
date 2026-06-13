@@ -390,17 +390,54 @@ function mapToolEvents(event: string, data: unknown): ToolEventRecord[] {
   const structured = structuredToolEvents(message.content);
   const failed = structured.some((event) => /_failed$/.test(event.eventType))
     || (typeof message.content === "string" && message.content.startsWith("Error:"));
+  const toolName = typeof message.name === "string" ? message.name : "unknown";
+  const sources = toolName === "web_search" ? extractWebSearchSources(message.content) : [];
   const terminal: ToolEventRecord = {
     eventType: failed ? "agent_backend_tool_failed" : "agent_backend_tool_completed",
     payload: {
       type: failed ? "tool_failed" : "tool_completed",
-      toolName: typeof message.name === "string" ? message.name : "unknown",
+      toolName,
       toolCallId: typeof message.tool_call_id === "string" ? message.tool_call_id : undefined,
+      ...(sources.length ? { sources } : {}),
       ...(structured[0]?.payload?.reason ? { reason: structured[0].payload.reason } : {}),
       ...(structured[0]?.payload?.summary ? { summary: structured[0].payload.summary } : {})
     }
   };
   return [terminal, ...structured];
+}
+
+function extractWebSearchSources(content: unknown) {
+  if (typeof content !== "string") return [];
+  const markerIndex = content.indexOf("__FACETWRITE_EVENT__");
+  const jsonText = (markerIndex >= 0 ? content.slice(0, markerIndex) : content).trim();
+  if (!jsonText) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    return [];
+  }
+  const items = Array.isArray(parsed)
+    ? parsed
+    : isRecord(parsed) && Array.isArray(parsed.results)
+      ? parsed.results
+      : [];
+  const seen = new Set<string>();
+  const sources: Array<{ title: string; url: string }> = [];
+  for (const item of items) {
+    if (!isRecord(item)) continue;
+    const url = readSourceString(item.url) || readSourceString(item.href) || readSourceString(item.link);
+    if (!/^https?:\/\//i.test(url) || seen.has(url)) continue;
+    seen.add(url);
+    const title = readSourceString(item.title) || url;
+    sources.push({ title: title.slice(0, 120), url });
+    if (sources.length >= 10) break;
+  }
+  return sources;
+}
+
+function readSourceString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function structuredToolEvents(content: unknown): ToolEventRecord[] {

@@ -28,9 +28,9 @@ export function normalizeAgentRunOutput(input: NormalizeInput): { text: string; 
   const withoutJson = stripLeakedToolJson(input.text);
   const sanitized = sanitizeVisibleText(withoutJson.text, input.locale);
   const events = [...sourceEvents, ...withoutJson.events];
-  const canvasCorrected = correctCanvasOutcomeClaim(sanitized, events, input.locale);
+  let visibleText = correctCanvasOutcomeClaim(sanitized, events, input.locale);
 
-  if (isBlockedPlaceholder(canvasCorrected, input.locale) && input.text.trim()) {
+  if (isBlockedPlaceholder(visibleText, input.locale) && input.text.trim()) {
     events.push({
       eventType: "internal_output_blocked",
       payload: {
@@ -41,7 +41,11 @@ export function normalizeAgentRunOutput(input: NormalizeInput): { text: string; 
     });
   }
 
-  return { text: canvasCorrected, events };
+  if (!isBlockedPlaceholder(visibleText, input.locale)) {
+    visibleText = enforceWebSearchSources(visibleText, events, input.locale);
+  }
+
+  return { text: visibleText, events };
 }
 
 export function sanitizeVisibleText(text: string, locale: Locale = "en") {
@@ -147,6 +151,73 @@ function correctCanvasOutcomeClaim(text: string, events: ToolEventRecord[], loca
   if (failed) return locale === "zh" ? "画布操作未完成，请查看错误信息后重试。" : "The Canvas operation did not complete. Review the error and try again.";
   if (pending) return locale === "zh" ? "画布操作正在等待你的批准，尚未写入。" : "The Canvas operation is waiting for your approval and has not been applied yet.";
   return text;
+}
+
+function enforceWebSearchSources(text: string, events: ToolEventRecord[], locale: Locale) {
+  if (!webSearchWasUsed(events) || hasVisibleUrl(text)) return text;
+
+  const sources = extractWebSearchSources(events);
+  if (!sources.length) {
+    events.push({
+      eventType: "web_search_sources_missing",
+      payload: {
+        reason: "no_source_urls"
+      }
+    });
+    return locale === "zh"
+      ? "本次联网搜索回复已被拦截，因为没有可用的来源链接。请重试搜索。"
+      : "This web search answer was blocked because source links were not available. Please retry the search.";
+  }
+
+  events.push({
+    eventType: "web_search_sources_appended",
+    payload: {
+      sourceCount: sources.length
+    }
+  });
+  const heading = locale === "zh" ? "来源" : "Sources";
+  return `${text.trim()}\n\n## ${heading}\n${sources.map((source) => `- [${escapeMarkdownLinkText(source.title)}](${source.url})`).join("\n")}`;
+}
+
+function webSearchWasUsed(events: ToolEventRecord[]) {
+  return events.some((event) => {
+    if (/_tool_failed$/.test(event.eventType)) return false;
+    const tool = readString(event.payload.toolName) || readString(event.payload.tool);
+    return tool === "web_search";
+  });
+}
+
+function extractWebSearchSources(events: ToolEventRecord[]) {
+  const seen = new Set<string>();
+  const sources: Array<{ title: string; url: string }> = [];
+  for (const event of events) {
+    const rawSources = Array.isArray(event.payload.sources) ? event.payload.sources : [];
+    for (const rawSource of rawSources) {
+      if (!rawSource || typeof rawSource !== "object" || Array.isArray(rawSource)) continue;
+      const source = rawSource as Record<string, unknown>;
+      const url = readString(source.url);
+      if (!/^https?:\/\//i.test(url) || seen.has(url)) continue;
+      seen.add(url);
+      sources.push({
+        title: readString(source.title).slice(0, 120) || url,
+        url
+      });
+      if (sources.length >= 10) return sources;
+    }
+  }
+  return sources;
+}
+
+function hasVisibleUrl(text: string) {
+  return /https?:\/\/\S+/i.test(text);
+}
+
+function escapeMarkdownLinkText(text: string) {
+  return text.replace(/[[\]\\]/g, "\\$&");
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function preview(text: string) {

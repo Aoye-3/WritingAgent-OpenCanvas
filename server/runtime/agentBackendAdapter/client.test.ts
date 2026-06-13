@@ -251,6 +251,7 @@ test("maps AgentBackend tool calls and results into FacetWrite tool events", asy
   ]);
   assert.equal(result.events[0]?.payload?.toolName, "web_search");
   assert.equal(result.events[1]?.payload?.toolCallId, "call_1");
+  assert.deepEqual(result.events[1]?.payload?.sources, [{ title: "OpenAI", url: "https://openai.com" }]);
   assert.equal(result.text, "Search complete");
 });
 
