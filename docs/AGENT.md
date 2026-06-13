@@ -18,7 +18,7 @@ Development must occur in the current `F:\.FinalProject` checkout on a normal `c
 Agent cards are exposed through `server/agentCards.ts` for compatibility, but the maintained implementation is split across `server/agents/`:
 
 - `server/agents/types.ts`: AgentCard and AgentSettings types.
-- `server/agents/cards/builtInCards.ts`: built-in Agent cards and localized field metadata.
+- `server/agents/cards/builtInCards.ts`: built-in Agent profile cards.
 - `server/agents/prompts.ts`: built-in identity prompts.
 - `server/agents/defaultSettings.ts`: default Agent settings.
 - `server/agents/loader.ts`: card lookup and saved-settings application.
@@ -32,37 +32,33 @@ An AgentCard includes:
 - `skillRefs`
 - `toolRefs`
 - Output contract
-- Default structured input values
-- Field definitions
 - Optional saved `settings`
 
-Current built-in cards include blog post, summary, email writer, lesson plan, report outline, and rewrite/polish.
+Current built-in cards expose only the neutral `chat-agent` / `ChatAgent`. Historical built-in ids such as `blog-post`, `summary`, `email-writer`, `lesson-plan`, `report-outline`, and `rewrite-polish` are compatibility aliases that resolve to `ChatAgent`; they are not product templates or default entry points.
 
 ## AgentSettings
 Settings cover:
 
-- Model provider, model name, temperature, topP, max tokens, streaming, tool call mode, and max tool calls.
-- Provider ids are resolved through the FacetWrite model registry in `shared/model/`; Agent settings should not hard-code the old three-provider list.
-- Agent settings store `configuredModelApiId` plus compatibility `providerId + model` fields. They must not store API keys, provider secrets, or copied base URL credentials.
 - Prompt name, description, identity prompt, output type, output format, and selected skills.
 - Tool enablement by ToolRef.
 - Knowledge settings: enablement, scope label, selected Knowledge Base ids, retrieval result count, score threshold, optional rerank preference.
 - Memory flag.
 - Quick messages.
+- MCP server references selected from already configured Agent Runtime MCP servers.
 
 Saved settings are merged back onto the base Agent card by the runtime adapter.
 
-Agent settings are the user-controlled configuration surface for concrete Agents. They define intent, model preferences, prompts, Skills, tool refs, memory, knowledge scope, and quick phrases. Agent Runtime is the execution subsystem that consumes these settings through FacetWrite's adapter contract; the current implementation is AgentBackend.
+Agent settings are the user-controlled configuration surface for concrete Agent profiles. They define intent, prompts, Skills, tool refs, MCP refs, memory, knowledge scope, and quick phrases. They do not own model identity or provider credentials. Agent Runtime is the execution subsystem that consumes these settings through FacetWrite's adapter contract; the current implementation is AgentBackend.
 
 The Agent Settings Knowledge tab loads bases through `GET /api/knowledge/bases` and saves changes through the existing `PUT /api/agent-cards/:agentCardId/settings` path. Selecting no specific base means all ready bases are eligible during generation; selecting one or more base ids constrains retrieval to those bases.
 
 ## Runtime Config
 `GET /api/agent-cards/:agentCardId/runtime-config` is the frontend source for rendering settings safely. It should be preferred over hard-coded settings UI assumptions.
 
-Runtime config includes the resolved card/settings, available tools, tool policies, available skills, and missing/deprecated references.
+Runtime config includes the resolved card/settings, available tools, tool policies, available skills, and missing/deprecated references. It does not return provider profile data as an Agent property; model capabilities come from the Thread-selected Model Config and conversation runtime controls.
 
 ## Runtime Context Boundary
-Agent runtime context comes from the left AgentCard structured input drawer and current workspace state such as the draft and selected Canvas node. The bottom workspace utility bar is not a context source and must not inject historical placeholder values such as course notes, audience profiles, or default writing style.
+Agent runtime context comes from the Project-owned Project Brief, the Thread-owned Current Task Brief, and explicit workspace state such as the draft and selected Canvas node. Briefs are independent from Agent selection and are loaded by the server before generation.
 
 Canvas context is filtered by node kind before it reaches the runtime:
 
@@ -102,7 +98,7 @@ Agent Runtime is FacetWrite's internal execution subsystem when `AGENT_BACKEND_E
 - Default local validation uses the project-managed Gateway at `http://127.0.0.1:8001`; explicit Docker validation uses nginx at `http://127.0.0.1:2026`.
 - Runtime status reports `deploymentMode` and `sandboxProvider` so the UI does not confuse local process execution with container isolation.
 - AgentBackend enablement uses `AGENT_BACKEND_*` env keys only; stale `DEERFLOW_*` values are historical and leave the runtime disabled.
-- Each FacetWrite Task card maps to an Agent Runtime subagent configuration.
+- The neutral `ChatAgent` profile maps to an Agent Runtime subagent configuration; legacy Task-card ids are normalized before mapping.
 - The current mapping lives in `server/runtime/agentBackendAdapter/taskAgentMapping.ts`, with `server/agentBackend/taskAgentMapping.ts` kept as a compatibility export.
 - Subagent metadata includes name, description, system prompt, skills, tools, model inheritance, timeout, and max turns.
 - FacetWrite records AgentBackend runs as provider `agent-backend`.
@@ -192,11 +188,9 @@ AgentBackend failure returns stable `runtime_unavailable`, `runtime_auth_failed`
 ## Provider Boundary
 Provider-specific request normalization belongs in `server/providerRuntime.ts`. UI and product code should use provider IDs and capabilities rather than inferring provider behavior from base URLs or model strings.
 
-Provider API credentials belong to the configured model API store, not Agent settings. The Model Config page writes local `API + model` bindings to `.facetwrite/provider-apis.json`; runtime code resolves the active Agent's `configuredModelApiId` immediately before calling the provider. If an Agent references a deleted, disabled, or keyless binding, the Provider runtime returns a clear configuration error and the UI should direct the user back to Model Config.
+Provider API credentials belong to the configured model API store, not Agent settings. The Model Config page writes local `API + model` bindings to `.facetwrite/provider-apis.json`; runtime code resolves the current Thread's `configuredModelApiId` immediately before generation. If the selected conversation model is deleted, disabled, or keyless, generation returns a clear `model_required` or `model_not_ready` error and the UI should direct the user back to Model Config.
 
-The Agent Settings model tab only offers saved, enabled, key-configured bindings whose model type can be used for chat generation. This prevents Agents from being assigned models that have no local callable API configuration.
-
-Frontend Agent settings load configured chat bindings through `src/features/model-config/modelConfigClient.ts`; they should not import provider/model API calls from the generic settings client.
+The Agent Settings page has no model tab. Conversation model selection is visible in the workspace composer and persists on `threads.configured_model_api_id`. Switching Agents must not change the current Thread model.
 
 Provider-private fields are allowed only inside the runtime request chain. DeepSeek thinking mode may return `reasoning_content`; when an assistant message also contains `tool_calls`, that field must be preserved for later DeepSeek API calls, but it must never be recorded as visible assistant text, output version content, Canvas content, or mock fallback text. Other providers strip DeepSeek-only fields according to their provider profile.
 

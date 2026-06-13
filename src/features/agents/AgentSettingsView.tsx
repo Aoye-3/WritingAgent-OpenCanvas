@@ -20,7 +20,7 @@ export function AgentSettingsView({ activeView, agentCards, onNavigate, onOpenAg
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [selectedId, setSelectedId] = useState(agentCards[0]?.id ?? "");
-  const [activeTab, setActiveTab] = useState<SettingsTab>("model");
+  const [activeTab, setActiveTab] = useState<SettingsTab>("prompt");
   const selectedAgent = agentCards.find((agent) => agent.id === selectedId) ?? agentCards[0];
   const runtime = useAgentRuntimeConfig(
     selectedAgent,
@@ -48,7 +48,7 @@ export function AgentSettingsView({ activeView, agentCards, onNavigate, onOpenAg
 
   const openSettings = (agent: AgentCard) => {
     setSelectedId(agent.id);
-    setActiveTab("model");
+    setActiveTab("prompt");
   };
 
   return (
@@ -69,10 +69,7 @@ export function AgentSettingsView({ activeView, agentCards, onNavigate, onOpenAg
           <TextField label={text(locale, "search")} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={text(locale, "search")} />
           <SelectField label={text(locale, "allCategories")} value={category} onChange={(event) => setCategory(event.target.value)}>
             <option value="all">{text(locale, "allCategories")}</option>
-            <option value="writing">{text(locale, "writing")}</option>
-            <option value="rewrite">{text(locale, "rewrite")}</option>
-            <option value="summarise">{text(locale, "summarise")}</option>
-            <option value="education">{text(locale, "education")}</option>
+            <option value="chat">ChatAgent</option>
           </SelectField>
         </div>
 
@@ -130,7 +127,7 @@ const copy = {
   en: {
     allCategories: "All categories",
     deprecatedTools: "Deprecated tools were ignored",
-    editorNote: "Model, prompt, skills, tools, and quick phrases affect generation. Tool availability is resolved from the backend catalog.",
+    editorNote: "Prompt, skills, tools, MCP, knowledge, memory, and quick phrases define the Agent profile. Conversation models are selected in the workspace.",
     education: "Education",
     empty: "Select an Agent to configure",
     rewrite: "Rewrite",

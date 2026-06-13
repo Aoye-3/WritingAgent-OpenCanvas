@@ -16,7 +16,6 @@ function runtimeConfig(): AgentRuntimeConfig {
     agentCard,
     settings: {
       ...settings,
-      model: { ...settings.model, streaming: false, contextCount: 1 },
       tools: { ...settings.tools, clear_context: false }
     },
     availableTools: [],
@@ -25,23 +24,7 @@ function runtimeConfig(): AgentRuntimeConfig {
     missingToolRefs: [],
     deprecatedToolRefs: [],
     availableSkills: [],
-    missingSkillRefs: [],
-    providerProfile: {
-      id: "deepseek",
-      label: "DeepSeek",
-      defaultBaseURL: "https://api.deepseek.com",
-      defaultModel: "deepseek-v4-flash",
-      capabilities: {
-        chatCompletions: true,
-        streaming: true,
-        toolCalls: true,
-        thinking: true,
-        reasoningContentPolicy: "preserve_when_tool_calling",
-        jsonOutput: true,
-        chatPrefixCompletion: true,
-        supportsAssistantPrefix: true
-      }
-    }
+    missingSkillRefs: []
   };
 }
 
@@ -94,6 +77,8 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
       getProject: () => ({ id: "project_test", title: "Test", summary: "", updatedAt: "" }),
       getProjectModelBindings: () => ["configured-test"],
       getProjectSharedContext: () => undefined,
+      getProjectBrief: () => ({ brief: {}, revision: 0 }),
+      getTaskBrief: () => ({ brief: {}, revision: 0 }),
       createPlanIntake: () => ({ id: "plan_intake_test" }),
       getPlanRun: (_threadId: string, planId: string) => planId === "plan_intake_test"
         ? planState
@@ -206,6 +191,28 @@ test("generation accepts the selected conversation model without a project bindi
   });
 
   assert.equal(result.provider, "agent-backend");
+});
+
+test("generation loads Project and Task Briefs from persisted Thread state", async () => {
+  const { storage } = fakeStorage();
+  storage.getProjectBrief = () => ({ brief: { goal: "Persisted project goal" }, revision: 2 });
+  storage.getTaskBrief = () => ({ brief: { objective: "Persisted task objective", deliverableType: "outline" }, revision: 3 });
+  let observedPrompt = "";
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        observedPrompt = input.prompt;
+        return { text: "Brief-aware response", finishReason: "stop", events: [] };
+      }
+    }
+  });
+
+  await service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "chat-agent", chatInstruction: "Continue" });
+
+  assert.match(observedPrompt, /# Project Brief\n- Project goal: Persisted project goal/);
+  assert.match(observedPrompt, /# Current Task Brief\n- Task objective: Persisted task objective\n- Expected deliverable: outline/);
 });
 
 test("generation facade does not copy assistant text into Canvas without a tool call", async () => {

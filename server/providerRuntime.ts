@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { AgentSettings } from "./agentCards.js";
+import type { ConversationModelRuntimeSettings } from "./agentCards.js";
 import type { ProviderId } from "./types.js";
 import { getProviderReference } from "../shared/modelReferences.js";
 
@@ -100,7 +100,7 @@ export type ProviderProfile = {
 };
 
 export type NormalizeInput = {
-  modelSettings: AgentSettings["model"];
+  modelSettings: ConversationModelRuntimeSettings;
   messages: ChatMessage[];
   tools: ChatCompletionTool[];
   stream: boolean;
@@ -264,7 +264,7 @@ function shouldPreserveReasoningContent(message: ChatMessage, profile: ProviderP
   return false;
 }
 
-export function normalizeToolChoice(mode: AgentSettings["model"]["toolCallMode"], profile?: ProviderProfile): "none" | "auto" | "required" {
+export function normalizeToolChoice(mode: ConversationModelRuntimeSettings["toolCallMode"], profile?: ProviderProfile): "none" | "auto" | "required" {
   if (mode === "none") return "none";
   if (profile?.id === "deepseek") return "auto";
   if (mode === "function") return "required";
@@ -289,7 +289,7 @@ export function createOpenAIChatClient(settings: { apiKey: string; baseURL: stri
 function normalizeMessagesForResponseMode(
   profile: ProviderProfile,
   messages: ChatMessage[],
-  responseMode: AgentSettings["model"]["responseMode"]
+  responseMode: ConversationModelRuntimeSettings["responseMode"]
 ): ChatMessage[] {
   if (responseMode !== "prefix_completion") return messages;
   if (!profile.capabilities.supportsAssistantPrefix) {
@@ -305,7 +305,7 @@ function normalizeMessagesForResponseMode(
   return [...normalized, { role: "assistant", content: "", prefix: true }];
 }
 
-function validateModelSettings(settings: AgentSettings["model"]) {
+function validateModelSettings(settings: ConversationModelRuntimeSettings) {
   if (settings.temperature < 0 || settings.temperature > 2) {
     throw new Error("Model temperature must be between 0 and 2");
   }
@@ -320,7 +320,7 @@ function validateModelSettings(settings: AgentSettings["model"]) {
   }
 }
 
-function normalizeReasoningEffort(effort: AgentSettings["model"]["reasoningEffort"]) {
+function normalizeReasoningEffort(effort: ConversationModelRuntimeSettings["reasoningEffort"]) {
   if (effort === "max" || effort === "xhigh") return "max";
   return "high";
 }

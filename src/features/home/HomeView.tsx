@@ -1,7 +1,7 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
 import type { AppView } from "../../app/App";
 import { AppSidebar } from "../../shared/AppSidebar";
-import { AddIcon, ArrowRightIcon, DocumentIcon, MoreIcon, SearchIcon, SendIcon, TaskIcon } from "../../shared/icons";
+import { AddIcon, ArrowRightIcon, DocumentIcon, MoreIcon, SearchIcon, SendIcon } from "../../shared/icons";
 import { Button, IconButton, ModalDialog, Panel, TextField } from "../../shared/ui";
 import type { AgentCard, StoredThread } from "../agents/types";
 import { useI18n } from "../i18n/I18nProvider";
@@ -24,7 +24,7 @@ const homeCopy = {
   en: {
     addInput: "Add input",
     agentHint: "Your most useful agents live here. Open one to turn its output into editable canvas nodes.",
-    agents: "Recent agents",
+    agents: "Agent profile",
     cancel: "Cancel",
     create: "Create board",
     createAgent: "Create agent",
@@ -102,16 +102,12 @@ export function HomeView({
   const [openMenuThreadId, setOpenMenuThreadId] = useState("");
   const [renameThread, setRenameThread] = useState<StoredThread | null>(null);
 
-  const featuredAgents = useMemo(() => {
-    const preferred = ["blog-post", "rewrite-polish", "email-writer", "lesson-plan"];
-    return preferred.map((id) => agentCards.find((agentCard) => agentCard.id === id)).filter((agentCard): agentCard is AgentCard => Boolean(agentCard));
-  }, [agentCards]);
   const primaryAgent = agentCards[0];
 
   const quickActions = [
-    { label: copy.create, hint: copy.createHint, agent: agentCards.find((agent) => agent.id === "blog-post") },
-    { label: copy.createAgent, hint: copy.createAgentHint, agent: agentCards.find((agent) => agent.id === "report-outline") },
-    { label: copy.rewrite, hint: copy.rewriteHint, agent: agentCards.find((agent) => agent.id === "rewrite-polish") }
+    { label: copy.create, hint: copy.createHint, agent: primaryAgent },
+    { label: copy.createAgent, hint: copy.createAgentHint, agent: primaryAgent },
+    { label: copy.rewrite, hint: copy.rewriteHint, agent: primaryAgent }
   ];
 
   const submitPrompt = (event: FormEvent<HTMLFormElement>) => {
@@ -164,20 +160,10 @@ export function HomeView({
           <section className="home-section home-agents" aria-label={copy.agents}>
             <div className="home-section-header">
               <div>
-                <h2>{copy.agents}</h2>
+                <h2>{primaryAgent?.title[locale] ?? copy.agents}</h2>
                 <p>{copy.agentHint}</p>
               </div>
               <button type="button" onClick={() => onNavigate("agentSettings")}>{copy.viewAll}</button>
-            </div>
-            <div className="home-agent-card-row">
-              {featuredAgents.map((agentCard) => (
-                <button className="home-agent-card" key={agentCard.id} type="button" onClick={() => onOpenAgent(agentCard)}>
-                  <span className={`task-icon accent-${agentCard.accent}`} aria-hidden="true"><TaskIcon icon={agentCard.icon} /></span>
-                  <strong>{agentCard.title[locale]}</strong>
-                  <p>{agentCard.description[locale]}</p>
-                  <small>{agentCard.outputContract.type}</small>
-                </button>
-              ))}
             </div>
           </section>
         </Panel>

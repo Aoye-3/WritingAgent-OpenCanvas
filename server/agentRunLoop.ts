@@ -1,4 +1,4 @@
-import type { AgentSettings } from "./agentCards.js";
+import type { ConversationModelRuntimeSettings } from "./agentCards.js";
 import { getProviderProfile, normalizeChatRequest, type ChatClient, type ChatCompletionStreamChunk, type ChatMessage, type ChatToolCall } from "./providerRuntime.js";
 import { executeToolCall, getEnabledToolDefinitions, type ToolEventRecord, type ToolExecutionContext } from "./toolRuntime.js";
 import type { ToolState } from "./toolRegistry.js";
@@ -7,7 +7,7 @@ import type { ProviderId } from "./types.js";
 export type AgentRunInput = {
   client: ChatClient;
   providerId: ProviderId;
-  modelSettings: AgentSettings["model"];
+  modelSettings: ConversationModelRuntimeSettings;
   messages: ChatMessage[];
   allowedToolRefs: string[];
   toolState?: ToolState;

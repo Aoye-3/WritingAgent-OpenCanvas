@@ -2,11 +2,13 @@ import type {
   AgentCard,
   AgentRuntimeConfig,
   AgentSettings,
+  ProjectBrief,
   ProjectSummary,
   SkillCatalogItem,
   StoredThread,
   ThreadCreateResponse,
   ThreadStateResponse,
+  TaskBrief,
   ToolCatalogItem
 } from "./types";
 import type { PlanRun } from "./types";
@@ -103,8 +105,12 @@ export async function hardDeleteProject(projectId: string): Promise<void> {
   await apiDelete<{ ok: true }>(`/api/projects/${encodeURIComponent(projectId)}`);
 }
 
-export async function saveThreadInputs(threadId: string, agentCardId: string, structuredValues: Record<string, string | string[]>, revision: number): Promise<{ structuredValues: Record<string, string | string[]>; revision: number }> {
-  return apiPatch<{ structuredValues: Record<string, string | string[]>; revision: number }>(`/api/threads/${encodeURIComponent(threadId)}/inputs`, { agentCardId, structuredValues, revision });
+export async function saveProjectBrief(projectId: string, brief: ProjectBrief, revision: number) {
+  return apiPatch<{ brief: ProjectBrief; revision: number }>(`/api/projects/${encodeURIComponent(projectId)}/brief`, { brief, revision });
+}
+
+export async function saveTaskBrief(threadId: string, brief: TaskBrief, revision: number) {
+  return apiPatch<{ brief: TaskBrief; revision: number }>(`/api/threads/${encodeURIComponent(threadId)}/task-brief`, { brief, revision });
 }
 
 export async function fetchAgentSettings(agentCardId: string): Promise<AgentSettings> {

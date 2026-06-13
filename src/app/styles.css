@@ -1356,6 +1356,67 @@ textarea:focus-visible,
   margin-bottom: 0;
 }
 
+.brief-form {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 12px;
+  overflow-y: auto;
+  border-top: 1px solid var(--color-border);
+}
+
+.brief-section {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.brief-section summary {
+  display: grid;
+  gap: 5px;
+  padding: 14px 22px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.brief-section summary::-webkit-details-marker { display: none; }
+.brief-section summary span { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.brief-section summary strong { font-size: 14px; }
+.brief-section summary small,
+.brief-section summary em {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brief-section-body { padding: 2px 22px 18px; }
+.brief-section-toolbar {
+  min-height: 26px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.brief-section-toolbar > button,
+.brief-save-status button {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.brief-section-toolbar > button:hover,
+.brief-save-status button:hover { color: var(--color-primary); }
+.brief-save-status { display: inline-flex; align-items: center; gap: 6px; color: var(--color-text-muted); font-size: 11px; }
+.brief-save-status.is-saving { color: var(--color-primary); }
+.brief-save-status.is-saved { color: var(--color-success); }
+.brief-save-status.is-error { color: var(--color-danger); }
+.brief-section-body .field textarea { min-height: 76px; }
+
 .facet-form { min-height: 0; padding: 18px 22px 22px; overflow: auto; }
 fieldset { border: 0; padding: 0; margin: 0 0 24px; }
 legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--color-text); }
@@ -2622,6 +2683,24 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   font-weight: 750;
 }
 
+.composer-model-select {
+  min-width: 0;
+  max-width: 150px;
+  min-height: 30px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-subtle);
+  color: var(--color-text);
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.composer-model-select:hover,
+.composer-model-select:focus-visible { border-color: var(--color-border); }
+.composer-model-select:disabled { cursor: not-allowed; opacity: 0.55; }
+
 .tool-icon-button {
   position: relative;
   width: 32px;
@@ -2833,16 +2912,16 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 }
 
 .app-shell[data-view="workspace"] .topbar {
-  height: 58px;
-  gap: 12px;
-  padding-left: 18px;
-  padding-right: 18px;
+  height: 54px;
+  gap: 10px;
+  padding-left: 14px;
+  padding-right: 14px;
 }
 
 .view-workspace {
-  --control-height: 38px;
-  --control-height-sm: 32px;
-  font-size: 13px;
+  --control-height: 36px;
+  --control-height-sm: 30px;
+  font-size: 12px;
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
@@ -2850,20 +2929,20 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 
 .app-shell[data-view="workspace"] .view-workspace {
   display: grid;
-  grid-template-rows: 58px minmax(0, 1fr);
+  grid-template-rows: 54px minmax(0, 1fr);
 }
 
 .view-workspace .button {
-  min-height: 38px;
-  padding: 0 14px;
-  font-size: 13px;
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 12px;
 }
 
 .view-workspace .button-small,
 .view-workspace .chip,
 .view-workspace .metadata-chip {
-  min-height: 31px;
-  padding: 6px 11px;
+  min-height: 30px;
+  padding: 5px 10px;
   font-size: 12px;
 }
 
@@ -5217,25 +5296,68 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 .view-workspace .composer-resize-handle span { width: 46px; }
 
 .view-workspace .drawer-chat-composer textarea {
-  min-height: 72px;
+  min-height: 64px;
   border-radius: 10px;
-  padding: 9px 10px;
+  padding: 8px 10px;
 }
 
-.view-workspace .composer-tool-row { justify-content: flex-end; gap: 5px; }
-.view-workspace .composer-tool-icons { gap: 3px; margin-right: auto; flex-wrap: nowrap; }
+.view-workspace .composer-tool-row {
+  min-width: 0;
+  justify-content: flex-start;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+
+.view-workspace .composer-tool-icons {
+  flex: 0 0 auto;
+  gap: 2px;
+  margin-right: 0;
+  flex-wrap: nowrap;
+}
 
 .view-workspace .tool-icon-button {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
   border-color: transparent;
 }
 
+.view-workspace .composer-model-select {
+  flex: 1 1 72px;
+  max-width: none;
+  min-width: 72px;
+  min-height: 28px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.view-workspace .plan-command-button {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 36px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+.view-workspace .composer-think-controls {
+  flex: 0 0 auto;
+  gap: 3px;
+  margin-left: 0;
+}
+
+.view-workspace .composer-effort-select {
+  max-width: 64px;
+  min-height: 28px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
 .view-workspace .chat-send-icon {
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  min-height: 40px;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  min-height: 34px;
   justify-self: auto;
   padding: 0;
   border-radius: 10px;

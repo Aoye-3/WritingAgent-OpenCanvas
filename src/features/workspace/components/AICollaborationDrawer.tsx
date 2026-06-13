@@ -3,7 +3,6 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, SearchIcon, SendIcon, SparkleIcon, StopIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
 import type { AgentCard, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, StoredThread, StoredToolEvent } from "../../agents/types";
-import type { AgentSettings } from "../../agents/types";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
 import { useI18n } from "../../i18n/I18nProvider";
 import { AnnotationChipRow, CanvasWriteProposalPanel, type MessageAnnotation } from "./CanvasWriteProposalPanel";
@@ -14,6 +13,7 @@ import { PlanClarificationCard } from "./PlanClarificationCard";
 import { acceptCanvasWriteSuggestion, answerPlan, dismissCanvasWriteSuggestion, pausePlan } from "../../agents/agentClient";
 import { visibleComposerTools } from "../planUiPolicy";
 import { buildPlanTimeline } from "../planTimeline";
+import type { ConfiguredModelApiSummary } from "../../settings/types";
 
 type ToolKey = NonNullable<GenerateRequest["toolState"]> extends Partial<Record<infer Key, boolean>> ? Key : never;
 
@@ -27,6 +27,12 @@ type SelectionAction = {
 type WriteDraft = {
   messageId?: string;
   text: string;
+};
+
+export type ConversationModelControls = {
+  providerId?: string;
+  thinkingMode?: NonNullable<GenerateRequest["modelOverrides"]>["thinkingMode"];
+  reasoningEffort?: NonNullable<GenerateRequest["modelOverrides"]>["reasoningEffort"];
 };
 
 type AICollaborationDrawerProps = {
@@ -45,7 +51,10 @@ type AICollaborationDrawerProps = {
   sessionBusy: boolean;
   sessionError: string;
   isSending: boolean;
-  modelSettings?: AgentSettings["model"];
+  modelSelectionDisabled: boolean;
+  configuredModels: ConfiguredModelApiSummary[];
+  selectedModelConfigId?: string | null;
+  modelSettings?: ConversationModelControls;
   toolEvents: StoredToolEvent[];
   onApproveWriteRequest: (requestId: string) => Promise<void>;
   onCreateConversation: () => Promise<void>;
@@ -59,6 +68,7 @@ type AICollaborationDrawerProps = {
   onSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => Promise<unknown>;
   onStopSending: () => void;
   onSelectAgent: (agentCardId: string) => void;
+  onSelectModel: (configuredModelApiId: string) => Promise<void>;
   onSelectThread: (threadId: string) => Promise<void>;
   onToggleCollapsed: () => void;
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
@@ -93,6 +103,9 @@ export function AICollaborationDrawer({
   sessionBusy,
   sessionError,
   isSending,
+  modelSelectionDisabled,
+  configuredModels,
+  selectedModelConfigId,
   modelSettings,
   toolEvents,
   onApproveWriteRequest,
@@ -107,6 +120,7 @@ export function AICollaborationDrawer({
   onSend,
   onStopSending,
   onSelectAgent,
+  onSelectModel,
   onSelectThread,
   onToggleCollapsed,
   onToolStateChange,
@@ -223,15 +237,19 @@ export function AICollaborationDrawer({
       await answerPlan(currentThreadId, awaitingPlan.id, text);
       await onPlansChanged();
     }
-    await onSend(text, supportsThinking ? {
-      thinkingMode: thinkEnabled ? "enabled" : "disabled",
-      reasoningEffort
-    } : undefined, {
-      ...(mindChainContext ? { canvasMindChain: mindChainContext.text } : {}),
-      ...(awaitingPlan ? { awaitingPlan: { id: awaitingPlan.id, answer: text } } : {}),
-      ...(revisePlan ? { awaitingPlan: { id: revisePlan.id, revise: true } } : {})
-    });
-    if (mindChainContext) onMindChainContextConsumed();
+    try {
+      await onSend(text, supportsThinking ? {
+        thinkingMode: thinkEnabled ? "enabled" : "disabled",
+        reasoningEffort
+      } : undefined, {
+        ...(mindChainContext ? { canvasMindChain: mindChainContext.text } : {}),
+        ...(awaitingPlan ? { awaitingPlan: { id: awaitingPlan.id, answer: text } } : {}),
+        ...(revisePlan ? { awaitingPlan: { id: revisePlan.id, revise: true } } : {})
+      });
+      if (mindChainContext) onMindChainContextConsumed();
+    } catch {
+      setInput(text);
+    }
   };
 
   const captureSelection = (event: React.MouseEvent<HTMLDivElement>, message: CollaborationMessage) => {
@@ -516,6 +534,21 @@ export function AICollaborationDrawer({
         />
         <div className="composer-tool-row" hidden={Boolean(pendingClarificationPlan)}>
           <ToolUseIconBar allowedTools={allowedTools} toolState={toolState} onToolStateChange={onToolStateChange} />
+          <select
+            aria-label={locale === "zh" ? "会话模型" : "Conversation model"}
+            className="composer-model-select"
+            disabled={modelSelectionDisabled}
+            value={selectedModelConfigId ?? ""}
+            onChange={(event) => { void onSelectModel(event.target.value); }}
+          >
+            <option value="">{locale === "zh" ? "选择模型" : "Select model"}</option>
+            {modelGroups(locale).map((group) => {
+              const models = configuredModels.filter((model) => model.capabilityGroup === group.id);
+              return models.length ? <optgroup key={group.id} label={group.label}>
+                {models.map((model) => <option key={model.id} value={model.id}>{model.providerLabel} / {model.modelName}</option>)}
+              </optgroup> : null;
+            })}
+          </select>
           <button className="tool-icon-button plan-command-button" type="button" onClick={() => setInput((value) => value.startsWith("/plan") ? value : `/plan ${value}`)} title="Create a task plan">Plan</button>
           {supportsThinking ? (
             <div className="composer-think-controls" aria-label="Think mode">
@@ -607,4 +640,12 @@ function ToolIcon({ tool }: { tool: string }) {
   if (tool === "knowledge_base") return <KnowledgeIcon aria-hidden="true" size={16} />;
   if (tool === "quick_messages") return <SparkleIcon aria-hidden="true" size={16} />;
   return null;
+}
+
+function modelGroups(locale: "en" | "zh") {
+  return [
+    { id: "reasoning", label: locale === "zh" ? "推理模型" : "Reasoning models" },
+    { id: "chat", label: locale === "zh" ? "对话模型" : "Chat models" },
+    { id: "other-chat", label: locale === "zh" ? "其他聊天模型" : "Other chat models" }
+  ] as const;
 }

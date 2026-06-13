@@ -1,43 +1,36 @@
 import { useEffect, useState } from "react";
 import { ChevronLeftIcon, ChevronRightIcon } from "../../../shared/icons";
-import { ChipGroup, IconButton, SelectField, SegmentedControl, TextareaField, TextField } from "../../../shared/ui";
-import type { AgentCard, AgentCardField, AgentValues } from "../../agents/types";
+import { Button, IconButton, SelectField, TextareaField, TextField } from "../../../shared/ui";
+import type { BriefSaveStatus, ProjectBrief, TaskBrief } from "../../agents/types";
 import type { Locale } from "../../i18n/types";
-import type { ConfiguredModelApiSummary } from "../../settings/types";
 
 type AgentInputDrawerProps = {
-  activeAgent: AgentCard;
-  agentValues: AgentValues;
   collapsed: boolean;
   locale: Locale;
   projectTitle: string;
-  configuredModels: ConfiguredModelApiSummary[];
-  selectedModelConfigId?: string | null;
+  projectBrief: ProjectBrief;
+  taskBrief: TaskBrief;
+  projectBriefStatus: BriefSaveStatus;
+  taskBriefStatus: BriefSaveStatus;
   onCollapse: () => void;
   onExpand: () => void;
   onProjectTitleChange: (title: string) => Promise<void>;
-  onSelectModel: (configuredModelApiId: string) => Promise<void>;
-  onValuesChange: (values: AgentValues) => void;
-  labels: {
-    coreSettings: string;
-    customInstruction: string;
-    outputSpec: string;
-    clear: string;
-    projectName: string;
-    projectNamePlaceholder: string;
-  };
+  onProjectBriefChange: (brief: ProjectBrief) => void;
+  onTaskBriefChange: (brief: TaskBrief) => void;
+  onRetryProjectBrief: () => Promise<void>;
+  onRetryTaskBrief: () => Promise<void>;
 };
 
 export function AgentInputDrawer(props: AgentInputDrawerProps) {
   const {
-    activeAgent, agentValues, collapsed, locale, projectTitle, configuredModels,
-    selectedModelConfigId, onCollapse, onExpand, onProjectTitleChange, onSelectModel, onValuesChange, labels
+    collapsed, locale, projectTitle, projectBrief, taskBrief, projectBriefStatus, taskBriefStatus,
+    onCollapse, onExpand, onProjectTitleChange, onProjectBriefChange, onTaskBriefChange,
+    onRetryProjectBrief, onRetryTaskBrief
   } = props;
   const [projectTitleDraft, setProjectTitleDraft] = useState(projectTitle);
 
   useEffect(() => setProjectTitleDraft(projectTitle), [projectTitle]);
 
-  const updateValue = (id: string, value: string) => onValuesChange({ ...agentValues, [id]: value });
   const commitProjectTitle = async () => {
     const nextTitle = projectTitleDraft.trim();
     if (!nextTitle || nextTitle === projectTitle) {
@@ -47,11 +40,16 @@ export function AgentInputDrawer(props: AgentInputDrawerProps) {
     await onProjectTitleChange(nextTitle);
   };
 
+  const clearProjectBrief = () => {
+    const confirmed = window.confirm(locale === "zh" ? "确定清空项目 Brief？这会影响项目中的所有对话。" : "Clear the Project Brief for every conversation in this project?");
+    if (confirmed) onProjectBriefChange({});
+  };
+
   return (
-    <aside className="input-drawer ui-drawer" aria-label="Project settings and structured inputs" data-collapsed={collapsed}>
+    <aside className="input-drawer ui-drawer" aria-label="Project and task Briefs" data-collapsed={collapsed}>
       {collapsed ? (
         <button className="drawer-rail drawer-rail-left" type="button" onClick={onExpand} aria-label={locale === "zh" ? "展开项目面板" : "Expand Project panel"}>
-          <span>{projectTitle.slice(0, 1)}</span><small>Project</small><b><ChevronRightIcon aria-hidden="true" size={18} /></b>
+          <span>{projectTitle.slice(0, 1)}</span><small>Briefs</small><b><ChevronRightIcon aria-hidden="true" size={18} /></b>
         </button>
       ) : null}
 
@@ -64,55 +62,100 @@ export function AgentInputDrawer(props: AgentInputDrawerProps) {
         </div>
 
         <div className="drawer-project-name">
-          <TextField label={labels.projectName} maxLength={120} placeholder={labels.projectNamePlaceholder} value={projectTitleDraft}
+          <TextField label={locale === "zh" ? "项目名称" : "Project name"} maxLength={120} placeholder={locale === "zh" ? "输入项目名称" : "Name this project"} value={projectTitleDraft}
             onBlur={() => { void commitProjectTitle(); }} onChange={(event) => setProjectTitleDraft(event.target.value)}
             onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
         </div>
 
-        <section className="project-model-settings" aria-label={locale === "zh" ? "会话模型" : "Conversation model"}>
-          <SelectField label={locale === "zh" ? "会话模型" : "Conversation model"} value={selectedModelConfigId ?? ""}
-            onChange={(event) => { void onSelectModel(event.target.value); }}>
-            <option value="">{locale === "zh" ? "生成前请选择模型" : "Select a model before generating"}</option>
-            {modelGroups(locale).map((group) => {
-              const models = configuredModels.filter((model) => model.capabilityGroup === group.id);
-              return models.length ? <optgroup key={group.id} label={group.label}>
-                {models.map((model) => <option key={model.id} value={model.id}>{model.providerLabel} / {model.modelName}</option>)}
-              </optgroup> : null;
-            })}
-          </SelectField>
-        </section>
+        <div className="brief-form">
+          <BriefSection
+            brief={projectBrief}
+            defaultOpen={false}
+            locale={locale}
+            onClear={clearProjectBrief}
+            onRetry={onRetryProjectBrief}
+            status={projectBriefStatus}
+            title="Project Brief"
+          >
+            <TextField label={locale === "zh" ? "项目目标" : "Project goal"} value={projectBrief.goal ?? ""} onChange={(event) => onProjectBriefChange({ ...projectBrief, goal: event.target.value })} />
+            <TextField label={locale === "zh" ? "目标受众" : "Target audience"} value={projectBrief.audience ?? ""} onChange={(event) => onProjectBriefChange({ ...projectBrief, audience: event.target.value })} />
+            <TextareaField label={locale === "zh" ? "背景与已知事实" : "Background and known facts"} value={projectBrief.background ?? ""} onChange={(event) => onProjectBriefChange({ ...projectBrief, background: event.target.value })} />
+            <TextareaField label={locale === "zh" ? "长期约束与表达原则" : "Standing constraints and expression principles"} value={projectBrief.standingConstraints ?? ""} onChange={(event) => onProjectBriefChange({ ...projectBrief, standingConstraints: event.target.value })} />
+          </BriefSection>
 
-        <form className="facet-form">
-          <p className="agent-parameter-heading">{locale === "zh" ? `${activeAgent.title[locale]} 参数` : `${activeAgent.title[locale]} parameters`}</p>
-          <fieldset><legend>{labels.coreSettings}</legend>{activeAgent.fields.slice(0, 4).map((field) => renderField(field, agentValues, updateValue, locale))}</fieldset>
-          <fieldset><legend>{labels.outputSpec}</legend>{activeAgent.fields.slice(4, 7).map((field) => renderField(field, agentValues, updateValue, locale))}</fieldset>
-          <fieldset><legend>{labels.customInstruction}</legend>{activeAgent.fields.slice(7).map((field) => renderField(field, agentValues, updateValue, locale))}</fieldset>
-        </form>
+          <BriefSection
+            brief={taskBrief}
+            defaultOpen
+            locale={locale}
+            onRetry={onRetryTaskBrief}
+            status={taskBriefStatus}
+            title="Current Task Brief"
+          >
+            <TextField label={locale === "zh" ? "任务目标" : "Task objective"} value={taskBrief.objective ?? ""} onChange={(event) => onTaskBriefChange({ ...taskBrief, objective: event.target.value })} />
+            <SelectField label={locale === "zh" ? "预期交付物" : "Expected deliverable"} value={taskBrief.deliverableType ?? "auto"} onChange={(event) => onTaskBriefChange({ ...taskBrief, deliverableType: event.target.value as TaskBrief["deliverableType"] })}>
+              {deliverableOptions(locale).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </SelectField>
+            <TextareaField label={locale === "zh" ? "交付物补充说明" : "Deliverable supplemental details"} value={taskBrief.deliverableDetails ?? ""} onChange={(event) => onTaskBriefChange({ ...taskBrief, deliverableDetails: event.target.value })} />
+            <TextareaField label={locale === "zh" ? "必须覆盖" : "Must cover"} value={taskBrief.mustCover ?? ""} onChange={(event) => onTaskBriefChange({ ...taskBrief, mustCover: event.target.value })} />
+            <TextareaField label={locale === "zh" ? "临时约束与补充要求" : "Temporary constraints and supplemental requirements"} value={taskBrief.temporaryConstraints ?? ""} onChange={(event) => onTaskBriefChange({ ...taskBrief, temporaryConstraints: event.target.value })} />
+          </BriefSection>
+        </div>
 
-        <div className="drawer-footer"><button className="button button-secondary ui-button ui-button-secondary" type="button" onClick={() => onValuesChange(activeAgent.defaultValues)}>{labels.clear}</button></div>
+        <div className="drawer-footer">
+          <Button type="button" onClick={() => onTaskBriefChange({})}>{locale === "zh" ? "清空当前任务" : "Clear current task"}</Button>
+        </div>
       </div>
     </aside>
   );
 }
 
-function modelGroups(locale: Locale) {
-  return [
-    { id: "reasoning", label: locale === "zh" ? "推理模型" : "Reasoning models" },
-    { id: "chat", label: locale === "zh" ? "对话模型" : "Chat models" },
-    { id: "other-chat", label: locale === "zh" ? "其他聊天模型" : "Other chat models" }
-  ] as const;
+function BriefSection({ brief, children, defaultOpen, locale, onClear, onRetry, status, title }: {
+  brief: Record<string, unknown>;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  locale: Locale;
+  onClear?: () => void;
+  onRetry: () => Promise<void>;
+  status: BriefSaveStatus;
+  title: string;
+}) {
+  const [open, setOpen] = useState(Boolean(defaultOpen));
+  const values = Object.values(brief).filter((value) => typeof value === "string" && value.trim());
+  return (
+    <details className="brief-section" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>
+        <span><strong>{title}</strong><small>{values.length} {locale === "zh" ? "项已填写" : "filled"}</small></span>
+        <em>{String(values[0] ?? (locale === "zh" ? "尚未填写" : "Not filled yet"))}</em>
+      </summary>
+      <div className="brief-section-body">
+        <div className="brief-section-toolbar">
+          <SaveStatus locale={locale} onRetry={onRetry} status={status} />
+          {onClear ? <button type="button" onClick={onClear}>{locale === "zh" ? "清空项目 Brief" : "Clear Project Brief"}</button> : null}
+        </div>
+        {children}
+      </div>
+    </details>
+  );
 }
 
-function renderField(field: AgentCardField, values: AgentValues, updateValue: (id: string, value: string) => void, locale: Locale) {
-  const value = String(values[field.id] ?? "");
-  const placeholder = field.placeholder[locale];
-  const label = field.label[locale];
-  if (field.kind === "textarea") return <TextareaField key={field.id} label={label} placeholder={placeholder} required={field.required} value={value} onChange={(event) => updateValue(field.id, event.target.value)} />;
-  if (field.kind === "select") return <SelectField key={field.id} label={label} required={field.required} value={value} onChange={(event) => updateValue(field.id, event.target.value)}><option value="">{placeholder}</option>{field.options?.map((option) => <option key={option} value={option}>{option}</option>)}</SelectField>;
-  if (field.kind === "chips" || field.kind === "segmented") {
-    const options = field.options?.map((option) => ({ label: option, value: option })) ?? [];
-    const Control = field.kind === "segmented" ? SegmentedControl : ChipGroup;
-    return <div className="field ui-field" key={field.id}><span>{label}</span><Control ariaLabel={label} options={options} value={value} onChange={(nextValue) => updateValue(field.id, nextValue)} />{!value ? <small className="field-hint">{placeholder}</small> : null}</div>;
-  }
-  return <TextField key={field.id} label={label} placeholder={placeholder} required={field.required} value={value} onChange={(event) => updateValue(field.id, event.target.value)} />;
+function SaveStatus({ locale, onRetry, status }: { locale: Locale; onRetry: () => Promise<void>; status: BriefSaveStatus }) {
+  const label = status === "saving"
+    ? (locale === "zh" ? "正在保存" : "Saving")
+    : status === "saved"
+      ? (locale === "zh" ? "已保存" : "Saved")
+      : status === "error"
+        ? (locale === "zh" ? "保存失败" : "Save failed")
+        : (locale === "zh" ? "尚未修改" : "No changes");
+  return <span className={`brief-save-status is-${status}`}>{label}{status === "error" ? <button type="button" onClick={() => { void onRetry().catch(() => undefined); }}>{locale === "zh" ? "重试" : "Retry"}</button> : null}</span>;
+}
+
+function deliverableOptions(locale: Locale) {
+  return [
+    { value: "auto", label: locale === "zh" ? "自动判断" : "Auto" },
+    { value: "document", label: locale === "zh" ? "文档" : "Document" },
+    { value: "outline", label: locale === "zh" ? "大纲" : "Outline" },
+    { value: "analysis", label: locale === "zh" ? "分析" : "Analysis" },
+    { value: "checklist", label: locale === "zh" ? "清单" : "Checklist" },
+    { value: "proposal", label: locale === "zh" ? "方案" : "Proposal" }
+  ] as const;
 }

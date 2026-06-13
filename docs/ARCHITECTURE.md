@@ -18,7 +18,7 @@ Primary flow:
 
 ```text
 User input
- -> AgentCard + AgentSettings
+ -> AgentCard profile settings + Thread-selected Model Config
  -> PromptBuilder + Skills + Tool policy
  -> Agent Runtime as the only real generation path
  -> explicit runtime/model error when the Runtime cannot complete
@@ -58,7 +58,7 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 - `src/features/*` groups product areas: agents, canvas, generation, home, i18n, knowledge, projects, settings, start, tasks, and workspace.
 - `src/shared/ui/` is the lightweight FacetWrite UI primitive layer. It provides shared buttons, fields, chips, tabs, panels, drawers, dialogs, badges, and empty states without owning business data or backend/runtime behavior.
 - `public/assets/ui/` is the local UI and image asset library. Brand asset URLs are centralized in `src/shared/brandAssets.ts` so components avoid hard-coded public paths. See `docs/UI_ASSETS.md`.
-- `src/features/workspace/WorkspaceView.tsx` renders the Project-first writing workspace: Project/model settings and Agent parameters in the left panel, Project-owned document Canvas in the center, and Project conversation history plus per-run Agent selection in the right collaboration drawer.
+- `src/features/workspace/WorkspaceView.tsx` renders the Project-first workspace: Project title plus Project/Task Briefs in the left panel, Project-owned document Canvas in the center, and Project conversation history plus per-run Agent and Thread model selection in the right collaboration drawer.
 - `src/features/workspace/components/AICollaborationDrawer.tsx` owns chat-side Canvas write proposals, temporary streaming assistant status, temporary response annotations, annotation chips, and highlighted assistant-message text. Annotation chips are shown both in the proposal panel and above the composer so the user can see the active write selection before sending "write" instructions. Annotation state is intentionally client-only and is cleared after write/cancel/page refresh.
 - `src/features/workspace/components/DocumentCanvas.tsx` renders Canvas V2 through `@xyflow/react`. React Flow owns viewport pan, zoom, selection, and node dragging; FacetWrite owns node rendering, node CRUD calls, resize persistence, and Canvas write approval flows. Shared Canvas submodules under `src/features/workspace/components/canvas/` keep the node frame, node-kind renderers, edge rendering, resize/layout helpers, node constants, status/context/selection chrome, and flow-node mapping separated from the Canvas container.
 - Canvas Workflow is layered over Canvas V2 without becoming the spatial engine. `shared/canvasWorkflow.ts` owns stage, Role-node, suggestion, and context-filtering pure helpers; `useCanvasState.ts`/`useCanvasActions.ts` own frontend state and API orchestration; `DocumentCanvas.tsx` and `CanvasNodeFrame.tsx` only render workflow controls, function nodes, badges, and suggestions through passed data/callbacks. Workflow control features that need targeted influence should be nodeized and relationship-driven, not added as more controls on ordinary content nodes.
@@ -66,11 +66,11 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 - Canvas hit testing is intentionally split between React Flow pane interactions and FacetWrite node controls. Inputs/buttons use `nodrag`, resize controls use `nodrag nopan`, and any future overlay must be browser-verified so it does not block pane context menus, pan/zoom, node drag, node resize, or node editing. See `docs/CANVAS.md`.
 - Canvas browser coverage lives in Playwright under `tests/e2e/canvas.spec.ts`; stable `data-testid` hooks are allowed for Canvas controls but should not become product behavior.
 - `src/shared/MarkdownText.tsx` preserves Markdown block/inline rendering while optionally wrapping annotated text fragments in highlight marks.
-- Runtime context is sourced from Project-scoped structured inputs plus current draft/Canvas state. Agent selection is a per-run choice recorded on `runs.agent_card_id`; model selection remains Thread state and Project model availability remains Project state.
+- Runtime context is sourced from the Project-owned Project Brief, Thread-owned Current Task Brief, and current draft/Canvas state. Agent selection is a per-run choice recorded on `runs.agent_card_id`; model selection remains Thread state.
 - Canvas node context is kind-aware and workflow-aware: notes are excluded by default, documents contribute previews, references contribute reference content, Role nodes contribute prompts only when connected to selected/filtered content nodes, and Canvas Workflow filters narrow runtime context by selected/specified chain, current stage, and `Role -> content` edges. Explicitly sent mind chains may include notes because they are user-selected context.
 - `src/features/ai-dashboard/AiDashboardView.tsx` renders the AI runtime dashboard for Agent Runtime status, Skills/MCP visibility, Agent mapping, and ToolUse bridge progress.
 - `src/features/knowledge/KnowledgeSettingsView.tsx` renders the local Knowledge Base management console for creating RAG bases, importing text/URL/sitemap/local-file sources, viewing indexing status, and testing retrieval.
-- Agent Settings renders Knowledge runtime controls from the same Knowledge API: users can enable Knowledge, search all bases or selected base ids, and tune retrieval count/threshold without adding new API endpoints.
+- Agent Settings renders Agent profile controls only: Prompt, Knowledge, Tools, MCP selection, Quick phrases, and Memory. It has no Model tab. Users can enable Knowledge, search all bases or selected base ids, tune retrieval count/threshold, and choose from already configured Agent Runtime MCP servers without adding new MCP installation/editing APIs.
 - `src/shared/apiClient.ts` provides shared frontend API helpers used by feature clients.
 
 ## Backend
@@ -92,7 +92,7 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 - `server/agents/types.ts` defines AgentCard and AgentSettings types.
 - `server/agents/cards/builtInCards.ts` defines built-in Agent cards and localized field metadata.
 - `server/agents/prompts.ts` stores built-in identity prompts.
-- `server/agents/defaultSettings.ts` defines default model, prompt, tool, knowledge, memory, and quick-message settings.
+- `server/agents/defaultSettings.ts` defines default prompt, tool, knowledge, memory, quick-message, and MCP-ref settings. Model runtime settings are conversation/runtime settings, not Agent settings.
 - `server/agents/loader.ts` exposes built-in cards and applies saved settings to cards.
 - `server/agentRuntimeAdapter.ts` resolves Agent cards, merged settings, runtime config, tool policies, and available skills/tools.
 - `server/tools/catalog.ts` is the Tool metadata source of truth.
@@ -122,7 +122,7 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 - Provider-specific wire fields stay behind `server/providerRuntime.ts` and the provider profile capability model.
 - Provider metadata, docs links, base URL defaults, static model references, and model capability flags live in the FacetWrite-owned model registry under `shared/model/`. The registry copies and adapts reference data into this project; runtime code must not import from `reference/sources/cherry-studio`.
 - Provider API credentials are separate from raw provider/model references. Local credentials live in `.facetwrite/provider-apis.json` as configured model API bindings: one callable row per `providerId + modelId + apiKey/baseURL`.
-- The Model Config page is a first-level workspace view. It shows the complete provider model catalog separately from the local API model list. The catalog is for discovery; the local list is the set of bindings that Agents and Knowledge Bases may call.
+- The Model Config page is a first-level workspace view. It shows the complete provider model catalog separately from the local API model list. The catalog is for discovery; the local list is the set of bindings that conversations and Knowledge Bases may call.
 - Dynamic model listing is backend-owned under `server/domains/model-config/model-list/`: `service.ts` handles fallback flow, `fetchers.ts` holds provider-specific remote strategies, and `utils.ts` owns response parsing and redaction helpers. `server/services/modelListService.ts` is only a compatibility export.
 - Dynamic model listing remains a provider catalog operation: request draft key/base URL first, saved binding for that provider second, registry defaults for non-secret fields last. It must not borrow a key from another provider.
 - Generation resolves the Thread's explicitly selected backend Model Config at request time. There is no default, Agent-owned, environment, Provider-runner, or test compatibility model fallback.
@@ -139,7 +139,7 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 - The local dev compose project is `facetwrite-agent-runtime` and container names use `facetwrite-agent-runtime-*`. The FacetWrite acceptance compose keeps host Docker socket and local CLI credential directories out of the gateway container by default; those mounts should only be reintroduced for isolated sandbox/CLI-auth experiments.
 - FacetWrite authenticates to protected AgentBackend APIs with a backend-managed local session cookie and CSRF token; these credentials are never returned to the frontend.
 - AgentBackend `lead_agent` is the default main-agent entrypoint.
-- FacetWrite Task cards are mapped to AgentBackend subagent metadata with skills, tools, model inheritance, timeout, and max-turn defaults.
+- The neutral `ChatAgent` profile is mapped to AgentBackend subagent metadata with skills, tools, model inheritance, timeout, and max-turn defaults. Historical Task-card ids resolve to `ChatAgent` before mapping.
 - FacetWrite exposes Agent Runtime status, config overview, dashboard, and FacetWrite-managed Memory endpoints at `/api/agent-runtime/*`, with `/api/agent-backend/*` kept as compatibility aliases where applicable.
 - FacetWrite exposes an AI Dashboard that summarizes Agent Runtime health, auth, Skills/MCP, AgentCard-to-subagent mapping, ToolUse bridge status, and editable FacetWrite-managed Memory.
 - FacetWrite exposes `/api/internal/agent-runtime/tool-call` as the only service-to-service ToolUse bridge. Every request requires `FACETWRITE_INTERNAL_TOOL_TOKEN`; source headers are metadata only. The bridge reuses `executeToolCall` and applies the Tool catalog policy guard.
@@ -200,17 +200,17 @@ The frontend keeps orchestration in `DocumentCanvas`, tool overlays and file inp
 
 FacetWrite uses `Project` as the only workspace and shared-context boundary.
 
-- A Project owns structured Agent inputs, Canvas resources, project summary, model bindings, and shared outputs.
-- A Thread belongs to one Project and owns only its conversation messages, runs, and current explicit Model Config selection.
-- An Agent is selected per run. Agent definitions contain capabilities, prompt templates, tools, and field definitions; they do not own project context or model configuration.
-- New Projects start with empty context. Runs automatically receive structured context from the current Project plus the current Thread history, never another Project's context.
+- A Project owns one Project Brief, Canvas resources, project summary, model bindings, and shared outputs.
+- A Thread belongs to one Project and owns its Current Task Brief, conversation messages, runs, and current explicit Model Config selection.
+- An Agent is selected per run. Agent definitions contain capabilities, prompts, Skills, tools, Knowledge, Memory, MCP refs, and quick phrases; they do not own Briefs or model configuration.
+- New Projects and Threads start with empty Briefs. Runs automatically receive the current Project Brief and Current Task Brief plus the current Thread history, never another Project's context.
 - AgentBackend receives the real `facetwrite_project_id` and current `thread_id`; the former `local-project` scope is forbidden.
 
 Canvas database columns and public Canvas records use `project_id`/`projectId`. Thread-scoped Canvas routes explicitly resolve the Thread's Project before calling the Project-owned Canvas domain.
 
 Model selection and context assembly are hidden runtime policies. Threads select directly from valid stored chat Model Configs and persist inherited defaults. Historical Project model bindings and context-inclusion flags remain readable compatibility data but are not current UI gates.
 
-Generation context is bounded to explicit mind chains/selections, the selected node and directed related nodes, Workflow/Role state, current draft and structured inputs, messages after `context_reset_at`, and Knowledge results. Ordinary notes and the rest of an unselected Canvas are excluded. Frontend generation and Thread restoration use operation ownership checks so stale asynchronous results cannot apply after a Project or Thread switch.
+Generation context is bounded to Project Brief, Current Task Brief, explicit mind chains/selections, the selected node and directed related nodes, Workflow/Role state, current draft, messages after `context_reset_at`, and Knowledge results. Ordinary notes and the rest of an unselected Canvas are excluded. Frontend generation and Thread restoration use operation ownership checks so stale asynchronous results cannot apply after a Project or Thread switch.
 
 Agent Runtime is the sole real generation path. Default failures return stable model/runtime errors, emit redacted failure events, and do not persist Mock messages or output versions.
 

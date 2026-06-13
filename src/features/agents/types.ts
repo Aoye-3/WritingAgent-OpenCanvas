@@ -1,23 +1,12 @@
 import type { Locale } from "../i18n/types";
 
-export type AgentCategory = "writing" | "education" | "summarise" | "rewrite";
-export type AgentIcon = "pen" | "lines" | "mail" | "book" | "report" | "refresh";
+export type AgentCategory = "chat";
+export type AgentIcon = "bot" | "pen" | "lines" | "mail" | "book" | "report" | "refresh";
 export type AgentAccent = "blue" | "green" | "orange" | "violet" | "rose";
 export type ToolRef = "web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write" | "plan_clarification_submit" | "plan_revision_submit" | "artifact_stage";
 export type ToolRiskLevel = "low" | "medium" | "high";
 export type ToolGroup = "web" | "context" | "chat";
 export type AgentModelResponseMode = "normal" | "prefix_completion";
-
-export type AgentCardField = {
-  id: string;
-  kind: "text" | "textarea" | "select" | "chips" | "segmented";
-  label: Record<Locale, string>;
-  options?: string[];
-  placeholder: Record<Locale, string>;
-  required?: boolean;
-};
-
-export type AgentValues = Record<string, string | string[]>;
 
 export type AgentCard = {
   id: string;
@@ -33,28 +22,44 @@ export type AgentCard = {
     type: string;
     defaultFormat: string;
   };
-  defaultValues: AgentValues;
-  fields: AgentCardField[];
   settings?: AgentSettings;
 };
 
+export type DeliverableType = "auto" | "document" | "outline" | "analysis" | "checklist" | "proposal";
+export type ProjectBrief = {
+  goal?: string;
+  audience?: string;
+  background?: string;
+  standingConstraints?: string;
+};
+export type TaskBrief = {
+  objective?: string;
+  deliverableType?: DeliverableType;
+  deliverableDetails?: string;
+  mustCover?: string;
+  temporaryConstraints?: string;
+};
+export type StoredBrief<T> = { brief: T; revision: number };
+export type BriefSaveStatus = "idle" | "saving" | "saved" | "error";
+
+export type ConversationModelRuntimeSettings = {
+  configuredModelApiId?: string;
+  providerId: string;
+  model: string;
+  responseMode?: AgentModelResponseMode;
+  temperature: number;
+  topP: number;
+  contextCount: number;
+  maxTokens: number;
+  maxTokensEnabled: boolean;
+  streaming: boolean;
+  toolCallMode: "auto" | "function" | "none";
+  maxToolCalls: number;
+  thinkingMode?: "enabled" | "disabled";
+  reasoningEffort?: "high" | "max" | "low" | "medium" | "xhigh";
+};
+
 export type AgentSettings = {
-  model: {
-    configuredModelApiId?: string;
-    providerId: string;
-    model: string;
-    responseMode?: AgentModelResponseMode;
-    temperature: number;
-    topP: number;
-    contextCount: number;
-    maxTokens: number;
-    maxTokensEnabled: boolean;
-    streaming: boolean;
-    toolCallMode: "auto" | "function" | "none";
-    maxToolCalls: number;
-    thinkingMode?: "enabled" | "disabled";
-    reasoningEffort?: "high" | "max" | "low" | "medium" | "xhigh";
-  };
   prompt: {
     name: string;
     description: string;
@@ -76,6 +81,7 @@ export type AgentSettings = {
     enabled: boolean;
   };
   quickMessages: string[];
+  mcpRefs: string[];
 };
 
 export type ToolCatalogItem = {
@@ -119,7 +125,7 @@ export type ProviderCapabilities = {
 };
 
 export type ProviderProfile = {
-  id: AgentSettings["model"]["providerId"];
+  id: ConversationModelRuntimeSettings["providerId"];
   label: string;
   defaultBaseURL: string;
   defaultModel: string;
@@ -136,7 +142,6 @@ export type AgentRuntimeConfig = {
   deprecatedToolRefs: string[];
   availableSkills: SkillCatalogItem[];
   missingSkillRefs: string[];
-  providerProfile: ProviderProfile;
 };
 
 export type ThreadCreateResponse = {
@@ -176,7 +181,7 @@ export type StoredOutputVersion = {
   runId: string;
   content: string;
   mode: "structured" | "chat";
-  provider: "deepseek" | "openai" | "openai-compatible" | "mock";
+  provider: "deepseek" | "openai" | "openai-compatible" | "agent-backend" | "mock";
   usedMock: boolean;
   includeInProjectContext: boolean;
   createdAt: string;
@@ -316,8 +321,8 @@ export type ThreadStateResponse = {
   thread: StoredThread;
   project?: ProjectSummary;
   messages: StoredMessage[];
-  projectInputs?: Record<string, AgentValues>;
-  projectInputRevisions?: Record<string, number>;
+  projectBrief: StoredBrief<ProjectBrief>;
+  taskBrief: StoredBrief<TaskBrief>;
   outputVersions: StoredOutputVersion[];
   toolEvents: StoredToolEvent[];
   canvasNodes?: CanvasNode[];

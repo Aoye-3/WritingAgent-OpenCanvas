@@ -45,6 +45,10 @@ Knowledge Base vector stores and uploads are created under:
   - Top-level workspace records. New Projects start with no content context; their first Thread resolves a valid default chat model.
 - `threads`
   - Conversations belonging to one Project, with `configured_model_api_id` and optional `context_reset_at`. The reset boundary preserves history while excluding older messages from later model context.
+- `project_briefs`
+  - One optional Project Brief JSON payload per Project, with autosave revision and update timestamp.
+- `thread_task_briefs`
+  - One optional Current Task Brief JSON payload per Thread, with autosave revision and update timestamp.
 - `messages`
   - User and assistant messages for a thread.
 - `runs`
@@ -62,7 +66,7 @@ Knowledge Base vector stores and uploads are created under:
 - `settings`
   - Generic settings key/value table.
 - `agent_settings`
-  - Per-Agent settings JSON payloads.
+  - Per-Agent profile settings JSON payloads: Prompt, Tools, Knowledge, MCP refs, Quick phrases, and Memory. Model identity and provider credentials are not stored here; legacy `payload_json.model` is ignored during normalization and is not written back.
 - `quick_messages`
   - Per-Agent quick message text.
 - `canvas_nodes`
@@ -109,7 +113,7 @@ Canvas pan, drag, resize, and hit testing are presentation-only. React Flow view
 Free arrows, shapes, tables, and asset cards are explicit saved user artifacts and therefore live in `canvas_objects`. They never create `canvas_edges` implicitly. Asset bytes live under `.facetwrite/threads/<threadId>/user-data/uploads/`; SQLite stores only safe metadata and the thread-relative path.
 
 ## Thread And Project Semantics
-Projects are backed by `projects` and renamed independently from their Threads. Threads are conversations inside a Project and do not own Agent identity, Canvas resources, project model bindings, or project shared context.
+Projects are backed by `projects` and renamed independently from their Threads. Threads are conversations inside a Project and own the explicit `configured_model_api_id` for model selection; they do not own Agent identity, Canvas resources, project model bindings, or project shared context.
 
 ## Migration Notes
 Schema creation and migration live in `server/db/schema.ts`. Schema version 3 completed the Project-owned Canvas migration. Schema version 4 adds `threads.context_reset_at` without deleting conversation history. Model Config, Agent definitions, and Knowledge data are retained.
@@ -128,19 +132,21 @@ Knowledge Base metadata is stored in FacetWrite's main SQLite database, while em
 The main database intentionally does not store provider secrets. Embedding requests use process/runtime provider configuration such as `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL`, and optional Ollama base URL settings.
 
 File uploads are stored outside the main database under `.facetwrite/knowledge/uploads/<baseId>/`. The database keeps source metadata only; vector chunks remain in the per-base libSQL store.
-# Project-First Workspace Schema V4 (2026-06-12)
+# Project-First Workspace Schema V12 (2026-06-13)
 
 - `projects`: top-level workspace, title, summary, timestamps, trash state.
 - `threads`: conversations belonging to a Project. `configured_model_api_id` stores the resolved chat model and `context_reset_at` stores the soft history boundary.
 - `project_model_bindings`: compatibility data from the former Project model allowlist.
-- `project_agent_inputs`: structured input values keyed by `(project_id, agent_card_id)`.
+- `project_briefs`: Project-owned reusable Brief JSON.
+- `thread_task_briefs`: Thread-owned Current Task Brief JSON.
 - `messages`, `runs`, `prompt_versions`, `output_versions`, and `tool_events`: Thread history.
 - Canvas resources are physically and logically Project-owned through `project_id`.
 - `canvas_nodes.include_in_project_context` and `output_versions.include_in_project_context` default to false.
-- `project_agent_inputs.revision` rejects stale autosave writes.
+- Brief revisions reject stale autosave writes independently.
 
 Schema version 3 intentionally clears legacy workspace data to complete the physical Project migration. Model Config, Agent definitions, and knowledge-base data are retained.
 Schema version 4 adds `threads.context_reset_at` without deleting history.
+Schema version 12 drops legacy `project_agent_inputs` data and creates Agent-independent Project and Thread Brief tables.
 
 Schema version 6 adds `plan_runs.clarification_json`. It stores the structured intake question, options, answer status, selected option, and optional custom answer while preserving the existing Plan ID through revision and execution.
 

@@ -90,6 +90,7 @@ export const ZoomInIcon = createIcon(ZoomIn);
 export const ZoomOutIcon = createIcon(ZoomOut);
 
 const taskIcons = {
+  bot: Bot,
   pen: PenLine,
   lines: ClipboardList,
   mail: Mail,

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createProject, fetchProjectFirstHealth, fetchThreadState, renameProject, resetThreadContext, saveThreadInputs, selectThreadModel } from "../features/agents/agentClient";
+import { createProject, fetchProjectFirstHealth, fetchThreadState, renameProject, resetThreadContext, saveProjectBrief, saveTaskBrief, selectThreadModel } from "../features/agents/agentClient";
 import { AgentSettingsView } from "../features/agents/AgentSettingsView";
 import { useAgentCards } from "../features/agents/hooks/useAgentCards";
-import type { AgentCard, AgentValues, ProjectSummary, StoredThread, ThreadStateResponse } from "../features/agents/types";
+import type { AgentCard, BriefSaveStatus, ProjectBrief, ProjectSummary, StoredThread, TaskBrief, ThreadStateResponse } from "../features/agents/types";
 import { AiDashboardView } from "../features/ai-dashboard/AiDashboardView";
 import { useAppNavigation } from "../features/app/useAppNavigation";
 import type { GenerateRequest } from "../features/generation/types";
@@ -30,25 +30,46 @@ export type AppView = "start" | "home" | "workspace" | "projects" | "agentSettin
 
 const fallbackAgentCards: AgentCard[] = [
   {
-    id: "blog-post",
-    category: "writing",
+    id: "chat-agent",
+    category: "chat",
     accent: "blue",
-    icon: "pen",
-    title: { en: "Blog Post", zh: "博客文章" },
+    icon: "bot",
+    title: { en: "ChatAgent", zh: "ChatAgent" },
     description: {
-      en: "Draft a structured article from topic, audience, tone, and references.",
-      zh: "根据主题、受众、语气和参考资料生成结构化文章。"
+      en: "A neutral base Agent for prompts, tools, knowledge, memory, and MCP selections.",
+      zh: "A neutral base Agent for prompts, tools, knowledge, memory, and MCP selections."
     },
-    identityPrompt: "You are a writing agent.",
-    skillRefs: ["blog-post"],
+    identityPrompt: "You are ChatAgent, a neutral assistant that follows the user's current instruction.",
+    skillRefs: [],
     toolRefs: ["web_search", "knowledge_base", "quick_messages", "clear_context", "canvas_write"],
-    outputContract: { type: "article", defaultFormat: "markdown" },
-    defaultValues: { topic: "", audience: "", tone: "", language: "", length: "", format: "", keyPoints: "", instruction: "" },
-    fields: []
+    outputContract: { type: "chat", defaultFormat: "markdown" }
   }
 ];
 
-const getInitialValues = (agentCard: AgentCard): AgentValues => ({ ...agentCard.defaultValues });
+const projectBriefLabels: Record<keyof ProjectBrief, string> = {
+  goal: "Project goal",
+  audience: "Target audience",
+  background: "Background and known facts",
+  standingConstraints: "Standing constraints and expression principles"
+};
+const taskBriefLabels: Record<keyof TaskBrief, string> = {
+  objective: "Task objective",
+  deliverableType: "Expected deliverable",
+  deliverableDetails: "Deliverable supplemental details",
+  mustCover: "Must cover",
+  temporaryConstraints: "Temporary constraints and supplemental requirements"
+};
+
+function sameBrief(left: object, right: object) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function briefPreviewLines<T extends object>(brief: T, labels: Record<keyof T, string>) {
+  return Object.entries(labels).flatMap(([key, label]) => {
+    const value = brief[key as keyof T];
+    return typeof value === "string" && value.trim() ? [`- ${label}: ${value.trim()}`] : [];
+  });
+}
 
 function AppContent() {
   const { locale } = useI18n();
@@ -56,27 +77,42 @@ function AppContent() {
   const { agentCards, updateAgentCard } = useAgentCards(fallbackAgentCards);
   const { handleBatchHardDelete, handleBatchMoveToTrash, handleRenameThread, handleTogglePinnedThread, pinnedThreadIds, projects, recentThreads, refreshProjectSurfaces, refreshProjects, refreshRecentThreads, trashProjects } = useProjects();
   const [activeAgent, setActiveAgent] = useState<AgentCard>(fallbackAgentCards[0]);
-  const [agentValues, setAgentValues] = useState<AgentValues>(() => getInitialValues(fallbackAgentCards[0]));
-  const [activeProjectTitle, setActiveProjectTitle] = useState(fallbackAgentCards[0].title[locale]);
+  const [projectBrief, setProjectBrief] = useState<ProjectBrief>({});
+  const [taskBrief, setTaskBrief] = useState<TaskBrief>({});
+  const [projectBriefStatus, setProjectBriefStatus] = useState<BriefSaveStatus>("idle");
+  const [taskBriefStatus, setTaskBriefStatus] = useState<BriefSaveStatus>("idle");
+  const [activeProjectTitle, setActiveProjectTitle] = useState(locale === "zh" ? "新项目" : "New Project");
   const [activeProjectId, setActiveProjectId] = useState("");
   const [configuredModels, setConfiguredModels] = useState<ConfiguredModelApiSummary[]>([]);
   const [runtimeStatus, setRuntimeStatus] = useState<AgentBackendRuntimeStatus>();
   const [selectedModelConfigId, setSelectedModelConfigId] = useState<string | null>(null);
-  const [projectInputs, setProjectInputs] = useState<Record<string, AgentValues>>({});
   const activeProjectIdRef = useRef("");
-  const inputRevisionRef = useRef<Record<string, number>>({});
+  const activeThreadIdRef = useRef("");
+  const projectBriefRef = useRef<ProjectBrief>({});
+  const taskBriefRef = useRef<TaskBrief>({});
+  const projectBriefRevisionRef = useRef(0);
+  const taskBriefRevisionRef = useRef(0);
+  const projectBriefDirtyRef = useRef(false);
+  const taskBriefDirtyRef = useRef(false);
+  const projectBriefSavePromiseRef = useRef<Promise<void> | null>(null);
+  const taskBriefSavePromiseRef = useRef<Promise<void> | null>(null);
   const [toolState, setToolState] = useState<GenerateRequest["toolState"]>({ web_search: true, knowledge_base: false, canvas_write: true });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [canvasUndoDepth, setCanvasUndoDepth] = useState(20);
 
   const applyThreadState = (state: ThreadStateResponse) => {
-    const agentCard = activeAgent;
-    const nextProjectInputs = state.projectInputs ?? {};
-    inputRevisionRef.current = Object.fromEntries(
-      Object.entries(state.projectInputRevisions ?? {}).map(([agentCardId, revision]) => [`${state.thread.projectId}:${agentCardId}`, revision])
-    );
-    setProjectInputs(nextProjectInputs);
-    setAgentValues({ ...getInitialValues(agentCard), ...(nextProjectInputs[agentCard.id] ?? {}) });
+    activeProjectIdRef.current = state.thread.projectId;
+    activeThreadIdRef.current = state.thread.id;
+    projectBriefRef.current = state.projectBrief.brief;
+    taskBriefRef.current = state.taskBrief.brief;
+    projectBriefRevisionRef.current = state.projectBrief.revision;
+    taskBriefRevisionRef.current = state.taskBrief.revision;
+    projectBriefDirtyRef.current = false;
+    taskBriefDirtyRef.current = false;
+    setProjectBrief(state.projectBrief.brief);
+    setTaskBrief(state.taskBrief.brief);
+    setProjectBriefStatus(state.projectBrief.revision ? "saved" : "idle");
+    setTaskBriefStatus(state.taskBrief.revision ? "saved" : "idle");
     setActiveProjectId(state.thread.projectId);
     setSelectedModelConfigId(state.thread.configuredModelApiId ?? null);
     setActiveProjectTitle(state.project?.title ?? state.thread.title);
@@ -113,15 +149,7 @@ function AppContent() {
 
   const selectedCanvasNode = canvasState.canvasNodes.find((node) => node.id === canvasState.selectedCanvasNodeId);
   const getContextValues = () => {
-    const structuredInputs = Object.fromEntries(
-      activeAgent.fields
-        .map((field) => [field.id, agentValues[field.id]] as const)
-        .filter(([, value]) => typeof value === "string" ? value.trim().length > 0 : Boolean(value))
-    );
     const values: Record<string, unknown> = {};
-    if (Object.keys(structuredInputs).length > 0) {
-      values.structuredInputs = structuredInputs;
-    }
     if (generationRun.editableOutput.trim()) {
       values.currentDraft = generationRun.editableOutput;
     }
@@ -189,9 +217,87 @@ function AppContent() {
     await refreshProjectSurfaces();
   };
 
+  const updateProjectBrief = useCallback((brief: ProjectBrief) => {
+    projectBriefRef.current = brief;
+    projectBriefDirtyRef.current = true;
+    setProjectBrief(brief);
+    setProjectBriefStatus("idle");
+  }, []);
+
+  const updateTaskBrief = useCallback((brief: TaskBrief) => {
+    taskBriefRef.current = brief;
+    taskBriefDirtyRef.current = true;
+    setTaskBrief(brief);
+    setTaskBriefStatus("idle");
+  }, []);
+
+  const saveProjectBriefNow = useCallback(async () => {
+    while (projectBriefDirtyRef.current && activeProjectId) {
+      if (projectBriefSavePromiseRef.current) {
+        await projectBriefSavePromiseRef.current;
+        continue;
+      }
+      const projectId = activeProjectId;
+      const snapshot = projectBriefRef.current;
+      const revision = projectBriefRevisionRef.current + 1;
+      setProjectBriefStatus("saving");
+      const savePromise = saveProjectBrief(projectId, snapshot, revision)
+        .then((saved) => {
+          if (projectId !== activeProjectIdRef.current) return;
+          projectBriefRevisionRef.current = saved.revision;
+          projectBriefDirtyRef.current = !sameBrief(snapshot, projectBriefRef.current);
+          setProjectBriefStatus(projectBriefDirtyRef.current ? "idle" : "saved");
+          void refreshProjectSurfaces().catch(() => undefined);
+        })
+        .catch((error) => {
+          if (projectId === activeProjectIdRef.current) setProjectBriefStatus("error");
+          throw error;
+        });
+      projectBriefSavePromiseRef.current = savePromise;
+      try {
+        await savePromise;
+      } finally {
+        if (projectBriefSavePromiseRef.current === savePromise) projectBriefSavePromiseRef.current = null;
+      }
+    }
+  }, [activeProjectId, refreshProjectSurfaces]);
+
+  const saveTaskBriefNow = useCallback(async () => {
+    while (taskBriefDirtyRef.current && threadSession.threadId) {
+      if (taskBriefSavePromiseRef.current) {
+        await taskBriefSavePromiseRef.current;
+        continue;
+      }
+      const threadId = threadSession.threadId;
+      const snapshot = taskBriefRef.current;
+      const revision = taskBriefRevisionRef.current + 1;
+      setTaskBriefStatus("saving");
+      const savePromise = saveTaskBrief(threadId, snapshot, revision)
+        .then((saved) => {
+          if (threadId !== activeThreadIdRef.current) return;
+          taskBriefRevisionRef.current = saved.revision;
+          taskBriefDirtyRef.current = !sameBrief(snapshot, taskBriefRef.current);
+          setTaskBriefStatus(taskBriefDirtyRef.current ? "idle" : "saved");
+        })
+        .catch((error) => {
+          if (threadId === activeThreadIdRef.current) setTaskBriefStatus("error");
+          throw error;
+        });
+      taskBriefSavePromiseRef.current = savePromise;
+      try {
+        await savePromise;
+      } finally {
+        if (taskBriefSavePromiseRef.current === savePromise) taskBriefSavePromiseRef.current = null;
+      }
+    }
+  }, [threadSession.threadId]);
+
+  const flushBriefs = useCallback(async () => {
+    await Promise.all([saveProjectBriefNow(), saveTaskBriefNow()]);
+  }, [saveProjectBriefNow, saveTaskBriefNow]);
+
   const generationRun = useGenerationRun({
     activeAgent,
-    agentValues,
     locale,
     toolState,
     selectedCanvasNodeId: canvasState.selectedCanvasNodeId,
@@ -205,7 +311,8 @@ function AppContent() {
     onApplyThreadState: applyThreadState,
     onApproveCanvasWriteRequest: async (requestId) => { await canvasState.handleApproveCanvasWriteRequest(requestId); },
     getPendingCanvasWriteRequestIds: () => canvasState.canvasWriteRequests.map((request) => request.id),
-    onRefreshProjectSurfaces: refreshProjectSurfaces
+    onRefreshProjectSurfaces: refreshProjectSurfaces,
+    beforeGenerate: flushBriefs
   });
 
   const projectTrash = useProjectTrash({
@@ -237,7 +344,6 @@ function AppContent() {
     const firstAgent = agentCards[0];
     if (!firstAgent || view === "workspace" || activeAgent.id !== fallbackAgentCards[0].id) return;
     setActiveAgent(firstAgent);
-    setAgentValues(getInitialValues(firstAgent));
   }, [activeAgent.id, agentCards, view]);
 
   useEffect(() => {
@@ -245,22 +351,20 @@ function AppContent() {
   }, [activeProjectId]);
 
   useEffect(() => {
-    if (view !== "workspace" || !threadSession.threadId) return;
-    const saveTimer = window.setTimeout(() => {
-      const targetProjectId = activeProjectId;
-      const revisionKey = `${targetProjectId}:${activeAgent.id}`;
-      const revision = (inputRevisionRef.current[revisionKey] ?? 0) + 1;
-      inputRevisionRef.current[revisionKey] = revision;
-      void saveThreadInputs(threadSession.threadId, activeAgent.id, agentValues, revision)
-        .then(() => {
-          if (targetProjectId !== activeProjectIdRef.current) return;
-          setProjectInputs((current) => ({ ...current, [activeAgent.id]: agentValues }));
-          return refreshProjectSurfaces();
-        })
-        .catch(() => undefined);
-    }, 350);
-    return () => window.clearTimeout(saveTimer);
-  }, [activeAgent.id, activeProjectId, agentValues, refreshProjectSurfaces, threadSession.threadId, view]);
+    activeThreadIdRef.current = threadSession.threadId;
+  }, [threadSession.threadId]);
+
+  useEffect(() => {
+    if (view !== "workspace" || !projectBriefDirtyRef.current) return;
+    const timer = window.setTimeout(() => { void saveProjectBriefNow().catch(() => undefined); }, 350);
+    return () => window.clearTimeout(timer);
+  }, [projectBrief, saveProjectBriefNow, view]);
+
+  useEffect(() => {
+    if (view !== "workspace" || !taskBriefDirtyRef.current) return;
+    const timer = window.setTimeout(() => { void saveTaskBriefNow().catch(() => undefined); }, 350);
+    return () => window.clearTimeout(timer);
+  }, [saveTaskBriefNow, taskBrief, view]);
 
   const handleActiveProjectTitleChange = useCallback(async (title: string) => {
     if (!activeProjectId) return;
@@ -270,42 +374,50 @@ function AppContent() {
   }, [activeProjectId, refreshProjectSurfaces]);
 
   const promptPreview = useMemo(() => {
-    const pairs = activeAgent.fields
-      .map((field) => [field.label[locale], String(agentValues[field.id] ?? "")] as const)
-      .filter(([, value]) => value.trim().length > 0);
     const tools = activeAgent.toolRefs.filter((tool) => toolState?.[tool as keyof NonNullable<GenerateRequest["toolState"]>]);
+    const projectLines = briefPreviewLines(projectBrief, projectBriefLabels);
+    const taskLines = briefPreviewLines(taskBrief, taskBriefLabels);
 
-    if (pairs.length === 0 && tools.length === 0) {
+    if (projectLines.length === 0 && taskLines.length === 0 && tools.length === 0) {
       return locale === "zh"
-        ? "填写左侧结构化输入后，这里会显示组装后的 Agent Prompt。底部栏仅作为后续功能区。"
-        : "Fill the left structured inputs to preview the assembled Agent prompt. The bottom bar is reserved for future tools.";
+        ? "填写左侧 Project Brief 或 Current Task Brief 后，这里会显示生成时自动注入的上下文。"
+        : "Fill the Project Brief or Current Task Brief to preview the context automatically injected at generation time.";
     }
 
     return [
       `AgentCard: ${activeAgent.title[locale]}`,
       `Skills: ${activeAgent.skillRefs.join(", ")}`,
       tools.length ? `Enabled tools: ${tools.join(", ")}` : "",
-      ...pairs.map(([label, value]) => `${label}: ${value}`)
+      projectLines.length ? `# Project Brief\n${projectLines.join("\n")}` : "",
+      taskLines.length ? `# Current Task Brief\n${taskLines.join("\n")}` : ""
     ].filter(Boolean).join("\n");
-  }, [activeAgent, agentValues, locale, toolState]);
+  }, [activeAgent, locale, projectBrief, taskBrief, toolState]);
 
   const openWorkspace = async (agentCard: AgentCard) => {
+    if (activeProjectId) await flushBriefs();
     const projectTitle = locale === "zh" ? "新项目" : "New Project";
     threadSession.setThreadId("");
     setActiveAgent(agentCard);
-    setAgentValues(getInitialValues(agentCard));
+    projectBriefRef.current = {};
+    taskBriefRef.current = {};
+    projectBriefDirtyRef.current = false;
+    taskBriefDirtyRef.current = false;
+    setProjectBrief({});
+    setTaskBrief({});
+    setProjectBriefStatus("idle");
+    setTaskBriefStatus("idle");
     setActiveProjectTitle(projectTitle);
     generationRun.resetGeneration();
     canvasState.resetCanvas();
     setToolState({ web_search: true, knowledge_base: false, canvas_write: true });
     const project = await createProject(projectTitle);
     setActiveProjectId(project.id);
-    setProjectInputs({});
     setSelectedModelConfigId(null);
     await threadSession.openProject(project.id);
   };
 
   const openRecentThread = async (thread: StoredThread | ProjectSummary) => {
+    if (activeProjectId) await flushBriefs();
     if ("projectId" in thread) {
       await threadSession.restoreThread(thread.id);
       return;
@@ -369,7 +481,10 @@ function AppContent() {
         activeAgent={activeAgent}
         agentCards={agentCards}
         activeView={view}
-        agentValues={agentValues}
+        projectBrief={projectBrief}
+        taskBrief={taskBrief}
+        projectBriefStatus={projectBriefStatus}
+        taskBriefStatus={taskBriefStatus}
         collaborationMessages={generationRun.collaborationMessages}
         editableOutput={generationRun.editableOutput}
         generation={generationRun.generation}
@@ -395,22 +510,24 @@ function AppContent() {
         projectThreads={threadSession.projectThreads}
         sessionBusy={threadSession.sessionBusy}
         sessionError={threadSession.sessionError}
-        onCreateConversation={async () => { if (activeProjectId) await threadSession.createConversation(activeProjectId); }}
+        onCreateConversation={async () => { if (activeProjectId) { await flushBriefs(); await threadSession.createConversation(activeProjectId); } }}
         onResetContext={async () => { if (threadSession.threadId) await resetThreadContext(threadSession.threadId); }}
-        onSelectThread={async (threadId) => { await threadSession.restoreThread(threadId); }}
+        onSelectThread={async (threadId) => { await flushBriefs(); await threadSession.restoreThread(threadId); }}
         onSelectModel={async (configuredModelApiId) => {
           if (!threadSession.threadId || !configuredModelApiId) return;
           const thread = await selectThreadModel(threadSession.threadId, configuredModelApiId);
           setSelectedModelConfigId(thread.configuredModelApiId ?? null);
         }}
-        onAgentValuesChange={setAgentValues}
         onSelectAgent={(agentCardId) => {
           const nextAgent = agentCards.find((agent) => agent.id === agentCardId);
           if (!nextAgent) return;
           setActiveAgent(nextAgent);
-          setAgentValues({ ...getInitialValues(nextAgent), ...(projectInputs[nextAgent.id] ?? {}) });
         }}
         onProjectTitleChange={handleActiveProjectTitleChange}
+        onProjectBriefChange={updateProjectBrief}
+        onTaskBriefChange={updateTaskBrief}
+        onRetryProjectBrief={saveProjectBriefNow}
+        onRetryTaskBrief={saveTaskBriefNow}
         onApproveCanvasWriteRequest={canvasState.handleApproveCanvasWriteRequest}
         onChatSend={generationRun.handleChatSend}
         onStopChatSend={generationRun.stopChatGeneration}

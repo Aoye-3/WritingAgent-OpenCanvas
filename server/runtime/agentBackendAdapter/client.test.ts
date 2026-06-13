@@ -11,11 +11,23 @@ test("builds LangGraph-compatible AgentBackend run request", () => {
     threadId: "thread_1",
     projectId: "project_1",
     configuredModelApiId: "deepseek--configured",
-    agentCard: card,
-    settings: {
-      ...settings,
-      model: { ...settings.model, model: "deepseek-v4-flash", thinkingMode: "enabled", reasoningEffort: "high" }
+    modelSettings: {
+      configuredModelApiId: "deepseek--configured",
+      providerId: "deepseek",
+      model: "deepseek-v4-flash",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: true,
+      toolCallMode: "auto",
+      maxToolCalls: 20,
+      thinkingMode: "enabled",
+      reasoningEffort: "high"
     },
+    agentCard: card,
+    settings,
     messages: [{ role: "user", content: "Summarise this" }],
     prompt: "Summarise this",
     allowedToolRefs: ["knowledge_base", "canvas_write"],
@@ -45,8 +57,8 @@ test("builds LangGraph-compatible AgentBackend run request", () => {
   assert.equal(request.context.facetwrite_project_id, "project_1");
   assert.equal(request.context.facetwrite_plan_phase, "chat");
   assert.equal(request.config.configurable.facetwrite_memory_enabled, false);
-  assert.equal(request.metadata.agentCardId, "summary");
-  assert.equal(request.metadata.subagent.name, "facetwrite-summary");
+  assert.equal(request.metadata.agentCardId, "chat-agent");
+  assert.equal(request.metadata.subagent.name, "facetwrite-chat-agent");
   assert.deepEqual(request.stream_mode, ["messages-tuple", "custom", "values"]);
   assert.equal(request.multitask_strategy, "interrupt");
 });

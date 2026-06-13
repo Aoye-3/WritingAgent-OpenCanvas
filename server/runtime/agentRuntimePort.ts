@@ -1,6 +1,7 @@
 import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
 import type { StreamStatus } from "../agentRunLoop.js";
 import type { AgentRuntimeConfig } from "../services/agentDefinitionService.js";
+import type { ConversationModelRuntimeSettings } from "../agentCards.js";
 import type { GenerateRequest } from "../contracts/generation.js";
 import type { ChatMessage } from "../providerRuntime.js";
 import type { ToolEventRecord } from "../toolRuntime.js";
@@ -10,6 +11,7 @@ export type AgentRuntimeRunInput = {
   threadId: string;
   projectId: string;
   configuredModelApiId: string;
+  modelSettings: ConversationModelRuntimeSettings;
   runtimeConfig: AgentRuntimeConfig;
   messages: ChatMessage[];
   prompt: string;

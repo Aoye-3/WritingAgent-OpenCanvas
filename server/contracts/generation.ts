@@ -12,8 +12,6 @@ export type GenerateRequest = {
   projectId?: string;
   threadId?: string;
   locale: Locale;
-  formValues?: Record<string, string | string[]>;
-  structuredValues?: Record<string, string | string[]>;
   contextValues?: Record<string, unknown>;
   freeTextPrompt?: string;
   chatInstruction?: string;
@@ -74,8 +72,6 @@ export function parseGenerateRequest(value: unknown): GenerateRequest {
     agentCardId: readString(body.agentCardId),
     projectId: readString(body.projectId),
     threadId: readString(body.threadId),
-    formValues: readStringRecord(body.formValues),
-    structuredValues: readStringRecord(body.structuredValues),
     contextValues: readUnknownRecord(body.contextValues),
     freeTextPrompt: readString(body.freeTextPrompt),
     chatInstruction: readString(body.chatInstruction),
@@ -128,16 +124,6 @@ function readProviderId(value: unknown): ProviderId | undefined {
 
 function readUnknownRecord(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-}
-
-function readStringRecord(value: unknown) {
-  const record = readUnknownRecord(value);
-  if (!record) return undefined;
-
-  return Object.fromEntries(
-    Object.entries(record)
-      .filter(([, entry]) => typeof entry === "string" || (Array.isArray(entry) && entry.every((item) => typeof item === "string")))
-  ) as Record<string, string | string[]>;
 }
 
 function readBooleanRecord(value: unknown) {

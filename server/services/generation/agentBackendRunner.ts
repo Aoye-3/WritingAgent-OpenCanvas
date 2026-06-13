@@ -1,4 +1,5 @@
 import type { AgentRuntimeConfig } from "../agentDefinitionService.js";
+import type { ConversationModelRuntimeSettings } from "../../agentCards.js";
 import type { GenerateRequest } from "../../contracts/generation.js";
 import { getAgentBackendRuntimeConfig, type AgentBackendRuntimeConfig } from "../../runtime/agentBackendAdapter/config.js";
 import { runAgentBackendAgent } from "../../runtime/agentBackendAdapter/client.js";
@@ -11,6 +12,7 @@ export type AgentBackendRunnerInput = {
   threadId: string;
   projectId: string;
   configuredModelApiId: string;
+  modelSettings: ConversationModelRuntimeSettings;
   runtimeConfig: AgentRuntimeConfig;
   messages: ChatMessage[];
   prompt: string;
@@ -34,6 +36,7 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     threadId: input.threadId,
     projectId: input.projectId,
     configuredModelApiId: input.configuredModelApiId,
+    modelSettings: input.modelSettings,
     agentCard: input.runtimeConfig.agentCard,
     settings: input.runtimeConfig.settings,
     messages: input.messages,

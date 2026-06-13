@@ -33,8 +33,8 @@ test("dashboard returns runtime, config, agent mapping, and tool bridge status",
   assert.equal(dashboard.runtime.reachable, true);
   assert.equal(dashboard.runtime.authState, "authenticated");
   assert.equal(dashboard.config.skills.length, 1);
-  assert.equal(dashboard.agentMappings[0].subagent.name, "facetwrite-summary");
-  assert.equal(dashboard.agentMappings[0].subagent.skills[0], "summary");
+  assert.equal(dashboard.agentMappings[0].subagent.name, "facetwrite-chat-agent");
+  assert.deepEqual(dashboard.agentMappings[0].subagent.skills, []);
   assert.equal(dashboard.toolBridgeStatus.some((item) => item.name === "canvas_write" && item.bridgeState === "facetwrite_bridge" && item.approvalBoundary === "FacetWrite pending approval"), true);
   assert.equal(dashboard.toolBridgeStatus.some((item) => item.name === "web_search" && item.bridgeState === "agent_backend_builtin"), true);
   assert.equal(dashboard.integrationMaturity.some((item) => item.label === "ToolUse bridge" && item.state === "verified"), true);
@@ -55,23 +55,21 @@ test("dashboard shows fallback state when AgentBackend is disabled", async () =>
 
 function fakeAgentRuntime() {
   return {
-    listAgentCards: () => [summaryCard]
+    listAgentCards: () => [chatAgentCard]
   } as Pick<AgentRuntimeAdapter, "listAgentCards"> as AgentRuntimeAdapter;
 }
 
-const summaryCard: AgentCard = {
-  id: "summary",
-  category: "summarise",
-  accent: "green",
-  icon: "lines",
+const chatAgentCard: AgentCard = {
+  id: "chat-agent",
+  category: "chat",
+  accent: "blue",
+  icon: "bot",
   title: { en: "Summary", zh: "摘要" },
   description: { en: "Summarise text", zh: "摘要文本" },
-  identityPrompt: "Summarise clearly.",
-  skillRefs: ["summary"],
+  identityPrompt: "Assist the user.",
+  skillRefs: [],
   toolRefs: ["knowledge_base", "canvas_write"],
-  outputContract: { type: "summary", defaultFormat: "markdown" },
-  defaultValues: {},
-  fields: []
+  outputContract: { type: "chat", defaultFormat: "markdown" }
 };
 
 function authConfig() {

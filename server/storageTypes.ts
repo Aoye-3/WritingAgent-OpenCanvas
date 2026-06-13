@@ -54,7 +54,27 @@ export type ProjectSummary = {
   modelConfigIds: string[];
 };
 
-export type StoredStructuredValues = Record<string, string | string[]>;
+export type DeliverableType = "auto" | "document" | "outline" | "analysis" | "checklist" | "proposal";
+
+export type ProjectBrief = {
+  goal?: string;
+  audience?: string;
+  background?: string;
+  standingConstraints?: string;
+};
+
+export type TaskBrief = {
+  objective?: string;
+  deliverableType?: DeliverableType;
+  deliverableDetails?: string;
+  mustCover?: string;
+  temporaryConstraints?: string;
+};
+
+export type StoredBrief<T> = {
+  brief: T;
+  revision: number;
+};
 
 export type PlanRunStatus = "draft" | "awaiting_approval" | "running" | "paused" | "awaiting_user" | "completed" | "failed" | "cancelled";
 export type PlanStepStatus = "pending" | "running" | "completed" | "failed" | "skipped";

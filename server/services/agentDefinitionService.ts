@@ -1,5 +1,4 @@
 import type { AgentCard, AgentSettings } from "../agentCards.js";
-import { getProviderProfile, type ProviderProfile } from "../providerRuntime.js";
 import { loadPublicSkills } from "../skillLoader.js";
 import { buildToolPolicies, type ToolPolicy } from "../tools/policies.js";
 import {
@@ -34,7 +33,6 @@ export type AgentRuntimeConfig = {
   deprecatedToolRefs: string[];
   availableSkills: SkillCatalogItem[];
   missingSkillRefs: string[];
-  providerProfile: ProviderProfile;
 };
 
 export function getToolCatalog(): PublicToolDefinition[] {
@@ -58,7 +56,6 @@ export function normalizeAgentSettings(
   allowedToolRefs: string[]
 ): AgentSettings {
   const merged: AgentSettings = {
-    model: { ...base.model, ...saved?.model },
     prompt: {
       ...base.prompt,
       ...saved?.prompt,
@@ -67,17 +64,9 @@ export function normalizeAgentSettings(
     tools: normalizeTools(base.tools, saved?.tools, allowedToolRefs),
     knowledge: { ...base.knowledge, ...saved?.knowledge },
     memory: { ...base.memory, ...saved?.memory },
-    quickMessages: saved?.quickMessages?.length ? saved.quickMessages : base.quickMessages
+    quickMessages: saved?.quickMessages?.length ? saved.quickMessages : base.quickMessages,
+    mcpRefs: Array.isArray(saved?.mcpRefs) ? saved.mcpRefs.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim()) : base.mcpRefs
   };
-
-  if (merged.model.responseMode === "prefix_completion") {
-    const profile = getProviderProfile(merged.model.providerId);
-    if (!profile.capabilities.chatPrefixCompletion) {
-      merged.model.responseMode = "normal";
-    }
-  } else {
-    merged.model.responseMode = "normal";
-  }
 
   return merged;
 }
@@ -103,8 +92,7 @@ export async function buildAgentRuntimeConfig(card: AgentCard, settings: AgentSe
     missingToolRefs,
     deprecatedToolRefs,
     availableSkills,
-    missingSkillRefs,
-    providerProfile: getProviderProfile(settings.model.providerId)
+    missingSkillRefs
   };
 }
 

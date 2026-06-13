@@ -20,6 +20,9 @@ type CanvasState = {
     roles: Array<{ id: string; label: string }>;
   };
   canvasObjects?: Array<{ id: string; kind: "arrow" | "shape" | "table" | "asset" | "text"; data: Record<string, unknown> }>;
+  projectBrief?: { brief: { goal?: string }; revision: number };
+  taskBrief?: { brief: { objective?: string }; revision: number };
+  thread?: { configuredModelApiId?: string | null };
 };
 
 async function openNewCanvas(page: Page) {
@@ -46,12 +49,25 @@ test("Project-first workspace separates sessions, models, and run Agent without 
   await page.setViewportSize({ width: 1536, height: 1024 });
   await openNewCanvas(page);
 
-  await expect(page.getByRole("complementary", { name: "Project settings and structured inputs" })).toBeVisible();
-  await expect(page.getByText(/Conversation model|会话模型/)).toBeVisible();
-  await expect(page.getByText(/Available to this Project|项目可用模型/)).toBeVisible();
-  await expect(page.getByRole("complementary", { name: "Project settings and structured inputs" }).getByText("AGENTCARD")).toHaveCount(0);
+  const briefDrawer = page.getByRole("complementary", { name: "Project and task Briefs" });
+  const projectBriefSection = briefDrawer.locator(".brief-section").nth(0);
+  const taskBriefSection = briefDrawer.locator(".brief-section").nth(1);
+  await expect(briefDrawer).toBeVisible();
+  await expect(briefDrawer.getByText("Project Brief", { exact: true })).toBeVisible();
+  await expect(briefDrawer.getByText("Current Task Brief", { exact: true })).toBeVisible();
+  await expect(projectBriefSection).toHaveJSProperty("open", false);
+  await expect(taskBriefSection).toHaveJSProperty("open", true);
+  await expect(briefDrawer.getByText(/Conversation model|会话模型/)).toHaveCount(0);
+
+  await briefDrawer.getByText("Project Brief", { exact: true }).click();
+  await briefDrawer.getByLabel("Project goal").fill("Shared launch goal");
+  await briefDrawer.getByLabel("Task objective").fill("Draft the launch outline");
+  await expect(projectBriefSection.getByText("Saved", { exact: true })).toBeVisible();
+  await expect(taskBriefSection.getByText("Saved", { exact: true })).toBeVisible();
 
   const firstThreadId = await getCurrentThreadId(page);
+  await expect.poll(async () => (await fetchCanvasState(page)).projectBrief?.brief.goal).toBe("Shared launch goal");
+  await expect.poll(async () => (await fetchCanvasState(page)).taskBrief?.brief.objective).toBe("Draft the launch outline");
   await expect(page.getByRole("button", { name: /History|历史/ })).toBeVisible();
   const rightDrawer = page.getByRole("complementary", { name: "AI collaboration drawer" });
   const compactHeader = rightDrawer.getByTestId("conversation-compact-header");
@@ -60,6 +76,12 @@ test("Project-first workspace separates sessions, models, and run Agent without 
   await expect(compactHeader).toBeVisible();
   await expect(rightDrawer.getByText(/History and collaboration|历史与协作/)).toHaveCount(0);
   await expect(agentRow.locator(".composer-agent-select")).toBeVisible();
+  const modelSelect = rightDrawer.locator(".composer-model-select");
+  await expect(modelSelect).toBeVisible();
+  const modelId = await modelSelect.locator("option:not([value=''])").first().getAttribute("value");
+  expect(modelId).toBeTruthy();
+  await modelSelect.selectOption(modelId!);
+  await expect.poll(async () => (await fetchCanvasState(page)).thread?.configuredModelApiId).toBe(modelId);
   expect((await agentRow.boundingBox())!.y).toBeLessThan((await composerInput.boundingBox())!.y);
   await expect(rightDrawer.getByRole("button", { name: /Web search|联网搜索/ })).toHaveAttribute("aria-pressed", "true");
   await expect(rightDrawer.getByRole("button", { name: /Knowledge base|知识库引用/ })).toHaveAttribute("aria-pressed", "false");
@@ -68,6 +90,27 @@ test("Project-first workspace separates sessions, models, and run Agent without 
   await expect(newConversationButton).toBeEnabled();
   await newConversationButton.click();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("facetwrite:lastThreadId"))).not.toBe(firstThreadId);
+  const secondThreadId = await getCurrentThreadId(page);
+  await expect.poll(async () => (await fetchCanvasState(page)).projectBrief?.brief.goal).toBe("Shared launch goal");
+  await expect.poll(async () => (await fetchCanvasState(page)).taskBrief?.brief.objective).toBeUndefined();
+  await expect(briefDrawer.getByLabel("Task objective")).toHaveValue("");
+  await expect(modelSelect).toHaveValue(modelId!);
+
+  let releaseGeneration: (() => void) | undefined;
+  await page.route("**/api/generate/stream", async (route) => {
+    await new Promise<void>((resolve) => { releaseGeneration = resolve; });
+    await route.fulfill({
+      contentType: "text/event-stream",
+      body: `event: final\ndata: ${JSON.stringify({ text: "Done", prompt: "", provider: "mock", usedMock: false, threadId: secondThreadId })}\n\n`
+    });
+  });
+  await composerInput.fill("Use the current Briefs");
+  await rightDrawer.getByRole("button", { name: /Send|发送/ }).click();
+  await expect.poll(() => Boolean(releaseGeneration)).toBe(true);
+  await expect(modelSelect).toBeDisabled();
+  releaseGeneration!();
+  await expect(rightDrawer.locator(".message-user").last()).toContainText("Use the current Briefs");
+  await expect(modelSelect).toBeEnabled();
 
   await page.getByRole("button", { name: /History|历史/ }).click();
   await expect(page.getByRole("button", { name: /New conversation/ })).toHaveCount(2);

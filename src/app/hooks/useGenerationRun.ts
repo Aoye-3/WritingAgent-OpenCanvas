@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentCard, AgentValues, CanvasWriteSuggestion, PlanRun, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
+import type { AgentCard, CanvasWriteSuggestion, PlanRun, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
 import { generateText, generateTextStream } from "../../features/generation/generationClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../../features/generation/types";
 import type { Locale } from "../../features/i18n/types";
@@ -15,7 +15,6 @@ import {
 
 type UseGenerationRunOptions = {
   activeAgent: AgentCard;
-  agentValues: AgentValues;
   locale: Locale;
   toolState: GenerateRequest["toolState"];
   selectedCanvasNodeId?: string;
@@ -30,6 +29,7 @@ type UseGenerationRunOptions = {
   onApproveCanvasWriteRequest: (requestId: string) => Promise<void>;
   onRefreshProjectSurfaces: () => Promise<void>;
   getPendingCanvasWriteRequestIds: () => string[];
+  beforeGenerate: () => Promise<void>;
 };
 
 type TypewriterTarget = "editable" | `message:${string}`;
@@ -229,6 +229,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   };
 
   const handleGenerate = async () => {
+    await options.beforeGenerate();
     const operationId = ++operationIdRef.current;
     setIsGenerating(true);
     try {
@@ -239,14 +240,13 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         projectId: options.currentProjectId,
         threadId,
         locale: options.locale,
-        structuredValues: options.agentValues,
         contextValues: options.getContextValues(),
         toolState: options.toolState,
         selectedCanvasNodeId: options.selectedCanvasNodeId
       };
       setEditableOutput("");
 
-      const streamingEnabled = Boolean(options.activeAgent.settings?.model.streaming);
+      const streamingEnabled = true;
       let streamedText = "";
       const result = streamingEnabled
         ? await generateTextStream(payload, {
@@ -274,6 +274,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   };
 
   const handleChatSend = async (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => {
+    await options.beforeGenerate();
     const operationId = ++operationIdRef.current;
     setIsChatSending(true);
     chatAbortControllerRef.current?.abort();
@@ -311,7 +312,6 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         projectId: options.currentProjectId,
         threadId,
         locale: options.locale,
-        structuredValues: options.agentValues,
         contextValues: { ...options.getContextValues(), ...requestContext },
         chatInstruction: text,
         planPhase: requestContext?.approvedPlan ? "execution" : requestContext?.awaitingPlan ? "revise" : isPlanInstruction(text) ? "intake" : undefined,

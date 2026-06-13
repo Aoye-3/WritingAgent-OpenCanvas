@@ -584,6 +584,26 @@ export function migrateStorageSchema(db: DatabaseSync) {
       INSERT INTO schema_version (version, applied_at) VALUES (11, datetime('now'));
     `);
   }
+
+  const version12 = db.prepare(`SELECT version FROM schema_version WHERE version = 12`).get();
+  if (!version12) {
+    db.exec(`
+      DROP TABLE IF EXISTS project_agent_inputs;
+      CREATE TABLE IF NOT EXISTS project_briefs (
+        project_id TEXT PRIMARY KEY,
+        payload_json TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS thread_task_briefs (
+        thread_id TEXT PRIMARY KEY,
+        payload_json TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO schema_version (version, applied_at) VALUES (12, datetime('now'));
+    `);
+  }
 }
 
 function columnExists(db: DatabaseSync, table: string, column: string) {

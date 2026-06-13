@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
 import { Topbar } from "../../shared/Topbar";
-import type { AgentCard, AgentValues, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, StoredOutputVersion, StoredThread, StoredToolEvent } from "../agents/types";
+import type { AgentCard, BriefSaveStatus, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, ProjectBrief, StoredOutputVersion, StoredThread, StoredToolEvent, TaskBrief } from "../agents/types";
 import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../generation/types";
 import { useI18n } from "../i18n/I18nProvider";
@@ -70,7 +70,6 @@ type WorkspaceViewProps = {
   onGenerate: () => Promise<void>;
   onGoHome: () => void;
   onOpenSettings: () => void;
-  onAgentValuesChange: (values: AgentValues) => void;
   onSelectAgent: (agentCardId: string) => void;
   onProjectTitleChange: (title: string) => Promise<void>;
   onApplyCanvasWriteFromMessage: (text: string) => Promise<void>;
@@ -86,8 +85,15 @@ type WorkspaceViewProps = {
   onUpdateCanvasWorkflow: (patch: { stage?: CanvasWorkflow["stage"]; roles?: CanvasWorkflow["roles"] }) => Promise<unknown>;
   onUndoCanvas: () => Promise<void>;
   onPlansChanged: () => Promise<void>;
+  onProjectBriefChange: (brief: ProjectBrief) => void;
+  onTaskBriefChange: (brief: TaskBrief) => void;
+  onRetryProjectBrief: () => Promise<void>;
+  onRetryTaskBrief: () => Promise<void>;
   promptPreview: string;
-  agentValues: AgentValues;
+  projectBrief: ProjectBrief;
+  taskBrief: TaskBrief;
+  projectBriefStatus: BriefSaveStatus;
+  taskBriefStatus: BriefSaveStatus;
   toolState: GenerateRequest["toolState"];
 };
 
@@ -98,6 +104,7 @@ export function WorkspaceView({
   collaborationMessages,
   generation,
   isChatSending,
+  isGenerating,
   canvasNodes,
   canvasEdges,
   canvasObjects,
@@ -137,7 +144,6 @@ export function WorkspaceView({
   onIgnoreCanvasWorkflowSuggestion,
   onGoHome,
   onOpenSettings,
-  onAgentValuesChange,
   onSelectAgent,
   onProjectTitleChange,
   onApplyCanvasWriteFromMessage,
@@ -146,6 +152,10 @@ export function WorkspaceView({
   onSelectCanvasNode,
   onToolStateChange,
   onPlansChanged,
+  onProjectBriefChange,
+  onTaskBriefChange,
+  onRetryProjectBrief,
+  onRetryTaskBrief,
   onUpdateCanvasNode,
   onUpdateCanvasObject,
   onUploadCanvasAsset,
@@ -153,7 +163,10 @@ export function WorkspaceView({
   onUpdateCanvasWorkflow,
   onUndoCanvas,
   promptPreview,
-  agentValues,
+  projectBrief,
+  taskBrief,
+  projectBriefStatus,
+  taskBriefStatus,
   toolState
 }: WorkspaceViewProps) {
   const { locale, t } = useI18n();
@@ -188,6 +201,8 @@ export function WorkspaceView({
   const providerLabel = runtimeStatus?.reachable
     ? `Agent Runtime / ${runtimeStatus.deploymentMode}`
     : locale === "zh" ? "Agent Runtime 不可用" : "Agent Runtime unavailable";
+
+  const selectedConfiguredModel = configuredModels.find((model) => model.id === selectedModelConfigId);
 
   const startRightDrawerResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -238,26 +253,20 @@ export function WorkspaceView({
 
       <WorkspaceLayout leftCollapsed={leftCollapsed} rightCollapsed={rightCollapsed} rightDrawerWidth={rightDrawerWidth}>
         <AgentInputDrawer
-          activeAgent={activeAgent}
-          agentValues={agentValues}
           collapsed={leftCollapsed}
-          labels={{
-            clear: t("workspace.clear"),
-            coreSettings: t("workspace.coreSettings"),
-            customInstruction: t("workspace.customInstruction"),
-            outputSpec: t("workspace.outputSpec"),
-            projectName: locale === "zh" ? "项目名称" : "Project name",
-            projectNamePlaceholder: locale === "zh" ? "输入项目名称" : "Name this project"
-          }}
           locale={locale}
           projectTitle={projectTitle}
-          configuredModels={configuredModels}
-          selectedModelConfigId={selectedModelConfigId}
+          projectBrief={projectBrief}
+          taskBrief={taskBrief}
+          projectBriefStatus={projectBriefStatus}
+          taskBriefStatus={taskBriefStatus}
           onCollapse={() => setLeftCollapsed(true)}
           onExpand={() => setLeftCollapsed(false)}
           onProjectTitleChange={onProjectTitleChange}
-          onSelectModel={onSelectModel}
-          onValuesChange={onAgentValuesChange}
+          onProjectBriefChange={onProjectBriefChange}
+          onTaskBriefChange={onTaskBriefChange}
+          onRetryProjectBrief={onRetryProjectBrief}
+          onRetryTaskBrief={onRetryTaskBrief}
         />
 
         <WorkspaceMainCanvas
@@ -272,10 +281,6 @@ export function WorkspaceView({
           selectedNodeId={selectedCanvasNodeId}
           writeRequests={canvasWriteRequests}
           agentCardId={activeAgent.id}
-          modelOverrides={{
-            thinkingMode: activeAgent.settings?.model.thinkingMode,
-            reasoningEffort: activeAgent.settings?.model.reasoningEffort
-          }}
           onAcceptSuggestion={onAcceptCanvasWorkflowSuggestion}
           onConvertSuggestionToNode={onConvertCanvasWorkflowSuggestionToNode}
           onCreateEdge={onCreateCanvasEdge}
@@ -310,6 +315,7 @@ export function WorkspaceView({
           canvasWriteSuggestions={canvasWriteSuggestions}
           collapsed={rightCollapsed}
           isSending={isChatSending}
+          modelSelectionDisabled={isGenerating || isChatSending}
           inputDraft={composerDraft}
           mindChainContext={mindChainContext}
           messages={collaborationMessages}
@@ -318,7 +324,12 @@ export function WorkspaceView({
           currentThreadId={currentThreadId}
           sessionBusy={sessionBusy}
           sessionError={sessionError}
-          modelSettings={activeAgent.settings?.model}
+          configuredModels={configuredModels}
+          selectedModelConfigId={selectedModelConfigId}
+          modelSettings={{
+            providerId: selectedConfiguredModel?.providerId,
+            thinkingMode: selectedConfiguredModel?.providerId === "deepseek" && selectedConfiguredModel.modelId === "deepseek-reasoner" ? "enabled" : undefined
+          }}
           onApproveWriteRequest={async (requestId) => { await onApproveCanvasWriteRequest(requestId); }}
             onCreateConversation={onCreateConversation}
             onResetContext={onResetContext}
@@ -327,6 +338,7 @@ export function WorkspaceView({
           onSend={onChatSend}
           onStopSending={onStopChatSend}
           onSelectAgent={onSelectAgent}
+          onSelectModel={onSelectModel}
           onSelectThread={onSelectThread}
           onInputDraftConsumed={() => setComposerDraft("")}
           onMindChainContextConsumed={() => setMindChainContext(null)}

@@ -101,33 +101,30 @@ test("rejects blank thread titles", async () => {
   await storage.hardDeleteThread(threadId);
 });
 
-test("persists structured inputs on an active thread", async () => {
+test("persists independent Project and current Task Briefs in thread state", async () => {
   const { app, storage } = await withThreadRoutes();
-  const threadId = `thread_inputs_route_${Date.now()}`;
-  await storage.ensureThread(threadId, "blog-post");
-  const revision = Date.now();
+  const projectId = `project_brief_route_${Date.now()}`;
+  const threadId = `thread_brief_route_${Date.now()}`;
+  storage.createProject(projectId, "Brief project");
+  await storage.ensureThread(threadId, projectId);
 
-  const saved = await request(app, `/api/threads/${threadId}/inputs`, {
-    agentCardId: "blog-post",
-    revision,
-    structuredValues: {
-      topic: "Project-scoped draft",
-      tone: "Friendly",
-      ignored: { nested: true }
-    }
+  const projectSaved = await request(app, `/api/projects/${projectId}/brief`, {
+    revision: 1,
+    brief: { goal: "Shared project goal", ignored: "drop me" }
+  });
+  const taskSaved = await request(app, `/api/threads/${threadId}/task-brief`, {
+    revision: 1,
+    brief: { objective: "Current task", deliverableType: "outline", ignored: "drop me" }
   });
   const state = await get(app, `/api/threads/${threadId}/state`);
 
-  assert.equal(saved.status, 200);
-  assert.deepEqual(saved.body.structuredValues, {
-    topic: "Project-scoped draft",
-    tone: "Friendly"
-  });
-  assert.equal(saved.body.revision, revision);
-  assert.deepEqual((state.body.projectInputs as Record<string, unknown>)["blog-post"], {
-    topic: "Project-scoped draft",
-    tone: "Friendly"
-  });
+  assert.equal(projectSaved.status, 200);
+  assert.deepEqual(projectSaved.body.brief, { goal: "Shared project goal" });
+  assert.equal(taskSaved.status, 200);
+  assert.deepEqual(taskSaved.body.brief, { objective: "Current task", deliverableType: "outline" });
+  assert.deepEqual(state.body.projectBrief, { brief: { goal: "Shared project goal" }, revision: 1 });
+  assert.deepEqual(state.body.taskBrief, { brief: { objective: "Current task", deliverableType: "outline" }, revision: 1 });
+  assert.equal("projectInputs" in state.body, false);
 
   storage.moveThreadToTrash(threadId);
   await storage.hardDeleteThread(threadId);

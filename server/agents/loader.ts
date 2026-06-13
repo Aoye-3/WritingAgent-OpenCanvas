@@ -3,8 +3,18 @@ import type { AgentCard, AgentSettings } from "./types.js";
 
 export const agentCards: AgentCard[] = builtInAgentCards;
 
+const legacyAgentAliases = new Set([
+  "blog-post",
+  "summary",
+  "email-writer",
+  "lesson-plan",
+  "report-outline",
+  "rewrite-polish"
+]);
+
 export function getAgentCard(agentCardId?: string) {
-  return agentCards.find((card) => card.id === agentCardId) ?? agentCards[0];
+  const resolvedId = legacyAgentAliases.has(agentCardId ?? "") ? "chat-agent" : agentCardId;
+  return agentCards.find((card) => card.id === resolvedId) ?? agentCards[0];
 }
 
 export function applyAgentSettings(card: AgentCard, settings: AgentSettings): AgentCard {

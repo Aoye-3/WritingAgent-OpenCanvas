@@ -1,17 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { defaultAgentSettings, getAgentCard } from "../../agentCards.js";
 import { resolveModelSettings } from "./promptRunBuilder.js";
 
 test("model settings require an explicitly resolved Model Config", async () => {
-  const settings = defaultAgentSettings(getAgentCard("blog-post")).model;
-
-  await assert.rejects(() => resolveModelSettings(settings), /select an enabled project model/i);
+  await assert.rejects(() => resolveModelSettings(undefined), /select an enabled project model/i);
 });
 
 test("model settings use the explicitly resolved backend Model Config", async () => {
-  const settings = defaultAgentSettings(getAgentCard("blog-post")).model;
-  const resolved = await resolveModelSettings(settings, {
+  const resolved = await resolveModelSettings({
     id: "deepseek--configured",
     providerId: "deepseek",
     modelId: "deepseek-configured",
@@ -27,4 +23,40 @@ test("model settings use the explicitly resolved backend Model Config", async ()
   assert.equal(resolved.configuredModelApiId, "deepseek--configured");
   assert.equal(resolved.providerId, "deepseek");
   assert.equal(resolved.model, "deepseek-configured");
+  assert.equal(resolved.temperature, 0.7);
+  assert.equal(resolved.contextCount, 5);
+});
+
+test("model settings ignore legacy Agent-owned model identity and use conversation runtime overrides", async () => {
+  const resolved = await resolveModelSettings({
+    id: "openai--configured",
+    providerId: "openai",
+    modelId: "gpt-4.1",
+    modelName: "GPT 4.1",
+    modelType: "chat",
+    apiKey: "sk-test",
+    baseURL: "https://api.openai.example",
+    enabled: true,
+    createdAt: "",
+    updatedAt: ""
+  }, {
+    temperature: 0.2,
+    contextCount: 12,
+    streaming: false,
+    toolCallMode: "none",
+    maxToolCalls: 0
+  }, {
+    thinkingMode: "enabled",
+    reasoningEffort: "high"
+  });
+
+  assert.equal(resolved.providerId, "openai");
+  assert.equal(resolved.model, "gpt-4.1");
+  assert.equal(resolved.temperature, 0.2);
+  assert.equal(resolved.contextCount, 12);
+  assert.equal(resolved.streaming, false);
+  assert.equal(resolved.toolCallMode, "none");
+  assert.equal(resolved.maxToolCalls, 0);
+  assert.equal(resolved.thinkingMode, "enabled");
+  assert.equal(resolved.reasoningEffort, "high");
 });

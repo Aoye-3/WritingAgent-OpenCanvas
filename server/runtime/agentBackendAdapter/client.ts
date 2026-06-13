@@ -1,5 +1,5 @@
 import type { StreamStatus } from "../../agentRunLoop.js";
-import type { AgentCard, AgentSettings } from "../../agentCards.js";
+import type { AgentCard, AgentSettings, ConversationModelRuntimeSettings } from "../../agentCards.js";
 import type { ChatMessage } from "../../providerRuntime.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { ToolState } from "../../toolRegistry.js";
@@ -15,6 +15,7 @@ export type AgentBackendRunInput = {
   threadId: string;
   projectId: string;
   configuredModelApiId: string;
+  modelSettings?: ConversationModelRuntimeSettings;
   agentCard: AgentCard;
   settings?: AgentSettings;
   messages: ChatMessage[];
@@ -53,6 +54,7 @@ type AgentBackendRunContext = {
   facetwrite_memory_enabled: boolean;
   facetwrite_memory_scope_id: string;
   facetwrite_project_id: string;
+  facetwrite_mcp_refs: string[];
   facetwrite_plan_phase: "chat" | "planning" | "execution";
   facetwrite_plan_stage: "chat" | "intake" | "revise" | "execution";
   facetwrite_plan_phase_attempt_id?: string;
@@ -150,7 +152,7 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
   };
 }
 
-function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId" | "projectId" | "configuredModelApiId" | "settings" | "facetwriteMemoryContent" | "chatInstruction" | "contextValues" | "toolState">): AgentBackendRunContext {
+function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId" | "projectId" | "configuredModelApiId" | "modelSettings" | "settings" | "facetwriteMemoryContent" | "chatInstruction" | "contextValues" | "toolState">): AgentBackendRunContext {
   const memoryEnabled = false;
   const memoryContent = memoryEnabled ? input.facetwriteMemoryContent?.trim() : "";
   const planPolicy = resolvePlanRequestPolicy({
@@ -164,12 +166,14 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
   const planId = planGeneration ? String(planGeneration.planId ?? "").trim() : "";
   const planStepId = planGeneration ? String(planGeneration.stepId ?? "").trim() : "";
   const phaseAttemptId = planGeneration ? String(planGeneration.phaseAttemptId ?? "").trim() : "";
-  if (!input.settings) {
+  const modelSettings = input.modelSettings;
+  if (!modelSettings) {
     return {
       model_name: input.configuredModelApiId,
       facetwrite_memory_enabled: false,
       facetwrite_memory_scope_id: input.threadId,
       facetwrite_project_id: input.projectId,
+      facetwrite_mcp_refs: input.settings?.mcpRefs ?? [],
       facetwrite_plan_phase: planPolicy.phase,
       facetwrite_plan_stage: planPolicy.stage,
       facetwrite_plan_phase_attempt_id: phaseAttemptId || undefined,
@@ -177,15 +181,15 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
       facetwrite_plan_step_id: planStepId || undefined
     };
   }
-  const settings = input.settings;
-  const thinkingMode = settings.model.thinkingMode ?? (settings.model.providerId === "deepseek" && settings.model.model === "deepseek-reasoner" ? "enabled" : "disabled");
+  const thinkingMode = modelSettings.thinkingMode ?? (modelSettings.providerId === "deepseek" && modelSettings.model === "deepseek-reasoner" ? "enabled" : "disabled");
   return {
     model_name: input.configuredModelApiId,
     thinking_enabled: thinkingMode === "enabled",
-    reasoning_effort: normalizeAgentBackendReasoningEffort(settings.model.reasoningEffort),
+    reasoning_effort: normalizeAgentBackendReasoningEffort(modelSettings.reasoningEffort),
     facetwrite_memory_enabled: memoryEnabled,
     facetwrite_memory_scope_id: input.threadId,
     facetwrite_project_id: input.projectId,
+    facetwrite_mcp_refs: input.settings?.mcpRefs ?? [],
     facetwrite_plan_phase: planPolicy.phase,
     facetwrite_plan_stage: planPolicy.stage,
     facetwrite_plan_phase_attempt_id: phaseAttemptId || undefined,
@@ -195,7 +199,7 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
   };
 }
 
-function normalizeAgentBackendReasoningEffort(effort: AgentSettings["model"]["reasoningEffort"]) {
+function normalizeAgentBackendReasoningEffort(effort: ConversationModelRuntimeSettings["reasoningEffort"]) {
   if (effort === "max" || effort === "xhigh") return "max";
   if (effort === "low" || effort === "medium" || effort === "high") return effort;
   return undefined;

@@ -1,11 +1,19 @@
 import { useEffect, useState } from "react";
+import { fetchAgentRuntimeDashboard } from "../../ai-dashboard/agentRuntimeClient";
 import { useI18n } from "../../i18n/I18nProvider";
 import { knowledgeClient } from "../../knowledge/knowledgeClient";
 import type { KnowledgeBase } from "../../knowledge/types";
 import type { AgentRuntimeConfig, AgentSettings } from "../types";
 
-export const tabs = ["model", "prompt", "knowledge", "tools", "quick", "memory"] as const;
+export const tabs = ["prompt", "knowledge", "tools", "mcp", "quick", "memory"] as const;
 export type SettingsTab = (typeof tabs)[number];
+
+type McpServerSummary = {
+  enabled?: boolean;
+  name?: string;
+  description?: string;
+  [key: string]: unknown;
+};
 
 export function AgentSettingsTabs({
   runtimeConfig,
@@ -18,81 +26,12 @@ export function AgentSettingsTabs({
   settings: AgentSettings;
   onChange: (settings: AgentSettings) => void;
 }) {
-  if (tab === "model") return <AgentModelTab runtimeConfig={runtimeConfig} settings={settings} onChange={onChange} />;
   if (tab === "prompt") return <AgentPromptTab runtimeConfig={runtimeConfig} settings={settings} onChange={onChange} />;
   if (tab === "knowledge") return <AgentKnowledgeTab settings={settings} onChange={onChange} />;
   if (tab === "tools") return <AgentToolsTab runtimeConfig={runtimeConfig} settings={settings} onChange={onChange} />;
+  if (tab === "mcp") return <AgentMcpTab settings={settings} onChange={onChange} />;
   if (tab === "quick") return <AgentQuickMessagesTab settings={settings} onChange={onChange} />;
   return <AgentMemoryTab settings={settings} onChange={onChange} />;
-}
-
-function AgentModelTab({ runtimeConfig, settings, onChange }: TabProps) {
-  const { locale } = useI18n();
-  const setModel = (patch: Partial<AgentSettings["model"]>) => onChange({ ...settings, model: { ...settings.model, ...patch } });
-  const providerCapabilities = runtimeConfig?.providerProfile.capabilities;
-  return (
-    <div className="agent-editor-section">
-      <p>{locale === "zh" ? "模型由项目会话从后端 Model Config 中显式选择；Agent 不保存模型配置。" : "Models are selected explicitly per project conversation from backend Model Config. Agents do not store model configuration."}</p>
-      {providerCapabilities?.chatPrefixCompletion ? (
-        <label className="field">
-          <span>{text(locale, "responseMode")}</span>
-          <select value={settings.model.responseMode ?? "normal"} onChange={(event) => setModel({ responseMode: event.target.value as AgentSettings["model"]["responseMode"] })}>
-            <option value="normal">{text(locale, "normalMode")}</option>
-            <option value="prefix_completion">{text(locale, "prefixMode")}</option>
-          </select>
-        </label>
-      ) : null}
-      {providerCapabilities?.thinking ? (
-        <>
-          <label className="toggle-row">
-            <span>{text(locale, "thinkMode")}</span>
-            <input
-              type="checkbox"
-              checked={settings.model.thinkingMode === "enabled"}
-              onChange={(event) => setModel({ thinkingMode: event.target.checked ? "enabled" : "disabled" })}
-            />
-          </label>
-          {settings.model.thinkingMode === "enabled" ? (
-            <label className="field">
-              <span>{text(locale, "reasoningEffort")}</span>
-              <select value={settings.model.reasoningEffort ?? "high"} onChange={(event) => setModel({ reasoningEffort: event.target.value as AgentSettings["model"]["reasoningEffort"] })}>
-                <option value="high">High</option>
-                <option value="max">Max</option>
-              </select>
-              <small>{text(locale, "thinkModeNote")}</small>
-            </label>
-          ) : null}
-        </>
-      ) : null}
-      <RangeField label="Temperature" min={0} max={2} step={0.1} value={settings.model.temperature} onChange={(value) => setModel({ temperature: value })} />
-      <RangeField label="Top-P" min={0} max={1} step={0.05} value={settings.model.topP} onChange={(value) => setModel({ topP: value })} />
-      <RangeField label={text(locale, "contextCount")} min={0} max={100} step={1} value={settings.model.contextCount} onChange={(value) => setModel({ contextCount: value })} />
-      <label className="toggle-row">
-        <span>{text(locale, "maxTokens")}</span>
-        <input type="checkbox" checked={settings.model.maxTokensEnabled} onChange={(event) => setModel({ maxTokensEnabled: event.target.checked })} />
-      </label>
-      <label className="field">
-        <span>{text(locale, "tokenLimit")}</span>
-        <input type="number" value={settings.model.maxTokens} onChange={(event) => setModel({ maxTokens: Number(event.target.value) })} />
-      </label>
-      <label className="toggle-row">
-        <span>{text(locale, "streaming")}</span>
-        <input type="checkbox" checked={settings.model.streaming} onChange={(event) => setModel({ streaming: event.target.checked })} />
-      </label>
-      <label className="field">
-        <span>{text(locale, "toolCallMode")}</span>
-        <select value={settings.model.toolCallMode} onChange={(event) => setModel({ toolCallMode: event.target.value as AgentSettings["model"]["toolCallMode"] })}>
-          <option value="function">Function</option>
-          <option value="auto">Auto</option>
-          <option value="none">None</option>
-        </select>
-      </label>
-      <label className="field">
-        <span>{text(locale, "maxToolCalls")}</span>
-        <input type="number" value={settings.model.maxToolCalls} onChange={(event) => setModel({ maxToolCalls: Number(event.target.value) })} />
-      </label>
-    </div>
-  );
 }
 
 function AgentPromptTab({ runtimeConfig, settings, onChange }: TabProps) {
@@ -214,32 +153,14 @@ function AgentKnowledgeTab({ settings, onChange }: TabProps) {
                 <small>{base.items.length} items - {base.embeddingModel}</small>
                 <em>{base.description || base.id}</em>
               </span>
-              <input
-                type="checkbox"
-                checked={selectedBaseIds.has(base.id)}
-                onChange={(event) => toggleBase(base.id, event.target.checked)}
-              />
+              <input type="checkbox" checked={selectedBaseIds.has(base.id)} onChange={(event) => toggleBase(base.id, event.target.checked)} />
             </label>
           ))}
           {bases.length === 0 ? <p className="agent-editor-note">{loadFailed ? text(locale, "knowledgeLoadFailed") : text(locale, "noKnowledgeBases")}</p> : null}
         </div>
       </div>
-      <RangeField
-        label={text(locale, "knowledgeDocumentCount")}
-        min={1}
-        max={12}
-        step={1}
-        value={settings.knowledge.documentCount ?? 6}
-        onChange={(value) => setKnowledge({ documentCount: value })}
-      />
-      <RangeField
-        label={text(locale, "knowledgeThreshold")}
-        min={0}
-        max={1}
-        step={0.05}
-        value={settings.knowledge.threshold ?? 0.2}
-        onChange={(value) => setKnowledge({ threshold: value })}
-      />
+      <RangeField label={text(locale, "knowledgeDocumentCount")} min={1} max={12} step={1} value={settings.knowledge.documentCount ?? 6} onChange={(value) => setKnowledge({ documentCount: value })} />
+      <RangeField label={text(locale, "knowledgeThreshold")} min={0} max={1} step={0.05} value={settings.knowledge.threshold ?? 0.2} onChange={(value) => setKnowledge({ threshold: value })} />
       <label className="toggle-row">
         <span>{text(locale, "rerankKnowledge")}</span>
         <input type="checkbox" checked={settings.knowledge.rerankEnabled ?? false} onChange={(event) => setKnowledge({ rerankEnabled: event.target.checked })} />
@@ -278,6 +199,58 @@ function AgentToolsTab({ runtimeConfig, settings, onChange }: TabProps) {
           </label>
         );
       })}
+    </div>
+  );
+}
+
+function AgentMcpTab({ settings, onChange }: TabProps) {
+  const { locale } = useI18n();
+  const [servers, setServers] = useState<Record<string, McpServerSummary>>({});
+  const [loadFailed, setLoadFailed] = useState(false);
+  const selected = new Set(settings.mcpRefs ?? []);
+
+  useEffect(() => {
+    let active = true;
+    fetchAgentRuntimeDashboard()
+      .then((dashboard) => {
+        if (!active) return;
+        setServers(normalizeMcpServers(dashboard.config.mcpServers));
+        setLoadFailed(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setServers({});
+        setLoadFailed(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const toggle = (id: string, checked: boolean) => {
+    const next = checked
+      ? [...selected, id]
+      : (settings.mcpRefs ?? []).filter((item) => item !== id);
+    onChange({ ...settings, mcpRefs: Array.from(new Set(next)) });
+  };
+
+  const entries = Object.entries(servers).filter(([, server]) => server.enabled !== false);
+  return (
+    <div className="agent-editor-section">
+      <p className="agent-editor-note">{text(locale, "mcpNote")}</p>
+      <div className="skill-catalog-list">
+        {entries.map(([id, server]) => (
+          <label className="tool-catalog-row" key={id}>
+            <span>
+              <strong>{server.name || id}</strong>
+              <small>{id}</small>
+              {server.description ? <em>{server.description}</em> : null}
+            </span>
+            <input type="checkbox" checked={selected.has(id)} onChange={(event) => toggle(id, event.target.checked)} />
+          </label>
+        ))}
+        {entries.length === 0 ? <p className="agent-editor-note">{loadFailed ? text(locale, "mcpLoadFailed") : text(locale, "noMcpServers")}</p> : null}
+      </div>
     </div>
   );
 }
@@ -338,6 +311,15 @@ function RangeField({ label, min, max, step, value, onChange }: { label: string;
   );
 }
 
+function normalizeMcpServers(value: Record<string, unknown>): Record<string, McpServerSummary> {
+  return Object.fromEntries(
+    Object.entries(value ?? {}).map(([id, server]) => [
+      id,
+      typeof server === "object" && server ? server as McpServerSummary : {}
+    ])
+  );
+}
+
 function riskLabel(riskLevel: "low" | "medium" | "high", locale: "en" | "zh") {
   const labels = {
     low: { en: "Low risk", zh: "低风险" },
@@ -349,116 +331,83 @@ function riskLabel(riskLevel: "low" | "medium" | "high", locale: "en" | "zh") {
 
 export function tabLabel(tab: SettingsTab, locale: "en" | "zh") {
   const labels: Record<SettingsTab, Record<"en" | "zh", string>> = {
-    model: { en: "Model", zh: "模型设置" },
-    prompt: { en: "Prompt", zh: "提示词设置" },
-    knowledge: { en: "Knowledge", zh: "知识库设置" },
-    tools: { en: "Tools", zh: "工具设置" },
-    quick: { en: "Quick phrases", zh: "常用短语" },
-    memory: { en: "Memory", zh: "全局记忆" }
+    prompt: { en: "Prompt", zh: "提示词" },
+    knowledge: { en: "Knowledge", zh: "知识库" },
+    tools: { en: "Tools", zh: "工具" },
+    mcp: { en: "MCP", zh: "MCP" },
+    quick: { en: "Quick phrases", zh: "快捷短语" },
+    memory: { en: "Memory", zh: "记忆" }
   };
   return labels[tab][locale];
 }
 
 function text(locale: "en" | "zh", key: keyof typeof copy.en) {
-  if (locale === "zh" && key in zhOverrides) {
-    return zhOverrides[key] ?? copy.en[key];
-  }
-  return (copy[locale] as Partial<Record<keyof typeof copy.en, string>>)[key] ?? copy.en[key];
+  return copy[locale][key];
 }
-
-const zhOverrides: Partial<Record<keyof typeof copy.en, string>> = {
-  allKnowledgeBases: "全部知识库",
-  allKnowledgeBasesNote: "保持选中时会检索所有已就绪知识库。",
-  knowledgeBases: "知识库",
-  knowledgeDocumentCount: "检索结果数",
-  knowledgeLoadFailed: "无法加载知识库",
-  knowledgeNote: "启用后，生成会先检索选中的知识库，并在模型运行前注入 Knowledge References。",
-  knowledgeThreshold: "分数阈值",
-  noKnowledgeBases: "还没有知识库。请先在知识库设置中创建。",
-  rerankKnowledge: "启用重排序"
-};
 
 const copy = {
   en: {
     addPhrase: "Add phrase",
     allKnowledgeBases: "All knowledge bases",
-    allKnowledgeBasesNote: "Leave this selected to search every ready base.",
+    allKnowledgeBasesNote: "Use every enabled knowledge base for this Agent.",
     allowedTools: "Allowed tools",
     approvalRequired: "Approval required",
     autoRunnable: "Auto runnable",
-    contextCount: "Context count",
-    configuredModelApi: "Configured API model",
     description: "Description",
-    enableKnowledge: "Enable knowledge base",
+    enableKnowledge: "Enable knowledge",
     externalConfig: "External config",
     globalMemory: "Global memory",
     identityPrompt: "Identity prompt",
     knowledgeBases: "Knowledge bases",
-    knowledgeDocumentCount: "Knowledge results",
+    knowledgeDocumentCount: "Documents",
     knowledgeLoadFailed: "Unable to load knowledge bases",
-    knowledgeNote: "When enabled, generation searches selected bases and injects matched Knowledge References before the model runs.",
-    knowledgeThreshold: "Score threshold",
-    maxTokens: "Max tokens",
-    maxToolCalls: "Max tool calls",
-    memoryNote: "This stage only saves the toggle and writes memory state into the prompt.",
-    missingTools: "AgentCard references missing tools",
-    modelsFromSavedApi: "Agent models are limited to saved local API + model bindings.",
-    model: "Model",
+    knowledgeNote: "Knowledge choices stay with the Agent profile.",
+    knowledgeThreshold: "Threshold",
+    memoryNote: "Memory belongs to the Agent profile; model choice stays with the conversation.",
+    mcpLoadFailed: "Unable to load Agent Runtime MCP configuration",
+    mcpNote: "Select from already configured Agent Runtime MCP servers. Installing or editing MCP servers lives outside Agent profiles.",
+    missingTools: "Missing tools",
     name: "Name",
-    noKnowledgeBases: "No knowledge bases yet. Create one in Knowledge settings.",
-    noSavedApis: "No saved API models",
-    noSavedModels: "No saved models",
-    noSkills: "No skills are available yet",
-    normalMode: "Normal chat",
+    noKnowledgeBases: "No knowledge bases configured",
+    noMcpServers: "No configured MCP servers available",
+    noSkills: "No public skills available",
     outputFormat: "Output format",
     outputType: "Output type",
-    prefixMode: "Prefix completion",
     referenceScope: "Reference scope",
-    responseMode: "Response mode",
-    saveProviderApiFirst: "Save an API + model binding in Model Config before assigning models to Agents.",
+    rerankKnowledge: "Rerank knowledge",
     skills: "Skills",
-    streaming: "Streaming",
-    tokenLimit: "Token limit",
-    thinkMode: "Think mode",
-    thinkModeNote: "Can be combined with tool calls on DeepSeek. The runtime preserves provider-private reasoning state without showing it in chat.",
-    toolCallMode: "Tool call mode",
-    unknownSkills: "Unknown skill refs",
-    reasoningEffort: "Reasoning effort",
-    rerankKnowledge: "Enable rerank"
+    unknownSkills: "Unknown skills"
   },
   zh: {
     addPhrase: "添加短语",
+    allKnowledgeBases: "全部知识库",
+    allKnowledgeBasesNote: "此 Agent 可使用全部已启用知识库。",
     allowedTools: "允许工具",
     approvalRequired: "需要审批",
     autoRunnable: "可自动运行",
-    contextCount: "上下文数量",
-    configuredModelApi: "已配置 API 模型",
     description: "描述",
     enableKnowledge: "启用知识库",
     externalConfig: "外部配置",
     globalMemory: "全局记忆",
     identityPrompt: "身份提示词",
-    knowledgeNote: "启用后，生成会先检索选中的知识库，并在模型运行前注入 Knowledge References。",
-    maxTokens: "最大 Token 数",
-    maxToolCalls: "最大工具调用次数",
-    memoryNote: "当前阶段只保存开关并写入 Prompt 状态。",
-    missingTools: "AgentCard 引用了缺失工具",
-    model: "模型",
+    knowledgeBases: "知识库",
+    knowledgeDocumentCount: "文档数量",
+    knowledgeLoadFailed: "无法加载知识库",
+    knowledgeNote: "知识库选择保存在 Agent Profile 中。",
+    knowledgeThreshold: "阈值",
+    memoryNote: "记忆属于 Agent Profile；模型选择属于会话。",
+    mcpLoadFailed: "无法加载 Agent Runtime MCP 配置",
+    mcpNote: "只能选择已经配置好的 Agent Runtime MCP server；安装和编辑不属于 Agent Profile。",
+    missingTools: "缺失工具",
     name: "名称",
+    noKnowledgeBases: "暂无知识库",
+    noMcpServers: "暂无可用 MCP server",
     noSkills: "暂无可用技能",
-    normalMode: "普通对话",
     outputFormat: "输出格式",
     outputType: "输出类型",
-    prefixMode: "前缀续写",
     referenceScope: "引用范围",
-    responseMode: "响应模式",
+    rerankKnowledge: "重排知识",
     skills: "技能",
-    streaming: "流式输出",
-    tokenLimit: "Token 上限",
-    thinkMode: "Think 模式",
-    thinkModeNote: "包含工具调用时会自动关闭，以避免 reasoning 与工具参数混线。",
-    toolCallMode: "工具调用方式",
-    unknownSkills: "未知技能引用",
-    reasoningEffort: "推理强度"
+    unknownSkills: "未知技能"
   }
 } as const;

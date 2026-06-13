@@ -5,20 +5,11 @@ export type LocaleText = {
   zh: string;
 };
 
-export type AgentCardField = {
-  id: string;
-  kind: "text" | "textarea" | "select" | "chips" | "segmented";
-  label: LocaleText;
-  options?: string[];
-  placeholder: LocaleText;
-  required?: boolean;
-};
-
 export type AgentCard = {
   id: string;
-  category: "writing" | "education" | "summarise" | "rewrite";
+  category: "chat";
   accent: "blue" | "green" | "orange" | "violet" | "rose";
-  icon: "pen" | "lines" | "mail" | "book" | "report" | "refresh";
+  icon: "bot" | "pen" | "lines" | "mail" | "book" | "report" | "refresh";
   title: LocaleText;
   description: LocaleText;
   identityPrompt: string;
@@ -28,30 +19,31 @@ export type AgentCard = {
     type: string;
     defaultFormat: string;
   };
-  defaultValues: Record<string, string | string[]>;
-  fields: AgentCardField[];
   settings?: AgentSettings;
 };
 
 export type AgentModelResponseMode = "normal" | "prefix_completion";
 
+export type ConversationModelRuntimeSettings = {
+  configuredModelApiId?: string;
+  providerId: string;
+  model: string;
+  responseMode?: AgentModelResponseMode;
+  temperature: number;
+  topP: number;
+  contextCount: number;
+  maxTokens: number;
+  maxTokensEnabled: boolean;
+  streaming: boolean;
+  toolCallMode: "auto" | "function" | "none";
+  maxToolCalls: number;
+  thinkingMode?: "enabled" | "disabled";
+  reasoningEffort?: "high" | "max" | "low" | "medium" | "xhigh";
+};
+
+export type ConversationModelRuntimeSettingsInput = Partial<Omit<ConversationModelRuntimeSettings, "configuredModelApiId" | "providerId" | "model">>;
+
 export type AgentSettings = {
-  model: {
-    configuredModelApiId?: string;
-    providerId: string;
-    model: string;
-    responseMode?: AgentModelResponseMode;
-    temperature: number;
-    topP: number;
-    contextCount: number;
-    maxTokens: number;
-    maxTokensEnabled: boolean;
-    streaming: boolean;
-    toolCallMode: "auto" | "function" | "none";
-    maxToolCalls: number;
-    thinkingMode?: "enabled" | "disabled";
-    reasoningEffort?: "high" | "max" | "low" | "medium" | "xhigh";
-  };
   prompt: {
     name: string;
     description: string;
@@ -73,4 +65,5 @@ export type AgentSettings = {
     enabled: boolean;
   };
   quickMessages: string[];
+  mcpRefs: string[];
 };

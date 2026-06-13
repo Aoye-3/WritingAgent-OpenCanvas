@@ -1,6 +1,6 @@
 import type { Locale, TranslationKey } from "../i18n/types";
 
-export type TaskCategory = "writing" | "education" | "summarise" | "rewrite";
+export type TaskCategory = "chat";
 
 export type TaskValues = Record<string, string | string[]>;
 
@@ -17,7 +17,7 @@ export type TaskDefinition = {
   id: string;
   category: TaskCategory;
   accent: "blue" | "green" | "orange" | "violet" | "rose";
-  icon: "pen" | "lines" | "mail" | "book" | "report" | "refresh";
+  icon: "bot" | "pen" | "lines" | "mail" | "book" | "report" | "refresh";
   i18nTitle: Record<Locale, string>;
   i18nDescription: Record<Locale, string>;
   defaultValues: TaskValues;

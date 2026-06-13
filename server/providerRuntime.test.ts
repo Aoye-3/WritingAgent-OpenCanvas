@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { getProviderProfile, normalizeChatRequest } from "./providerRuntime.js";
-import type { AgentSettings } from "./agentCards.js";
+import type { ConversationModelRuntimeSettings } from "./agentCards.js";
 
-const baseModel: AgentSettings["model"] = {
+const baseModel: ConversationModelRuntimeSettings = {
+  configuredModelApiId: "configured-test",
   providerId: "deepseek",
   model: "deepseek-chat",
   temperature: 0.7,

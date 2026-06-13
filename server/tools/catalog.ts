@@ -91,7 +91,7 @@ export const toolCatalog: ToolDefinition[] = [
     group: "context",
     label: "Clear Context",
     description: "Confirm that previous conversation context should be ignored for this run.",
-    promptHint: "Ignore previous conversational context for this run unless it appears in the current structured inputs.",
+    promptHint: "Ignore previous conversational context for this run unless it appears in the current Briefs or explicit workspace context.",
     schema: {
       type: "object",
       properties: {

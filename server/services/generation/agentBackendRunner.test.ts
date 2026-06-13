@@ -16,6 +16,19 @@ test("forwards enabled stage-specific Plan tools even when Agent settings hide t
     threadId: "thread_1",
     projectId: "project_1",
     configuredModelApiId: "model_1",
+    modelSettings: {
+      configuredModelApiId: "model_1",
+      providerId: "deepseek",
+      model: "deepseek-chat",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: true,
+      toolCallMode: "auto",
+      maxToolCalls: 20
+    },
     runtimeConfig: { enabledTools: [], agentCard: {}, settings: {} } as never,
     messages: [],
     prompt: "prompt"

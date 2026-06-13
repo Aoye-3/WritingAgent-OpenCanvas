@@ -7,8 +7,6 @@ export type GenerateRequest = {
   projectId?: string;
   threadId?: string;
   locale: Locale;
-  formValues?: Record<string, string | string[]>;
-  structuredValues?: Record<string, string | string[]>;
   contextValues?: Record<string, unknown>;
   freeTextPrompt?: string;
   chatInstruction?: string;

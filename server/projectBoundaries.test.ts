@@ -4,12 +4,12 @@ import { DatabaseSync } from "node:sqlite";
 import { migrateStorageSchema } from "./db/schema.js";
 import { createStorage } from "./storage.js";
 
-test("schema v11 uses project-owned Canvas tables and persistent recoverable plans", () => {
+test("schema v12 uses independent Project and Thread Brief tables", () => {
   const db = new DatabaseSync(":memory:");
   migrateStorageSchema(db);
 
   const version = db.prepare(`SELECT MAX(version) as version FROM schema_version`).get() as { version: number };
-  assert.equal(version.version, 11);
+  assert.equal(version.version, 12);
   assert.equal(tableExists(db, "plan_runs"), true);
   assert.equal(tableExists(db, "plan_executions"), true);
   assert.equal(tableExists(db, "run_activities"), true);
@@ -22,6 +22,9 @@ test("schema v11 uses project-owned Canvas tables and persistent recoverable pla
   assert.equal(columnNames(db, "plan_executions").includes("lease_expires_at"), true);
   assert.equal(columnNames(db, "plan_executions").includes("last_heartbeat_at"), true);
   assert.equal(tableExists(db, "thread_inputs"), false);
+  assert.equal(tableExists(db, "project_agent_inputs"), false);
+  assert.equal(tableExists(db, "project_briefs"), true);
+  assert.equal(tableExists(db, "thread_task_briefs"), true);
   assert.equal(columnNames(db, "threads").includes("agent_card_id"), false);
   assert.equal(columnNames(db, "threads").includes("context_reset_at"), true);
   for (const table of ["canvas_nodes", "canvas_edges", "canvas_objects", "canvas_workflows", "canvas_workflow_suggestions", "canvas_write_requests"]) {
@@ -85,7 +88,7 @@ test("schema v8 repairs Thread-owned Canvas requests and makes old low-risk prop
   assert.equal(request.status, "stale");
 });
 
-test("projects own threads, models, and agent inputs without cross-project leakage", async () => {
+test("projects own Project Briefs while threads own independent Task Briefs", async () => {
   const storage = await createStorage();
   const suffix = Date.now().toString(36);
   const firstProjectId = `project_first_${suffix}`;
@@ -100,15 +103,19 @@ test("projects own threads, models, and agent inputs without cross-project leaka
 
   storage.setProjectModelBindings(firstProjectId, ["model_config_a", "model_config_b"]);
   storage.setThreadModelConfig(firstThreadId, "model_config_b");
-  storage.saveProjectAgentInputValues(firstProjectId, "blog-post", { topic: "First only" }, 1);
-  storage.saveProjectAgentInputValues(secondProjectId, "blog-post", { topic: "Second only" }, 1);
+  storage.saveProjectBrief(firstProjectId, { goal: "First only" }, 1);
+  storage.saveProjectBrief(secondProjectId, { goal: "Second only" }, 1);
+  storage.saveTaskBrief(firstThreadId, { objective: "First task" }, 1);
+  storage.saveTaskBrief(secondThreadId, { objective: "Second task" }, 1);
 
   assert.equal(storage.getThread(firstThreadId)?.projectId, firstProjectId);
   assert.equal("agentCardId" in (storage.getThread(firstThreadId) ?? {}), false);
   assert.equal(storage.getThread(firstThreadId)?.configuredModelApiId, "model_config_b");
   assert.deepEqual(storage.getProjectModelBindings(firstProjectId), ["model_config_a", "model_config_b"]);
-  assert.deepEqual(storage.getProjectAgentInputValues(firstProjectId, "blog-post"), { topic: "First only" });
-  assert.deepEqual(storage.getProjectAgentInputValues(secondProjectId, "blog-post"), { topic: "Second only" });
+  assert.deepEqual(storage.getProjectBrief(firstProjectId), { brief: { goal: "First only" }, revision: 1 });
+  assert.deepEqual(storage.getProjectBrief(secondProjectId), { brief: { goal: "Second only" }, revision: 1 });
+  assert.deepEqual(storage.getTaskBrief(firstThreadId), { brief: { objective: "First task" }, revision: 1 });
+  assert.deepEqual(storage.getTaskBrief(secondThreadId), { brief: { objective: "Second task" }, revision: 1 });
 });
 
 test("conversation model selection no longer requires a project model binding", async () => {
@@ -145,21 +152,30 @@ test("project canvas is shared by project threads and isolated from other projec
   assert.equal(storage.listCanvasNodes(otherProjectId).length, 0);
 });
 
-test("project Agent inputs reject stale revisions", async () => {
+test("Project and Task Briefs reject stale revisions", async () => {
   const storage = await createStorage();
   const suffix = Date.now().toString(36);
   const projectId = `project_revision_${suffix}`;
   storage.createProject(projectId, "Revision project");
 
-  assert.deepEqual(storage.saveProjectAgentInputValues(projectId, "blog-post", { topic: "newer" }, 2), {
-    structuredValues: { topic: "newer" },
+  const threadId = `thread_revision_${suffix}`;
+  await storage.ensureThread(threadId, projectId);
+
+  assert.deepEqual(storage.saveProjectBrief(projectId, { goal: "newer" }, 2), {
+    brief: { goal: "newer" },
     revision: 2
   });
   assert.throws(
-    () => storage.saveProjectAgentInputValues(projectId, "blog-post", { topic: "older" }, 1),
+    () => storage.saveProjectBrief(projectId, { goal: "older" }, 1),
     /stale/i
   );
-  assert.deepEqual(storage.getProjectAgentInputValues(projectId, "blog-post"), { topic: "newer" });
+  assert.deepEqual(storage.saveTaskBrief(threadId, { objective: "newer task", deliverableType: "outline" }, 2), {
+    brief: { objective: "newer task", deliverableType: "outline" },
+    revision: 2
+  });
+  assert.throws(() => storage.saveTaskBrief(threadId, { objective: "older task" }, 1), /stale/i);
+  assert.deepEqual(storage.getProjectBrief(projectId), { brief: { goal: "newer" }, revision: 2 });
+  assert.deepEqual(storage.getTaskBrief(threadId), { brief: { objective: "newer task", deliverableType: "outline" }, revision: 2 });
 });
 
 test("project shared context includes only explicit Canvas and outputs within stable budgets", async () => {
@@ -169,7 +185,7 @@ test("project shared context includes only explicit Canvas and outputs within st
   const threadId = `thread_context_${suffix}`;
   storage.createProject(projectId, "Context project");
   await storage.ensureThread(threadId, projectId);
-  storage.saveProjectAgentInputValues(projectId, "blog-post", { topic: "Project input" }, 1);
+  storage.saveProjectBrief(projectId, { goal: "Project input" }, 1);
   storage.createCanvasNode(projectId, { kind: "note", title: "Private", content: "DO_NOT_SHARE" });
   storage.createCanvasNode(projectId, { kind: "reference", title: "Included", content: "SHARE_ME", includeInProjectContext: true });
   const run = storage.recordRun({

@@ -102,7 +102,7 @@ test("storage facade saves and returns Agent settings", async () => {
   });
 
   const saved = storage.getAgentSettings(agentCardId);
-  assert.equal(saved?.model?.providerId, "");
+  assert.equal("model" in (saved as Record<string, unknown>), false);
   assert.deepEqual(saved?.quickMessages, ["Shorten this", "Make it clearer"]);
 });
 

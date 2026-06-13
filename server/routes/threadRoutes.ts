@@ -111,13 +111,9 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
     }
   });
 
-  app.patch("/api/threads/:threadId/inputs", (request, response) => {
+  app.patch("/api/threads/:threadId/task-brief", (request, response) => {
     try {
-      const thread = storage.getThread(request.params.threadId);
-      const agentCardId = safeId(request.body?.agentCardId);
-      const saved = thread && agentCardId
-        ? storage.saveProjectAgentInputValues(thread.projectId, agentCardId, request.body?.structuredValues, request.body?.revision)
-        : undefined;
+      const saved = storage.saveTaskBrief(request.params.threadId, request.body?.brief, request.body?.revision);
       if (!saved) {
         sendError(response, 404, "not_found", "Thread not found");
         return;
@@ -125,7 +121,7 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
 
       sendOk(response, saved);
     } catch (error) {
-      sendError(response, 400, "bad_request", errorMessage(error, "Unable to save structured inputs"));
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to save Task Brief"));
     }
   });
 
@@ -196,8 +192,8 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
       thread,
       project,
       messages: storage.listMessages(request.params.threadId),
-      projectInputs: storage.getAllProjectAgentInputValues(projectId),
-      projectInputRevisions: storage.getAllProjectAgentInputRevisions(projectId),
+      projectBrief: storage.getProjectBrief(projectId),
+      taskBrief: storage.getTaskBrief(request.params.threadId),
       outputVersions: storage.listOutputVersions(request.params.threadId),
       toolEvents: storage.listToolEvents(request.params.threadId),
       canvasNodes: storage.listCanvasNodes(projectId),

@@ -1,4 +1,5 @@
 import type { AgentRuntimeAdapter } from "../../agentRuntimeAdapter.js";
+import type { ConversationModelRuntimeSettings, ConversationModelRuntimeSettingsInput } from "../../agentCards.js";
 import { getSystemPrompt } from "../../config/providerConfig.js";
 import type { GenerateRequest } from "../../contracts/generation.js";
 import { buildAgentPrompt } from "../../promptBuilder.js";
@@ -14,7 +15,19 @@ import type { ConfiguredModelApi } from "../../domains/model-config/index.js";
 import { shouldExcludeFromModelContext } from "./outputNormalizer.js";
 import { planPhaseSystemPrompt, resolvePlanRequestPolicy } from "./planRequestPolicy.js";
 
-export type GenerateModelSettings = NonNullable<ReturnType<AgentRuntimeAdapter["resolveAgentCard"]>["settings"]>["model"];
+export type GenerateModelSettings = ConversationModelRuntimeSettings;
+
+export const defaultConversationModelRuntimeSettings: ConversationModelRuntimeSettingsInput = {
+  responseMode: "normal",
+  temperature: 0.7,
+  topP: 1,
+  contextCount: 5,
+  maxTokens: 2000,
+  maxTokensEnabled: false,
+  streaming: true,
+  toolCallMode: "auto",
+  maxToolCalls: 20
+};
 
 export type GenerationRunContext = {
   runtimeConfig: Awaited<ReturnType<AgentRuntimeAdapter["getAgentRuntimeConfig"]>>;
@@ -37,7 +50,6 @@ export async function buildGenerationRunContext(
 ): Promise<GenerationRunContext> {
   const runtimeConfig = await agentRuntime.getAgentRuntimeConfig(payload.agentCardId ?? payload.taskId ?? "");
   const agentCard = runtimeConfig.agentCard;
-  const effectivePayload = payload;
   const effectiveToolState: ToolState = resolvePlanRequestPolicy({
     chatInstruction: payload.chatInstruction,
     contextValues: payload.contextValues,
@@ -52,13 +64,14 @@ export async function buildGenerationRunContext(
     agentCard,
     skills,
     locale: payload.locale,
-    structuredValues: effectivePayload.structuredValues ?? effectivePayload.formValues,
-    contextValues: effectivePayload.contextValues,
+    projectBrief: storage.getProjectBrief(storage.getThread(threadId)?.projectId ?? "").brief,
+    taskBrief: storage.getTaskBrief(threadId).brief,
+    contextValues: payload.contextValues,
     chatInstruction: payload.chatInstruction,
     freeTextPrompt: payload.freeTextPrompt,
     toolState: effectiveToolState
   });
-  const modelSettings = await resolveModelSettings(runtimeConfig.settings.model, configuredModel, payload.modelOverrides);
+  const modelSettings = await resolveModelSettings(configuredModel, undefined, payload.modelOverrides);
   const userPrompt = userPromptForModel(payload, agentCard.outputContract.type);
   const knowledge = await buildKnowledgeContext({
     knowledgeService,
@@ -91,13 +104,14 @@ export async function buildGenerationRunContext(
 }
 
 export async function resolveModelSettings(
-  settings: GenerateModelSettings | undefined,
   configured?: ConfiguredModelApi,
+  runtimeSettings?: ConversationModelRuntimeSettingsInput,
   modelOverrides?: GenerateRequest["modelOverrides"]
 ): Promise<GenerateModelSettings> {
   if (!configured?.enabled || !configured.apiKey?.trim()) {
     throw new Error("Please select an enabled project model with a configured API key before generating.");
   }
+  const settings = { ...defaultConversationModelRuntimeSettings, ...runtimeSettings };
   return {
     configuredModelApiId: configured.id,
     providerId: configured.providerId,
@@ -156,7 +170,7 @@ function buildSystemPrompt(systemPrompt: string, internalPrompt: string, phasePr
 function userPromptForModel(payload: GenerateRequest, outputType: string) {
   const instruction = payload.chatInstruction?.trim() || payload.freeTextPrompt?.trim();
   if (instruction) return instruction;
-  return `Generate the requested ${outputType} from the current AgentCard structured inputs.`;
+  return `Generate the requested ${outputType} from the current Project Brief and Current Task Brief.`;
 }
 
 async function buildKnowledgeContext(input: {

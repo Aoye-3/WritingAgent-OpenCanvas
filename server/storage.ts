@@ -28,8 +28,10 @@ import type {
   CanvasWriteRequestInput,
   CanvasWriteRequestStatus,
   JsonValue,
+  ProjectBrief,
   RunRecordInput,
-  StoredStructuredValues
+  StoredBrief,
+  TaskBrief
 } from "./storageTypes.js";
 export type {
   CanvasEdge,
@@ -55,12 +57,14 @@ export type {
   CanvasWriteRequestStatus,
   JsonValue,
   ProjectSummary,
+  ProjectBrief,
   RunRecordInput,
   StoredMessage,
   StoredOutputVersion,
-  StoredStructuredValues,
+  StoredBrief,
   StoredThread,
-  StoredToolEvent
+  StoredToolEvent,
+  TaskBrief
 } from "./storageTypes.js";
 
 export { resolveFacetWritePaths } from "./storagePaths.js";
@@ -254,42 +258,64 @@ export class SQLiteStorageRepository {
     return this.getThread(threadId);
   }
 
-  getProjectAgentInputValues(projectId: string, agentCardId: string): StoredStructuredValues {
+  getProjectBrief(projectId: string): StoredBrief<ProjectBrief> {
     validateId(projectId, "projectId");
-    validateId(agentCardId, "agentCardId");
     const row = this.db
-      .prepare(`SELECT structured_values_json as structuredValuesJson FROM project_agent_inputs WHERE project_id = ? AND agent_card_id = ?`)
-      .get(projectId, agentCardId) as { structuredValuesJson: string } | undefined;
-    return row ? cleanStructuredValues(parseJson(row.structuredValuesJson)) : {};
+      .prepare(`SELECT payload_json as payloadJson, revision FROM project_briefs WHERE project_id = ?`)
+      .get(projectId) as { payloadJson: string; revision: number } | undefined;
+    return row ? { brief: cleanProjectBrief(parseJson(row.payloadJson)), revision: row.revision } : { brief: {}, revision: 0 };
   }
 
-  saveProjectAgentInputValues(projectId: string, agentCardId: string, structuredValues: unknown, revision: number) {
+  saveProjectBrief(projectId: string, brief: unknown, revision: number): StoredBrief<ProjectBrief> | undefined {
     validateId(projectId, "projectId");
-    validateId(agentCardId, "agentCardId");
     if (!this.getProject(projectId)) return undefined;
-    const values = cleanStructuredValues(structuredValues);
-    if (!Number.isInteger(revision) || revision < 1) throw new Error("Project Agent input revision must be a positive integer");
+    const values = cleanProjectBrief(brief);
+    validateBriefRevision(revision, "Project Brief");
     const current = this.db
-      .prepare(`SELECT revision FROM project_agent_inputs WHERE project_id = ? AND agent_card_id = ?`)
-      .get(projectId, agentCardId) as { revision: number } | undefined;
-    if (current && revision <= current.revision) throw new Error("Stale Project Agent input revision");
+      .prepare(`SELECT revision FROM project_briefs WHERE project_id = ?`)
+      .get(projectId) as { revision: number } | undefined;
+    if (current && revision <= current.revision) throw new Error("Stale Project Brief revision");
     const now = nowIso();
     this.db.prepare(
-      `INSERT INTO project_agent_inputs (project_id, agent_card_id, structured_values_json, revision, updated_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(project_id, agent_card_id) DO UPDATE SET structured_values_json = excluded.structured_values_json, revision = excluded.revision, updated_at = excluded.updated_at`
-    ).run(projectId, agentCardId, JSON.stringify(values), revision, now);
+      `INSERT INTO project_briefs (project_id, payload_json, revision, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(project_id) DO UPDATE SET payload_json = excluded.payload_json, revision = excluded.revision, updated_at = excluded.updated_at`
+    ).run(projectId, JSON.stringify(values), revision, now);
     this.db.prepare(`UPDATE projects SET updated_at = ? WHERE id = ?`).run(now, projectId);
-    return { structuredValues: values, revision };
+    return { brief: values, revision };
+  }
+
+  getTaskBrief(threadId: string): StoredBrief<TaskBrief> {
+    validateId(threadId, "threadId");
+    const row = this.db
+      .prepare(`SELECT payload_json as payloadJson, revision FROM thread_task_briefs WHERE thread_id = ?`)
+      .get(threadId) as { payloadJson: string; revision: number } | undefined;
+    return row ? { brief: cleanTaskBrief(parseJson(row.payloadJson)), revision: row.revision } : { brief: {}, revision: 0 };
+  }
+
+  saveTaskBrief(threadId: string, brief: unknown, revision: number): StoredBrief<TaskBrief> | undefined {
+    validateId(threadId, "threadId");
+    if (!this.getThread(threadId)) return undefined;
+    const values = cleanTaskBrief(brief);
+    validateBriefRevision(revision, "Task Brief");
+    const current = this.db
+      .prepare(`SELECT revision FROM thread_task_briefs WHERE thread_id = ?`)
+      .get(threadId) as { revision: number } | undefined;
+    if (current && revision <= current.revision) throw new Error("Stale Task Brief revision");
+    const now = nowIso();
+    this.db.prepare(
+      `INSERT INTO thread_task_briefs (thread_id, payload_json, revision, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(thread_id) DO UPDATE SET payload_json = excluded.payload_json, revision = excluded.revision, updated_at = excluded.updated_at`
+    ).run(threadId, JSON.stringify(values), revision, now);
+    this.db.prepare(`UPDATE threads SET updated_at = ? WHERE id = ?`).run(now, threadId);
+    return { brief: values, revision };
   }
 
   getProjectSharedContext(projectId: string) {
     validateId(projectId, "projectId");
     const project = this.getProject(projectId);
     if (!project) return undefined;
-    const inputRows = this.db
-      .prepare(`SELECT agent_card_id as agentCardId, structured_values_json as valuesJson FROM project_agent_inputs WHERE project_id = ? ORDER BY updated_at DESC`)
-      .all(projectId) as { agentCardId: string; valuesJson: string }[];
     const outputRows = this.db
       .prepare(
         `SELECT output_versions.content
@@ -300,10 +326,6 @@ export class SQLiteStorageRepository {
          LIMIT 24`
       )
       .all(projectId) as { content: string }[];
-    const agentInputs = takeBudgetedEntries(
-      inputRows.map((row) => [row.agentCardId, cleanStructuredValues(parseJson(row.valuesJson))] as const),
-      8_000
-    );
     const canvasNodes = takeBudgetedValues(
       this.listCanvasNodes(projectId)
         .filter((node) => node.includeInProjectContext)
@@ -316,21 +338,10 @@ export class SQLiteStorageRepository {
       projectId,
       title: truncateContextValue(project.title, 2_000),
       summary: truncateContextValue(project.summary, 2_000),
-      agentInputs: Object.fromEntries(agentInputs),
+      projectBrief: this.getProjectBrief(projectId).brief,
       canvasNodes,
       recentOutputs
     };
-  }
-
-  getAllProjectAgentInputValues(projectId: string) {
-    return this.getProjectSharedContext(projectId)?.agentInputs ?? {};
-  }
-
-  getAllProjectAgentInputRevisions(projectId: string) {
-    validateId(projectId, "projectId");
-    return Object.fromEntries((this.db
-      .prepare(`SELECT agent_card_id as agentCardId, revision FROM project_agent_inputs WHERE project_id = ?`)
-      .all(projectId) as { agentCardId: string; revision: number }[]).map((row) => [row.agentCardId, row.revision]));
   }
 
   renameProject(projectId: string, title: unknown) {
@@ -371,7 +382,8 @@ export class SQLiteStorageRepository {
       for (const table of ["canvas_edges", "canvas_objects", "canvas_workflow_suggestions", "canvas_workflows", "canvas_write_requests", "canvas_nodes"]) {
         this.db.prepare(`DELETE FROM ${table} WHERE project_id = ?`).run(projectId);
       }
-      this.db.prepare(`DELETE FROM project_agent_inputs WHERE project_id = ?`).run(projectId);
+      this.db.prepare(`DELETE FROM project_briefs WHERE project_id = ?`).run(projectId);
+      this.db.prepare(`DELETE FROM thread_task_briefs WHERE thread_id IN (SELECT id FROM threads WHERE project_id = ?)`).run(projectId);
       this.db.prepare(`DELETE FROM project_model_bindings WHERE project_id = ?`).run(projectId);
       this.db.prepare(`DELETE FROM threads WHERE project_id = ?`).run(projectId);
       this.db.prepare(`DELETE FROM projects WHERE id = ?`).run(projectId);
@@ -415,6 +427,7 @@ export class SQLiteStorageRepository {
       this.db.prepare(`DELETE FROM prompt_versions WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM runs WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM messages WHERE thread_id = ?`).run(threadId);
+      this.db.prepare(`DELETE FROM thread_task_briefs WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM threads WHERE id = ?`).run(threadId);
     });
 
@@ -721,21 +734,32 @@ function resolveThreadRelativePath(threadId: string, relativePath: string) {
   return resolved;
 }
 
-function cleanStructuredValues(value: unknown): StoredStructuredValues {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const values: StoredStructuredValues = {};
-  for (const [key, rawValue] of Object.entries(value)) {
-    if (!/^[A-Za-z0-9_-]{1,80}$/.test(key)) continue;
-    if (typeof rawValue === "string") {
-      values[key] = rawValue.slice(0, 8000);
-    } else if (Array.isArray(rawValue)) {
-      values[key] = rawValue
-        .filter((item): item is string => typeof item === "string")
-        .map((item) => item.slice(0, 1000))
-        .slice(0, 50);
-    }
+function cleanProjectBrief(value: unknown): ProjectBrief {
+  return cleanBriefRecord(value, ["goal", "audience", "background", "standingConstraints"]);
+}
+
+function cleanTaskBrief(value: unknown): TaskBrief {
+  const values = cleanBriefRecord(value, ["objective", "deliverableDetails", "mustCover", "temporaryConstraints"]) as TaskBrief;
+  const deliverableType = value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>).deliverableType
+    : undefined;
+  if (deliverableType === "auto" || deliverableType === "document" || deliverableType === "outline" || deliverableType === "analysis" || deliverableType === "checklist" || deliverableType === "proposal") {
+    values.deliverableType = deliverableType;
   }
   return values;
+}
+
+function cleanBriefRecord<T extends Record<string, string | undefined>>(value: unknown, keys: Array<keyof T>): T {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {} as T;
+  const input = value as Record<string, unknown>;
+  return Object.fromEntries(keys.flatMap((key) => {
+    const item = input[String(key)];
+    return typeof item === "string" && item.trim() ? [[key, item.trim().slice(0, 8000)]] : [];
+  })) as T;
+}
+
+function validateBriefRevision(revision: number, label: string) {
+  if (!Number.isInteger(revision) || revision < 1) throw new Error(`${label} revision must be a positive integer`);
 }
 
 function truncateContextValue(value: string, limit = 4_000) {
@@ -750,19 +774,6 @@ function takeBudgetedValues<T>(values: T[], budget: number) {
     const size = JSON.stringify(normalized).length;
     if (used + size > budget) continue;
     selected.push(normalized as T);
-    used += size;
-  }
-  return selected;
-}
-
-function takeBudgetedEntries<T>(entries: ReadonlyArray<readonly [string, T]>, budget: number) {
-  const selected: Array<readonly [string, T]> = [];
-  let used = 0;
-  for (const [key, value] of entries) {
-    const normalized = truncateContextRecord(value);
-    const size = key.length + JSON.stringify(normalized).length;
-    if (used + size > budget) continue;
-    selected.push([key, normalized as T]);
     used += size;
   }
   return selected;

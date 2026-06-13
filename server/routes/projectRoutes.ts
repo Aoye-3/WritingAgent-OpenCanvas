@@ -43,6 +43,16 @@ export function registerProjectRoutes(app: Express, { storage, agentRuntime }: P
     }
   });
 
+  app.patch("/api/projects/:projectId/brief", (request, response) => {
+    try {
+      const saved = storage.saveProjectBrief(request.params.projectId, request.body?.brief, request.body?.revision);
+      if (!saved) return sendError(response, 404, "not_found", "Project not found");
+      sendOk(response, saved);
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to save Project Brief"));
+    }
+  });
+
   app.put("/api/projects/:projectId/models", (request, response) => {
     try {
       const ids = Array.isArray(request.body?.configuredModelApiIds)

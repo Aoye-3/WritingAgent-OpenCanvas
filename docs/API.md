@@ -98,20 +98,21 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 
 ## Agent Cards
 - `GET /api/agent-cards`
-  - Returns `{ agentCards }`.
+  - Returns `{ agentCards }`. The only default product Agent is `chat-agent` / `ChatAgent`; historical writing Agent ids are compatibility aliases, not returned as built-in templates.
 - `GET /api/agent-cards/:agentCardId/settings`
-  - Returns `{ settings }` for the resolved Agent card.
+  - Returns `{ settings }` for the resolved Agent card. Settings contain Prompt, Tools, Knowledge, MCP refs, Quick phrases, and Memory; they do not contain model identity or provider credentials.
 - `GET /api/agent-cards/:agentCardId/runtime-config`
-  - Returns resolved Agent runtime config, including card, merged settings, available tools, tool policies, available skills, and missing/deprecated refs.
+  - Returns resolved Agent runtime config, including card, merged settings, available tools, tool policies, available skills, and missing/deprecated refs. It does not expose provider profile as an Agent model property.
 - `PUT /api/agent-cards/:agentCardId/settings`
   - Body: `{ settings }`.
-  - Saves normalized settings and returns `{ settings, agentCard }`.
+  - Saves normalized Agent profile settings and returns `{ settings, agentCard }`. Legacy `settings.model` payloads may be read for compatibility but are ignored and not written back.
 
 ## Generation
 - `POST /api/generate`
   - Body is parsed by `parseGenerateRequest`.
-  - `contextValues`, when present, represents explicit left AgentCard structured inputs and current workspace state such as draft or Canvas node data. It must not contain bottom-bar placeholder content or historical defaults such as course notes or audience profiles.
+  - `contextValues`, when present, represents explicit transient workspace state such as draft or Canvas node data. Project Brief and Current Task Brief are loaded from storage by Thread identity and are not accepted from the generation request.
   - `modelOverrides`, when present, is a per-run override for runtime-safe model controls such as `thinkingMode` and `reasoningEffort`. It does not mutate saved Agent settings.
+  - Model identity is resolved from the Thread's selected `configuredModelApiId`; Agents do not own model selection.
   - Runs generation, records the result, and returns generation metadata and output.
   - Uses Agent Runtime as the only real generation path. Runtime/model failures return stable error codes and do not record an assistant message, output version, or Mock result.
   - Mock fallback is disabled by default and exists only when `FACETWRITE_MOCK_FALLBACK_ENABLED=true` is explicitly configured.
@@ -156,6 +157,7 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `GET /api/agent-runtime/config`
   - Returns read-only Agent Runtime skills and MCP server overview.
   - Secret-like MCP values such as keys, tokens, passwords, authorization headers, and OAuth client secrets are redacted.
+  - Agent profiles may save references to these already configured MCP server ids. This API is not an MCP installation or editing surface.
   - Uses the backend AgentBackend auth session for protected AgentBackend APIs. If auth fails, the route returns safe overview defaults plus `lastError`; it must not expose AgentBackend secrets or MCP environment values.
 - `GET /api/agent-runtime/dashboard`
   - Returns a read-only AI Dashboard payload containing runtime status, Agent Runtime Skills/MCP overview, Lead Agent metadata, AgentCard-to-runtime subagent mappings, ToolUse bridge status, and integration maturity.
@@ -320,9 +322,10 @@ Implementation note: these HTTP contracts are stable while the internals move to
 - `GET /api/projects/:projectId/threads`: list the current Project's active conversations in most-recently-updated order.
 - `PATCH /api/threads/:threadId/model`: explicitly select the conversation Model Config.
 - `POST /api/threads/:threadId/context-reset`: persist a soft context boundary without deleting visible history.
-- `PATCH /api/threads/:threadId/inputs`: save Project-scoped Agent inputs; requires `agentCardId` and a monotonically increasing integer `revision`.
+- `PATCH /api/projects/:projectId/brief`: save the Project-owned Project Brief with `{ brief, revision }`.
+- `PATCH /api/threads/:threadId/task-brief`: save the Thread-owned Current Task Brief with `{ brief, revision }`.
 - `PATCH /api/threads/:threadId/output-versions/:versionId/context`: explicitly include or exclude an output version from Project shared context.
-- `GET /api/threads/:threadId/state`: returns Thread history plus Project metadata, all Project Agent inputs, and Project Canvas state.
+- `GET /api/threads/:threadId/state`: returns Thread history plus Project metadata, Project Brief, Current Task Brief, their revisions, and Project Canvas state.
 
 Generation requests may include `projectId` when creating a new conversation. Existing conversations derive Project and model selection from backend storage. Provider/model names supplied by the frontend are not authoritative.
 

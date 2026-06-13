@@ -13,12 +13,7 @@ export type AgentBackendSubagentConfig = {
 };
 
 const subagentNames: Record<string, string> = {
-  "blog-post": "facetwrite-blog-writer",
-  summary: "facetwrite-summary",
-  "email-writer": "facetwrite-email-writer",
-  "lesson-plan": "facetwrite-lesson-planner",
-  "report-outline": "facetwrite-report-outliner",
-  "rewrite-polish": "facetwrite-rewrite-polisher"
+  "chat-agent": "facetwrite-chat-agent"
 };
 
 export function buildAgentBackendSubagentConfig(card: AgentCard, settings?: AgentSettings): AgentBackendSubagentConfig {
