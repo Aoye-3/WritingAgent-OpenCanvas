@@ -69,14 +69,45 @@ function Get-ToolTokenFingerprint {
   }
 }
 
+function Get-SourceFingerprint {
+  $sourceNewest = (Get-ChildItem -Path @(
+    (Join-Path $backendRoot "app"),
+    (Join-Path $backendRoot "packages\harness"),
+    (Join-Path $runtimeRoot "skills"),
+    (Join-Path $runtimeRoot "config.yaml")
+  ) -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
+    $_.Extension -in @(".py", ".md", ".yaml", ".yml", ".json", ".toml") -and $_.FullName -notmatch "\\(__pycache__|\.pytest_cache|\.uv-cache|\.venv|node_modules)\\"
+  } | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).LastWriteTimeUtc
+  if (-not $sourceNewest) { return "0" }
+  return [DateTimeOffset]::new($sourceNewest).ToUnixTimeMilliseconds().ToString()
+}
+
+function Assert-PathInsideWorkspace {
+  param([string] $Path, [string] $Label)
+  $resolvedRoot = [IO.Path]::GetFullPath($root).TrimEnd('\') + '\'
+  $resolvedPath = [IO.Path]::GetFullPath($Path)
+  if (-not $resolvedPath.StartsWith($resolvedRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "$Label must stay inside $root, but resolved to $resolvedPath"
+  }
+  return $resolvedPath
+}
+
 function Assert-CompatibleOwner {
   $metadata = Read-Metadata
   if (-not $metadata) {
     throw "Port $Port already serves an unmanaged Agent Runtime. Stop it or use AGENT_RUNTIME_MODE=external."
   }
-  $tokenFingerprint = Get-ToolTokenFingerprint
-  if ($metadata.projectRoot -ne $root -or [int] $metadata.port -ne $Port -or $metadata.bridgeBaseUrl -ne $BridgeBaseUrl -or $metadata.toolTokenFingerprint -ne $tokenFingerprint) {
+  $tokenFingerprint = if ($env:FACETWRITE_INTERNAL_TOOL_TOKEN) { Get-ToolTokenFingerprint } else { $null }
+  $tokenMismatch = $tokenFingerprint -and $metadata.toolTokenFingerprint -ne $tokenFingerprint
+  if ($metadata.projectRoot -ne $root -or [int] $metadata.port -ne $Port -or $metadata.bridgeBaseUrl -ne $BridgeBaseUrl -or $tokenMismatch) {
     throw "The running local Agent Runtime uses incompatible project, port, or FacetWrite bridge settings."
+  }
+  if (-not $metadata.runtimePython) {
+    throw "The running local Agent Runtime does not declare its Python executable."
+  }
+  Assert-PathInsideWorkspace -Path ([string] $metadata.runtimePython) -Label "running Agent Runtime Python" | Out-Null
+  if ($metadata.sourceFingerprint -ne (Get-SourceFingerprint)) {
+    throw "Source files changed after the local Agent Runtime started."
   }
 }
 
@@ -149,6 +180,8 @@ function Initialize-Environment {
   New-Item -ItemType Directory -Path $logsRoot -Force | Out-Null
   $env:UV_CACHE_DIR = Join-Path $backendRoot ".uv-cache"
   $env:UV_PYTHON_INSTALL_DIR = Join-Path $backendRoot ".uv-python"
+  Assert-PathInsideWorkspace -Path $env:UV_CACHE_DIR -Label "uv cache" | Out-Null
+  Assert-PathInsideWorkspace -Path $env:UV_PYTHON_INSTALL_DIR -Label "uv Python install directory" | Out-Null
   New-Item -ItemType Directory -Path $env:UV_CACHE_DIR -Force | Out-Null
   New-Item -ItemType Directory -Path $env:UV_PYTHON_INSTALL_DIR -Force | Out-Null
   Import-DotEnv
@@ -190,7 +223,7 @@ function Stop-OwnedRuntime {
 switch ($Action) {
   "doctor" {
     $uv = Initialize-Environment
-    $pythonStatus = Invoke-Uv -UvPath $uv.Source -Arguments @("python", "find", "3.12") -Quiet
+    $pythonStatus = Invoke-Uv -UvPath $uv.Source -Arguments @("python", "find", "--managed-python", "3.12") -Quiet
     if ($pythonStatus -ne 0) { Write-Host "Python 3.12 is not installed yet; the first up command will install it." -ForegroundColor Yellow }
     Write-Host "Agent Runtime local prerequisites are available." -ForegroundColor Green
     Write-Host "Gateway: $healthUrl"
@@ -198,6 +231,7 @@ switch ($Action) {
     exit 0
   }
   "status" {
+    Import-DotEnv
     if (Test-HttpOk) {
       Assert-CompatibleOwner
       $process = Get-OwnedProcess
@@ -213,10 +247,20 @@ switch ($Action) {
     exit 0
   }
   "up" {
+    Import-DotEnv
     if (Test-HttpOk) {
-      Assert-CompatibleOwner
-      Write-Host "Reusing the project-owned Agent Runtime local Gateway at $healthUrl." -ForegroundColor Cyan
-      exit 0
+      try {
+        Assert-CompatibleOwner
+        Write-Host "Reusing the project-owned Agent Runtime local Gateway at $healthUrl." -ForegroundColor Cyan
+        exit 0
+      } catch {
+        $ownerError = $_.Exception.Message
+        $restartable = $ownerError -like "Source files changed*" -or
+          $ownerError -like "The running local Agent Runtime does not declare its Python executable*" -or
+          $ownerError -like "running Agent Runtime Python must stay inside*"
+        if (-not $restartable) { throw }
+        Stop-OwnedRuntime
+      }
     }
     if (Get-OwnedProcess) {
       throw "The project-owned Agent Runtime process is running but unhealthy. Run agent-runtime:down and inspect $stderrPath."
@@ -224,21 +268,34 @@ switch ($Action) {
     Remove-OwnershipFiles
     $uv = Initialize-Environment
 
-    $pythonStatus = Invoke-Uv -UvPath $uv.Source -Arguments @("python", "find", "3.12") -Quiet
+    $pythonStatus = Invoke-Uv -UvPath $uv.Source -Arguments @("python", "find", "--managed-python", "3.12") -Quiet
     if ($pythonStatus -ne 0) {
       $installStatus = Invoke-Uv -UvPath $uv.Source -Arguments @("python", "install", "3.12")
       if ($installStatus -ne 0) { throw "uv could not install Python 3.12." }
     }
+    $managedPython = (& $uv.Source python find --managed-python 3.12).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $managedPython) { throw "uv could not resolve its workspace-managed Python 3.12." }
+    Assert-PathInsideWorkspace -Path $managedPython -Label "managed Python" | Out-Null
+
+    $venvRoot = Join-Path $backendRoot ".venv"
+    $venvConfigPath = Join-Path $venvRoot "pyvenv.cfg"
+    if (Test-Path -LiteralPath $venvConfigPath) {
+      $pythonHomeLine = Get-Content -LiteralPath $venvConfigPath | Where-Object { $_ -match "^home\s*=\s*(.+)$" } | Select-Object -First 1
+      if ($pythonHomeLine -and $pythonHomeLine -match "^home\s*=\s*(.+)$") {
+        $pythonHome = $Matches[1].Trim()
+        try { Assert-PathInsideWorkspace -Path $pythonHome -Label "virtualenv Python home" | Out-Null } catch {
+          $resolvedVenvRoot = Assert-PathInsideWorkspace -Path $venvRoot -Label "virtualenv"
+          Remove-Item -LiteralPath $resolvedVenvRoot -Recurse -Force
+        }
+      }
+    }
 
     Push-Location $backendRoot
     try {
-      $syncStatus = Invoke-Uv -UvPath $uv.Source -Arguments @("sync", "--python", "3.12", "--locked", "--all-packages")
+      $syncStatus = Invoke-Uv -UvPath $uv.Source -Arguments @("sync", "--python", $managedPython, "--locked", "--all-packages")
       if ($syncStatus -ne 0) { throw "Agent Runtime dependency synchronization failed." }
-      $venvConfigPath = Join-Path $backendRoot ".venv\pyvenv.cfg"
-      $pythonHomeLine = Get-Content -LiteralPath $venvConfigPath | Where-Object { $_ -match "^home\s*=\s*(.+)$" } | Select-Object -First 1
-      if (-not $pythonHomeLine -or $pythonHomeLine -notmatch "^home\s*=\s*(.+)$") { throw "Agent Runtime virtual environment does not declare its Python home." }
-      $pythonHome = $Matches[1].Trim()
-      $runtimePython = Join-Path $pythonHome "python.exe"
+      $runtimePython = Join-Path $backendRoot ".venv\Scripts\python.exe"
+      Assert-PathInsideWorkspace -Path $runtimePython -Label "Agent Runtime Python" | Out-Null
       if (-not (Test-Path -LiteralPath $runtimePython)) { throw "Agent Runtime Python executable is missing: $runtimePython" }
       $venvSitePackages = Join-Path $backendRoot ".venv\Lib\site-packages"
       $harnessPackage = Join-Path $backendRoot "packages\harness"
@@ -254,22 +311,14 @@ switch ($Action) {
 
     try {
       Set-Content -LiteralPath $pidPath -Value $process.Id -Encoding ascii
-      $sourceNewest = (Get-ChildItem -Path @(
-        (Join-Path $backendRoot "app"),
-        (Join-Path $backendRoot "packages\harness"),
-        (Join-Path $runtimeRoot "skills"),
-        (Join-Path $runtimeRoot "config.yaml")
-      ) -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
-        $_.Extension -in @(".py", ".md", ".yaml", ".yml", ".json", ".toml") -and $_.FullName -notmatch "\\(__pycache__|\.pytest_cache|\.uv-cache|\.venv|node_modules)\\"
-      } | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).LastWriteTimeUtc
-      $sourceFingerprint = [DateTimeOffset]::new($sourceNewest).ToUnixTimeMilliseconds().ToString()
       $metadataJson = @{
         pid = $process.Id
         projectRoot = $root
         port = $Port
         bridgeBaseUrl = $BridgeBaseUrl
         startedAt = (Get-Date).ToUniversalTime().ToString("o")
-        sourceFingerprint = $sourceFingerprint
+        sourceFingerprint = Get-SourceFingerprint
+        runtimePython = $runtimePython
         toolTokenFingerprint = Get-ToolTokenFingerprint
       } | ConvertTo-Json
       [System.IO.File]::WriteAllText($metadataPath, $metadataJson, [System.Text.UTF8Encoding]::new($false))

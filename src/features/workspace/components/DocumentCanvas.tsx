@@ -144,6 +144,7 @@ function DocumentCanvasInner({
   const resizingNodeIdRef = useRef<string | null>(null);
   const lastCanvasPointRef = useRef<{ x: number; y: number } | null>(null);
   const internalClipboardRef = useRef<CanvasClipboardPayload | null>(null);
+  const focusedNodeRef = useRef<string | undefined>(undefined);
   const selectedNode = useMemo(() => nodes.find((node) => node.id === selectedNodeId), [nodes, selectedNodeId]);
   const flowEdges = useMemo<Edge[]>(() => edges.map((edge) => ({
     id: edge.id,
@@ -188,6 +189,16 @@ function DocumentCanvasInner({
       }
     }));
   }, [agentCardId, clearCreationPreview, handleResizeStateChange, locale, modelOverrides, nodes, onAcceptSuggestion, onApproveWriteRequest, onConvertSuggestionToNode, onDeleteNode, onIgnoreSuggestion, onRejectWriteRequest, onRequestRangeRewrite, onUpdateNode, resizingNodeId, selectedNodeId, suggestions, workflow, writeRequests]);
+
+  useEffect(() => {
+    if (!selectedNode || focusedNodeRef.current === selectedNode.id) return;
+    focusedNodeRef.current = selectedNode.id;
+    void reactFlow.setCenter(
+      selectedNode.x + selectedNode.width / 2,
+      selectedNode.y + selectedNode.height / 2,
+      { duration: 260, zoom: Math.max(viewport.zoom, 0.65) }
+    );
+  }, [reactFlow, selectedNode, viewport.zoom]);
 
   const createNode = async (kind: CanvasNodeKind) => {
     if (!menu) return;

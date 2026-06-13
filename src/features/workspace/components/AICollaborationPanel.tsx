@@ -29,6 +29,7 @@ type AICollaborationPanelProps = {
   onRejectWriteRequest: (requestId: string) => Promise<void>;
   onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => Promise<unknown>;
+  onStopSending: () => void;
   onSelectAgent: (agentCardId: string) => void;
   onSelectThread: (threadId: string) => Promise<void>;
   onInputDraftConsumed: () => void;

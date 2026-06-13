@@ -13,6 +13,8 @@ const eventLabels: Record<string, { en: string; zh: string }> = {
   tool_state_applied: { en: "Tool state applied", zh: "工具状态已应用" },
   agent_backend_runtime_failed: { en: "AgentBackend runtime failed", zh: "AgentBackend 运行失败" },
   agent_backend_plan_protocol_failed: { en: "Plan paused: protocol incomplete", zh: "Plan 已暂停：状态更新未完成" },
+  agent_backend_tool_failed: { en: "Tool call failed", zh: "工具调用失败" },
+  agent_backend_plan_submission_failed: { en: "Plan submission failed", zh: "Plan 提交失败" },
   internal_output_blocked: { en: "Internal output blocked", zh: "内部输出已拦截" }
 };
 
@@ -56,6 +58,6 @@ function formatPayload(payload: unknown) {
   if (typeof payload === "string") return payload;
   if (typeof payload !== "object" || Array.isArray(payload)) return JSON.stringify(payload);
   const record = payload as Record<string, unknown>;
-  return JSON.stringify(Object.fromEntries(["toolName", "tool", "status", "summary", "operation", "nodeId", "requestId", "planId", "stepId", "artifactCount", "failedCount"]
+  return JSON.stringify(Object.fromEntries(["toolName", "tool", "status", "reason", "summary", "operation", "nodeId", "requestId", "planId", "stepId", "artifactCount", "failedCount"]
     .flatMap((key) => key in record ? [[key, record[key]]] : [])), null, 2);
 }

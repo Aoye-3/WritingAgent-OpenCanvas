@@ -284,6 +284,32 @@ test("plan_clarification_submit updates only the server-created intake Plan", as
   assert.equal(submittedPlanId, "plan_intake");
 });
 
+test("plan_clarification_submit rejects missing or multiple recommendations", async () => {
+  for (const recommendations of [[false, false], [true, true]]) {
+    const result = await executeToolCall({ id: "invalid-intake-contract", type: "function", function: {
+      name: "plan_clarification_submit",
+      arguments: JSON.stringify({
+        title: "Clarify laptop purchase",
+        goal: "Choose the primary purchase priority",
+        question: "What matters most?",
+        options: [
+          { id: "value", label: "Best value", description: "Balance price and performance", recommended: recommendations[0] },
+          { id: "power", label: "Maximum power", description: "Prefer performance", recommended: recommendations[1] }
+        ]
+      })
+    } }, {
+      allowedToolRefs: ["plan_clarification_submit"],
+      toolState: { plan_clarification_submit: true },
+      contextValues: { planGeneration: { planId: "plan_intake" } },
+      submitPlanClarification: () => { throw new Error("invalid clarification must not persist"); }
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.payload.reason, "invalid_clarification");
+    assert.equal(result.payload.planId, "plan_intake");
+  }
+});
+
 test("plan_revision_submit revises only the specified pending Plan", async () => {
   let revisedPlanId = "";
   const result = await executeToolCall({ id: "revision-contract", type: "function", function: {

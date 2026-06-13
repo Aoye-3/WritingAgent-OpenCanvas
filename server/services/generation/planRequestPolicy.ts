@@ -27,6 +27,7 @@ export function planPhaseSystemPrompt(payload: Pick<GenerateRequest, "chatInstru
       planId
         ? `Continue planning on the existing plan ${planId}. Submit exactly one plan_revision_submit result for that same plan; never create a replacement plan.`
         : "Apply the brainstorming skill. Submit exactly one plan_clarification_submit result containing 2-3 mutually exclusive options and exactly one recommended option. Do not create an approval-ready plan yet.",
+      planId ? "Use the selected clarification answer from contextValues.awaitingPlan, including option.description when present." : "Do not repeat the clarification options as ordinary assistant prose; the product UI renders the options as a clickable form.",
       planId ? "Apply the writing-plans skill and produce a short approval-ready sequential plan." : "Stop immediately after requesting input.",
       "Stop after requesting input or producing an approval-ready plan. User approval is required before execution."
     ].join("\n");
@@ -37,6 +38,7 @@ export function planPhaseSystemPrompt(payload: Pick<GenerateRequest, "chatInstru
       "# Plan Execution Policy",
       `Execute only plan ${payload.planId ?? string(execution.planId)} step ${policy.executionStepId}. Do not start or complete any other step in this run.`,
       "The product runtime owns step status. Stage durable text/image artifacts for this step as soon as they are ready.",
+      "For text artifacts, prefer payload.sections or payload.items with stable ids, titles, and concise content so Canvas can create one semantic node per section.",
       "If essential information is missing, request user input and stop. Do not finish the whole plan unless no steps remain."
     ].join("\n");
   }

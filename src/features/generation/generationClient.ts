@@ -11,12 +11,14 @@ export async function generateTextStream(
     onToken?: (token: string) => void;
     onStatus?: (status: StreamStatus) => void;
     onToolEvent?: (event: unknown) => void;
-  } = {}
+  } = {},
+  options: { signal?: AbortSignal } = {}
 ): Promise<GenerateResponse> {
   const response = await fetch("/api/generate/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal: options.signal
   });
 
   if (!response.ok || !response.body) {

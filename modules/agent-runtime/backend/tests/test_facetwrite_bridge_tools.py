@@ -6,7 +6,9 @@ from deerflow.tools.facetwrite_bridge import (
     _bridge_headers,
     _format_bridge_response,
     _redact,
+    PlanClarificationOption,
     artifact_stage_tool,
+    plan_clarification_submit_tool,
 )
 from deerflow.config.app_config import FACETWRITE_REQUIRED_TOOLS
 
@@ -50,6 +52,29 @@ def test_build_payload_defaults_to_requested_tool_policy_when_context_missing():
     assert payload["toolState"] == {"quick_messages": True}
 
 
+def test_build_payload_prefers_top_level_plan_identifiers():
+    runtime = SimpleNamespace(
+        context={
+            "thread_id": "thread_1",
+            "facetwrite_context_values": {
+                "planGeneration": {"planId": "stale_plan", "stepId": "stale_step"},
+            },
+            "facetwrite_plan_id": "plan_1",
+            "facetwrite_plan_step_id": "step_1",
+            "facetwrite_plan_phase_attempt_id": "attempt_1",
+        },
+        state={},
+    )
+
+    payload = _build_payload(runtime, "plan_clarification_submit", {"question": "Scope?"})
+
+    assert payload["contextValues"]["planGeneration"] == {
+        "planId": "plan_1",
+        "stepId": "step_1",
+        "phaseAttemptId": "attempt_1",
+    }
+
+
 def test_bridge_headers_do_not_expose_token_in_response_formatting(monkeypatch):
     monkeypatch.setenv("FACETWRITE_INTERNAL_TOOL_TOKEN", "super-secret-token")
 
@@ -74,7 +99,28 @@ def test_bridge_uses_agent_runtime_endpoint():
 
 def test_format_bridge_response_maps_ok_and_denied_results():
     assert _format_bridge_response({"ok": True, "content": "context", "payload": {"tool": "knowledge_base"}}) == "context"
-    assert _format_bridge_response({"ok": False, "content": "Denied", "payload": {"reason": "policy_denied"}}) == "Error: Denied"
+    denied = _format_bridge_response({"ok": False, "content": "Denied", "payload": {"tool": "knowledge_base", "reason": "policy_denied"}})
+    assert denied.startswith("Error: Denied\n__FACETWRITE_EVENT__")
+    envelope = __import__("json").loads(denied.split("__FACETWRITE_EVENT__", 1)[1])
+    assert envelope["event"]["eventType"] == "tool_failed"
+    assert envelope["event"]["reason"] == "policy_denied"
+
+
+def test_format_bridge_response_preserves_structured_plan_failure():
+    result = _format_bridge_response({
+        "ok": False,
+        "content": "Exactly one recommendation is required.",
+        "payload": {"tool": "plan_clarification_submit", "reason": "invalid_clarification", "planId": "plan_1"},
+    })
+
+    envelope = __import__("json").loads(result.split("__FACETWRITE_EVENT__", 1)[1])
+    assert envelope["event"] == {
+        "tool": "plan_clarification_submit",
+        "eventType": "plan_submission_failed",
+        "reason": "invalid_clarification",
+        "planId": "plan_1",
+        "summary": "Exactly one recommendation is required.",
+    }
 
 
 def test_format_bridge_response_preserves_structured_plan_event():
@@ -125,6 +171,40 @@ def test_artifact_stage_tool_forwards_artifact_and_links(monkeypatch):
     assert observed["name"] == "artifact_stage"
     assert observed["arguments"]["artifacts"][0]["artifactId"] == "summary"
     assert observed["arguments"]["links"][0]["id"] == "link_1"
+
+
+def test_plan_clarification_schema_requires_structured_options():
+    schema = plan_clarification_submit_tool.tool_call_schema.model_json_schema()
+    options = schema["properties"]["options"]
+    option_ref = options["items"]["$ref"].split("/")[-1]
+    option_schema = schema["$defs"][option_ref]
+
+    assert options["minItems"] == 2
+    assert options["maxItems"] == 3
+    assert set(option_schema["required"]) == {"id", "label", "description", "recommended"}
+
+
+def test_plan_clarification_tool_forwards_valid_structured_options(monkeypatch):
+    observed = {}
+    monkeypatch.setattr(
+        "deerflow.tools.facetwrite_bridge._call_facetwrite_tool",
+        lambda runtime, name, arguments: observed.update(name=name, arguments=arguments) or "ok",
+    )
+
+    result = plan_clarification_submit_tool.func(
+        SimpleNamespace(context={}, state={}),
+        title="Laptop comparison",
+        goal="Choose the comparison scope",
+        question="Which generations should be compared?",
+        options=[
+            PlanClarificationOption(id="latest", label="Latest", description="Compare current models", recommended=True),
+            PlanClarificationOption(id="value", label="Value", description="Compare lower-cost models", recommended=False),
+        ],
+    )
+
+    assert result == "ok"
+    assert observed["name"] == "plan_clarification_submit"
+    assert observed["arguments"]["options"][0]["recommended"] is True
 
 
 def test_required_plan_tools_are_available_for_existing_runtime_configs():

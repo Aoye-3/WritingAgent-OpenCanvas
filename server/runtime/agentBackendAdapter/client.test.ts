@@ -477,6 +477,46 @@ test("maps structured Plan envelopes from bridged tool results", async () => {
   assert.ok(result.events.some((event) => event.eventType === "agent_backend_plan_created" && event.payload.planId === "plan_1"));
 });
 
+test("sends Plan identifiers as top-level AgentBackend runtime context", () => {
+  const card = getAgentCard("summary");
+  const request = buildRunRequest({
+    threadId: "thread_plan",
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings: defaultAgentSettings(card),
+    messages: [{ role: "user", content: "/plan Compare two laptops" }],
+    prompt: "/plan Compare two laptops",
+    chatInstruction: "/plan Compare two laptops",
+    contextValues: { planGeneration: { phase: "intake", planId: "plan_1", stepId: "step_1", phaseAttemptId: "attempt_1" } },
+    toolState: { plan_clarification_submit: true }
+  }, {
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8000",
+    assistantId: "lead_agent"
+  });
+
+  assert.equal(request.context.facetwrite_plan_id, "plan_1");
+  assert.equal(request.context.facetwrite_plan_step_id, "step_1");
+  assert.equal(request.context.facetwrite_plan_phase_attempt_id, "attempt_1");
+});
+
+test("maps rejected Plan submissions as failures instead of completions", async () => {
+  const envelope = JSON.stringify({ content: "Invalid clarification.", event: {
+    tool: "plan_clarification_submit",
+    eventType: "plan_submission_failed",
+    reason: "invalid_clarification",
+    planId: "plan_1",
+    summary: "Exactly one recommendation is required."
+  } });
+  const body = `event: messages\ndata: [{"type":"tool","name":"plan_clarification_submit","tool_call_id":"call_plan","content":${JSON.stringify(`Error: Invalid clarification.\n__FACETWRITE_EVENT__${envelope}`)}}]\n\n`;
+  const result = await runWithBody(body);
+
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_tool_failed" && event.payload.reason === "invalid_clarification"));
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_plan_submission_failed"));
+  assert.equal(result.events.some((event) => event.eventType === "agent_backend_tool_completed"), false);
+});
+
 test("maps committed artifacts as a separate structured event", async () => {
   const envelope = JSON.stringify({ content: "2 artifacts staged.", event: { tool: "artifact_stage", eventType: "artifact_staged", planId: "plan_1", artifacts: [{ id: "a", status: "committed" }] } });
   const body = `event: messages\ndata: [{"type":"tool","name":"artifact_stage","tool_call_id":"call_artifact","content":${JSON.stringify(`2 artifacts staged.\n__FACETWRITE_EVENT__${envelope}`)}}]\n\n`;

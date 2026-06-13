@@ -32,6 +32,42 @@ test("persists plan approval, step progress, waiting state, and retry", async ()
   assert.equal(resumed?.statusMessage, "UK market");
 });
 
+test("validates Plan intake from persisted state instead of stream events", async () => {
+  const storage = await isolatedStorage();
+  await storage.ensureThread("thread_postcondition_intake", "project_postcondition_intake", "Research");
+  const plan = storage.createPlanIntake("thread_postcondition_intake", { title: "Compare laptops", goal: "Choose scope" });
+  const orchestrator = new PlanOrchestrator(storage);
+  const payload = {
+    mode: "chat" as const,
+    locale: "en" as const,
+    planGeneration: { phase: "intake" as const, planId: plan.id, phaseAttemptId: "intake_1" }
+  };
+
+  assert.throws(() => orchestrator.assertPostcondition("thread_postcondition_intake", payload), /persisted clarification/);
+  storage.submitPlanClarification("thread_postcondition_intake", plan.id, {
+    question: "Which comparison?",
+    options: [
+      { id: "latest", label: "Latest", description: "Compare current models", recommended: true },
+      { id: "value", label: "Best value", description: "Compare lower-cost models", recommended: false }
+    ],
+    status: "pending"
+  });
+  assert.doesNotThrow(() => orchestrator.assertPostcondition("thread_postcondition_intake", payload));
+});
+
+test("rejects a Plan event when the revision was not persisted", async () => {
+  const storage = await isolatedStorage();
+  await storage.ensureThread("thread_postcondition_revision", "project_postcondition_revision", "Research");
+  const plan = storage.createPlanIntake("thread_postcondition_revision", { title: "Compare laptops", goal: "Choose scope" });
+  const orchestrator = new PlanOrchestrator(storage);
+
+  assert.throws(() => orchestrator.assertPostcondition("thread_postcondition_revision", {
+    mode: "chat",
+    locale: "en",
+    planGeneration: { phase: "revise", planId: plan.id, phaseAttemptId: "revise_1" }
+  }), /approval-ready persisted Plan/);
+});
+
 test("upserts artifacts by stable artifact id", async () => {
   const storage = await isolatedStorage();
   await storage.ensureThread("thread_artifact", "project_artifact", "Research");
@@ -257,6 +293,10 @@ test("creates and refreshes a deletable Canvas Plan projection", async () => {
   const node = storage.listCanvasNodes("project_projection").find((item: { id: string }) => item.id === projected?.canvasNodeId);
   assert.equal(node?.kind, "plan");
   assert.match(node?.content ?? "", /\[ \] Compare models/);
+  const initialProjection = (node?.metadata as { planProjection?: { steps?: Array<{ id: string; title: string; status: string }>; artifactCount?: number } })?.planProjection;
+  assert.equal(initialProjection?.steps?.[0]?.id, "compare");
+  assert.equal(initialProjection?.steps?.[0]?.title, "Compare models");
+  assert.equal(initialProjection?.steps?.[0]?.status, "pending");
 
   storage.approvePlanRun("thread_projection", plan.id);
   storage.updatePlanStep("thread_projection", plan.id, "compare", { status: "running" });
@@ -271,9 +311,16 @@ test("creates and refreshes a deletable Canvas Plan projection", async () => {
   storage.updatePlanStep("thread_projection", plan.id, "compare", { status: "completed" });
   const refreshed = storage.listCanvasNodes("project_projection").find((item: { id: string }) => item.id === projected?.canvasNodeId);
   assert.match(refreshed?.content ?? "", /\[x\] Compare models/);
+  const refreshedProjection = (refreshed?.metadata as { planProjection?: { steps?: Array<{ id: string; status: string }>; artifactCount?: number } })?.planProjection;
+  assert.equal(refreshedProjection?.artifactCount, 1);
+  assert.equal(refreshedProjection?.steps?.[0]?.status, "completed");
 
   storage.deleteCanvasNode("project_projection", projected!.canvasNodeId!);
   assert.equal(storage.getPlanRun("thread_projection", plan.id)?.status, "completed");
+  const recovered = storage.setPlanRunStatus("thread_projection", plan.id, "completed", "Archived");
+  assert.ok(recovered?.canvasNodeId);
+  assert.notEqual(recovered?.canvasNodeId, projected?.canvasNodeId);
+  assert.equal(storage.listCanvasNodes("project_projection").some((item: { id: string }) => item.id === recovered?.canvasNodeId), true);
 });
 
 async function isolatedStorage() {

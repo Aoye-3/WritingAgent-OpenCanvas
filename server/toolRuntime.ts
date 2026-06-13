@@ -145,9 +145,9 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
 
   if (name === "plan_clarification_submit") {
     if (!context.submitPlanClarification) return unavailable(name);
-    const clarification = readPlanClarification({ question: args.question, options: args.options });
-    if (!clarification) return { ok: false, content: "A structured clarification question with 2-3 options and exactly one recommendation is required.", payload: { tool: name, reason: "invalid_clarification" } };
     const planId = readPlanGenerationId(context.contextValues);
+    const clarification = readPlanClarification({ question: args.question, options: args.options });
+    if (!clarification) return { ok: false, content: "A structured clarification question with 2-3 options and exactly one recommendation is required.", payload: { tool: name, reason: "invalid_clarification", planId } };
     if (!planId) return { ok: false, content: "A server-created Plan intake is required.", payload: { tool: name, reason: "plan_intake_missing" } };
     const plan = context.submitPlanClarification(planId, clarification);
     return { ok: true, content: clarification.question, payload: { tool: name, eventType: "plan_waiting_for_user", planId: plan.id, status: "awaiting_user" } };

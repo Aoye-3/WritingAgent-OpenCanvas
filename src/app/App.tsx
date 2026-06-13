@@ -183,6 +183,7 @@ function AppContent() {
     generationRun.setToolEvents(state.toolEvents);
     generationRun.setCanvasWriteSuggestions(state.canvasWriteSuggestions ?? []);
     generationRun.setActiveVersionId(state.outputVersions[0]?.id);
+    generationRun.applyCollaborationMessagesFromThreadState(state);
     canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? [], state.canvasWorkflow, state.canvasWorkflowSuggestions ?? [], state.canvasObjects ?? []);
     setActiveProjectTitle(state.thread.title);
     await refreshProjectSurfaces();
@@ -412,6 +413,7 @@ function AppContent() {
         onProjectTitleChange={handleActiveProjectTitleChange}
         onApproveCanvasWriteRequest={canvasState.handleApproveCanvasWriteRequest}
         onChatSend={generationRun.handleChatSend}
+        onStopChatSend={generationRun.stopChatGeneration}
         onPlansChanged={async () => { if (threadSession.threadId) await refreshThreadState(threadSession.threadId); }}
         onCreateCanvasEdge={canvasState.handleCreateCanvasEdge}
         onCreateCanvasNode={canvasState.handleCreateCanvasNode}

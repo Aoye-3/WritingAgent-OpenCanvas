@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
 import { Topbar } from "../../shared/Topbar";
@@ -55,6 +55,7 @@ type WorkspaceViewProps = {
   onApproveCanvasWriteRequest: (requestId: string) => Promise<{ request: CanvasWriteRequest; node?: CanvasNode }>;
   onAcceptCanvasWorkflowSuggestion: (suggestionId: string) => Promise<void>;
   onChatSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => Promise<unknown>;
+  onStopChatSend: () => void;
   onConvertCanvasWorkflowSuggestionToNode: (suggestionId: string, kind?: CanvasNodeKind) => Promise<void>;
   onCreateCanvasEdge: (draft: CanvasEdgeDraft) => Promise<CanvasEdge | undefined>;
   onCreateCanvasNode: (draft: CanvasNodeDraft) => Promise<unknown>;
@@ -123,6 +124,7 @@ export function WorkspaceView({
   onApproveCanvasWriteRequest,
   onAcceptCanvasWorkflowSuggestion,
   onChatSend,
+  onStopChatSend,
   onConvertCanvasWorkflowSuggestionToNode,
   onCreateCanvasEdge,
   onCreateCanvasNode,
@@ -161,6 +163,7 @@ export function WorkspaceView({
   const [composerDraft, setComposerDraft] = useState("");
   const [mindChainContext, setMindChainContext] = useState<CanvasMindChainContext | null>(null);
   const [activeCanvasTool, setActiveCanvasTool] = useState<CanvasTool>("select");
+  const focusedPlanProjectionRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -169,6 +172,18 @@ export function WorkspaceView({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  useEffect(() => {
+    const projected = [...plans]
+      .filter((plan) => plan.canvasNodeId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+    if (!projected?.canvasNodeId) return;
+    if (!canvasNodes.some((node) => node.id === projected.canvasNodeId)) return;
+    const focusKey = `${projected.id}:${projected.canvasNodeId}`;
+    if (focusedPlanProjectionRef.current === focusKey) return;
+    focusedPlanProjectionRef.current = focusKey;
+    onSelectCanvasNode(projected.canvasNodeId);
+  }, [canvasNodes, onSelectCanvasNode, plans]);
 
   const providerLabel = runtimeStatus?.reachable
     ? `Agent Runtime / ${runtimeStatus.deploymentMode}`
@@ -310,6 +325,7 @@ export function WorkspaceView({
           onApplyWriteText={onApplyCanvasWriteFromMessage}
           onRejectWriteRequest={onRejectCanvasWriteRequest}
           onSend={onChatSend}
+          onStopSending={onStopChatSend}
           onSelectAgent={onSelectAgent}
           onSelectThread={onSelectThread}
           onInputDraftConsumed={() => setComposerDraft("")}

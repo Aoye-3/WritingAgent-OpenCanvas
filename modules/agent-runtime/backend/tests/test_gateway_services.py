@@ -277,6 +277,33 @@ def test_merge_run_context_overrides_propagates_to_runtime_context():
     assert "thread_id" not in config["context"]
 
 
+def test_merge_run_context_overrides_preserves_facetwrite_runtime_contract():
+    from app.gateway.services import build_run_config, merge_run_context_overrides
+
+    facetwrite_context = {
+        "facetwrite_prompt": "/plan Compare laptops",
+        "facetwrite_allowed_tool_refs": ["plan_clarification_submit"],
+        "facetwrite_tool_state": {"plan_clarification_submit": True, "knowledge_base": False},
+        "facetwrite_context_values": {"planGeneration": {"planId": "plan_1"}},
+        "facetwrite_chat_instruction": "/plan Compare laptops",
+        "facetwrite_project_id": "project_1",
+        "facetwrite_plan_phase": "planning",
+        "facetwrite_plan_stage": "intake",
+        "facetwrite_plan_id": "plan_1",
+        "facetwrite_plan_step_id": "step_1",
+        "facetwrite_plan_phase_attempt_id": "intake_attempt_1",
+    }
+    config = build_run_config("thread-1", None, None)
+
+    merge_run_context_overrides(config, {**facetwrite_context, "untrusted_extra": "ignored"})
+
+    for key, value in facetwrite_context.items():
+        assert config["context"][key] == value
+        assert config["configurable"][key] == value
+    assert "untrusted_extra" not in config["context"]
+    assert "untrusted_extra" not in config["configurable"]
+
+
 def test_merge_run_context_overrides_noop_for_empty_context():
     from app.gateway.services import build_run_config, merge_run_context_overrides
 

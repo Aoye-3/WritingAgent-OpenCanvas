@@ -1,5 +1,6 @@
 """Force the Plan runtime to establish persisted Plan state before replying."""
 
+import json
 from collections.abc import Awaitable, Callable
 from typing import override
 
@@ -20,6 +21,10 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         context = getattr(runtime, "context", None)
         phase = context.get("facetwrite_plan_phase") if isinstance(context, dict) else None
         canvas_action = context.get("facetwrite_canvas_action") if isinstance(context, dict) else None
+        failure_reason = PlanToolChoiceMiddleware._plan_submission_failure_reason(request)
+        if failure_reason:
+            raise RuntimeError(f"Plan submission failed: {failure_reason}")
+        request = PlanToolChoiceMiddleware._filter_tools(request, context)
         if phase == "chat" and isinstance(canvas_action, dict) and canvas_action.get("requiresTool") is True:
             if not PlanToolChoiceMiddleware._has_tool_result(request, "canvas_write") and PlanToolChoiceMiddleware._has_tool(request, "canvas_write"):
                 return request.override(tool_choice="canvas_write")
@@ -42,6 +47,50 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         if contract not in tool_names:
             return request
         return request.override(tool_choice=contract)
+
+    @staticmethod
+    def _filter_tools(request: ModelRequest, context: object) -> ModelRequest:
+        if not isinstance(context, dict):
+            return request
+        allowed_refs = context.get("facetwrite_allowed_tool_refs")
+        tool_state = context.get("facetwrite_tool_state")
+        if not isinstance(allowed_refs, list):
+            return request
+        allowed = {value for value in allowed_refs if isinstance(value, str)}
+        enabled = tool_state if isinstance(tool_state, dict) else {}
+        phase = context.get("facetwrite_plan_phase")
+        stage = context.get("facetwrite_plan_stage")
+        if phase == "planning" and stage in (None, "intake"):
+            allowed = {"plan_clarification_submit"}
+        elif phase == "planning" and stage == "revise":
+            allowed = {"plan_revision_submit"}
+        filtered = [
+            tool for tool in request.tools
+            if PlanToolChoiceMiddleware._tool_name(tool) in allowed
+            and enabled.get(PlanToolChoiceMiddleware._tool_name(tool), True) is not False
+        ]
+        return request.override(tools=filtered)
+
+    @staticmethod
+    def _tool_name(tool: object) -> str | None:
+        return tool.get("name") if isinstance(tool, dict) else getattr(tool, "name", None)
+
+    @staticmethod
+    def _plan_submission_failure_reason(request: ModelRequest) -> str | None:
+        marker = "__FACETWRITE_EVENT__"
+        for message in reversed(request.messages):
+            if not isinstance(message, ToolMessage) or marker not in str(message.content):
+                continue
+            raw = str(message.content).split(marker, 1)[1].strip()
+            try:
+                envelope = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            event = envelope.get("event") if isinstance(envelope, dict) else None
+            if isinstance(event, dict) and event.get("eventType") == "plan_submission_failed":
+                reason = event.get("reason")
+                return reason if isinstance(reason, str) and reason else "unknown_plan_submission_failure"
+        return None
 
     @staticmethod
     def _planning_contract(request: ModelRequest) -> str | None:

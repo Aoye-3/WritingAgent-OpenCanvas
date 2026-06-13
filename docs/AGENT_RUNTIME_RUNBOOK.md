@@ -13,7 +13,7 @@ The default local path does not start the Runtime Next.js frontend or nginx beca
 ## Requirements
 
 - Node.js 22+, including `npm` and `npx` for JavaScript Skills, stdio MCP, and ACP adapters.
-- `uv`; the launcher installs Python 3.12 into `modules/agent-runtime/backend/.uv-python` and syncs `uv.lock` into `.venv`.
+- `uv`; the launcher installs managed Python 3.12 into `modules/agent-runtime/backend/.uv-python`, syncs `uv.lock` into `.venv`, and launches only `.venv/Scripts/python.exe`. Both the managed interpreter and virtual environment must resolve inside the workspace.
 - Docker Desktop/Engine only for `docker` mode.
 
 ## Configuration
@@ -38,7 +38,7 @@ npm.cmd run agent-runtime:status
 npm.cmd run agent-runtime:down
 ```
 
-Logs and ownership metadata are written under `modules/agent-runtime/logs/`. A healthy compatible project-owned process is reused. An unmanaged or incompatible process on the configured port blocks startup. Shutdown only terminates the process recorded as project-owned.
+Logs and ownership metadata are written under `modules/agent-runtime/logs/`. A healthy compatible project-owned process is reused only while its source fingerprint still matches; changed Python/config sources trigger a managed restart. An unmanaged or incompatible process on the configured port blocks startup. Shutdown only terminates the process recorded as project-owned. `status` and `up` load project dotenv files before comparing the Tool Bridge token fingerprint.
 
 Docker remains available explicitly:
 
@@ -87,8 +87,18 @@ It starts from `start-opencanvas-shell.vbs`, requires Docker and port `2026` to 
 - Deliberate local Mock demonstration only: set `FACETWRITE_MOCK_FALLBACK_ENABLED=true`; unset it before real Runtime verification.
 # Plan Runtime Enforcement
 
-FacetWrite passes a stable Plan phase attempt in both LangGraph configurable context and runtime context. `PlanToolChoiceMiddleware` permits at most one stage submission per attempt: `plan_clarification_submit` for intake, `plan_revision_submit` for revision, and `artifact_stage` for the current approved execution step.
+FacetWrite passes a stable Plan phase attempt in both LangGraph configurable context and runtime context. The Gateway forwards only the documented FacetWrite context fields, including top-level Plan identifiers, tool refs, tool state, and structured context values. `PlanToolChoiceMiddleware` filters model-visible tools on every call and permits at most one forced stage submission per attempt: intake exposes only `plan_clarification_submit`, revision exposes only `plan_revision_submit`, and approved execution uses the request policy for research tools plus `artifact_stage`.
 
-The TypeScript `PlanOrchestrator` owns lifecycle state and the persistent `PlanExecutor` owns sequential execution. It requires an `artifact_committed` event for every successful execution unit, persists safe activities including active skills such as `brainstorming` and `writing-plans`, and pauses recoverably on protocol failure. The legacy broad `plan_update` model path is not part of the maintained Plan protocol.
+The TypeScript `PlanOrchestrator` owns lifecycle state and the persistent `PlanExecutor` owns sequential execution. Repository state is the authoritative phase postcondition: intake must persist a pending clarification in `awaiting_user`, revision must persist an approval-ready Plan with steps, and execution must persist a committed current-step Artifact or a waiting/failed/paused interruption. SSE lifecycle events remain realtime UI and audit signals; a missing event does not invalidate a correct database transition, and an event cannot substitute for a missing transition. Tool failures are emitted as `agent_backend_tool_failed`; Plan contract failures also emit `agent_backend_plan_submission_failed` with a safe reason. The legacy broad `plan_update` model path is not part of the maintained Plan protocol.
 
-After changing AgentBackend middleware, restart the local Gateway; `agent:up` reuses a healthy process and does not hot-reload Python modules.
+A structured `plan_submission_failed` ToolMessage terminates the current AgentBackend run before another model or tool call. The Gateway records the run as an error rather than success; the user starts a new phase attempt by revising or retrying the request.
+
+Canvas feedback is part of the maintained Plan contract. Intake remains conversation-only until the user answers the structured clarification. Revision creates or refreshes one `kind:"plan"` Canvas projection node, and later lifecycle transitions keep that same node synchronized with checklist progress, current step, committed artifact count, and failure or pause messages. The projection is derived state: deleting it must not delete or cancel the Plan, and the next refresh may recreate it.
+
+Approved execution writes Canvas content only through `artifact_stage`. Runtime prompts should ask for `payload.sections` or `payload.items` when a text artifact contains multiple user-visible points; each section maps to one Canvas node, with pagination only for an overlong section. The artifact committer links each artifact node from the Plan projection node and commits explicit artifact links once both endpoints exist. Ordinary chat `CanvasWriteSuggestion` prompts remain for non-Plan replies only; approved Plan execution must not ask the user again before creating artifact nodes.
+
+Clarification feedback is anchored in the composer. Intake may emit a short assistant acknowledgement, but the pending options must come from the persisted Plan clarification in thread state. After every Plan intake/revision generation and every explicit thread refresh, the frontend applies returned `plans` and `planActivities`; an `awaiting_user` Plan with a pending clarification replaces the normal textarea with a selection form. Option clicks submit through the Plan answer endpoint and the revise request includes `contextValues.awaitingPlan` with the selected option label, description, and recommendation flag. Custom answers use `customAnswer` and resume revision without a fabricated option id.
+
+Running generations are user-stoppable from the chat composer. The frontend aborts the streaming fetch, marks the active assistant message as `stopped`, and lets AgentBackend receive the disconnect with `on_disconnect:"cancel"`. A stopped stream is not treated as a successful Plan phase and does not mutate Plan lifecycle state by itself; use the persisted Plan status and activities to decide whether the user should retry, answer a pending clarification, approve a Plan, or resume execution.
+
+After changing AgentBackend middleware, run `agent-runtime:up`; source fingerprint comparison restarts a stale healthy Gateway because Python modules are not hot-reloaded.

@@ -1,10 +1,11 @@
 import json
 import os
 import re
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
 from langchain.tools import tool
+from pydantic import BaseModel, Field
 
 from deerflow.tools.types import Runtime
 
@@ -12,6 +13,13 @@ _DEFAULT_BASE_URL = "http://host.docker.internal:8787"
 _INTERNAL_ENDPOINT = "/api/internal/agent-runtime/tool-call"
 _BRIDGED_TOOL_NAMES = ("knowledge_base", "quick_messages", "clear_context", "plan_clarification_submit", "plan_revision_submit", "artifact_stage", "canvas_write")
 _SECRET_PATTERN = re.compile(r"(?i)(api[_-]?key|authorization|token|password|secret)=?[^\s,;]+")
+
+
+class PlanClarificationOption(BaseModel):
+    id: str
+    label: str
+    description: str
+    recommended: bool
 
 
 def _bridge_base_url() -> str:
@@ -95,6 +103,21 @@ def _build_payload(runtime: Runtime, tool_name: str, arguments: dict[str, Any]) 
     tool_state = _context_record(context, "facetwrite_tool_state")
     if not tool_state:
         tool_state = {tool_name: True}
+    context_values = _context_record(context, "facetwrite_context_values")
+    nested_plan_generation = _context_record(context_values, "planGeneration")
+    plan_id = context.get("facetwrite_plan_id") or nested_plan_generation.get("planId")
+    step_id = context.get("facetwrite_plan_step_id") or nested_plan_generation.get("stepId")
+    phase_attempt_id = context.get("facetwrite_plan_phase_attempt_id") or nested_plan_generation.get("phaseAttemptId")
+    if plan_id:
+        context_values = {
+            **context_values,
+            "planGeneration": {
+                **nested_plan_generation,
+                "planId": plan_id,
+                **({"stepId": step_id} if step_id else {}),
+                **({"phaseAttemptId": phase_attempt_id} if phase_attempt_id else {}),
+            },
+        }
     return {
         "threadId": _thread_id_from_runtime(runtime),
         "toolName": tool_name,
@@ -102,7 +125,7 @@ def _build_payload(runtime: Runtime, tool_name: str, arguments: dict[str, Any]) 
         "allowedToolRefs": _context_string_list(context, "facetwrite_allowed_tool_refs") or list(_BRIDGED_TOOL_NAMES),
         "toolState": tool_state,
         "selectedCanvasNodeId": context.get("facetwrite_selected_canvas_node_id"),
-        "contextValues": _context_record(context, "facetwrite_context_values"),
+        "contextValues": context_values,
         "chatInstruction": context.get("facetwrite_chat_instruction") or context.get("facetwrite_prompt"),
         "projectId": context.get("facetwrite_project_id"),
         "canvasAction": _context_record(context, "facetwrite_canvas_action"),
@@ -138,14 +161,22 @@ def _format_bridge_response(data: Any) -> str:
                 return legacy_content
             return json.dumps(payload, ensure_ascii=False)
     if ok is False:
-        if isinstance(content, str):
-            return f"Error: {content}"
-        payload = data.get("payload")
-        if isinstance(payload, dict):
-            legacy_content = payload.get("content")
-            if isinstance(legacy_content, str):
-                return f"Error: {legacy_content}"
-            return f"Error: {json.dumps(payload, ensure_ascii=False)}"
+        visible_content = content if isinstance(content, str) else "FacetWrite bridge rejected the tool call."
+        safe_content = _redact(visible_content)
+        failure_payload = payload if isinstance(payload, dict) else {}
+        tool_name = failure_payload.get("tool")
+        event_type = "plan_submission_failed" if tool_name in ("plan_clarification_submit", "plan_revision_submit") else "tool_failed"
+        event = {
+            "tool": tool_name,
+            "eventType": event_type,
+            "reason": failure_payload.get("reason") or "bridge_rejected",
+            "planId": failure_payload.get("planId"),
+            "summary": safe_content,
+        }
+        return f"Error: {safe_content}\n__FACETWRITE_EVENT__" + json.dumps({
+            "content": safe_content,
+            "event": {key: value for key, value in event.items() if value is not None},
+        }, ensure_ascii=False)
     if ok is True and isinstance(payload, dict):
         content = payload.get("content")
         if isinstance(content, str):
@@ -212,7 +243,7 @@ def plan_clarification_submit_tool(
     title: str,
     goal: str,
     question: str,
-    options: list[dict[str, Any]],
+    options: Annotated[list[PlanClarificationOption], Field(min_length=2, max_length=3)],
 ) -> str:
     """Submit the one structured clarification required for a new Plan.
 
@@ -223,7 +254,8 @@ def plan_clarification_submit_tool(
         options: Two or three mutually exclusive answer options.
     """
     return _call_facetwrite_tool(runtime, "plan_clarification_submit", {
-        "title": title, "goal": goal, "question": question, "options": options,
+        "title": title, "goal": goal, "question": question,
+        "options": [option.model_dump() for option in options],
     })
 
 
@@ -259,7 +291,7 @@ def artifact_stage_tool(
 
     Args:
         planId: Approved plan id.
-        artifacts: Text or image artifacts with stable artifactId values.
+        artifacts: Text or image artifacts with stable artifactId values. For text artifacts, prefer payload.sections or payload.items with stable ids, titles, and concise content.
         links: Optional directed links between artifact ids.
     """
 

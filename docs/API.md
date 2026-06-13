@@ -214,7 +214,7 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
 - `GET /api/threads/:threadId/messages`
   - Returns `{ messages }`.
 - `GET /api/threads/:threadId/state`
-  - Returns thread, sanitized messages, sanitized output versions, tool events, Canvas nodes, Canvas edges, Canvas Workflow state, Canvas Workflow suggestions, and pending Canvas write requests.
+  - Returns thread, sanitized messages, sanitized output versions, tool events, Canvas nodes, Canvas edges, Canvas Workflow state, Canvas Workflow suggestions, pending Canvas write requests, ordinary Canvas write suggestions, Plans, and Plan activities.
   - Internal prompt text, raw ToolUse JSON, provider-private fields such as DeepSeek `reasoning_content`, and AgentBackend replay values must not appear in `messages` or `outputVersions`; they are represented as redacted tool/runtime events when needed.
   - Runtime fallback events such as `agent_backend_runtime_failed` are returned in `toolEvents`; the only generation fallback is Mock.
 
@@ -328,9 +328,40 @@ Generation requests may include `projectId` when creating a new conversation. Ex
 
 Explicit Canvas instructions are converted server-side into a structured `canvasAction`. Internal Runtime Bridge calls always resolve `projectId` from `threadId`; a mismatched Runtime-supplied project is rejected. `canvas_write` returns either `{ status:"committed", nodeId, projectId, operation }` for create/append or `{ status:"pending", requestId, projectId, operation }` for destructive writes.
 
+Streaming generation is client-cancellable. The frontend passes an `AbortSignal` into the `/api/generate/stream` request and marks the active assistant message as `stopped` when the user cancels. AgentBackend requests are created with `on_disconnect:"cancel"`, so a client disconnect cancels the active runtime run instead of letting it continue invisibly. Cancellation is a transport/run control; persistent Plan state remains the source of truth for whether a Plan is awaiting clarification, awaiting approval, paused, failed, or ready to retry.
+
 ## Plan Clarification API
 
 Plan generation uses phase-scoped contracts: `plan_clarification_submit`, `plan_revision_submit`, and approved-step-only `artifact_stage`. Generation requests may carry explicit `planPhase`, `planId`, and `stepId`. `POST /api/threads/:threadId/plans/:planId/answer` accepts `optionId`, `customAnswer`, or legacy text `answer`; pause, resume, activities, and Canvas projection endpoints persist recovery state.
+
+`plan_clarification_submit.options` contains 2-3 objects. Every option requires `id`, `label`, `description`, and boolean `recommended`; exactly one option must set `recommended: true`. Invalid submissions return a structured `plan_submission_failed` bridge event with a stable `reason` such as `invalid_clarification`, the intake `planId` when available, and a safe summary. They do not produce a successful Plan lifecycle event.
+
+Pending clarification is a UI form state, not only assistant prose. After intake persists an `awaiting_user` Plan with `clarification.status:"pending"`, refreshed thread state must populate `plans` and `planActivities` in the frontend. The composer area renders the active clarification as a required selection form: question title, 2-3 option buttons, one recommended badge, option detail exposed through hover/focus tooltip and accessible labels, plus an "Other" free-text path. The ordinary textarea is secondary/disabled while this form is pending. Assistant text may provide a short transition, but the option form is the authoritative decision surface.
+
+Choosing an option posts to the existing answer endpoint and immediately starts the revise phase. The next generation request carries the full selected context in `contextValues.awaitingPlan`, for example `{ id, optionId, answer, option: { id, label, description, recommended } }`. The free-text path carries `{ id, customAnswer, answer }` and does not invent an `optionId`. This preserves the public Plan answer API while making the user's click available to AgentBackend as structured context.
+
+AgentBackend run context uses an explicit FacetWrite field allowlist. Plan identifiers are sent as `facetwrite_plan_id`, `facetwrite_plan_step_id`, and `facetwrite_plan_phase_attempt_id`; `facetwrite_context_values.planGeneration` remains a compatibility fallback. Request-level `facetwrite_allowed_tool_refs` and `facetwrite_tool_state` are authoritative for model-visible tools. Intake exposes only `plan_clarification_submit`, revision exposes only `plan_revision_submit`, and disabled tools are removed before every model call.
+
+Approval-ready Plans are projected to a `kind:"plan"` Canvas node. The node is a recoverable projection of Plan state, not the source of truth: it contains title, goal, overall status, current step, committed artifact count, and a checklist of steps. The projection is refreshed when the Plan is revised, approved, paused, resumed, failed, when a step changes status, and when an artifact is committed. Deleting the Canvas node does not delete the Plan; the next projection refresh may create a replacement and update `canvas_node_id`.
+
+`artifact_stage` remains the only Canvas write path during approved Plan execution. For text artifacts, `payload.content` is still accepted, but `payload.sections` or `payload.items` is preferred:
+
+```json
+{
+  "artifactId": "decision_framework",
+  "stepId": "compare",
+  "type": "text",
+  "title": "Decision framework",
+  "payload": {
+    "sections": [
+      { "id": "m4_if", "title": "Prefer M4 if", "content": "..." },
+      { "id": "m3_if", "title": "Prefer M3 if", "content": "..." }
+    ]
+  }
+}
+```
+
+Each section is projected as one semantic Canvas node. Only an individual overlong section is paginated; generated pages are linked with `continues` edges. Artifact nodes are linked from the Plan projection node, and explicit `artifact_stage.links` are committed as Canvas edges after both endpoint artifacts have committed nodes. Plan execution does not create ordinary `CanvasWriteSuggestion` prompts and does not ask for a second "create nodes" confirmation after the Plan has been approved.
 
 Ordinary reply Canvas suggestions are persisted in thread state and controlled through:
 

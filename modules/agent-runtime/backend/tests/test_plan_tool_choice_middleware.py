@@ -42,25 +42,91 @@ def canvas_write(operation: str, content: str) -> str:
     return operation
 
 
-def request(*, phase: str, stage: str | None = None, messages=None, canvas_action=None, phase_attempt_id=None):
+def request(*, phase: str, stage: str | None = None, messages=None, canvas_action=None, phase_attempt_id=None,
+            allowed_tool_refs=None, tool_state=None):
     runtime = SimpleNamespace(context={
         "facetwrite_plan_phase": phase,
         "facetwrite_plan_stage": stage,
         "facetwrite_plan_phase_attempt_id": phase_attempt_id,
         "facetwrite_canvas_action": canvas_action,
+        "facetwrite_allowed_tool_refs": allowed_tool_refs,
+        "facetwrite_tool_state": tool_state,
     })
-    return SimpleNamespace(
-        runtime=runtime,
-        messages=messages or [HumanMessage(content="Plan this task")],
-        tools=[plan_update, plan_clarification_submit, plan_revision_submit, web_search, artifact_stage, canvas_write],
-        tool_choice=None,
-        override=lambda **changes: SimpleNamespace(
+    initial_messages = messages or [HumanMessage(content="Plan this task")]
+    initial_tools = [plan_update, plan_clarification_submit, plan_revision_submit, web_search, artifact_stage, canvas_write]
+
+    def build(current_messages, current_tools, current_tool_choice=None):
+        return SimpleNamespace(
             runtime=runtime,
-            messages=changes.get("messages", messages or [HumanMessage(content="Plan this task")]),
-            tools=changes.get("tools", [plan_update, plan_clarification_submit, plan_revision_submit, web_search, artifact_stage, canvas_write]),
-            tool_choice=changes.get("tool_choice"),
+            messages=current_messages,
+            tools=current_tools,
+            tool_choice=current_tool_choice,
+            override=lambda **changes: build(
+                changes.get("messages", current_messages),
+                changes.get("tools", current_tools),
+                changes.get("tool_choice", current_tool_choice),
+            ),
+        )
+
+    return build(initial_messages, initial_tools)
+
+
+def test_filters_intake_tools_to_the_phase_contract():
+    middleware = PlanToolChoiceMiddleware()
+    captured = {}
+
+    middleware.wrap_model_call(
+        request(
+            phase="planning",
+            stage="intake",
+            allowed_tool_refs=["plan_clarification_submit", "knowledge_base", "ls"],
+            tool_state={"plan_clarification_submit": True, "knowledge_base": False, "ls": True},
         ),
+        lambda model_request: captured.setdefault("request", model_request),
     )
+
+    assert [tool.name for tool in captured["request"].tools] == ["plan_clarification_submit"]
+
+
+def test_filters_chat_tools_using_allowed_refs_and_disabled_state():
+    middleware = PlanToolChoiceMiddleware()
+    captured = {}
+
+    middleware.wrap_model_call(
+        request(
+            phase="chat",
+            allowed_tool_refs=["web_search", "canvas_write"],
+            tool_state={"web_search": False, "canvas_write": True},
+        ),
+        lambda model_request: captured.setdefault("request", model_request),
+    )
+
+    assert [tool.name for tool in captured["request"].tools] == ["canvas_write"]
+
+
+def test_plan_submission_failure_stops_before_another_model_call():
+    import pytest
+
+    middleware = PlanToolChoiceMiddleware()
+    called = False
+    messages = [
+        HumanMessage(content="Plan this task"),
+        ToolMessage(
+            content='Error\n__FACETWRITE_EVENT__{"event":{"eventType":"plan_submission_failed","reason":"plan_intake_missing"}}',
+            name="plan_clarification_submit",
+            tool_call_id="call_1",
+            status="error",
+        ),
+    ]
+
+    def handler(_request):
+        nonlocal called
+        called = True
+
+    with pytest.raises(RuntimeError, match="plan_intake_missing"):
+        middleware.wrap_model_call(request(phase="planning", stage="intake", messages=messages), handler)
+
+    assert called is False
 
 
 def test_forces_stage_specific_contract_for_the_first_planning_model_call():

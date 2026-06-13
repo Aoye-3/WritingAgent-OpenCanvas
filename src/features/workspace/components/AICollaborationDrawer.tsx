@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, SearchIcon, SendIcon, SparkleIcon } from "../../../shared/icons";
+import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, SearchIcon, SendIcon, SparkleIcon, StopIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
 import type { AgentCard, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, StoredThread, StoredToolEvent } from "../../agents/types";
 import type { AgentSettings } from "../../agents/types";
@@ -57,6 +57,7 @@ type AICollaborationDrawerProps = {
   onRemoveMindChainContext: () => void;
   onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => Promise<unknown>;
+  onStopSending: () => void;
   onSelectAgent: (agentCardId: string) => void;
   onSelectThread: (threadId: string) => Promise<void>;
   onToggleCollapsed: () => void;
@@ -104,6 +105,7 @@ export function AICollaborationDrawer({
   onRemoveMindChainContext,
   onResizeStart,
   onSend,
+  onStopSending,
   onSelectAgent,
   onSelectThread,
   onToggleCollapsed,
@@ -134,6 +136,7 @@ export function AICollaborationDrawer({
   const annotatedText = annotations.map((annotation) => annotation.text).join("\n\n");
   const hasWriteProposal = Boolean(writeDraft || pendingWriteRequest || annotations.length);
   const timeline = useMemo(() => buildPlanTimeline(messages, plans), [messages, plans]);
+  const pendingClarificationPlan = plans.find((plan) => plan.status === "awaiting_user" && plan.clarification?.status === "pending");
 
   useEffect(() => {
     setThinkEnabled(modelSettings?.thinkingMode === "enabled");
@@ -272,10 +275,18 @@ export function AICollaborationDrawer({
     try {
       await answerPlan(currentThreadId, plan.id, answer);
       await onPlansChanged();
+      const option = plan.clarification?.options.find((item) => item.id === answer.optionId);
       const answerText = answer.customAnswer
-        || plan.clarification?.options.find((option) => option.id === answer.optionId)?.label
+        || option?.label
         || "";
-      await onSend(answerText, undefined, { awaitingPlan: { id: plan.id, ...answer, answer: answerText } });
+      await onSend(answerText, undefined, {
+        awaitingPlan: {
+          id: plan.id,
+          ...answer,
+          answer: answerText,
+          ...(option ? { option: { id: option.id, label: option.label, description: option.description, recommended: option.recommended } } : {})
+        }
+      });
     } finally {
       setClarificationBusy(false);
     }
@@ -381,7 +392,7 @@ export function AICollaborationDrawer({
           if (entry.kind === "plan") {
             const plan = entry.value;
             if (plan.clarification && plan.status === "awaiting_user") {
-              return <PlanClarificationCard busy={clarificationBusy} key={`plan:${plan.id}`} plan={plan} onAnswer={(answer) => answerClarification(plan, answer)} />;
+              return pendingClarificationPlan?.id === plan.id ? null : <PlanClarificationCard busy={clarificationBusy} key={`plan:${plan.id}`} plan={plan} onAnswer={(answer) => answerClarification(plan, answer)} />;
             }
             if (plan.clarification?.status === "answered" && plan.status === "draft") {
               return <PlanClarificationCard busy key={`plan:${plan.id}`} plan={plan} onAnswer={async () => {}} />;
@@ -451,7 +462,7 @@ export function AICollaborationDrawer({
 
       <ToolEventDrawer events={toolEvents} />
 
-      <form className="drawer-chat-composer" onSubmit={submit}>
+      <form className={pendingClarificationPlan ? "drawer-chat-composer drawer-chat-composer-clarification" : "drawer-chat-composer"} onSubmit={submit}>
         <div className="composer-agent-row" data-testid="composer-agent-row">
           <AgentIcon aria-hidden="true" size={16} />
           <select className="composer-agent-select" aria-label={locale === "zh" ? "本次执行 Agent" : "Agent for this message"}
@@ -460,6 +471,14 @@ export function AICollaborationDrawer({
           </select>
         </div>
         <AnnotationChipRow annotations={annotations} compact onRemoveAnnotation={removeAnnotation} />
+        {pendingClarificationPlan ? (
+          <PlanClarificationCard
+            busy={clarificationBusy}
+            plan={pendingClarificationPlan}
+            variant="composer"
+            onAnswer={(answer) => answerClarification(pendingClarificationPlan, answer)}
+          />
+        ) : null}
         {mindChainContext ? (
           <div className="mind-chain-context-chip" data-testid="mind-chain-context-chip">
             <span>{locale === "zh" ? `思维链 · ${mindChainContext.nodeCount} 节点` : `Mind chain · ${mindChainContext.nodeCount} ${mindChainContext.nodeCount === 1 ? "node" : "nodes"}`}</span>
@@ -477,6 +496,7 @@ export function AICollaborationDrawer({
           aria-orientation="horizontal"
           className="composer-resize-handle"
           data-testid="composer-resize-handle"
+          hidden={Boolean(pendingClarificationPlan)}
           onPointerDown={startComposerResize}
           role="separator"
           title={locale === "zh" ? "上下拖动调整输入框高度" : "Drag vertically to resize the message input"}
@@ -486,13 +506,15 @@ export function AICollaborationDrawer({
         <textarea
           aria-label="AI collaboration message"
           data-testid="ai-collaboration-input"
+          disabled={Boolean(pendingClarificationPlan)}
+          hidden={Boolean(pendingClarificationPlan)}
           placeholder={locale === "zh" ? "让 AI 协作修改当前草稿..." : "Ask AI to collaborate on this draft..."}
           rows={3}
           style={{ height: composerHeight }}
           value={input}
           onChange={(event) => setInput(event.target.value)}
         />
-        <div className="composer-tool-row">
+        <div className="composer-tool-row" hidden={Boolean(pendingClarificationPlan)}>
           <ToolUseIconBar allowedTools={allowedTools} toolState={toolState} onToolStateChange={onToolStateChange} />
           <button className="tool-icon-button plan-command-button" type="button" onClick={() => setInput((value) => value.startsWith("/plan") ? value : `/plan ${value}`)} title="Create a task plan">Plan</button>
           {supportsThinking ? (
@@ -520,9 +542,9 @@ export function AICollaborationDrawer({
               ) : null}
             </div>
           ) : null}
-          <button className="button button-primary chat-send chat-send-icon" type="submit" disabled={isSending || writeBusy}
+          <button className={isSending ? "button button-primary chat-send chat-send-icon is-stopping" : "button button-primary chat-send chat-send-icon"} type={isSending ? "button" : "submit"} disabled={writeBusy} onClick={isSending ? onStopSending : undefined}
             aria-label={locale === "zh" ? "发送" : "Send"} title={isSending ? (locale === "zh" ? "发送中" : "Sending") : (locale === "zh" ? "发送" : "Send")}>
-            <SendIcon aria-hidden="true" size={18} />
+            {isSending ? <StopIcon aria-hidden="true" size={18} /> : <SendIcon aria-hidden="true" size={18} />}
           </button>
         </div>
       </form>
