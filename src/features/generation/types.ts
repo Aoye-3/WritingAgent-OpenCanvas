@@ -53,7 +53,7 @@ export type CollaborationMessage = {
   text: string;
   usedMock?: boolean;
   isStreaming?: boolean;
-  status?: StreamStatus["phase"] | "error";
+  status?: StreamStatus["phase"] | "error" | "stopped";
   statusLabel?: string;
   createdAt?: string;
   kind?: "message" | "activity";

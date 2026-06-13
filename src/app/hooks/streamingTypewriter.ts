@@ -12,7 +12,7 @@ type CollaborationMessageLike = {
   text: string;
   usedMock?: boolean;
   isStreaming?: boolean;
-  status?: "thinking" | "searching" | "writing" | "finalizing" | "error";
+  status?: "thinking" | "searching" | "writing" | "finalizing" | "error" | "stopped";
   statusLabel?: string;
   createdAt?: string;
 };

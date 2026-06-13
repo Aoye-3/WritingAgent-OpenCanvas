@@ -34,9 +34,8 @@ test("reports a diagnostic when a successful runtime has neither text nor state 
   );
 });
 
-test("rejects a Plan planning run that answers directly without updating Plan state", async () => {
-  await assert.rejects(
-    () => runAgentRuntimeGeneration({
+test("defers Plan planning postconditions to persisted state validation", async () => {
+  const result = await runAgentRuntimeGeneration({
       ...input,
       payload: { ...input.payload, chatInstruction: "/plan Compare two laptops" }
     }, {
@@ -46,14 +45,12 @@ test("rejects a Plan planning run that answers directly without updating Plan st
         finishReason: "agent_backend_completed",
         events: []
       })
-    }),
-    /planning phase completed without the required stage submission/i
-  );
+    });
+  assert.equal(result?.text, "Here is the completed comparison.");
 });
 
-test("rejects a Plan execution run that answers directly without advancing the step", async () => {
-  await assert.rejects(
-    () => runAgentRuntimeGeneration({
+test("defers Plan execution postconditions to persisted state validation", async () => {
+  const result = await runAgentRuntimeGeneration({
       ...input,
       payload: {
         ...input.payload,
@@ -66,14 +63,12 @@ test("rejects a Plan execution run that answers directly without advancing the s
         finishReason: "agent_backend_completed",
         events: []
       })
-    }),
-    /execution phase completed without a Plan or Artifact state update/i
-  );
+    });
+  assert.equal(result?.text, "The research is complete.");
 });
 
-test("rejects a Plan execution run that updates the step without committing a Canvas artifact", async () => {
-  await assert.rejects(
-    () => runAgentRuntimeGeneration({
+test("does not treat execution events as the authoritative postcondition", async () => {
+  const result = await runAgentRuntimeGeneration({
       ...input,
       payload: {
         ...input.payload,
@@ -89,9 +84,8 @@ test("rejects a Plan execution run that updates the step without committing a Ca
           payload: { planId: "plan_1", stepId: "step_1", status: "completed" }
         }]
       })
-    }),
-    /execution phase completed without committing a Canvas artifact/i
-  );
+    });
+  assert.equal(result?.text, "Step complete.");
 });
 
 test("accepts a Plan execution run after the current step artifact is committed", async () => {

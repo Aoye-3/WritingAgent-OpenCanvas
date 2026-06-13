@@ -88,6 +88,34 @@ export class PlanOrchestrator {
     }
   }
 
+  assertPostcondition(threadId: string, payload: GenerateRequest) {
+    const generation = payload.planGeneration;
+    if (!generation) return;
+    const plan = this.storage.getPlanRun(threadId, generation.planId);
+    if (!plan) throw new Error("Plan phase completed without its persisted Plan state.");
+
+    if (generation.phase === "intake") {
+      if (plan.status !== "awaiting_user" || plan.clarification?.status !== "pending") {
+        throw new Error("Plan planning phase completed without a persisted clarification.");
+      }
+      return;
+    }
+
+    if (generation.phase === "revise") {
+      if (plan.status !== "awaiting_approval" || plan.approval !== "pending" || plan.steps.length === 0) {
+        throw new Error("Plan revision phase completed without an approval-ready persisted Plan.");
+      }
+      return;
+    }
+
+    const stepId = generation.stepId;
+    const artifactCommitted = Boolean(stepId && plan.artifacts.some((artifact) => artifact.stepId === stepId && artifact.status === "committed"));
+    const interrupted = plan.status === "awaiting_user" || plan.status === "failed" || plan.status === "paused";
+    if (!artifactCommitted && !interrupted) {
+      throw new Error("Plan execution phase completed without a committed Artifact or persisted interruption.");
+    }
+  }
+
   fail(threadId: string, payload: GenerateRequest, error: unknown) {
     const context = executionContext(payload);
     if (!context) return;

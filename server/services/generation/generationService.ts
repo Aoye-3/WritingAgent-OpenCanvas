@@ -106,6 +106,7 @@ export function createGenerationService(
       }, executionRuntime);
 
       if (agentBackendRun) {
+        planOrchestrator.assertPostcondition(threadId, payload);
         const normalized = normalizeAgentRunOutput({
           text: agentBackendRun.text,
           locale: payload.locale,
@@ -214,6 +215,7 @@ export function createGenerationService(
       }, executionRuntime);
 
       if (agentBackendRun) {
+        planOrchestrator.assertPostcondition(threadId, payload);
         const normalized = normalizeAgentRunOutput({
           text: agentBackendRun.text,
           locale: payload.locale,
@@ -292,7 +294,7 @@ function hasBlockedInternalOutput(events?: ToolEventRecord[]) {
 
 function createRuntimeFallbackEvent(source: "agent-backend", error: unknown, mockFallbackEnabled: boolean): ToolEventRecord {
   const message = safeRuntimeErrorMessage(error);
-  const planProtocolFailure = /^Plan (?:planning|execution) phase completed/i.test(message);
+  const planProtocolFailure = /^Plan (?:planning|revision|execution|phase)\b/i.test(message);
   return {
     eventType: planProtocolFailure ? "agent_backend_plan_protocol_failed" : "agent_backend_runtime_failed",
     payload: {

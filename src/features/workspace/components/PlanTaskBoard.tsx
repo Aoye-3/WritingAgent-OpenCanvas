@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { PlanRun } from "../../agents/types";
+import type { PlanRun, PlanStepStatus } from "../../agents/types";
 import { approvePlan, cancelPlan, retryPlanStep } from "../../agents/agentClient";
 import { useI18n } from "../../i18n/I18nProvider";
 
@@ -21,14 +21,14 @@ export function PlanTaskBoard({ plan, threadId, onChanged, onRevise, onFocusArti
 
   return <section className="plan-task-board" data-plan-status={plan.status}>
     <button className="plan-task-board-header" type="button" onClick={() => setCollapsed((value) => !value)}>
-      <strong>{completed}/{plan.steps.length} {completed === plan.steps.length ? (locale === "zh" ? "已完成" : "Completed") : (locale === "zh" ? "计划" : "Plan")}</strong>
+      <strong>{completed}/{plan.steps.length} {completed === plan.steps.length ? (locale === "zh" ? "已完成" : "Completed") : (locale === "zh" ? "计划进度" : "Plan")}</strong>
       <span>{collapsed ? "+" : "-"}</span>
     </button>
     {!collapsed ? <div className="plan-task-board-body">
       <h4>{plan.title}</h4>
       <p>{plan.goal}</p>
       <ol>{plan.steps.map((step) => <li className={`plan-step is-${step.status}`} key={step.id}>
-        <span className="plan-step-state">{step.status === "completed" ? "OK" : step.status === "running" ? ">" : step.status === "failed" ? "!" : "-"}</span>
+        <span className="plan-step-state">{stepIcon(step.status)}</span>
         <div><strong>{step.title}</strong>{step.detail ? <small>{step.detail}</small> : null}{step.error ? <small className="is-error">{step.error}</small> : null}</div>
         {step.status === "failed" ? <button disabled={busy} type="button" onClick={() => void act(() => retryPlanStep(threadId, plan.id, step.id))}>{locale === "zh" ? "重试" : "Retry"}</button> : null}
       </li>)}</ol>
@@ -41,4 +41,11 @@ export function PlanTaskBoard({ plan, threadId, onChanged, onRevise, onFocusArti
       </div> : null}
     </div> : null}
   </section>;
+}
+
+function stepIcon(status: PlanStepStatus) {
+  if (status === "completed" || status === "skipped") return "✓";
+  if (status === "running") return "…";
+  if (status === "failed") return "!";
+  return "○";
 }

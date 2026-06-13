@@ -77,9 +77,17 @@ function fakeAgentRuntime(config = runtimeConfig()): AgentRuntimeAdapter {
 function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string }> = [], contextResetAt?: string) {
   const records: unknown[] = [];
   const canvasWriteRequests: unknown[] = [];
+  const planState: Record<string, unknown> = {
+    id: "plan_intake_test",
+    status: "draft",
+    approval: "pending",
+    steps: [],
+    artifacts: []
+  };
   return {
     records,
     canvasWriteRequests,
+    planState,
     storage: {
       ensureThread: async () => undefined,
       getThread: () => ({ id: "thread_test", projectId: "project_test", title: "Test", configuredModelApiId: "configured-test", contextResetAt, updatedAt: "" }),
@@ -88,7 +96,7 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
       getProjectSharedContext: () => undefined,
       createPlanIntake: () => ({ id: "plan_intake_test" }),
       getPlanRun: (_threadId: string, planId: string) => planId === "plan_intake_test"
-        ? { id: planId, status: "draft", steps: [], artifacts: [] }
+        ? planState
         : undefined,
       listPlanRuns: () => [{ id: "plan_intake_test", status: "draft" }],
       recordPlanActivity: () => undefined,
@@ -339,6 +347,46 @@ test("generation facade reports Plan protocol violations without labeling them a
   );
   assert.equal(events.at(-1)?.eventType, "agent_backend_plan_protocol_failed");
   assert.equal(events.at(-1)?.payload.fallback, "none");
+});
+
+test("generation accepts a persisted Plan clarification when the stream event is missing", async () => {
+  const { storage, planState } = fakeStorage();
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => {
+        Object.assign(planState, {
+          status: "awaiting_user",
+          clarification: { question: "Which models?", options: [], status: "pending" }
+        });
+        return { text: "Which models?", finishReason: "stop", events: [] };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "/plan Compare laptops" });
+  assert.equal(result.provider, "agent-backend");
+});
+
+test("generation rejects a Plan success event when the repository was not updated", async () => {
+  const { storage } = fakeStorage();
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: "Which models?",
+        finishReason: "stop",
+        events: [{ eventType: "agent_backend_plan_waiting_for_user", payload: { planId: "plan_intake_test" } }]
+      })
+    }
+  });
+
+  await assert.rejects(
+    () => service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "/plan Compare laptops" }),
+    /persisted clarification/
+  );
 });
 
 test("generation facade blocks AgentBackend internal prompt output before recording", async () => {

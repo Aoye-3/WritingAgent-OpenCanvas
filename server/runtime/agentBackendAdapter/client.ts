@@ -56,6 +56,8 @@ type AgentBackendRunContext = {
   facetwrite_plan_phase: "chat" | "planning" | "execution";
   facetwrite_plan_stage: "chat" | "intake" | "revise" | "execution";
   facetwrite_plan_phase_attempt_id?: string;
+  facetwrite_plan_id?: string;
+  facetwrite_plan_step_id?: string;
   facetwrite_memory_content?: string;
 };
 
@@ -156,6 +158,12 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     contextValues: input.contextValues,
     toolState: input.toolState
   });
+  const planGeneration = input.contextValues?.planGeneration && isRecord(input.contextValues.planGeneration)
+    ? input.contextValues.planGeneration
+    : undefined;
+  const planId = planGeneration ? String(planGeneration.planId ?? "").trim() : "";
+  const planStepId = planGeneration ? String(planGeneration.stepId ?? "").trim() : "";
+  const phaseAttemptId = planGeneration ? String(planGeneration.phaseAttemptId ?? "").trim() : "";
   if (!input.settings) {
     return {
       model_name: input.configuredModelApiId,
@@ -163,9 +171,10 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
       facetwrite_memory_scope_id: input.threadId,
       facetwrite_project_id: input.projectId,
       facetwrite_plan_phase: planPolicy.phase,
-      facetwrite_plan_stage: planPolicy.stage
-      ,facetwrite_plan_phase_attempt_id: input.contextValues?.planGeneration && isRecord(input.contextValues.planGeneration)
-        ? String(input.contextValues.planGeneration.phaseAttemptId ?? "") : undefined
+      facetwrite_plan_stage: planPolicy.stage,
+      facetwrite_plan_phase_attempt_id: phaseAttemptId || undefined,
+      facetwrite_plan_id: planId || undefined,
+      facetwrite_plan_step_id: planStepId || undefined
     };
   }
   const settings = input.settings;
@@ -179,8 +188,9 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     facetwrite_project_id: input.projectId,
     facetwrite_plan_phase: planPolicy.phase,
     facetwrite_plan_stage: planPolicy.stage,
-    facetwrite_plan_phase_attempt_id: input.contextValues?.planGeneration && isRecord(input.contextValues.planGeneration)
-      ? String(input.contextValues.planGeneration.phaseAttemptId ?? "") : undefined,
+    facetwrite_plan_phase_attempt_id: phaseAttemptId || undefined,
+    facetwrite_plan_id: planId || undefined,
+    facetwrite_plan_step_id: planStepId || undefined,
     ...(memoryContent ? { facetwrite_memory_content: memoryContent } : {})
   };
 }
@@ -373,15 +383,20 @@ function mapToolEvents(event: string, data: unknown): ToolEventRecord[] {
   const messageType = typeof message.type === "string" ? message.type.toLowerCase() : "";
   const role = typeof message.role === "string" ? message.role.toLowerCase() : "";
   if (messageType !== "tool" && role !== "tool") return [];
-  const completed: ToolEventRecord = {
-    eventType: "agent_backend_tool_completed",
+  const structured = structuredToolEvents(message.content);
+  const failed = structured.some((event) => /_failed$/.test(event.eventType))
+    || (typeof message.content === "string" && message.content.startsWith("Error:"));
+  const terminal: ToolEventRecord = {
+    eventType: failed ? "agent_backend_tool_failed" : "agent_backend_tool_completed",
     payload: {
-      type: "tool_completed",
+      type: failed ? "tool_failed" : "tool_completed",
       toolName: typeof message.name === "string" ? message.name : "unknown",
-      toolCallId: typeof message.tool_call_id === "string" ? message.tool_call_id : undefined
+      toolCallId: typeof message.tool_call_id === "string" ? message.tool_call_id : undefined,
+      ...(structured[0]?.payload?.reason ? { reason: structured[0].payload.reason } : {}),
+      ...(structured[0]?.payload?.summary ? { summary: structured[0].payload.summary } : {})
     }
   };
-  return [completed, ...structuredToolEvents(message.content)];
+  return [terminal, ...structured];
 }
 
 function structuredToolEvents(content: unknown): ToolEventRecord[] {

@@ -139,7 +139,7 @@ export const toolCatalog: ToolDefinition[] = [
     group: "chat",
     label: "Stage Plan Artifact",
     description: "Stage a text or web-image artifact selected by the Agent for the approved plan.",
-    promptHint: "Stage only durable task outputs, not conversational replies. Use stable artifact ids for retries.",
+    promptHint: "Stage only durable task outputs, not conversational replies. For text, prefer payload.sections/items so each section becomes one Canvas node.",
     schema: { type: "object", properties: {
       planId: { type: "string" },
       artifacts: { type: "array", items: { type: "object", properties: { artifactId: { type: "string" }, stepId: { type: "string" }, type: { type: "string", enum: ["text", "image"] }, title: { type: "string" }, payload: { type: "object" }, source: { type: "object" }, layout: { type: "object" } }, required: ["artifactId", "stepId", "type", "title", "payload"], additionalProperties: false } },

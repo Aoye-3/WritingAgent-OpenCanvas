@@ -116,6 +116,22 @@ _CONTEXT_CONFIGURABLE_KEYS: frozenset[str] = frozenset(
         "max_concurrent_subagents",
         "agent_name",
         "is_bootstrap",
+        "facetwrite_prompt",
+        "facetwrite_allowed_tool_refs",
+        "facetwrite_tool_state",
+        "facetwrite_selected_canvas_node_id",
+        "facetwrite_context_values",
+        "facetwrite_chat_instruction",
+        "facetwrite_canvas_action",
+        "facetwrite_memory_enabled",
+        "facetwrite_memory_scope_id",
+        "facetwrite_memory_content",
+        "facetwrite_project_id",
+        "facetwrite_plan_phase",
+        "facetwrite_plan_stage",
+        "facetwrite_plan_id",
+        "facetwrite_plan_step_id",
+        "facetwrite_plan_phase_attempt_id",
     }
 )
 

@@ -130,7 +130,7 @@ export class SQLiteStorageRepository {
   resumePlanWithAnswer(threadId: string, planId: string, answer: string | { optionId?: string; customAnswer?: string; answer?: string }) { return this.plans.resumeWithAnswer(threadId, planId, answer); }
   setPlanRunStatus(threadId: string, planId: string, status: import("./storageTypes.js").PlanRunStatus, message = "") { const plan = this.plans.setStatus(threadId, planId, status, undefined, message); return plan ? this.syncPlanCanvasProjection(threadId, planId) : undefined; }
   updatePlanStep(threadId: string, planId: string, stepId: string, patch: Parameters<PlanRepository["updateStep"]>[3]) { const step = this.plans.updateStep(threadId, planId, stepId, patch); this.syncPlanCanvasProjection(threadId, planId); return step; }
-  retryPlanStep(threadId: string, planId: string, stepId: string) { return this.plans.retryStep(threadId, planId, stepId); }
+  retryPlanStep(threadId: string, planId: string, stepId: string) { const step = this.plans.retryStep(threadId, planId, stepId); this.syncPlanCanvasProjection(threadId, planId); return step; }
   stagePlanArtifact(threadId: string, planId: string, input: Parameters<PlanRepository["stageArtifact"]>[2]) { return this.plans.stageArtifact(threadId, planId, input); }
   markPlanArtifactCommitted(threadId: string, planId: string, artifactId: string, canvasTargetId: string) { const artifact = this.plans.markArtifact(threadId, planId, artifactId, "committed", canvasTargetId); this.syncPlanCanvasProjection(threadId, planId); return artifact; }
   markPlanArtifactFailed(threadId: string, planId: string, artifactId: string, error: string) { return this.plans.markArtifact(threadId, planId, artifactId, "failed", undefined, error); }
@@ -637,14 +637,48 @@ export class SQLiteStorageRepository {
   private syncPlanCanvasProjection(threadId: string, planId: string) {
     const plan = this.plans.get(threadId, planId);
     if (!plan || plan.status === "draft" || plan.status === "awaiting_user") return plan;
+    const currentStep = plan.steps.find((step) => step.id === plan.currentStepId);
+    const artifactCount = plan.artifacts.filter((artifact) => artifact.status === "committed").length;
+    const stepSummaries = plan.steps.map((step) => ({
+      id: step.id,
+      title: step.title,
+      detail: step.detail,
+      status: step.status,
+      attempt: step.attempt,
+      error: step.error
+    }));
+    const artifactSummaries = plan.artifacts.map((artifact) => ({
+      id: artifact.id,
+      stepId: artifact.stepId,
+      type: artifact.type,
+      status: artifact.status,
+      title: artifact.title,
+      canvasTargetId: artifact.canvasTargetId,
+      error: artifact.error
+    }));
     const content = [
       `# ${plan.title}`,
       plan.goal,
       "",
-      ...plan.steps.map((step) => `${step.status === "completed" || step.status === "skipped" ? "[x]" : "[ ]"} ${step.title}${step.status === "running" ? " (running)" : step.status === "failed" ? " (failed)" : ""}`),
+      `Status: ${plan.status}${currentStep ? ` | Current: ${currentStep.title}` : ""}`,
+      artifactCount ? `Artifacts: ${artifactCount} committed` : "Artifacts: none yet",
+      "",
+      ...plan.steps.map((step) => `${step.status === "completed" || step.status === "skipped" ? "[x]" : "[ ]"} ${step.title}${step.status === "running" ? " (running)" : step.status === "failed" ? ` (failed${step.error ? `: ${step.error}` : ""})` : ""}`),
       ...(plan.statusMessage ? ["", plan.statusMessage] : [])
     ].join("\n");
-    const metadata = { planProjection: { planId: plan.id, threadId: plan.threadId, status: plan.status } };
+    const metadata = {
+      planProjection: {
+        planId: plan.id,
+        threadId: plan.threadId,
+        status: plan.status,
+        approval: plan.approval,
+        currentStepId: plan.currentStepId,
+        statusMessage: plan.statusMessage,
+        artifactCount,
+        steps: stepSummaries,
+        artifacts: artifactSummaries
+      }
+    };
     const existing = plan.canvasNodeId ? this.listCanvasNodes(plan.projectId).find((node) => node.id === plan.canvasNodeId) : undefined;
     const node = existing
       ? this.updateCanvasNode(plan.projectId, existing.id, { title: plan.title, content, metadata, includeInProjectContext: false })

@@ -9,8 +9,10 @@ const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { script
 test("local Agent Runtime script manages the Gateway lifecycle", () => {
   assert.match(script, /ValidateSet\("up", "down", "status", "doctor"\)/);
   assert.match(script, /python", "install", "3\.12/);
-  assert.match(script, /"sync", "--python", "3\.12", "--locked", "--all-packages"/);
-  assert.match(script, /\.venv\\pyvenv\.cfg/);
+  assert.match(script, /python find --managed-python 3\.12/);
+  assert.match(script, /"sync", "--python", \$managedPython, "--locked", "--all-packages"/);
+  assert.match(script, /\$venvConfigPath = Join-Path \$venvRoot "pyvenv\.cfg"/);
+  assert.match(script, /\.venv\\Scripts\\python\.exe/);
   assert.match(script, /PYTHONPATH/);
   assert.match(script, /packages\\harness/);
   assert.match(script, /"-m", "uvicorn", "app\.gateway\.app:app"/);

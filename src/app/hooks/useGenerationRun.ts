@@ -48,8 +48,13 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const typewriterRef = useRef<Partial<Record<TypewriterTarget, TypewriterState<TypewriterTarget>>>>({});
   const drainWaitersRef = useRef<Partial<Record<TypewriterTarget, Array<() => void>>>>({});
   const operationIdRef = useRef(0);
+  const chatAbortControllerRef = useRef<AbortController | null>(null);
+  const activeChatMessageIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    chatAbortControllerRef.current?.abort();
+    chatAbortControllerRef.current = null;
+    activeChatMessageIdRef.current = null;
     operationIdRef.current += 1;
     setIsGenerating(false);
     setIsChatSending(false);
@@ -63,6 +68,9 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   }, []);
 
   const resetGeneration = () => {
+    chatAbortControllerRef.current?.abort();
+    chatAbortControllerRef.current = null;
+    activeChatMessageIdRef.current = null;
     operationIdRef.current += 1;
     setGeneration(null);
     setEditableOutput("");
@@ -72,6 +80,20 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     setPlans([]);
     setCanvasWriteSuggestions([]);
     setActiveVersionId(undefined);
+  };
+
+  const stopChatGeneration = () => {
+    const messageId = activeChatMessageIdRef.current;
+    chatAbortControllerRef.current?.abort();
+    if (messageId) {
+      flushStreamingText(`message:${messageId}`);
+      updateStreamingMessage(messageId, {
+        isStreaming: false,
+        status: "stopped",
+        statusLabel: undefined
+      });
+    }
+    setIsChatSending(false);
   };
 
   const appendToolEvent = (event: unknown, threadId: string) => {
@@ -254,9 +276,14 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const handleChatSend = async (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => {
     const operationId = ++operationIdRef.current;
     setIsChatSending(true);
+    chatAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    chatAbortControllerRef.current = abortController;
     const userMessageId = crypto.randomUUID();
     const assistantMessageId = crypto.randomUUID();
+    activeChatMessageIdRef.current = assistantMessageId;
     const startedAt = new Date().toISOString();
+    let streamedText = "";
     setCollaborationMessages((current) => [
       ...current,
       {
@@ -302,7 +329,6 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         modelOverrides,
         selectedCanvasNodeId: options.selectedCanvasNodeId
       };
-      let streamedText = "";
       const result = await generateTextStream(payload, {
         onStatus: (status) => updateStreamingMessage(assistantMessageId, {
           status: status.phase,
@@ -313,7 +339,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
           enqueueStreamingText(`message:${assistantMessageId}`, token);
         },
         onToolEvent: (event) => appendToolEvent(event, threadId)
-      });
+      }, { signal: abortController.signal });
       if (operationId !== operationIdRef.current) return;
 
       await drainStreamingText(`message:${assistantMessageId}`);
@@ -328,10 +354,22 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
 
       const state = await options.onFetchAndApplyThreadState(result.threadId);
       if (operationId !== operationIdRef.current) return;
+      applyCollaborationMessagesFromThreadState(state);
       await options.onRefreshThreadState(result.threadId);
       await options.onRefreshProjectSurfaces();
       return state;
     } catch (error) {
+      if (isAbortError(error)) {
+        flushStreamingText(`message:${assistantMessageId}`);
+        updateStreamingMessage(assistantMessageId, {
+          ...(streamedText.trim() ? {} : { text: options.locale === "zh" ? "已停止" : "Stopped" }),
+          usedMock: false,
+          isStreaming: false,
+          status: "stopped",
+          statusLabel: undefined
+        });
+        return;
+      }
       const message = recoverableGenerationError(error instanceof Error ? error.message : "Generation failed", options.locale);
       flushStreamingText(`message:${assistantMessageId}`);
       updateStreamingMessage(assistantMessageId, {
@@ -342,6 +380,8 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         statusLabel: undefined
       });
     } finally {
+      if (chatAbortControllerRef.current === abortController) chatAbortControllerRef.current = null;
+      if (activeChatMessageIdRef.current === assistantMessageId) activeChatMessageIdRef.current = null;
       if (operationId === operationIdRef.current) setIsChatSending(false);
     }
   };
@@ -367,6 +407,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     generation,
     isChatSending,
     isGenerating,
+    stopChatGeneration,
     outputVersions,
     plans,
     canvasWriteSuggestions,
@@ -391,11 +432,21 @@ function isPlanInstruction(text: string) {
   return /^\s*\/plan\b/i.test(text) || /^\s*continue approved plan\b/i.test(text);
 }
 
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 function liveActivitySummary(eventType: string, payload: Record<string, unknown>, locale: Locale) {
   const tool = typeof payload.toolName === "string" ? payload.toolName : typeof payload.tool === "string" ? payload.tool : "";
   const skill = typeof payload.skill === "string" ? payload.skill : "";
   if (skill) return locale === "zh" ? `正在使用技能：${skill === "brainstorming" ? "头脑风暴" : skill === "writing-plans" ? "计划编写" : skill}` : `Using skill: ${skill}`;
   if (/(?:^|_)tool_started$/.test(eventType)) return locale === "zh" ? `正在调用工具${tool ? `：${tool}` : ""}` : `Using tool${tool ? `: ${tool}` : ""}`;
+  if (/(?:^|_)tool_failed$/.test(eventType)) {
+    const reason = typeof payload.reason === "string" ? payload.reason : "";
+    return locale === "zh"
+      ? `工具调用失败${tool ? `：${tool}` : ""}${reason ? `（${reason}）` : ""}`
+      : `Tool failed${tool ? `: ${tool}` : ""}${reason ? ` (${reason})` : ""}`;
+  }
   if (/(?:^|_)tool_completed$/.test(eventType)) return locale === "zh" ? `工具调用完成${tool ? `：${tool}` : ""}` : `Tool completed${tool ? `: ${tool}` : ""}`;
   if (/(?:^|_)artifact_committed$/.test(eventType)) return locale === "zh" ? "当前步骤产物已写入画板" : "Current step artifact committed to Canvas";
   if (/(?:^|_)canvas_action_recognized$/.test(eventType)) return locale === "zh" ? "已识别 Canvas 操作" : "Canvas action recognized";
@@ -407,7 +458,7 @@ function liveActivitySummary(eventType: string, payload: Record<string, unknown>
 }
 
 function recoverableGenerationError(message: string, locale: Locale) {
-  if (/Plan planning phase completed without|Plan execution phase completed without/i.test(message)) {
+  if (/Plan (?:planning|revision|execution|phase).*completed without/i.test(message)) {
     return locale === "zh"
       ? "Plan 状态没有正确更新，执行已暂停。请重试当前步骤或修改计划。"
       : "The Plan state was not updated correctly, so execution paused. Retry the current step or revise the Plan.";

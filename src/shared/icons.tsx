@@ -28,6 +28,7 @@ import {
   Send,
   Settings2,
   Sparkles,
+  Square,
   Star,
   Trash2,
   X,
@@ -80,6 +81,7 @@ export const SearchIcon = createIcon(Search);
 export const SendIcon = createIcon(Send);
 export const SettingsIcon = createIcon(Settings2);
 export const SparkleIcon = createIcon(Sparkles);
+export const StopIcon = createIcon(Square);
 export const StarIcon = createIcon(Star);
 export const StatusIcon = createIcon(Circle);
 export const TrashIcon = createIcon(Trash2);

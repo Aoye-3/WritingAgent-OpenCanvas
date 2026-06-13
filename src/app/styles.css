@@ -5489,3 +5489,53 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   padding: 0;
   font: inherit;
 }
+
+.drawer-chat-composer-clarification {
+  gap: 8px;
+}
+
+.drawer-chat-composer-clarification .plan-clarification-card {
+  margin: 0;
+}
+
+.plan-clarification-card-composer {
+  border-color: #9ebcff;
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+  box-shadow: 0 8px 22px rgba(37, 99, 235, 0.08);
+}
+
+.plan-clarification-card-composer .plan-clarification-heading strong {
+  color: #1d4ed8;
+}
+
+.plan-clarification-card-composer .plan-clarification-options {
+  grid-template-columns: 1fr;
+}
+
+.plan-clarification-card-composer .plan-clarification-options button {
+  min-height: 44px;
+  justify-content: center;
+}
+
+.plan-clarification-detail {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 999px;
+  background: #eef4ff;
+  color: #245bd7;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: help;
+}
+
+.chat-send-icon.is-stopping {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+.chat-send-icon.is-stopping:hover {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}
