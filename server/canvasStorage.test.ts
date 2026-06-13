@@ -65,6 +65,27 @@ test("rejecting a canvas write request leaves nodes unchanged", async () => {
   assert.equal(storage.listCanvasNodes(threadId)[0].content, "Keep me");
 });
 
+test("deleting a Canvas node through Agent write requests requires approval", async () => {
+  const storage = await createStorage();
+  const projectId = `project_${randomUUID().replace(/-/g, "_")}`;
+  storage.createProject(projectId, "Delete approval");
+  const node = storage.createCanvasNode(projectId, {
+    kind: "document",
+    title: "Delete me",
+    content: "Obsolete"
+  });
+  const request = storage.createCanvasWriteRequest(projectId, {
+    operation: "delete",
+    targetNodeId: node.id,
+    content: "",
+    rationale: "Remove obsolete content"
+  });
+
+  assert.equal(storage.listCanvasNodes(projectId).length, 1);
+  storage.approveCanvasWriteRequest(projectId, request.id);
+  assert.equal(storage.listCanvasNodes(projectId).length, 0);
+});
+
 test("approves a range replacement only while the source node is unchanged", async () => {
   const storage = await createStorage();
   const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;

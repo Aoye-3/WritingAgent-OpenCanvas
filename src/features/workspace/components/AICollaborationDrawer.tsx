@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, SearchIcon, SendIcon, SparkleIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
-import type { AgentCard, CanvasWriteRequest, PlanRun, StoredThread, StoredToolEvent } from "../../agents/types";
+import type { AgentCard, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, StoredThread, StoredToolEvent } from "../../agents/types";
 import type { AgentSettings } from "../../agents/types";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
 import { useI18n } from "../../i18n/I18nProvider";
@@ -10,7 +10,8 @@ import { AnnotationChipRow, CanvasWriteProposalPanel, type MessageAnnotation } f
 import { ToolEventDrawer } from "./ToolEventDrawer";
 import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain";
 import { PlanTaskBoard } from "./PlanTaskBoard";
-import { answerPlan } from "../../agents/agentClient";
+import { PlanClarificationCard } from "./PlanClarificationCard";
+import { acceptCanvasWriteSuggestion, answerPlan, dismissCanvasWriteSuggestion, pausePlan } from "../../agents/agentClient";
 import { visibleComposerTools } from "../planUiPolicy";
 import { buildPlanTimeline } from "../planTimeline";
 
@@ -33,6 +34,7 @@ type AICollaborationDrawerProps = {
   activeAgent: AgentCard;
   agentCards: AgentCard[];
   canvasWriteRequests: CanvasWriteRequest[];
+  canvasWriteSuggestions: CanvasWriteSuggestion[];
   collapsed: boolean;
   inputDraft: string;
   mindChainContext: CanvasMindChainContext | null;
@@ -54,7 +56,7 @@ type AICollaborationDrawerProps = {
   onMindChainContextConsumed: () => void;
   onRemoveMindChainContext: () => void;
   onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => Promise<void>;
+  onSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => Promise<unknown>;
   onSelectAgent: (agentCardId: string) => void;
   onSelectThread: (threadId: string) => Promise<void>;
   onToggleCollapsed: () => void;
@@ -71,11 +73,6 @@ const toolMeta: Record<string, { en: string; zh: string; hint: string }> = {
   clear_context: { en: "Clear context", zh: "清除上下文", hint: "Ignore previous conversational context" }
 };
 
-const waitingLabels = {
-  zh: ["思考中", "整理上下文", "检查可用资料", "组织回答结构", "准备生成内容"],
-  en: ["Thinking", "Reviewing context", "Checking available sources", "Structuring the answer", "Preparing the response"]
-} as const;
-
 const COMPOSER_MIN_HEIGHT = 72;
 const COMPOSER_MAX_HEIGHT = 240;
 
@@ -84,6 +81,7 @@ export function AICollaborationDrawer({
   activeAgent,
   agentCards,
   canvasWriteRequests,
+  canvasWriteSuggestions,
   collapsed,
   inputDraft,
   mindChainContext,
@@ -124,13 +122,14 @@ export function AICollaborationDrawer({
   const [selectionAction, setSelectionAction] = useState<SelectionAction | null>(null);
   const [writeBusy, setWriteBusy] = useState(false);
   const [writeStatus, setWriteStatus] = useState("");
-  const [statusIndex, setStatusIndex] = useState(0);
   const [composerHeight, setComposerHeight] = useState(72);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [contextResetNotice, setContextResetNotice] = useState(false);
+  const [clarificationBusy, setClarificationBusy] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
 
   const pendingWriteRequest = canvasWriteRequests.find((request) => request.operation !== "replace_range");
+  const pendingWriteSuggestion = canvasWriteSuggestions.find((suggestion) => suggestion.status === "pending");
   const proposalFullText = writeDraft?.text || pendingWriteRequest?.content || "";
   const annotatedText = annotations.map((annotation) => annotation.text).join("\n\n");
   const hasWriteProposal = Boolean(writeDraft || pendingWriteRequest || annotations.length);
@@ -146,11 +145,6 @@ export function AICollaborationDrawer({
     setInput(inputDraft);
     onInputDraftConsumed();
   }, [inputDraft, onInputDraftConsumed]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setStatusIndex((index) => index + 1), 1500);
-    return () => window.clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     messageListRef.current?.scrollTo({ top: messageListRef.current.scrollHeight, behavior: "smooth" });
@@ -209,10 +203,19 @@ export function AICollaborationDrawer({
     if (!text) return;
     setInput("");
     if (isWriteConfirmation(text)) {
-      if (hasWriteProposal) await applyWrite(annotations.length ? "snippets" : "default");
-      return;
+      if (pendingWriteSuggestion) {
+        await acceptCanvasWriteSuggestion(currentThreadId, pendingWriteSuggestion.id);
+        await onPlansChanged();
+        return;
+      }
+      if (hasWriteProposal) {
+        await applyWrite(annotations.length ? "snippets" : "default");
+        return;
+      }
     }
     const awaitingPlan = plans.find((plan) => plan.status === "awaiting_user");
+    const revisePlanId = text.match(/^\s*\/plan\s+revise\s+([A-Za-z0-9_-]+)/i)?.[1];
+    const revisePlan = revisePlanId ? plans.find((plan) => plan.id === revisePlanId) : undefined;
     if (awaitingPlan) {
       await answerPlan(currentThreadId, awaitingPlan.id, text);
       await onPlansChanged();
@@ -222,7 +225,8 @@ export function AICollaborationDrawer({
       reasoningEffort
     } : undefined, {
       ...(mindChainContext ? { canvasMindChain: mindChainContext.text } : {}),
-      ...(awaitingPlan ? { awaitingPlan: { id: awaitingPlan.id, answer: text } } : {})
+      ...(awaitingPlan ? { awaitingPlan: { id: awaitingPlan.id, answer: text } } : {}),
+      ...(revisePlan ? { awaitingPlan: { id: revisePlan.id, revise: true } } : {})
     });
     if (mindChainContext) onMindChainContextConsumed();
   };
@@ -263,9 +267,18 @@ export function AICollaborationDrawer({
     setAnnotations((current) => current.filter((annotation) => annotation.id !== id));
   };
 
-  const startMessageWrite = (message: CollaborationMessage) => {
-    setWriteDraft({ messageId: message.id, text: message.text });
-    setWriteStatus("");
+  const answerClarification = async (plan: PlanRun, answer: { optionId?: string; customAnswer?: string }) => {
+    setClarificationBusy(true);
+    try {
+      await answerPlan(currentThreadId, plan.id, answer);
+      await onPlansChanged();
+      const answerText = answer.customAnswer
+        || plan.clarification?.options.find((option) => option.id === answer.optionId)?.label
+        || "";
+      await onSend(answerText, undefined, { awaitingPlan: { id: plan.id, ...answer, answer: answerText } });
+    } finally {
+      setClarificationBusy(false);
+    }
   };
 
   const startComposerResize = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -343,7 +356,11 @@ export function AICollaborationDrawer({
         <div className="conversation-history-popover" aria-label={locale === "zh" ? "当前项目历史对话" : "Current Project conversation history"}>
           {projectThreads.map((thread) => (
             <button className={thread.id === currentThreadId ? "is-active" : ""} key={thread.id} type="button"
-              onClick={() => { setHistoryOpen(false); void onSelectThread(thread.id); }}>
+              onClick={() => {
+                setHistoryOpen(false);
+                void Promise.all(plans.filter((plan) => plan.status === "running").map((plan) => pausePlan(currentThreadId, plan.id)))
+                  .finally(() => onSelectThread(thread.id));
+              }}>
               <strong>{thread.title}</strong><time>{new Date(thread.updatedAt).toLocaleString()}</time>
             </button>
           ))}
@@ -363,14 +380,22 @@ export function AICollaborationDrawer({
         {timeline.map((entry) => {
           if (entry.kind === "plan") {
             const plan = entry.value;
-            return <PlanTaskBoard key={`plan:${plan.id}`} plan={plan} threadId={currentThreadId} onChanged={onPlansChanged} onFocusArtifact={onFocusPlanArtifact} onRevise={(value) => setInput(`/plan revise ${value.id}: `)} onContinue={(approved) => {
-              const step = approved.steps.find((item) => item.status === "pending" || item.status === "failed");
-              return step
-                ? onSend(`Continue approved plan ${approved.id}. Execute only step ${step.id}.`, undefined, { approvedPlan: approved, planExecution: { planId: approved.id, stepId: step.id } })
-                : Promise.resolve();
-            }} />;
+            if (plan.clarification && plan.status === "awaiting_user") {
+              return <PlanClarificationCard busy={clarificationBusy} key={`plan:${plan.id}`} plan={plan} onAnswer={(answer) => answerClarification(plan, answer)} />;
+            }
+            if (plan.clarification?.status === "answered" && plan.status === "draft") {
+              return <PlanClarificationCard busy key={`plan:${plan.id}`} plan={plan} onAnswer={async () => {}} />;
+            }
+            const board = <PlanTaskBoard plan={plan} threadId={currentThreadId} onChanged={onPlansChanged} onFocusArtifact={onFocusPlanArtifact} onRevise={(value) => setInput(`/plan revise ${value.id}: `)} />;
+            return <div key={`plan:${plan.id}`}>
+              {plan.clarification?.status === "answered" ? <PlanClarificationCard busy plan={plan} onAnswer={async () => {}} /> : null}
+              {board}
+            </div>;
           }
           const message = entry.value;
+          if (message.kind === "activity") {
+            return <div className="plan-activity-line" key={message.id}><span aria-hidden="true" />{message.text}</div>;
+          }
           const messageAnnotations = annotations.filter((annotation) => annotation.messageId === message.id);
           const isPendingAssistant = message.role === "assistant" && message.isStreaming && !message.text.trim();
           return (
@@ -378,21 +403,25 @@ export function AICollaborationDrawer({
               <div className="message-avatar" aria-hidden="true">{message.role === "user" ? "U" : "F"}</div>
               <div className={isPendingAssistant ? "message-thinking-status" : "message-bubble"}>
                 {message.role === "assistant" && message.isStreaming && !message.text.trim() ? (
-                  <StreamingStatus label={streamingStatusLabel(message, locale, statusIndex)} />
+                  <StreamingStatus label={streamingStatusLabel(message, locale)} />
                 ) : message.role === "assistant" ? (
                   <div className="assistant-selectable-text" onMouseUp={(event) => captureSelection(event, message)}>
                     <MarkdownText text={message.text} highlights={messageAnnotations.map((annotation) => annotation.text)} />
                     {message.isStreaming ? <span className="typing-caret" aria-hidden="true" /> : null}
                   </div>
                 ) : <p>{message.text}</p>}
-                {message.role === "assistant" && message.text.trim() ? (
-                  <WriteMessageButton onWrite={() => startMessageWrite(message)} />
-                ) : null}
                 {message.usedMock ? <span className="message-meta">{locale === "zh" ? "Mock 兜底" : "Mock fallback"}</span> : null}
               </div>
             </article>
           );
         })}
+        {pendingWriteSuggestion ? (
+          <div className="canvas-write-suggestion-tail">
+            <span>{locale === "zh" ? "是否将这些要点生成到画板？" : "Create Canvas nodes for these points?"}</span>
+            <button type="button" onClick={() => void acceptCanvasWriteSuggestion(currentThreadId, pendingWriteSuggestion.id).then(onPlansChanged)}>{locale === "zh" ? "生成节点" : "Create nodes"}</button>
+            <button type="button" onClick={() => void dismissCanvasWriteSuggestion(currentThreadId, pendingWriteSuggestion.id).then(onPlansChanged)}>{locale === "zh" ? "不用" : "No thanks"}</button>
+          </div>
+        ) : null}
         {hasWriteProposal ? (
           <CanvasWriteProposalPanel
             annotations={annotations}
@@ -510,27 +539,12 @@ function StreamingStatus({ label }: { label: string }) {
   );
 }
 
-function streamingStatusLabel(message: CollaborationMessage, locale: "en" | "zh", statusIndex: number) {
-  if (message.isStreaming && !message.text.trim()) {
-    const labels = locale === "zh" ? waitingLabels.zh : waitingLabels.en;
-    return labels[statusIndex % labels.length];
-  }
-  if (message.statusLabel) return message.statusLabel;
-  const labels = locale === "zh" ? waitingLabels.zh : waitingLabels.en;
-  return labels[statusIndex % labels.length];
-}
-
-function WriteMessageButton({ onWrite }: { onWrite: () => void }) {
-  const { locale } = useI18n();
-  return (
-    <button className="button button-secondary button-small message-write-button" type="button" onClick={onWrite}>
-      {locale === "zh" ? "写入画板" : "Write to canvas"}
-    </button>
-  );
+function streamingStatusLabel(message: CollaborationMessage, locale: "en" | "zh") {
+  return message.statusLabel || (locale === "zh" ? "正在准备响应" : "Preparing response");
 }
 
 function isWriteConfirmation(text: string) {
-  return /^(?:\u5199\u5165|\u5199\u5165\u5168\u90e8|\u76f4\u63a5\u5199\u5165|\u786e\u8ba4\u5199\u5165|\u786e\u8ba4|\u4fdd\u5b58|\u4fdd\u5b58\u5230\u753b\u677f|\u52a0\u5165\u753b\u677f|\u4fdd\u5b58\u5230\s*canvas|\u52a0\u5165\s*canvas|save\s+to\s+canvas|write\s+this|write\s+it|write|write\s+all)$/i.test(text.trim());
+  return /^(?:是|好|生成节点|yes|\u5199\u5165|\u5199\u5165\u5168\u90e8|\u76f4\u63a5\u5199\u5165|\u786e\u8ba4\u5199\u5165|\u786e\u8ba4|\u4fdd\u5b58|\u4fdd\u5b58\u5230\u753b\u677f|\u52a0\u5165\u753b\u677f|\u4fdd\u5b58\u5230\s*canvas|\u52a0\u5165\s*canvas|save\s+to\s+canvas|write\s+this|write\s+it|write|write\s+all)$/i.test(text.trim());
 }
 
 function ToolUseIconBar({ allowedTools, toolState, onToolStateChange }: Pick<AICollaborationDrawerProps, "allowedTools" | "toolState" | "onToolStateChange">) {

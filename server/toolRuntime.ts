@@ -1,6 +1,6 @@
 import type { ChatCompletionTool, ChatToolCall } from "./providerRuntime.js";
 import type { CanvasWriteRequestInput } from "./storage.js";
-import type { JsonValue, PlanArtifactLink, PlanRun, PlanStepStatus } from "./storageTypes.js";
+import type { JsonValue, PlanArtifactLink, PlanClarification, PlanRun, PlanStepStatus } from "./storageTypes.js";
 import type { KnowledgeService } from "./knowledge/service.js";
 import { allowedToolDefinitions, toChatCompletionTool, toolCatalog, type ToolState } from "./tools/catalog.js";
 import { evaluateToolExecutionPolicy, isToolRef } from "./tools/toolPolicyGuard.js";
@@ -12,17 +12,29 @@ export type ToolExecutionContext = {
   selectedCanvasNodeId?: string | null;
   contextValues?: Record<string, unknown>;
   chatInstruction?: string;
+  canvasAction?: {
+    operation?: string;
+    targetNodeId?: string;
+  };
   knowledgeService?: KnowledgeService;
   resetContext?: () => unknown;
   createCanvasWriteRequest?: (input: CanvasWriteRequestInput) => {
     id: string;
+    projectId?: string;
     operation: string;
     targetNodeId?: string;
     nodeKind: string;
     title: string;
     status: string;
   };
-  createPlanRun?: (input: { title: unknown; goal: unknown; steps: Array<{ id?: string; title: unknown; detail?: unknown }> }) => Pick<PlanRun, "id" | "status">;
+  commitCanvasWrite?: (input: CanvasWriteRequestInput) => {
+    id: string;
+    projectId: string;
+    kind: string;
+    title: string;
+  };
+  createPlanRun?: (input: { title: unknown; goal: unknown; steps: Array<{ id?: string; title: unknown; detail?: unknown }>; clarification?: PlanClarification }) => Pick<PlanRun, "id" | "status">;
+  submitPlanClarification?: (planId: string, clarification: PlanClarification) => Pick<PlanRun, "id" | "status">;
   revisePlanRun?: (planId: string, input: { title: unknown; goal: unknown; steps: Array<{ id?: string; title: unknown; detail?: unknown }> }) => Pick<PlanRun, "id" | "status"> | undefined;
   getPlanRun?: (planId: string) => PlanRun | undefined;
   updatePlanStep?: (planId: string, stepId: string, patch: { status: PlanStepStatus; detail?: unknown; error?: unknown }) => unknown;
@@ -46,6 +58,7 @@ export type ToolEventRecord = {
     | "internal_output_blocked"
     | "knowledge_search_completed"
     | "knowledge_search_failed"
+    | `canvas_${string}`
     | `agent_backend_${string}`;
   payload: Record<string, unknown>;
 };
@@ -130,44 +143,26 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
     };
   }
 
-  if (name === "plan_update") {
-    const action = readString(args.action);
-    if (action === "create") {
-      if (!context.createPlanRun || !Array.isArray(args.steps)) return unavailable(name);
-      const plan = context.createPlanRun({ title: args.title, goal: args.goal, steps: args.steps as Array<{ id?: string; title: unknown; detail?: unknown }> });
-      return { ok: true, content: `Plan ${plan.id} is ready for user approval. Do not execute it yet.`, payload: { tool: name, eventType: "plan_created", planId: plan.id, status: plan.status } };
-    }
+  if (name === "plan_clarification_submit") {
+    if (!context.submitPlanClarification) return unavailable(name);
+    const clarification = readPlanClarification({ question: args.question, options: args.options });
+    if (!clarification) return { ok: false, content: "A structured clarification question with 2-3 options and exactly one recommendation is required.", payload: { tool: name, reason: "invalid_clarification" } };
+    const planId = readPlanGenerationId(context.contextValues);
+    if (!planId) return { ok: false, content: "A server-created Plan intake is required.", payload: { tool: name, reason: "plan_intake_missing" } };
+    const plan = context.submitPlanClarification(planId, clarification);
+    return { ok: true, content: clarification.question, payload: { tool: name, eventType: "plan_waiting_for_user", planId: plan.id, status: "awaiting_user" } };
+  }
+
+  if (name === "plan_revision_submit") {
     const planId = readString(args.planId);
     const plan = planId && context.getPlanRun?.(planId);
-    if (!plan) return { ok: false, content: "Plan not found.", payload: { tool: name, reason: "plan_not_found" } };
-    if (action === "request_input") {
-      if (!context.setPlanStatus) return unavailable(name);
-      context.setPlanStatus(planId, "awaiting_user", readString(args.message));
-      return { ok: true, content: readString(args.message) || "More information is required before continuing.", payload: { tool: name, eventType: "plan_waiting_for_user", planId, status: "awaiting_user" } };
+    if (!plan || plan.approval !== "pending" || !context.revisePlanRun || !Array.isArray(args.steps)) {
+      return { ok: false, content: "Only the specified pending Plan can be revised.", payload: { tool: name, reason: "plan_not_pending", planId } };
     }
-    if (action === "revise") {
-      if (plan.approval !== "pending" || !context.revisePlanRun || !Array.isArray(args.steps)) return { ok: false, content: "Only a pending plan can be revised.", payload: { tool: name, reason: "plan_not_pending", planId } };
-      const revised = context.revisePlanRun(planId, { title: args.title, goal: args.goal, steps: args.steps as Array<{ id?: string; title: unknown; detail?: unknown }> });
-      return revised
-        ? { ok: true, content: `Plan ${planId} was updated and is ready for approval.`, payload: { tool: name, eventType: "plan_updated", planId, status: revised.status } }
-        : unavailable(name);
-    }
-    if (plan.approval !== "approved") return { ok: false, content: "Plan is waiting for user approval.", payload: { tool: name, reason: "plan_not_approved", planId } };
-    if (action === "update_step") {
-      const stepId = readString(args.stepId); const status = readPlanStepStatus(args.status);
-      if (!stepId || !status || !context.updatePlanStep) return unavailable(name);
-      const executionStepId = readExecutionStepId(context.contextValues);
-      if (executionStepId && executionStepId !== stepId) return { ok: false, content: `This run may execute only step ${executionStepId}.`, payload: { tool: name, reason: "wrong_execution_step", planId, stepId, executionStepId } };
-      context.updatePlanStep(planId, stepId, { status, detail: args.detail, error: args.error });
-      return { ok: true, content: `Plan step ${stepId} is ${status}.`, payload: { tool: name, eventType: "plan_step_updated", planId, stepId, status } };
-    }
-    if (action === "finish" && plan.steps.some((step) => step.status === "pending" || step.status === "running" || step.status === "failed")) {
-      return { ok: false, content: "Plan cannot finish while steps are incomplete.", payload: { tool: name, reason: "steps_incomplete", planId } };
-    }
-    const status = action === "finish" ? "completed" : action === "fail" ? "failed" : undefined;
-    if (!status || !context.setPlanStatus) return unavailable(name);
-    context.setPlanStatus(planId, status, readString(args.message) || readString(args.error));
-    return { ok: true, content: `Plan ${planId} is ${status}.`, payload: { tool: name, eventType: status === "completed" ? "plan_completed" : "plan_failed", planId, status } };
+    const revised = context.revisePlanRun(planId, { title: args.title, goal: args.goal, steps: args.steps as Array<{ id?: string; title: unknown; detail?: unknown }> });
+    return revised
+      ? { ok: true, content: `Plan ${planId} is ready for approval.`, payload: { tool: name, eventType: "plan_updated", planId, status: revised.status } }
+      : unavailable(name);
   }
 
   if (name === "artifact_stage") {
@@ -192,7 +187,7 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
   }
 
   if (name === "canvas_write") {
-    if (!context.createCanvasWriteRequest) {
+    if (!context.createCanvasWriteRequest && !context.commitCanvasWrite) {
       return {
         ok: false,
         content: "Canvas write requests are not available in this workspace.",
@@ -201,8 +196,9 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
     }
 
     const content = readString(args.content);
-    const targetNodeId = readString(args.targetNodeId) || context.selectedCanvasNodeId || undefined;
-    const operation = normalizeCanvasOperation(readCanvasOperation(args.operation), targetNodeId, context.chatInstruction);
+    const targetNodeId = readString(context.canvasAction?.targetNodeId) || readString(args.targetNodeId) || context.selectedCanvasNodeId || undefined;
+    const actionOperation = readCanvasOperation(context.canvasAction?.operation);
+    const operation = actionOperation ?? normalizeCanvasOperation(readCanvasOperation(args.operation), targetNodeId, context.chatInstruction);
     if (!operation) {
       return {
         ok: false,
@@ -210,7 +206,7 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
         payload: { tool: name, reason: "invalid_operation" }
       };
     }
-    if (!content) {
+    if (!content && operation !== "delete") {
       return {
         ok: false,
         content: "Canvas write request failed: content is required.",
@@ -219,20 +215,50 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
     }
 
     try {
-      const request = context.createCanvasWriteRequest({
+      const writeInput: CanvasWriteRequestInput = {
         operation,
         targetNodeId,
         nodeKind: readCanvasNodeKind(args.nodeKind),
         title: readString(args.title),
         content,
         rationale: readString(args.rationale)
+      };
+      if (operation === "create" || operation === "append") {
+        if (!context.commitCanvasWrite) {
+          return {
+            ok: false,
+            content: `Canvas ${operation} is unavailable because this runtime cannot commit low-risk writes directly.`,
+            payload: { tool: name, eventType: "canvas_mutation_failed", operation, reason: "direct_commit_unavailable" }
+          };
+        }
+        const node = context.commitCanvasWrite(writeInput);
+        return {
+          ok: true,
+          content: `Canvas ${operation} committed successfully. Node id: ${node.id}.`,
+          payload: {
+            tool: name,
+            eventType: "canvas_mutation_committed",
+            nodeId: node.id,
+            projectId: node.projectId,
+            operation,
+            status: "committed",
+            title: node.title
+          }
+        };
+      }
+      if (!context.createCanvasWriteRequest) return unavailable(name);
+      const request = context.createCanvasWriteRequest({
+        ...writeInput,
+        operation
       });
       return {
         ok: true,
         content: `A Canvas write proposal (${request.operation}) is ready for user confirmation. Request id: ${request.id}. Do not say it has been applied yet.`,
         payload: {
           tool: name,
+          eventType: "canvas_write_pending_approval",
           requestId: request.id,
+          projectId: request.projectId,
           operation: request.operation,
           targetNodeId: request.targetNodeId,
           nodeKind: request.nodeKind,
@@ -244,7 +270,7 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
       return {
         ok: false,
         content: `Canvas write request failed: ${error instanceof Error ? error.message : "unknown error"}`,
-        payload: { tool: name, reason: "request_failed" }
+        payload: { tool: name, eventType: "canvas_mutation_failed", reason: "request_failed" }
       };
     }
   }
@@ -286,10 +312,10 @@ function readStringArray(value: unknown) {
 }
 
 function readCanvasOperation(value: unknown) {
-  return value === "create" || value === "replace" || value === "append" ? value : undefined;
+  return value === "create" || value === "replace" || value === "append" || value === "delete" ? value : undefined;
 }
 
-function normalizeCanvasOperation(operation: "create" | "replace" | "append" | undefined, targetNodeId: string | undefined, instruction = "") {
+function normalizeCanvasOperation(operation: "create" | "replace" | "append" | "delete" | undefined, targetNodeId: string | undefined, instruction = "") {
   if (operation !== "replace") return operation;
   if (hasCanvasReplaceIntent(instruction)) return operation;
   return targetNodeId ? "append" : "create";
@@ -308,8 +334,22 @@ function readExecutionStepId(contextValues: Record<string, unknown> | undefined)
   return value && typeof value === "object" && !Array.isArray(value) ? readString((value as Record<string, unknown>).stepId) : "";
 }
 
-function readPlanStepStatus(value: unknown): PlanStepStatus | undefined {
-  return value === "pending" || value === "running" || value === "completed" || value === "failed" || value === "skipped" ? value : undefined;
+function readPlanGenerationId(contextValues: Record<string, unknown> | undefined) {
+  const value = contextValues?.planGeneration;
+  return value && typeof value === "object" && !Array.isArray(value) ? readString((value as Record<string, unknown>).planId) : "";
+}
+
+function readPlanClarification(value: unknown): PlanClarification | undefined {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  const question = readString(input?.question);
+  const options = Array.isArray(input?.options) ? input.options.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const option = entry as Record<string, unknown>;
+    const id = readString(option.id); const label = readString(option.label); const description = readString(option.description);
+    return id && label && description ? [{ id, label, description, recommended: option.recommended === true }] : [];
+  }) : [];
+  if (!question || options.length < 2 || options.length > 3 || options.filter((option) => option.recommended).length !== 1) return undefined;
+  return { question, options, status: "pending" };
 }
 
 function unavailable(tool: string): ToolExecutionResult { return { ok: false, content: `${tool} is not available in this workspace.`, payload: { tool, reason: "not_configured" } }; }

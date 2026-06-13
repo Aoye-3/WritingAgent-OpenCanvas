@@ -52,6 +52,16 @@ $agentBackendBaseUrl = (Get-ConfigValue -Name "AGENT_BACKEND_BASE_URL" -DefaultV
 $runtimeUri = [uri] $agentBackendBaseUrl
 $runtimePort = $runtimeUri.Port
 $agentBackendEnabled = (Get-ConfigValue -Name "AGENT_BACKEND_ENABLED" -DefaultValue "false") -match "^(true|1)$"
+$configuredToolToken = Get-ConfigValue -Name "FACETWRITE_INTERNAL_TOOL_TOKEN"
+if ($configuredToolToken) {
+  $env:FACETWRITE_INTERNAL_TOOL_TOKEN = $configuredToolToken
+  $generatedToolToken = $false
+} elseif ($runtimeMode -eq "external") {
+  throw "FACETWRITE_INTERNAL_TOOL_TOKEN is required when using an external Agent Runtime."
+} else {
+  $env:FACETWRITE_INTERNAL_TOOL_TOKEN = [Guid]::NewGuid().ToString("N") + [Guid]::NewGuid().ToString("N")
+  $generatedToolToken = $true
+}
 
 if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { throw "npm.cmd was not found. Install Node.js 22 or newer." }
 if (-not $NoInstall -and -not (Test-Path -LiteralPath (Join-Path $root "node_modules"))) {
@@ -75,14 +85,20 @@ function Start-SelectedAgentRuntime {
   switch ($runtimeMode) {
     "local" {
       if (Test-HttpOk -Url "$agentBackendBaseUrl/health") {
-        Invoke-RuntimeScript -Script $localRuntimeScript -Action "status" -ExtraArgs @("-Port", "$runtimePort", "-BridgeBaseUrl", $bridgeBaseUrl)
-        return
+        if (-not $generatedToolToken) {
+          Invoke-RuntimeScript -Script $localRuntimeScript -Action "status" -ExtraArgs @("-Port", "$runtimePort", "-BridgeBaseUrl", $bridgeBaseUrl)
+          return
+        }
+        Invoke-RuntimeScript -Script $localRuntimeScript -Action "down" -ExtraArgs @("-Port", "$runtimePort", "-BridgeBaseUrl", $bridgeBaseUrl)
       }
       Invoke-RuntimeScript -Script $localRuntimeScript -Action "up" -ExtraArgs @("-Port", "$runtimePort", "-BridgeBaseUrl", $bridgeBaseUrl)
       $script:runtimeOwned = $true
     }
     "docker" {
-      if (Test-HttpOk -Url "$agentBackendBaseUrl/health") { return }
+      if (Test-HttpOk -Url "$agentBackendBaseUrl/health") {
+        if (-not $generatedToolToken) { return }
+        Invoke-RuntimeScript -Script $dockerRuntimeScript -Action "down"
+      }
       Invoke-RuntimeScript -Script $dockerRuntimeScript -Action "up"
       $script:runtimeOwned = $true
     }

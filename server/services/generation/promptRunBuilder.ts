@@ -43,7 +43,11 @@ export async function buildGenerationRunContext(
     contextValues: payload.contextValues,
     toolState: { ...runtimeConfig.settings.tools, ...payload.toolState }
   }).toolState;
-  const skills = await loadSkillsByRefs(agentCard.skillRefs);
+  const planPolicy = resolvePlanRequestPolicy(payload);
+  const planSkillRef = planPolicy.phase === "planning"
+    ? (payload.contextValues?.awaitingPlan ? "writing-plans" : "brainstorming")
+    : undefined;
+  const skills = await loadSkillsByRefs([...agentCard.skillRefs, ...(planSkillRef ? [planSkillRef] : [])]);
   const prompt = buildAgentPrompt({
     agentCard,
     skills,

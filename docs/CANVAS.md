@@ -23,7 +23,7 @@ The Canvas is the visual workspace where generated or user-authored writing arti
 The Canvas has two separate responsibilities:
 
 - Present and edit local node state in the browser.
-- Apply AI-proposed writes only after FacetWrite records a pending write request and the user confirms it.
+- Apply low-risk AI creates/appends directly and keep destructive replacements/deletes behind approval.
 
 ## Frontend Architecture
 `src/features/workspace/components/DocumentCanvas.tsx` is the Canvas V2 container. It uses `@xyflow/react` as the pan/zoom/drag engine and keeps the existing FacetWrite Canvas API as the persistence boundary.
@@ -47,7 +47,7 @@ Common node behavior is intentionally separated from node-kind content rendering
 
 Canvas state is also split by responsibility. `src/app/hooks/useCanvasState.ts` is the public composition hook, `useCanvasActions.ts` owns API operation orchestration, `useCanvasHistory.ts` owns the session undo stack, and pure history helpers live in `shared/canvasHistory.ts` for backend-compatible unit tests. Small action-state helpers live under `src/app/hooks/canvasActions/` so failure-prone state transitions can be tested without rendering React Flow.
 
-Future FigJam-style toolbar modes and contextual quick-bar actions should reuse these Canvas API and state boundaries. Direct user edits may call Canvas CRUD endpoints; Agent-originated edits must continue through approval-aware write request paths.
+Future FigJam-style toolbar modes and contextual quick-bar actions should reuse these Canvas API and state boundaries. Direct user edits may call Canvas CRUD endpoints. Agent-originated creates/appends use the server-controlled low-risk commit path; destructive edits continue through approval-aware write requests.
 
 ## Floating Toolbar And Saved Objects
 
@@ -187,20 +187,20 @@ Resize rules:
 - Persistence happens once on pointer release.
 
 ## Canvas Write Safety
-Agent and AgentBackend output must never mutate Canvas nodes directly.
+Agent and AgentBackend output must never mutate Canvas nodes outside the product-controlled Canvas tool path.
 
 The only safe write path is:
 
 ```text
-Agent/provider/AgentBackend intent
- -> canvas_write tool or explicit user write action
- -> canvas_write_requests row with status "pending"
- -> user confirmation or same-run explicit write intent
- -> approve endpoint
- -> canvas_nodes mutation
+explicit Canvas action recognized by the server
+ -> canvas_write forced once
+ -> create/append: validated direct commit with real projectId and nodeId
+ -> replace/replace_range/delete: pending approval
+ -> structured committed/pending/failed event
+ -> Canvas refresh and accurate conversation feedback
 ```
 
-Frontend Canvas features such as drag, resize, title edit, and content edit are direct user edits and may call Canvas node CRUD endpoints directly. AI-originated content changes must stay behind the write-request approval path.
+Frontend Canvas features such as drag, resize, title edit, and content edit are direct user edits and may call Canvas node CRUD endpoints directly. AI-originated content changes must stay behind the operation-level Canvas tool policy.
 
 ## Directed Edges And Mind Chains
 Canvas supports directed node edges stored separately from nodes. A connection from A to B means `A -> B` for mind-chain ordering. Edges are user-authored Canvas structure, not Agent-owned state.
@@ -286,7 +286,7 @@ Before claiming Canvas work is complete, verify:
 - Title/content edit persists after blur.
 - Node kind conversion preserves title, content, position, and size.
 - Delete removes the node.
-- `canvas_write` still creates pending requests only.
+- `canvas_write` creates/appends directly and keeps destructive operations pending.
 - Directed node edges persist and can be deleted.
 - Sending a mind chain populates the right collaboration composer without auto-sending, and deleted edges no longer pull disconnected nodes into that draft.
 - Note nodes are excluded from default AI context.
@@ -296,5 +296,15 @@ Before claiming Canvas work is complete, verify:
 - Pending Role suggestions render below the Role node, and accept/ignore/convert actions update their status.
 - Agent context is filtered by selected chain, workflow stage, and connected Role nodes before runtime execution.
 - Canvas undo works for node and edge operations up to the configured cache depth.
-- Approval still applies writes through the backend approve path.
+- Approval still applies destructive writes through the backend approve path.
 - QA nodes created during browser tests are deleted.
+
+## Plan Artifacts
+
+Conversation text is never automatically treated as a Canvas Artifact, and assistant messages do not expose a message-level write button. Explicit write commands, selected-text annotations, approved `canvas_write` proposals, and approved Plan `artifact_stage` deliveries remain supported. Plan artifacts use stable IDs and must belong to the currently running step.
+
+`kind:"plan"` nodes are server-controlled read-only projections of `PlanRun`. Users may move, resize, fold, or delete a projection, but ordinary Canvas creation/edit/copy/undo paths cannot create or change its content. Deleting a projection does not cancel the Plan; the projection endpoint can recreate it.
+Plan nodes are server-controlled read-only projections. They are created when a Plan becomes approval-ready and refreshed after step, Artifact, pause, failure, and completion changes. Deleting a Plan node deletes only the projection.
+Long Agent deliveries use stable delivery IDs. Structured text is split at headings, list items, and paragraph boundaries into readable document nodes, then connected with ordered `continues` edges. Retrying a delivery reuses existing nodes and edges.
+
+Ordinary conversation never writes automatically. A response with at least three top-level points may display a lightweight persisted suggestion; only user acceptance commits its nodes.

@@ -13,6 +13,12 @@ test("launcher defaults to the project-managed local Agent Runtime", () => {
   assert.match(launcher, /http:\/\/127\.0\.0\.1:8001/);
 });
 
+test("launcher shares one authenticated Tool Bridge token with managed services", () => {
+  assert.match(launcher, /FACETWRITE_INTERNAL_TOOL_TOKEN/);
+  assert.match(launcher, /generatedToolToken/);
+  assert.match(launcher, /Invoke-RuntimeScript -Script \$localRuntimeScript -Action "down"/);
+});
+
 test("launcher keeps Docker behind the explicit docker mode", () => {
   assert.match(launcher, /"docker" \{/);
   assert.match(launcher, /scripts\\agent-runtime\.ps1/);

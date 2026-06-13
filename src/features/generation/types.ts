@@ -12,13 +12,16 @@ export type GenerateRequest = {
   contextValues?: Record<string, unknown>;
   freeTextPrompt?: string;
   chatInstruction?: string;
-  toolState?: Partial<Record<"web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write" | "plan_update" | "artifact_stage", boolean>>;
+  toolState?: Partial<Record<"web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write" | "plan_update" | "plan_clarification_submit" | "plan_revision_submit" | "artifact_stage", boolean>>;
   systemPrompt?: string;
   modelOverrides?: {
     thinkingMode?: "enabled" | "disabled";
     reasoningEffort?: "high" | "max" | "low" | "medium" | "xhigh";
   };
   selectedCanvasNodeId?: string;
+  planPhase?: "intake" | "revise" | "execution";
+  planId?: string;
+  stepId?: string;
 };
 
 export type GenerateResponse = {
@@ -53,4 +56,5 @@ export type CollaborationMessage = {
   status?: StreamStatus["phase"] | "error";
   statusLabel?: string;
   createdAt?: string;
+  kind?: "message" | "activity";
 };

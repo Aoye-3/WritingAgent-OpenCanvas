@@ -83,6 +83,7 @@ function AppContent() {
     threadSession.setThreadId(state.thread.id);
     generationRun.setOutputVersions(state.outputVersions);
     generationRun.setToolEvents(state.toolEvents);
+    generationRun.setCanvasWriteSuggestions(state.canvasWriteSuggestions ?? []);
     canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? [], state.canvasWorkflow, state.canvasWorkflowSuggestions ?? [], state.canvasObjects ?? []);
     const latestVersion = state.outputVersions[0];
     generationRun.setActiveVersionId(latestVersion?.id);
@@ -180,6 +181,7 @@ function AppContent() {
     const state = await fetchThreadState(threadId);
     generationRun.setOutputVersions(state.outputVersions);
     generationRun.setToolEvents(state.toolEvents);
+    generationRun.setCanvasWriteSuggestions(state.canvasWriteSuggestions ?? []);
     generationRun.setActiveVersionId(state.outputVersions[0]?.id);
     canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? [], state.canvasWorkflow, state.canvasWorkflowSuggestions ?? [], state.canvasObjects ?? []);
     setActiveProjectTitle(state.thread.title);
@@ -377,6 +379,7 @@ function AppContent() {
         canvasEdges={canvasState.canvasEdges}
         canvasObjects={canvasState.canvasObjects}
         canvasWriteRequests={canvasState.canvasWriteRequests}
+        canvasWriteSuggestions={generationRun.canvasWriteSuggestions}
         canvasWorkflow={canvasState.canvasWorkflow}
         canvasWorkflowSuggestions={canvasState.canvasWorkflowSuggestions}
         selectedCanvasNodeId={canvasState.selectedCanvasNodeId}

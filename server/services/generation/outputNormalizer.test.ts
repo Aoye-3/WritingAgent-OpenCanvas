@@ -55,3 +55,38 @@ test("sanitizes historical leaked text at read time", () => {
   assert.equal(text.includes("# AgentCard"), false);
   assert.match(text, /内部运行信息/);
 });
+
+test("corrects false Canvas success claims when the write is still pending", () => {
+  const result = normalizeAgentRunOutput({
+    text: "The Canvas node was created successfully.",
+    locale: "en",
+    source: "agent-backend",
+    events: [{ eventType: "agent_backend_canvas_write_pending_approval", payload: { requestId: "write_1" } }]
+  });
+
+  assert.match(result.text, /waiting for your approval/i);
+  assert.doesNotMatch(result.text, /created successfully/i);
+});
+
+test("corrects false Canvas success claims when the mutation failed", () => {
+  const result = normalizeAgentRunOutput({
+    text: "已创建画布节点。",
+    locale: "zh",
+    source: "agent-backend",
+    events: [{ eventType: "agent_backend_canvas_mutation_failed", payload: { reason: "request_failed" } }]
+  });
+
+  assert.match(result.text, /未完成/);
+  assert.doesNotMatch(result.text, /已创建/);
+});
+
+test("creates an authoritative visible summary from a committed Canvas event", () => {
+  const result = normalizeAgentRunOutput({
+    text: "",
+    locale: "en",
+    source: "agent-backend",
+    events: [{ eventType: "agent_backend_canvas_mutation_committed", payload: { nodeId: "node_1", status: "committed" } }]
+  });
+
+  assert.match(result.text, /created or updated/i);
+});

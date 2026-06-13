@@ -12,7 +12,8 @@ test("server enforces planning-only tools for slash plan requests", () => {
     quick_messages: false,
     clear_context: false,
     canvas_write: false,
-    plan_update: true
+    plan_clarification_submit: true,
+    plan_revision_submit: false
   });
 });
 
@@ -24,17 +25,15 @@ test("server limits approved execution to the designated step", () => {
   });
   assert.equal(policy.phase, "execution");
   assert.equal(policy.executionStepId, "sources");
-  assert.equal(policy.toolState.plan_update, true);
   assert.equal(policy.toolState.artifact_stage, true);
   assert.equal(policy.toolState.web_search, true);
   assert.equal(policy.toolState.knowledge_base, true);
   assert.equal(policy.toolState.canvas_write, false);
 });
 
-test("ordinary chat preserves internal tools enabled in Agent settings", () => {
-  const policy = resolvePlanRequestPolicy({ chatInstruction: "Hello", toolState: { plan_update: true, artifact_stage: true, web_search: true } });
+test("ordinary chat does not expose Plan lifecycle tools", () => {
+  const policy = resolvePlanRequestPolicy({ chatInstruction: "Hello", toolState: { artifact_stage: true, web_search: true } });
   assert.equal(policy.phase, "chat");
-  assert.equal(policy.toolState.plan_update, true);
-  assert.equal(policy.toolState.artifact_stage, true);
+  assert.equal(policy.toolState.artifact_stage, false);
   assert.equal(policy.toolState.web_search, true);
 });

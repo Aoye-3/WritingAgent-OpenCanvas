@@ -25,6 +25,12 @@ test("local Agent Runtime preserves runtime paths and executable tools", () => {
   assert.match(script, /DEER_FLOW_EXTENSIONS_CONFIG_PATH/);
   assert.match(script, /DEER_FLOW_SKILLS_PATH/);
   assert.match(script, /FACETWRITE_INTERNAL_BASE_URL/);
+  assert.match(script, /FACETWRITE_INTERNAL_TOOL_TOKEN/);
+  assert.match(script, /toolTokenFingerprint/);
+  assert.match(script, /SHA256\]::Create/);
+  assert.match(script, /BitConverter\]::ToString/);
+  assert.doesNotMatch(script, /SHA256\]::HashData/);
+  assert.doesNotMatch(script, /Convert\]::ToHexString/);
   assert.match(script, /Join-Path \$root "\.env\.local"/);
   assert.match(script, /Assert-Command "node"/);
   assert.match(script, /Assert-Command "npx\.cmd"/);

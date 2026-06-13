@@ -60,10 +60,15 @@ export function createCanvasDomainService(storage: SQLiteStorageRepository) {
     },
 
     createNode(projectId: string, input: CanvasNodeInput) {
+      if (input.kind === "plan") throw new Error("Plan nodes are managed by the Plan runtime");
       return storage.createCanvasNode(projectId, input);
     },
 
     updateNode(projectId: string, nodeId: string, patch: CanvasNodePatch) {
+      const node = storage.listCanvasNodes(projectId).find((candidate) => candidate.id === nodeId);
+      if (node?.kind === "plan" && (patch.kind !== undefined || patch.title !== undefined || patch.content !== undefined || patch.metadata !== undefined || patch.includeInProjectContext !== undefined)) {
+        throw new Error("Plan node content is read-only");
+      }
       return storage.updateCanvasNode(projectId, nodeId, patch);
     },
 
@@ -101,6 +106,12 @@ export function createCanvasDomainService(storage: SQLiteStorageRepository) {
 
     createWriteRequest(projectId: string, input: CanvasWriteRequestInput) {
       return storage.createCanvasWriteRequest(projectId, input);
+    },
+    acceptWriteSuggestion(threadId: string, suggestionId: string) {
+      return storage.acceptCanvasWriteSuggestion(threadId, suggestionId);
+    },
+    dismissWriteSuggestion(threadId: string, suggestionId: string) {
+      return storage.dismissCanvasWriteSuggestion(threadId, suggestionId);
     },
 
     approveWriteRequest(projectId: string, requestId: string) {

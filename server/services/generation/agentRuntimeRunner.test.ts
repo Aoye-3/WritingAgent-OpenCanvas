@@ -30,7 +30,7 @@ test("reports a diagnostic when a successful runtime has neither text nor state 
       ...runtimeBase,
       run: async () => ({ text: "", finishReason: "agent_backend_completed", events: [] })
     }),
-    /no visible assistant text or structured Plan events/i
+    /no visible assistant text or structured lifecycle events/i
   );
 });
 
@@ -47,7 +47,7 @@ test("rejects a Plan planning run that answers directly without updating Plan st
         events: []
       })
     }),
-    /planning phase completed without a Plan state update/i
+    /planning phase completed without the required stage submission/i
   );
 });
 
@@ -92,4 +92,25 @@ test("rejects a Plan execution run that updates the step without committing a Ca
     }),
     /execution phase completed without committing a Canvas artifact/i
   );
+});
+
+test("accepts a Plan execution run after the current step artifact is committed", async () => {
+  const result = await runAgentRuntimeGeneration({
+      ...input,
+      payload: {
+        ...input.payload,
+        contextValues: { planExecution: { planId: "plan_1", stepId: "step_1" } }
+      }
+    }, {
+      ...runtimeBase,
+      run: async () => ({
+        text: "Artifact ready.",
+        finishReason: "agent_backend_completed",
+        events: [{
+          eventType: "agent_backend_artifact_committed",
+          payload: { planId: "plan_1", artifacts: [{ stepId: "step_1", status: "committed" }] }
+        }]
+      })
+    });
+  assert.equal(result?.text, "Artifact ready.");
 });

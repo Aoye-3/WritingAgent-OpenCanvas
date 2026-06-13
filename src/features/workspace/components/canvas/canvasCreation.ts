@@ -40,7 +40,7 @@ export function pointToCenteredOrigin(point: CanvasPoint, size: CanvasSize): Can
   };
 }
 
-export function createCanvasNodeDraft(tool: NodeCreationTool | CanvasNodeKind, point: CanvasPoint, locale: "en" | "zh"): CanvasNodeDraft {
+export function createCanvasNodeDraft(tool: NodeCreationTool, point: CanvasPoint, locale: "en" | "zh"): CanvasNodeDraft {
   const kind = nodeToolKinds[tool];
   const size = creationSizes[tool];
   const roleId = `role_${Date.now().toString(36)}`;

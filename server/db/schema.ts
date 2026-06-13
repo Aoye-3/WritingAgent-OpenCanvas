@@ -165,7 +165,7 @@ export function migrateStorageSchema(db: DatabaseSync) {
     CREATE TABLE IF NOT EXISTS plan_runs (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, thread_id TEXT NOT NULL, run_id TEXT,
       title TEXT NOT NULL, goal TEXT NOT NULL, status TEXT NOT NULL, approval TEXT NOT NULL,
-      status_message TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      status_message TEXT NOT NULL, clarification_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS plan_steps (
       id TEXT NOT NULL, plan_run_id TEXT NOT NULL, step_order INTEGER NOT NULL, title TEXT NOT NULL,
@@ -498,9 +498,99 @@ export function migrateStorageSchema(db: DatabaseSync) {
       INSERT INTO schema_version (version, applied_at) VALUES (5, datetime('now'));
     `);
   }
+
+  const version6 = db.prepare(`SELECT version FROM schema_version WHERE version = 6`).get();
+  if (!version6) {
+    if (!columnExists(db, "plan_runs", "clarification_json")) {
+      db.exec(`ALTER TABLE plan_runs ADD COLUMN clarification_json TEXT NOT NULL DEFAULT '{}'`);
+    }
+    db.exec(`INSERT INTO schema_version (version, applied_at) VALUES (6, datetime('now'))`);
+  }
+
+  const version7 = db.prepare(`SELECT version FROM schema_version WHERE version = 7`).get();
+  if (!version7) {
+    if (!columnExists(db, "plan_runs", "canvas_node_id")) {
+      db.exec(`ALTER TABLE plan_runs ADD COLUMN canvas_node_id TEXT`);
+    }
+    if (!columnExists(db, "plan_runs", "current_step_id")) {
+      db.exec(`ALTER TABLE plan_runs ADD COLUMN current_step_id TEXT`);
+    }
+    if (!columnExists(db, "plan_runs", "execution_version")) {
+      db.exec(`ALTER TABLE plan_runs ADD COLUMN execution_version INTEGER NOT NULL DEFAULT 0`);
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS plan_executions (
+        plan_run_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, status TEXT NOT NULL,
+        current_step_id TEXT, lease_owner TEXT, cancel_token TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 0,
+        started_at TEXT NOT NULL, paused_at TEXT, completed_at TEXT, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS run_activities (
+        id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, plan_run_id TEXT NOT NULL, run_id TEXT, step_id TEXT,
+        activity_type TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL, detail_json TEXT NOT NULL,
+        sequence INTEGER NOT NULL, created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_run_activities_plan_sequence ON run_activities(plan_run_id, sequence);
+      INSERT INTO schema_version (version, applied_at) VALUES (7, datetime('now'));
+    `);
+  }
+
+  const version8 = db.prepare(`SELECT version FROM schema_version WHERE version = 8`).get();
+  if (!version8) {
+    db.exec(`
+      UPDATE canvas_write_requests
+      SET project_id = (SELECT threads.project_id FROM threads WHERE threads.id = canvas_write_requests.project_id),
+          status = CASE
+            WHEN status = 'pending' AND operation IN ('create', 'append') THEN 'stale'
+            ELSE status
+          END,
+          updated_at = datetime('now')
+      WHERE EXISTS (SELECT 1 FROM threads WHERE threads.id = canvas_write_requests.project_id);
+      INSERT INTO schema_version (version, applied_at) VALUES (8, datetime('now'));
+    `);
+  }
+
+  const version9 = db.prepare(`SELECT version FROM schema_version WHERE version = 9`).get();
+  if (!version9) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS plan_executions (
+        plan_run_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, status TEXT NOT NULL,
+        current_step_id TEXT, lease_owner TEXT, lease_expires_at TEXT, last_heartbeat_at TEXT,
+        cancel_token TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 0,
+        started_at TEXT NOT NULL, paused_at TEXT, completed_at TEXT, updated_at TEXT NOT NULL
+      );
+    `);
+    if (!columnExists(db, "plan_executions", "lease_expires_at")) db.exec(`ALTER TABLE plan_executions ADD COLUMN lease_expires_at TEXT`);
+    if (!columnExists(db, "plan_executions", "last_heartbeat_at")) db.exec(`ALTER TABLE plan_executions ADD COLUMN last_heartbeat_at TEXT`);
+    db.exec(`INSERT INTO schema_version (version, applied_at) VALUES (9, datetime('now'))`);
+  }
+
+  const version10 = db.prepare(`SELECT version FROM schema_version WHERE version = 10`).get();
+  if (!version10) {
+    if (tableExists(db, "run_activities")) {
+      db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_run_activities_plan_sequence_unique ON run_activities(plan_run_id, sequence)`);
+    }
+    db.exec(`INSERT INTO schema_version (version, applied_at) VALUES (10, datetime('now'))`);
+  }
+
+  const version11 = db.prepare(`SELECT version FROM schema_version WHERE version = 11`).get();
+  if (!version11) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS canvas_write_suggestions (
+        id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, project_id TEXT NOT NULL, run_id TEXT NOT NULL,
+        status TEXT NOT NULL, items_json TEXT NOT NULL, node_ids_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_canvas_write_suggestions_thread ON canvas_write_suggestions(thread_id, created_at);
+      INSERT INTO schema_version (version, applied_at) VALUES (11, datetime('now'));
+    `);
+  }
 }
 
 function columnExists(db: DatabaseSync, table: string, column: string) {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
   return rows.some((row) => row.name === column);
+}
+
+function tableExists(db: DatabaseSync, table: string) {
+  return Boolean(db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`).get(table));
 }

@@ -586,3 +586,28 @@ Completed:
 Deferred:
 - Packaged executable, installer, signing, and automatic updates.
 - Native local Agent Runtime for machines without Docker.
+
+## 2026-06-12 - Structured Plan Chain
+
+- Added project-local `brainstorming` and `writing-plans` skills and forced phase loading.
+- Added persisted structured Plan clarification and Codex-style choice UI.
+- Added one-approval sequential execution with per-step committed Artifact enforcement.
+- Removed assistant-message-level Canvas write buttons while preserving explicit and approved write paths.
+- Added local Runtime source fingerprint reuse checks and metadata-aware status detection.
+## 2026-06-13 - Plan Orchestration And Feedback
+
+- Replaced broad model-driven Plan lifecycle calls with phase-scoped clarification/revision/artifact contracts.
+- Added persistent Plan execution/activity state, server-owned step advancement, pause/resume, stable Artifact completion checks, and read-only Canvas Plan projections.
+- Routed safe Plan/tool activity into the visible conversation timeline and removed the React multi-step execution loop.
+
+## 2026-06-13 - Agent Canvas Write Chain
+
+- Added deterministic Canvas action recognition and one-shot Runtime tool forcing.
+- Fixed the internal Bridge to resolve the real Project from the Thread.
+- Made create/append direct and idempotent while preserving destructive approval.
+- Added structured Canvas lifecycle events, accurate outcome summaries, and immediate frontend refresh feedback.
+- Added schema v8 orphan-request repair and stale protection.
+- Replaced repeated Plan tool forcing with stable phase attempt ids and stage-specific submissions.
+- Added server-created intake Plans, leased server-side sequential execution, startup recovery, compact activity rows, and visible Plan skill usage.
+- Removed the legacy model-callable `plan_update` catalog and runtime branch; historical Plan events remain read-only.
+- Added token-only internal Bridge authentication, sanitized Tool events, executor lease heartbeats, persistent Canvas write suggestions, and stable multi-node Artifact delivery.

@@ -2,6 +2,8 @@ import type { Locale } from "../promptBuilder.js";
 import type { ToolEventRecord } from "../toolRuntime.js";
 import type { Provider, ProviderId } from "../types.js";
 import type { ToolState } from "../toolRegistry.js";
+import type { CanvasAction } from "../services/generation/canvasActionPolicy.js";
+import type { OrchestrationPolicy } from "../services/generation/orchestrationPolicy.js";
 
 export type GenerateRequest = {
   mode: "faceted" | "freeText" | "structured" | "chat";
@@ -23,6 +25,18 @@ export type GenerateRequest = {
     reasoningEffort?: "high" | "max" | "low" | "medium" | "xhigh";
   };
   selectedCanvasNodeId?: string;
+  planPhase?: "intake" | "revise" | "execution";
+  planId?: string;
+  stepId?: string;
+  planGeneration?: {
+    phase: "intake" | "revise" | "execution";
+    planId: string;
+    stepId?: string;
+    phaseAttemptId: string;
+    executionVersion?: number;
+  };
+  canvasAction?: CanvasAction;
+  orchestrationPolicy?: OrchestrationPolicy;
 };
 
 export type GenerateResponse = {
@@ -70,6 +84,37 @@ export function parseGenerateRequest(value: unknown): GenerateRequest {
     providerId: readProviderId(body.providerId),
     modelOverrides: readModelOverrides(body.modelOverrides),
     selectedCanvasNodeId: readString(body.selectedCanvasNodeId)
+    ,planPhase: body.planPhase === "intake" || body.planPhase === "revise" || body.planPhase === "execution" ? body.planPhase : undefined
+    ,planId: readString(body.planId)
+    ,stepId: readString(body.stepId)
+    ,planGeneration: readPlanGeneration(body.planGeneration)
+    ,canvasAction: readCanvasAction(body.canvasAction)
+    ,orchestrationPolicy: readOrchestrationPolicy(body.orchestrationPolicy)
+  };
+}
+
+function readOrchestrationPolicy(value: unknown): OrchestrationPolicy | undefined {
+  const record = readUnknownRecord(value);
+  if (!record) return undefined;
+  if (record.mode !== "direct" && record.mode !== "guided" && record.mode !== "managed_plan") return undefined;
+  if (record.trigger !== "ordinary" && record.trigger !== "explicit_plan") return undefined;
+  if (record.clarificationPolicy !== "when_needed" && record.clarificationPolicy !== "required_once") return undefined;
+  if (record.deliveryPolicy !== "conversation_only" && record.deliveryPolicy !== "canvas_required") return undefined;
+  return record as OrchestrationPolicy;
+}
+
+function readPlanGeneration(value: unknown): GenerateRequest["planGeneration"] {
+  const record = readUnknownRecord(value);
+  const phase = record?.phase;
+  const planId = readString(record?.planId);
+  const phaseAttemptId = readString(record?.phaseAttemptId);
+  if ((phase !== "intake" && phase !== "revise" && phase !== "execution") || !planId || !phaseAttemptId) return undefined;
+  return {
+    phase,
+    planId,
+    phaseAttemptId,
+    stepId: readString(record?.stepId),
+    executionVersion: typeof record?.executionVersion === "number" ? record.executionVersion : undefined
   };
 }
 
@@ -112,4 +157,22 @@ function readModelOverrides(value: unknown): GenerateRequest["modelOverrides"] {
   const reasoningEffort = effort === "high" || effort === "max" || effort === "low" || effort === "medium" || effort === "xhigh" ? effort : undefined;
   if (!thinkingMode && !reasoningEffort) return undefined;
   return { thinkingMode, reasoningEffort };
+}
+
+function readCanvasAction(value: unknown): CanvasAction | undefined {
+  const record = readUnknownRecord(value);
+  if (!record) return undefined;
+  const operation = record.operation;
+  const risk = record.risk;
+  if (operation !== "create" && operation !== "append" && operation !== "replace" && operation !== "replace_range" && operation !== "delete") return undefined;
+  if (risk !== "low" && risk !== "high") return undefined;
+  const id = readString(record.id);
+  if (!id) return undefined;
+  return {
+    id,
+    operation,
+    risk,
+    requiresTool: record.requiresTool === true,
+    targetNodeId: readString(record.targetNodeId)
+  };
 }

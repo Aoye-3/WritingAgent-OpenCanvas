@@ -33,7 +33,7 @@ import { createCanvasObjectDraft, type CanvasShapeId } from "../../../../shared/
 import { CanvasAssetInput, CanvasToolOverlays } from "./canvas/CanvasToolOverlays";
 import { CanvasCreationPreview } from "./canvas/CanvasCreationPreview";
 import { createCanvasNodeDraft, getCanvasCreationSize, isPreviewCreationTool, pointToCenteredOrigin } from "./canvas/canvasCreation";
-import { CANVAS_CLIPBOARD_MIME, createCanvasClipboardPayload, type CanvasClipboardPayload } from "../../../../shared/canvasClipboard";
+import { CANVAS_CLIPBOARD_MIME, createCanvasClipboardPayload, type CanvasClipboardPayload, type ClipboardNodeDraft } from "../../../../shared/canvasClipboard";
 
 type DocumentCanvasProps = {
   activeTool: CanvasTool;
@@ -191,6 +191,7 @@ function DocumentCanvasInner({
 
   const createNode = async (kind: CanvasNodeKind) => {
     if (!menu) return;
+    if (kind === "plan") return;
     setMenu(null);
     await onCreateNode(createCanvasNodeDraft(kind, { x: menu.canvasX, y: menu.canvasY }, locale));
   };
@@ -255,7 +256,7 @@ function DocumentCanvasInner({
     const isEditable = (target: EventTarget | null) => target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable);
     const copy = (event: ClipboardEvent) => {
       if (isEditable(event.target)) return;
-      const copiedNodes = nodes.filter((node) => selectedNodeIds.includes(node.id));
+      const copiedNodes = nodes.filter((node): node is CanvasNode & ClipboardNodeDraft => selectedNodeIds.includes(node.id) && node.kind !== "plan");
       const copiedObjects = objects.filter((object) => selectedObjectIds.includes(object.id));
       if (copiedNodes.length === 0 && !copiedObjects.some((object) => object.kind === "text")) return;
       const payload = createCanvasClipboardPayload({ nodes: copiedNodes, objects: copiedObjects, edges });

@@ -29,7 +29,7 @@ import {
   type CanvasWriteRequestDraft
 } from "../../features/canvas/canvasClient";
 import type { CanvasRangeRewriteDraft } from "../../features/canvas/canvasClient";
-import { createInverseCanvasNodePatch, createInverseCanvasObjectPatch, type CanvasHistoryEntry } from "../../../shared/canvasHistory";
+import { createInverseCanvasNodePatch, createInverseCanvasObjectPatch, type CanvasHistoryEntry, type CanvasHistoryNode, type CanvasHistoryNodePatch } from "../../../shared/canvasHistory";
 import { removeCanvasNodeFromState } from "./canvasActions/state";
 import { placeCanvasClipboardPayload, type CanvasClipboardPayload } from "../../../shared/canvasClipboard";
 import type { CanvasPoint, CanvasTextObject } from "../../../shared/canvasObjects";
@@ -96,8 +96,8 @@ export function useCanvasActions({
     const previous = canvasNodes.find((node) => node.id === nodeId);
     const node = await updateCanvasNode(threadId, nodeId, patch);
     setCanvasNodes((current) => current.map((item) => item.id === node.id ? node : item));
-    if (previous && options.recordHistory !== false) {
-      pushHistory({ kind: "updateNode", nodeId, patch: createInverseCanvasNodePatch(previous, patch) });
+    if (previous && previous.kind !== "plan" && options.recordHistory !== false) {
+      pushHistory({ kind: "updateNode", nodeId, patch: createInverseCanvasNodePatch(previous as CanvasHistoryNode, patch as CanvasHistoryNodePatch) });
     }
     await onRefreshProjectSurfaces();
     return node;
@@ -111,7 +111,7 @@ export function useCanvasActions({
     setCanvasNodes((current) => removeCanvasNodeFromState({ nodeId, nodes: current, edges: canvasEdges }).nodes);
     setCanvasEdges((current) => removeCanvasNodeFromState({ nodeId, nodes: canvasNodes, edges: current }).edges);
     setSelectedCanvasNodeId((current) => removeCanvasNodeFromState({ nodeId, nodes: canvasNodes, edges: canvasEdges, selectedNodeId: current }).selectedNodeId);
-    if (previous && options.recordHistory !== false) pushHistory({ kind: "restoreNode", node: previous, edges: attachedEdges });
+    if (previous && previous.kind !== "plan" && options.recordHistory !== false) pushHistory({ kind: "restoreNode", node: previous as CanvasHistoryNode, edges: attachedEdges });
     await onRefreshProjectSurfaces();
   };
 

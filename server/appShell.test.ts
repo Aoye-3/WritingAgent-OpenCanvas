@@ -24,6 +24,8 @@ test("Electron shell owns fixed non-reserved development ports and shutdown", ()
   assert.match(main, /resolveRuntimeMode/);
   assert.match(main, /agent-runtime-local\.ps1/);
   assert.match(main, /runDetachedCommand/);
+  assert.match(main, /FACETWRITE_INTERNAL_TOOL_TOKEN:\s*internalToolToken/);
+  assert.match(main, /toolTokenFingerprint/);
   assert.doesNotMatch(main, /Docker Desktop\.exe/);
 });
 
@@ -51,6 +53,7 @@ test("Agent Runtime compose profiles accept the shell callback URL", () => {
     "modules/agent-runtime/docker/docker-compose-local-images.yaml",
   ]) {
     assert.match(read(file), /FACETWRITE_INTERNAL_BASE_URL=\$\{FACETWRITE_INTERNAL_BASE_URL:-http:\/\/host\.docker\.internal:8837\}/);
+    assert.match(read(file), /FACETWRITE_INTERNAL_TOOL_TOKEN=\$\{FACETWRITE_INTERNAL_TOOL_TOKEN:\?FACETWRITE_INTERNAL_TOOL_TOKEN is required\}/);
   }
 });
 

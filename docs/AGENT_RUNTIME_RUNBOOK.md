@@ -52,7 +52,7 @@ npm.cmd run agent-runtime:docker:down
 
 Local mode uses `deerflow.sandbox.local:LocalSandboxProvider` with `allow_host_bash: false`. It preserves Gateway auth/cookies/CSRF, `/api/runs/stream`, Skills and hot reload, stdio/HTTP/SSE MCP, Memory/SQLite/uploads/events, web search, providers, ACP, subagents, and the FacetWrite bridge tools `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write`.
 
-`canvas_write` may only create a pending request; FacetWrite approval remains the only product-data mutation path.
+`canvas_write` directly commits low-risk create and append operations with stable IDs. Replace, range replacement, delete, and other destructive operations remain approval-gated.
 
 These remain Docker-specific and are not claimed as local equivalents: `AioSandboxProvider`, Kubernetes Provisioner, Docker socket/Docker-out-of-Docker, and Bash Skills that require Linux containers.
 
@@ -71,7 +71,7 @@ The maintained end-to-end local acceptance is:
 npm.cmd run acceptance:local-runtime
 ```
 
-It starts from `start-opencanvas-shell.vbs`, requires Docker and port `2026` to remain absent, and verifies five UI generations with `provider:"agent-backend"` and `usedMock:false`. It then verifies a Skill-driven `read_file` followed by live `web_search`, Agent Runtime `memory.json` persistence, visible tool start/completion events, and a `canvas_write` pending request without a direct Canvas mutation.
+It starts from `start-opencanvas-shell.vbs`, requires Docker and port `2026` to remain absent, and verifies five UI generations with `provider:"agent-backend"` and `usedMock:false`. It then verifies a Skill-driven `read_file` followed by live `web_search`, Agent Runtime `memory.json` persistence, visible tool start/completion events, low-risk Canvas commits, and destructive Canvas approval.
 
 ## Troubleshooting
 
@@ -87,8 +87,8 @@ It starts from `start-opencanvas-shell.vbs`, requires Docker and port `2026` to 
 - Deliberate local Mock demonstration only: set `FACETWRITE_MOCK_FALLBACK_ENABLED=true`; unset it before real Runtime verification.
 # Plan Runtime Enforcement
 
-FacetWrite passes `facetwrite_plan_phase` (`chat`, `planning`, or `execution`) in both LangGraph configurable context and runtime context. `PlanToolChoiceMiddleware` forces the first planning call to `plan_update`. During execution it permits research tools, but intercepts a text-only finish before `artifact_stage` and forces the artifact call.
+FacetWrite passes a stable Plan phase attempt in both LangGraph configurable context and runtime context. `PlanToolChoiceMiddleware` permits at most one stage submission per attempt: `plan_clarification_submit` for intake, `plan_revision_submit` for revision, and `artifact_stage` for the current approved execution step.
 
-The TypeScript runtime boundary independently requires a Plan state event during planning and an `artifact_committed` event for every successful execution unit. `plan_waiting_for_user` and `plan_failed` are valid no-artifact exits. This prevents models with weak or inconsistent tool calling from bypassing the task board or completing without writing Canvas output.
+The TypeScript `PlanOrchestrator` owns lifecycle state and the persistent `PlanExecutor` owns sequential execution. It requires an `artifact_committed` event for every successful execution unit, persists safe activities including active skills such as `brainstorming` and `writing-plans`, and pauses recoverably on protocol failure. The legacy broad `plan_update` model path is not part of the maintained Plan protocol.
 
 After changing AgentBackend middleware, restart the local Gateway; `agent:up` reuses a healthy process and does not hot-reload Python modules.

@@ -2,26 +2,32 @@ import type { GenerateRequest } from "../../contracts/generation.js";
 import type { ToolState } from "../../toolRegistry.js";
 
 export type PlanRequestPhase = "chat" | "planning" | "execution";
+export type PlanRequestStage = "chat" | "intake" | "revise" | "execution";
 
-export function resolvePlanRequestPolicy(payload: Pick<GenerateRequest, "chatInstruction" | "contextValues" | "toolState">) {
+export function resolvePlanRequestPolicy(payload: Pick<GenerateRequest, "chatInstruction" | "contextValues" | "toolState" | "planPhase" | "planId" | "stepId">) {
   const execution = record(payload.contextValues?.planExecution);
   const executionStepId = string(execution.stepId);
-  const isPlanning = /^\s*\/plan\b/i.test(payload.chatInstruction ?? "") || Boolean(payload.contextValues?.awaitingPlan);
-  const phase: PlanRequestPhase = executionStepId ? "execution" : isPlanning ? "planning" : "chat";
-  return { phase, executionStepId, toolState: toolsForPhase(payload.toolState ?? {}, phase) };
+  const awaitingPlan = record(payload.contextValues?.awaitingPlan);
+  const orchestration = record(payload.contextValues?.orchestrationPolicy);
+  const isPlanning = /^\s*\/plan\b/i.test(payload.chatInstruction ?? "") || Boolean(awaitingPlan.id) || orchestration.mode === "managed_plan";
+  const explicitStage = payload.planPhase;
+  const phase: PlanRequestPhase = explicitStage === "execution" || executionStepId ? "execution" : explicitStage === "intake" || explicitStage === "revise" || isPlanning ? "planning" : "chat";
+  const stage: PlanRequestStage = explicitStage ?? (phase === "execution" ? "execution" : phase === "planning" ? (string(awaitingPlan.id) ? "revise" : "intake") : "chat");
+  return { phase, stage, executionStepId: payload.stepId ?? executionStepId, toolState: toolsForStage(payload.toolState ?? {}, stage) };
 }
 
-export function planPhaseSystemPrompt(payload: Pick<GenerateRequest, "chatInstruction" | "contextValues" | "toolState">) {
+export function planPhaseSystemPrompt(payload: Pick<GenerateRequest, "chatInstruction" | "contextValues" | "toolState" | "planPhase" | "planId" | "stepId">) {
   const policy = resolvePlanRequestPolicy(payload);
   if (policy.phase === "planning") {
     const awaiting = record(payload.contextValues?.awaitingPlan);
-    const planId = string(awaiting.id);
+    const planId = payload.planId ?? string(awaiting.id);
     return [
       "# Plan Phase Policy",
       "This request is planning-only. Do not search the web, browse, write Canvas content, or execute task steps.",
       planId
-        ? `Continue planning on the existing plan ${planId}. Use plan_update(action=\"revise\") to update that same plan; never create a replacement plan.`
-        : "Analyze the user's intent. If material scope is missing, create a preliminary plan and then call plan_update(action=\"request_input\") with one concise user-facing question. If scope is sufficient, create the ordered plan for approval.",
+        ? `Continue planning on the existing plan ${planId}. Submit exactly one plan_revision_submit result for that same plan; never create a replacement plan.`
+        : "Apply the brainstorming skill. Submit exactly one plan_clarification_submit result containing 2-3 mutually exclusive options and exactly one recommended option. Do not create an approval-ready plan yet.",
+      planId ? "Apply the writing-plans skill and produce a short approval-ready sequential plan." : "Stop immediately after requesting input.",
       "Stop after requesting input or producing an approval-ready plan. User approval is required before execution."
     ].join("\n");
   }
@@ -29,16 +35,16 @@ export function planPhaseSystemPrompt(payload: Pick<GenerateRequest, "chatInstru
     const execution = record(payload.contextValues?.planExecution);
     return [
       "# Plan Execution Policy",
-      `Execute only plan ${string(execution.planId)} step ${policy.executionStepId}. Do not start or complete any other step in this run.`,
-      "Mark this step running before work. Stage durable text/image artifacts for this step as soon as they are ready, then mark only this step completed.",
+      `Execute only plan ${payload.planId ?? string(execution.planId)} step ${policy.executionStepId}. Do not start or complete any other step in this run.`,
+      "The product runtime owns step status. Stage durable text/image artifacts for this step as soon as they are ready.",
       "If essential information is missing, request user input and stop. Do not finish the whole plan unless no steps remain."
     ].join("\n");
   }
   return "";
 }
 
-function toolsForPhase(current: ToolState, phase: PlanRequestPhase): ToolState {
-  if (phase === "planning") {
+function toolsForStage(current: ToolState, stage: PlanRequestStage): ToolState {
+  if (stage === "intake" || stage === "revise") {
     return {
       web_search: false,
       artifact_stage: false,
@@ -46,21 +52,28 @@ function toolsForPhase(current: ToolState, phase: PlanRequestPhase): ToolState {
       quick_messages: false,
       clear_context: false,
       canvas_write: false,
-      plan_update: true
+      plan_clarification_submit: stage === "intake",
+      plan_revision_submit: stage === "revise"
     };
   }
-  if (phase === "execution") {
+  if (stage === "execution") {
     return {
       ...current,
       quick_messages: false,
       clear_context: false,
       canvas_write: false,
-      plan_update: true,
+      plan_clarification_submit: false,
+      plan_revision_submit: false,
       artifact_stage: true,
       web_search: true
     };
   }
-  return { ...current };
+  return {
+    ...current,
+    plan_clarification_submit: false,
+    plan_revision_submit: false,
+    artifact_stage: false
+  };
 }
 
 function record(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }

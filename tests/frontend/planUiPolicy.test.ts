@@ -4,14 +4,13 @@ import { buildRequestToolState, visibleComposerTools } from "../../src/features/
 
 test("composer hides internal orchestration tools and keeps one dedicated Plan entry", () => {
   assert.deepEqual(
-    visibleComposerTools(["web_search", "plan_update", "artifact_stage", "canvas_write", "clear_context"]),
+    visibleComposerTools(["web_search", "artifact_stage", "canvas_write", "clear_context"]),
     ["web_search"]
   );
 });
 
-test("ordinary chat preserves Agent-configured Plan orchestration tools", () => {
-  assert.deepEqual(buildRequestToolState({ plan_update: true, artifact_stage: true, web_search: true }, { kind: "chat" }), {
-    plan_update: true,
+test("ordinary chat preserves Agent-configured tools", () => {
+  assert.deepEqual(buildRequestToolState({ artifact_stage: true, web_search: true }, { kind: "chat" }), {
     artifact_stage: true,
     web_search: true,
     quick_messages: true,
@@ -26,12 +25,12 @@ test("planning and execution expose only their phase-specific tools", () => {
     canvas_write: false,
     web_search: false,
     artifact_stage: false,
-    plan_update: true
+    plan_clarification_submit: true,
+    plan_revision_submit: true
   });
   assert.deepEqual(buildRequestToolState({}, { kind: "execution" }), {
     quick_messages: false,
     canvas_write: false,
-    plan_update: true,
     artifact_stage: true,
     web_search: true
   });

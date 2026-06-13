@@ -15,13 +15,13 @@ import { registerAgentBackendRoutes } from "./routes/agentBackendRoutes.js";
 import { registerAgentRuntimeRoutes } from "./routes/agentRuntimeRoutes.js";
 import { registerGenerationRoutes } from "./routes/generationRoutes.js";
 import { registerHealthRoutes } from "./routes/healthRoutes.js";
-import { registerInternalAgentBackendRoutes } from "./routes/internalAgentBackendRoutes.js";
 import { registerInternalAgentRuntimeRoutes } from "./routes/internalAgentRuntimeRoutes.js";
 import { registerKnowledgeRoutes } from "./routes/knowledgeRoutes.js";
 import { registerProjectRoutes } from "./routes/projectRoutes.js";
 import { registerSettingsRoutes } from "./routes/settingsRoutes.js";
 import { registerThreadRoutes } from "./routes/threadRoutes.js";
 import { registerPlanRoutes } from "./routes/planRoutes.js";
+import { PlanExecutor } from "./services/planExecutor.js";
 import { syncConfiguredModelsToAgentBackend } from "./runtime/agentBackendAdapter/modelSync.js";
 
 export async function createApp() {
@@ -33,6 +33,7 @@ export async function createApp() {
   const memoryService = new AgentRuntimeMemoryService();
   const canvasService = createCanvasDomainService(storage);
   const generationService = createGenerationService(storage, agentRuntime, { agentRuntime: executionRuntime, knowledge: knowledgeService, memory: memoryService });
+  const planExecutor = new PlanExecutor(storage, (payload) => generationService.generateAndRecord(payload));
 
   storage.upsertAgentCards(agentCards);
   await syncConfiguredModelsToAgentBackend().catch((error) => {
@@ -44,18 +45,18 @@ export async function createApp() {
 
   registerHealthRoutes(app);
   registerInternalAgentRuntimeRoutes(app, { storage, knowledgeService });
-  registerInternalAgentBackendRoutes(app, { storage, knowledgeService });
   registerAgentRuntimeRoutes(app, { agentRuntime, executionRuntime, memoryService });
   registerAgentBackendRoutes(app, { agentRuntime, executionRuntime, memoryService });
   registerKnowledgeRoutes(app, { knowledgeService });
   registerCatalogRoutes(app);
   registerAgentRoutes(app, { agentRuntime });
   registerThreadRoutes(app, { storage, agentRuntime });
-  registerPlanRoutes(app, storage);
+  registerPlanRoutes(app, storage, planExecutor);
   registerProjectRoutes(app, { storage, agentRuntime });
   registerCanvasRoutes(app, { canvasService });
   registerSettingsRoutes(app, { storage });
   registerGenerationRoutes(app, { generationService, canvasService });
+  storage.listRunnablePlanExecutions().forEach(({ threadId, planId }) => planExecutor.wake(threadId, planId));
 
   return app;
 }

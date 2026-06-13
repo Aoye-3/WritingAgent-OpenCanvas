@@ -17,6 +17,14 @@ $pidPath = Join-Path $logsRoot "agent-runtime-local.pid"
 $metadataPath = Join-Path $logsRoot "agent-runtime-local.json"
 $stdoutPath = Join-Path $logsRoot "gateway-local.out.log"
 $stderrPath = Join-Path $logsRoot "gateway-local.err.log"
+
+if ($Action -eq "status" -and (Test-Path -LiteralPath $metadataPath)) {
+  try {
+    $statusMetadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+    $Port = [int] $statusMetadata.port
+    $BridgeBaseUrl = [string] $statusMetadata.bridgeBaseUrl
+  } catch {}
+}
 $healthUrl = "http://127.0.0.1:$Port/health"
 
 if (-not $BridgeBaseUrl) {
@@ -51,12 +59,23 @@ function Remove-OwnershipFiles {
   Remove-Item -LiteralPath $metadataPath -Force -ErrorAction SilentlyContinue
 }
 
+function Get-ToolTokenFingerprint {
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($env:FACETWRITE_INTERNAL_TOOL_TOKEN)
+    return ([System.BitConverter]::ToString($sha256.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
+  } finally {
+    $sha256.Dispose()
+  }
+}
+
 function Assert-CompatibleOwner {
   $metadata = Read-Metadata
   if (-not $metadata) {
     throw "Port $Port already serves an unmanaged Agent Runtime. Stop it or use AGENT_RUNTIME_MODE=external."
   }
-  if ($metadata.projectRoot -ne $root -or [int] $metadata.port -ne $Port -or $metadata.bridgeBaseUrl -ne $BridgeBaseUrl) {
+  $tokenFingerprint = Get-ToolTokenFingerprint
+  if ($metadata.projectRoot -ne $root -or [int] $metadata.port -ne $Port -or $metadata.bridgeBaseUrl -ne $BridgeBaseUrl -or $metadata.toolTokenFingerprint -ne $tokenFingerprint) {
     throw "The running local Agent Runtime uses incompatible project, port, or FacetWrite bridge settings."
   }
 }
@@ -133,6 +152,9 @@ function Initialize-Environment {
   New-Item -ItemType Directory -Path $env:UV_CACHE_DIR -Force | Out-Null
   New-Item -ItemType Directory -Path $env:UV_PYTHON_INSTALL_DIR -Force | Out-Null
   Import-DotEnv
+  if (-not $env:FACETWRITE_INTERNAL_TOOL_TOKEN) {
+    throw "FACETWRITE_INTERNAL_TOOL_TOKEN is required so the Agent Runtime can authenticate to the FacetWrite Tool bridge."
+  }
 
   $node = Assert-Command "node" "Install Node.js 22 or newer."
   $npm = Assert-Command "npm.cmd" "Install Node.js 22 or newer."
@@ -230,15 +252,31 @@ switch ($Action) {
       Pop-Location
     }
 
-    Set-Content -LiteralPath $pidPath -Value $process.Id -Encoding ascii
-    $metadataJson = @{
-      pid = $process.Id
-      projectRoot = $root
-      port = $Port
-      bridgeBaseUrl = $BridgeBaseUrl
-      startedAt = (Get-Date).ToUniversalTime().ToString("o")
-    } | ConvertTo-Json
-    [System.IO.File]::WriteAllText($metadataPath, $metadataJson, [System.Text.UTF8Encoding]::new($false))
+    try {
+      Set-Content -LiteralPath $pidPath -Value $process.Id -Encoding ascii
+      $sourceNewest = (Get-ChildItem -Path @(
+        (Join-Path $backendRoot "app"),
+        (Join-Path $backendRoot "packages\harness"),
+        (Join-Path $runtimeRoot "skills"),
+        (Join-Path $runtimeRoot "config.yaml")
+      ) -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
+        $_.Extension -in @(".py", ".md", ".yaml", ".yml", ".json", ".toml") -and $_.FullName -notmatch "\\(__pycache__|\.pytest_cache|\.uv-cache|\.venv|node_modules)\\"
+      } | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).LastWriteTimeUtc
+      $sourceFingerprint = [DateTimeOffset]::new($sourceNewest).ToUnixTimeMilliseconds().ToString()
+      $metadataJson = @{
+        pid = $process.Id
+        projectRoot = $root
+        port = $Port
+        bridgeBaseUrl = $BridgeBaseUrl
+        startedAt = (Get-Date).ToUniversalTime().ToString("o")
+        sourceFingerprint = $sourceFingerprint
+        toolTokenFingerprint = Get-ToolTokenFingerprint
+      } | ConvertTo-Json
+      [System.IO.File]::WriteAllText($metadataPath, $metadataJson, [System.Text.UTF8Encoding]::new($false))
+    } catch {
+      Stop-OwnedRuntime
+      throw
+    }
 
     for ($attempt = 0; $attempt -lt 90; $attempt++) {
       if (Test-HttpOk) {

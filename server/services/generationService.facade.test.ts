@@ -7,6 +7,7 @@ import type { ChatClient } from "../providerRuntime.js";
 import type { SQLiteStorageRepository } from "../storage.js";
 import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
 import type { KnowledgeSearchInput } from "../knowledge/service.js";
+import { resolveCanvasAction } from "./generation/canvasActionPolicy.js";
 
 function runtimeConfig(): AgentRuntimeConfig {
   const agentCard = agentCards[0];
@@ -85,6 +86,12 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
       getProject: () => ({ id: "project_test", title: "Test", summary: "", updatedAt: "" }),
       getProjectModelBindings: () => ["configured-test"],
       getProjectSharedContext: () => undefined,
+      createPlanIntake: () => ({ id: "plan_intake_test" }),
+      getPlanRun: (_threadId: string, planId: string) => planId === "plan_intake_test"
+        ? { id: planId, status: "draft", steps: [], artifacts: [] }
+        : undefined,
+      listPlanRuns: () => [{ id: "plan_intake_test", status: "draft" }],
+      recordPlanActivity: () => undefined,
       listMessages: () => messages.map((message, index) => ({
         id: `msg_${index}`,
         threadId: "thread_test",
@@ -212,7 +219,8 @@ test("generation facade does not copy assistant text into Canvas without a tool 
     locale: "zh",
     agentCardId: "blog-post",
     chatInstruction: "帮我写个关于气候变暖的播客，300字。放到画板里。",
-    toolState: { canvas_write: true }
+    toolState: { canvas_write: true },
+    canvasAction: { id: "canvas_action_not_required", operation: "delete", risk: "high", requiresTool: false }
   });
 
   assert.equal(canvasWriteRequests.length, 0);
@@ -227,7 +235,7 @@ test("generation facade does not copy assistant text into Canvas without a tool 
   assert.ok((records[0] as { events: Array<{ payload: { tool?: string; requestId?: string } }> }).events.some((event) => event.payload.tool === "canvas_write" && event.payload.requestId === "write_1"));
 });
 
-test("Canvas intent phrases do not bypass explicit tools", async () => {
+test("explicit Canvas intent requires a structured Canvas tool result", async () => {
   for (const chatInstruction of ["请写入画板", "save to canvas", "write this"]) {
     const { storage, canvasWriteRequests } = fakeStorage();
     const service = createGenerationService(storage, fakeAgentRuntime(), {
@@ -242,17 +250,20 @@ test("Canvas intent phrases do not bypass explicit tools", async () => {
       }
     });
 
-    await service.generateAndRecord({
+    const generate = () => service.generateAndRecord({
       mode: "chat",
       locale: "zh",
       agentCardId: "blog-post",
       chatInstruction,
       toolState: { canvas_write: true }
     });
+    if (resolveCanvasAction({ threadId: "test", instruction: chatInstruction })) {
+      await assert.rejects(generate, /Canvas action completed without a committed node or pending approval request/);
+    } else {
+      await generate();
+    }
 
     assert.equal(canvasWriteRequests.length, 0);
-    continue;
-    assert.equal((canvasWriteRequests[0] as { content: string }).content, "Reusable answer");
   }
 });
 
@@ -304,6 +315,30 @@ test("generation facade exposes runtime failure without recording a mock result 
     (error: unknown) => (error as { code?: string }).code === "runtime_unavailable"
   );
   assert.equal(records.length, 0);
+});
+
+test("generation facade reports Plan protocol violations without labeling them as runtime fallback", async () => {
+  const { storage } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => {
+        throw new Error("Plan planning phase completed without a Plan state update.");
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => service.generateAndRecord(
+      { mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "/plan Compare laptops" },
+      (event) => events.push(event)
+    ),
+    /Plan planning phase completed/
+  );
+  assert.equal(events.at(-1)?.eventType, "agent_backend_plan_protocol_failed");
+  assert.equal(events.at(-1)?.payload.fallback, "none");
 });
 
 test("generation facade blocks AgentBackend internal prompt output before recording", async () => {

@@ -102,22 +102,48 @@ export class SQLiteStorageRepository {
     this.plans = new PlanRepository(this.db);
   }
 
-  createPlanRun(threadId: string, input: Parameters<PlanRepository["create"]>[1]) { return this.plans.create(threadId, input); }
-  revisePlanRun(threadId: string, planId: string, input: Parameters<PlanRepository["revise"]>[2]) { return this.plans.revise(threadId, planId, input); }
+  createPlanRun(threadId: string, input: Parameters<PlanRepository["create"]>[1]) {
+    const plan = this.plans.create(threadId, input);
+    return plan.status === "awaiting_approval" ? this.syncPlanCanvasProjection(threadId, plan.id) ?? plan : plan;
+  }
+  createPlanIntake(threadId: string, input: Parameters<PlanRepository["createIntake"]>[1]) { return this.plans.createIntake(threadId, input); }
+  submitPlanClarification(threadId: string, planId: string, clarification: import("./storageTypes.js").PlanClarification) { return this.plans.submitClarification(threadId, planId, clarification); }
+  revisePlanRun(threadId: string, planId: string, input: Parameters<PlanRepository["revise"]>[2]) {
+    const plan = this.plans.revise(threadId, planId, input);
+    return plan ? this.syncPlanCanvasProjection(threadId, plan.id) : undefined;
+  }
   listPlanRuns(threadId: string) { return this.plans.list(threadId); }
   getPlanRun(threadId: string, planId: string) { return this.plans.get(threadId, planId); }
-  approvePlanRun(threadId: string, planId: string) { return this.plans.setStatus(threadId, planId, "running", "approved"); }
-  cancelPlanRun(threadId: string, planId: string) { return this.plans.setStatus(threadId, planId, "cancelled", "rejected"); }
+  approvePlanRun(threadId: string, planId: string) { const plan = this.plans.approve(threadId, planId); return plan ? this.syncPlanCanvasProjection(threadId, planId) : undefined; }
+  pausePlanRun(threadId: string, planId: string, message = "Plan paused") { const plan = this.plans.pause(threadId, planId, message); return plan ? this.syncPlanCanvasProjection(threadId, planId) : undefined; }
+  resumePlanRun(threadId: string, planId: string) { const plan = this.plans.resume(threadId, planId); return plan ? this.syncPlanCanvasProjection(threadId, planId) : undefined; }
+  getPlanExecution(threadId: string, planId: string) { return this.plans.getExecution(threadId, planId); }
+  listRunnablePlanExecutions() { return this.plans.listRunnableExecutions(); }
+  claimPlanExecution(threadId: string, planId: string, owner: string) { return this.plans.claimExecution(threadId, planId, owner); }
+  renewPlanExecutionLease(threadId: string, planId: string, owner: string) { return this.plans.renewExecutionLease(threadId, planId, owner); }
+  releasePlanExecutionLease(threadId: string, planId: string, owner: string) { return this.plans.releaseExecution(threadId, planId, owner); }
+  recordPlanActivity(threadId: string, planId: string, input: Parameters<PlanRepository["recordActivity"]>[2]) { return this.plans.recordActivity(threadId, planId, input); }
+  listPlanActivities(threadId: string, planId: string) { return this.plans.listActivities(threadId, planId); }
+  ensurePlanCanvasProjection(threadId: string, planId: string) { return this.syncPlanCanvasProjection(threadId, planId); }
+  cancelPlanRun(threadId: string, planId: string) { const plan = this.plans.setStatus(threadId, planId, "cancelled", "rejected"); return plan ? this.syncPlanCanvasProjection(threadId, planId) : undefined; }
   setPlanWaitingForUser(threadId: string, planId: string, message: string) { return this.plans.setStatus(threadId, planId, "awaiting_user", undefined, message); }
-  resumePlanWithAnswer(threadId: string, planId: string, answer: string) { return this.plans.resumeWithAnswer(threadId, planId, answer); }
-  setPlanRunStatus(threadId: string, planId: string, status: import("./storageTypes.js").PlanRunStatus, message = "") { return this.plans.setStatus(threadId, planId, status, undefined, message); }
-  updatePlanStep(threadId: string, planId: string, stepId: string, patch: Parameters<PlanRepository["updateStep"]>[3]) { return this.plans.updateStep(threadId, planId, stepId, patch); }
+  resumePlanWithAnswer(threadId: string, planId: string, answer: string | { optionId?: string; customAnswer?: string; answer?: string }) { return this.plans.resumeWithAnswer(threadId, planId, answer); }
+  setPlanRunStatus(threadId: string, planId: string, status: import("./storageTypes.js").PlanRunStatus, message = "") { const plan = this.plans.setStatus(threadId, planId, status, undefined, message); return plan ? this.syncPlanCanvasProjection(threadId, planId) : undefined; }
+  updatePlanStep(threadId: string, planId: string, stepId: string, patch: Parameters<PlanRepository["updateStep"]>[3]) { const step = this.plans.updateStep(threadId, planId, stepId, patch); this.syncPlanCanvasProjection(threadId, planId); return step; }
   retryPlanStep(threadId: string, planId: string, stepId: string) { return this.plans.retryStep(threadId, planId, stepId); }
   stagePlanArtifact(threadId: string, planId: string, input: Parameters<PlanRepository["stageArtifact"]>[2]) { return this.plans.stageArtifact(threadId, planId, input); }
-  markPlanArtifactCommitted(threadId: string, planId: string, artifactId: string, canvasTargetId: string) { return this.plans.markArtifact(threadId, planId, artifactId, "committed", canvasTargetId); }
+  markPlanArtifactCommitted(threadId: string, planId: string, artifactId: string, canvasTargetId: string) { const artifact = this.plans.markArtifact(threadId, planId, artifactId, "committed", canvasTargetId); this.syncPlanCanvasProjection(threadId, planId); return artifact; }
   markPlanArtifactFailed(threadId: string, planId: string, artifactId: string, error: string) { return this.plans.markArtifact(threadId, planId, artifactId, "failed", undefined, error); }
   stagePlanArtifactLinks(threadId: string, planId: string, links: Parameters<PlanRepository["stageArtifactLinks"]>[2]) { return this.plans.stageArtifactLinks(threadId, planId, links); }
   markPlanArtifactLinkCommitted(threadId: string, planId: string, linkId: string, canvasEdgeId: string) { return this.plans.markArtifactLinkCommitted(threadId, planId, linkId, canvasEdgeId); }
+  createCanvasWriteSuggestion(threadId: string, runId: string, items: Array<{ title: string; content: string }>) {
+    const projectId = this.getThread(threadId)?.projectId;
+    if (!projectId) throw new Error("Thread not found");
+    return this.canvas.createWriteSuggestion(threadId, projectId, runId, items);
+  }
+  listCanvasWriteSuggestions(threadId: string) { return this.canvas.listWriteSuggestions(threadId); }
+  acceptCanvasWriteSuggestion(threadId: string, suggestionId: string) { return this.canvas.acceptWriteSuggestion(threadId, suggestionId); }
+  dismissCanvasWriteSuggestion(threadId: string, suggestionId: string) { return this.canvas.dismissWriteSuggestion(threadId, suggestionId); }
 
   createProject(projectId: string, title: unknown, summary = "") {
     validateId(projectId, "projectId");
@@ -136,7 +162,10 @@ export class SQLiteStorageRepository {
     validateId(threadId, "threadId");
     validateId(projectId, "projectId");
     if (!this.getProject(projectId)) {
-      this.createProject(projectId, "Untitled project");
+      const now = nowIso();
+      this.db.prepare(`INSERT INTO projects (id, title, summary, created_at, updated_at) VALUES (?, 'Untitled project', '', ?, ?)
+        ON CONFLICT(id) DO UPDATE SET deleted_at = NULL, updated_at = excluded.updated_at`)
+        .run(projectId, now, now);
     }
     await ensureThreadDirs(threadId);
     const now = nowIso();
@@ -603,6 +632,26 @@ export class SQLiteStorageRepository {
 
   recordToolEvent(threadId: string, runId: string, eventType: string, payload: JsonValue, createdAt = nowIso()) {
     this.runs.recordToolEvent(threadId, runId, eventType, payload, createdAt);
+  }
+
+  private syncPlanCanvasProjection(threadId: string, planId: string) {
+    const plan = this.plans.get(threadId, planId);
+    if (!plan || plan.status === "draft" || plan.status === "awaiting_user") return plan;
+    const content = [
+      `# ${plan.title}`,
+      plan.goal,
+      "",
+      ...plan.steps.map((step) => `${step.status === "completed" || step.status === "skipped" ? "[x]" : "[ ]"} ${step.title}${step.status === "running" ? " (running)" : step.status === "failed" ? " (failed)" : ""}`),
+      ...(plan.statusMessage ? ["", plan.statusMessage] : [])
+    ].join("\n");
+    const metadata = { planProjection: { planId: plan.id, threadId: plan.threadId, status: plan.status } };
+    const existing = plan.canvasNodeId ? this.listCanvasNodes(plan.projectId).find((node) => node.id === plan.canvasNodeId) : undefined;
+    const node = existing
+      ? this.updateCanvasNode(plan.projectId, existing.id, { title: plan.title, content, metadata, includeInProjectContext: false })
+      : this.createCanvasNode(plan.projectId, { kind: "plan", title: plan.title, content, width: 380, height: 300, metadata, includeInProjectContext: false });
+    if (!node) return plan;
+    if (!existing) return this.plans.setCanvasNodeId(threadId, planId, node.id);
+    return this.plans.get(threadId, planId);
   }
 
   private withTransaction<T>(work: () => T) {

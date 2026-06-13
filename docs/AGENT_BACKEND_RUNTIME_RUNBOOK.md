@@ -6,11 +6,11 @@ FacetWrite requests `messages-tuple`, `custom`, and `values`; the Gateway may em
 
 Plan/Artifact bridge results preserve structured payloads through the private `__FACETWRITE_EVENT__` envelope. A run with no assistant text but a valid Plan/Artifact event is successful. A run with neither reports that it completed without visible text or structured events instead of claiming the backend is disconnected.
 
-`PlanToolChoiceMiddleware` enforces the runtime contract. Planning forces the first `plan_update` call. Execution allows research tools, then intercepts a text-only finish and forces `artifact_stage` until the current step has a committed Canvas artifact. FacetWrite also validates these postconditions after the stream, so unsupported provider behavior fails visibly instead of producing a false successful answer.
+`PlanToolChoiceMiddleware` enforces one stage-specific submission per stable phase attempt. Intake exposes `plan_clarification_submit`, revision exposes `plan_revision_submit`, and approved execution exposes `artifact_stage` for the current step. The product `PlanOrchestrator` owns lifecycle state; the model never calls the legacy broad `plan_update` path. FacetWrite validates stage postconditions after the stream, so unsupported provider behavior pauses visibly instead of producing a false successful answer.
 
 Middleware changes require restarting the project-owned local Gateway with `npm run agent:down` followed by `npm run agent:up`; reusing an already-running Gateway does not reload Python modules.
 
-For a stuck Plan run, verify model sync, Gateway HTTP/run status, the bridge envelope, the final message id/`values` snapshot, and the persisted PlanRun/current step in that order.
+For a stuck Plan run, verify model sync, Gateway HTTP/run status, the bridge envelope, persisted PlanRun/current step, `plan_executions` lease, and `run_activities` in that order. A new server process clears stale execution leases before waking running Plans.
 
 Repository maintenance must use the current `F:\.FinalProject` checkout and a normal branch. Do not create Git worktrees or project copies on another drive.
 

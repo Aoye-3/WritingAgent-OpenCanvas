@@ -191,6 +191,7 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
     }
     const project = storage.listProjects().find((candidate) => candidate.id === projectId);
     storage.migrateCanvasWorkflowRoleNodes(projectId);
+    const plans = storage.listPlanRuns(request.params.threadId);
     sendOk(response, {
       thread,
       project,
@@ -203,9 +204,11 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
       canvasEdges: storage.listCanvasEdges(projectId),
       canvasObjects: storage.listCanvasObjects(projectId),
       canvasWriteRequests: storage.listCanvasWriteRequests(projectId, "pending"),
+      canvasWriteSuggestions: storage.listCanvasWriteSuggestions(request.params.threadId),
       canvasWorkflow: storage.getCanvasWorkflow(projectId),
       canvasWorkflowSuggestions: storage.listCanvasWorkflowSuggestions(projectId),
-      plans: storage.listPlanRuns(request.params.threadId)
+      plans,
+      planActivities: plans.flatMap((plan) => storage.listPlanActivities(request.params.threadId, plan.id))
     });
   });
 }

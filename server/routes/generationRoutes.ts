@@ -4,6 +4,7 @@ import type { GenerationService } from "../services/generationService.js";
 import type { CanvasDomainService } from "../domains/canvas/index.js";
 import { errorMessage, sendError, sendOk } from "../utils/http.js";
 import { GenerationError } from "../domains/generation/index.js";
+import { sanitizeToolEventPayload } from "../services/generation/toolEventSanitizer.js";
 
 type GenerationRouteDeps = {
   generationService: GenerationService;
@@ -36,9 +37,14 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
         onStatus: (status) => writeSse(response, "status", status),
         onToken: (token) => writeSse(response, "token", { text: token }),
         onToolEvent: (event) => {
-          writeSse(response, "tool_event", event);
+          const safePayload = sanitizeToolEventPayload(event.payload);
+          const safeEvent = { ...event, payload: safePayload };
+          writeSse(response, "tool_event", safeEvent);
           const structuredEvent = typeof event.payload?.eventType === "string" ? event.payload.eventType : "";
-          if (/^(?:plan_|artifact_)/.test(structuredEvent)) writeSse(response, structuredEvent, event.payload);
+          if (/^(?:plan_|artifact_)/.test(structuredEvent)) writeSse(response, structuredEvent, safePayload);
+          if (/^(?:plan_|artifact_|canvas_)/.test(structuredEvent) || /(?:tool_started|tool_completed)$/.test(event.eventType)) {
+            writeSse(response, "activity", safePayload);
+          }
         }
       });
       writeSse(response, "final", result);

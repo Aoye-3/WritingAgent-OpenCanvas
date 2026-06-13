@@ -4,6 +4,7 @@ import type { Provider } from "../../types.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { ToolState } from "../../toolRegistry.js";
 import { userMessageForRun } from "./promptRunBuilder.js";
+import { extractTopLevelListItems } from "../canvasDelivery.js";
 
 export type RecordRunInput = {
   storage: SQLiteStorageRepository;
@@ -43,6 +44,11 @@ export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
     finishReason: input.finishReason,
     usage: input.usage
   });
+  const policy = input.payload.orchestrationPolicy;
+  if (!input.usedMock && policy?.trigger === "ordinary" && policy.mode !== "managed_plan" && !input.payload.canvasAction) {
+    const items = extractTopLevelListItems(input.text);
+    if (items.length >= 3 && saved.runId) input.storage.createCanvasWriteSuggestion(input.threadId, saved.runId, items);
+  }
 
   return {
     text: input.text,

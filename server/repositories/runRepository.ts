@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { sanitizeVisibleText } from "../services/generation/outputNormalizer.js";
 import type { JsonValue, RunRecordInput, StoredMessage, StoredOutputVersion, StoredToolEvent } from "../storageTypes.js";
 import { nowIso, parseJson, randomId } from "./storageRepositoryUtils.js";
+import { sanitizeToolEventPayload } from "../services/generation/toolEventSanitizer.js";
 
 export class RunRepository {
   constructor(
@@ -142,7 +143,7 @@ export class RunRepository {
   recordToolEvent(threadId: string, runId: string, eventType: string, payload: JsonValue, createdAt = nowIso()) {
     this.db
       .prepare(`INSERT INTO tool_events (id, thread_id, run_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(randomId("tool"), threadId, runId, eventType, JSON.stringify(payload), createdAt);
+      .run(randomId("tool"), threadId, runId, eventType, JSON.stringify(sanitizeToolEventPayload(payload)), createdAt);
   }
 
   private addMessage(threadId: string, role: "user" | "assistant", text: string, usedMock: boolean, createdAt = nowIso()) {

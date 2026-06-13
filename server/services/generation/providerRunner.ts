@@ -56,8 +56,10 @@ export async function runProviderGeneration(input: ProviderRunnerInput, deps: Pr
       selectedCanvasNodeId: safeId(input.payload.selectedCanvasNodeId),
       contextValues: input.payload.contextValues,
       chatInstruction: input.payload.chatInstruction ?? input.payload.freeTextPrompt,
+      canvasAction: input.payload.canvasAction,
       knowledgeService: input.knowledgeService,
-      createCanvasWriteRequest: (writeInput) => input.storage.createCanvasWriteRequest(input.threadId, writeInput)
+      createCanvasWriteRequest: (writeInput) => input.storage.createCanvasWriteRequest(projectIdForThread(input), writeInput),
+      commitCanvasWrite: (writeInput) => commitLowRiskCanvasWrite(input.storage, projectIdForThread(input), writeInput, input.payload.canvasAction?.id)
     },
     onToolEvent: input.onToolEvent
   });
@@ -99,8 +101,10 @@ export async function runProviderGenerationStream(
       selectedCanvasNodeId: safeId(input.payload.selectedCanvasNodeId),
       contextValues: input.payload.contextValues,
       chatInstruction: input.payload.chatInstruction ?? input.payload.freeTextPrompt,
+      canvasAction: input.payload.canvasAction,
       knowledgeService: input.knowledgeService,
-      createCanvasWriteRequest: (writeInput) => input.storage.createCanvasWriteRequest(input.threadId, writeInput)
+      createCanvasWriteRequest: (writeInput) => input.storage.createCanvasWriteRequest(projectIdForThread(input), writeInput),
+      commitCanvasWrite: (writeInput) => commitLowRiskCanvasWrite(input.storage, projectIdForThread(input), writeInput, input.payload.canvasAction?.id)
     },
     onToolEvent: input.onToolEvent,
     onToken: input.onToken,
@@ -112,4 +116,24 @@ export async function runProviderGenerationStream(
   }
 
   return run;
+}
+
+function commitLowRiskCanvasWrite(storage: ProviderRunnerInput["storage"], projectId: string, input: import("../../storage.js").CanvasWriteRequestInput, actionId?: string) {
+  if (input.operation === "create") {
+    const stableId = actionId ? `node_${actionId.replace(/[^A-Za-z0-9_-]/g, "_")}` : undefined;
+    const existing = stableId ? storage.listCanvasNodes(projectId).find((node) => node.id === stableId) : undefined;
+    return existing ?? storage.createCanvasNode(projectId, { id: stableId, kind: input.nodeKind ?? "document", title: input.title, content: input.content });
+  }
+  if (input.operation === "append" && input.targetNodeId) {
+    const existing = storage.listCanvasNodes(projectId).find((node) => node.id === input.targetNodeId);
+    const updated = existing && storage.updateCanvasNode(projectId, existing.id, { content: existing.content ? `${existing.content}\n\n${input.content}` : input.content });
+    if (updated) return updated;
+  }
+  throw new Error("Only create and append Canvas operations can be committed without approval");
+}
+
+function projectIdForThread(input: ProviderRunnerInput) {
+  const projectId = input.storage.getThread(input.threadId)?.projectId;
+  if (!projectId) throw new Error("Thread not found");
+  return projectId;
 }

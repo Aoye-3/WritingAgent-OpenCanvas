@@ -102,6 +102,26 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
     }
   });
 
+  app.post("/api/threads/:threadId/canvas/write-suggestions/:suggestionId/accept", (request, response) => {
+    try {
+      const suggestion = canvasService.acceptWriteSuggestion(request.params.threadId, request.params.suggestionId);
+      if (!suggestion) return sendError(response, 404, "not_found", "Canvas write suggestion not found");
+      sendOk(response, { suggestion });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to accept Canvas write suggestion"));
+    }
+  });
+
+  app.post("/api/threads/:threadId/canvas/write-suggestions/:suggestionId/dismiss", (request, response) => {
+    try {
+      const suggestion = canvasService.dismissWriteSuggestion(request.params.threadId, request.params.suggestionId);
+      if (!suggestion) return sendError(response, 404, "not_found", "Canvas write suggestion not found");
+      sendOk(response, { suggestion });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to dismiss Canvas write suggestion"));
+    }
+  });
+
   app.post("/api/threads/:threadId/canvas/edges", (request, response) => {
     try {
       sendOk(response, { edge: canvasService.createEdge(projectIdForThread(request.params.threadId), request.body ?? {}) });

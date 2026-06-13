@@ -3,7 +3,7 @@ import type { GenerateRequest } from "../generation/types";
 type ToolState = NonNullable<GenerateRequest["toolState"]>;
 export type PlanRequestPhase = { kind: "chat" | "planning" | "execution" };
 
-const internalComposerTools = new Set(["plan_update", "artifact_stage", "canvas_write", "clear_context"]);
+const internalComposerTools = new Set(["artifact_stage", "canvas_write", "clear_context"]);
 
 export function visibleComposerTools(tools: string[]) {
   return tools.filter((tool) => !internalComposerTools.has(tool));
@@ -18,7 +18,8 @@ export function buildRequestToolState(current: ToolState | undefined, phase: Pla
       canvas_write: false,
       web_search: false,
       artifact_stage: false,
-      plan_update: true
+      plan_clarification_submit: true,
+      plan_revision_submit: true
     };
   }
   if (phase.kind === "execution") {
@@ -26,7 +27,6 @@ export function buildRequestToolState(current: ToolState | undefined, phase: Pla
       ...current,
       quick_messages: false,
       canvas_write: false,
-      plan_update: true,
       artifact_stage: true,
       web_search: true
     };

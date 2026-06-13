@@ -8,7 +8,11 @@
 - `POST /api/threads/:threadId/plans/:planId/cancel` cancels remaining work.
 - `POST /api/threads/:threadId/plans/:planId/steps/:stepId/retry` resets only that step and increments its attempt count.
 
-`POST /api/generate/stream` retains its existing events and may additionally emit `plan_created`, `plan_updated`, `plan_step_updated`, `plan_waiting_for_user`, `artifact_staged`, `artifact_committed`, `plan_completed`, and `plan_failed`. Thread state is authoritative when events are duplicated or reordered.
+`POST /api/generate/stream` retains its existing events and additionally emits compact `activity` events plus `plan_updated`, `plan_waiting_for_user`, `artifact_committed`, `run_paused`, and `run_failed` lifecycle events. Thread state is authoritative when events are duplicated or reordered.
+
+Tool event payloads are sanitized before persistence and SSE delivery. Internal Bridge calls require `FACETWRITE_INTERNAL_TOOL_TOKEN`.
+
+`POST /api/threads/:threadId/plans/intake` creates a server-owned draft intake. Approval, resume, and retry routes wake the persistent Plan executor; the frontend does not run Plan steps.
 
 The backend derives Plan phase independently of frontend flags. `/plan` forces planning-only tools; approved continuation forces Plan execution tools and a single step id. Ordinary chat keeps the active Agent's configured tool state.
 
@@ -321,3 +325,14 @@ Implementation note: these HTTP contracts are stable while the internals move to
 - `GET /api/threads/:threadId/state`: returns Thread history plus Project metadata, all Project Agent inputs, and Project Canvas state.
 
 Generation requests may include `projectId` when creating a new conversation. Existing conversations derive Project and model selection from backend storage. Provider/model names supplied by the frontend are not authoritative.
+
+Explicit Canvas instructions are converted server-side into a structured `canvasAction`. Internal Runtime Bridge calls always resolve `projectId` from `threadId`; a mismatched Runtime-supplied project is rejected. `canvas_write` returns either `{ status:"committed", nodeId, projectId, operation }` for create/append or `{ status:"pending", requestId, projectId, operation }` for destructive writes.
+
+## Plan Clarification API
+
+Plan generation uses phase-scoped contracts: `plan_clarification_submit`, `plan_revision_submit`, and approved-step-only `artifact_stage`. Generation requests may carry explicit `planPhase`, `planId`, and `stepId`. `POST /api/threads/:threadId/plans/:planId/answer` accepts `optionId`, `customAnswer`, or legacy text `answer`; pause, resume, activities, and Canvas projection endpoints persist recovery state.
+
+Ordinary reply Canvas suggestions are persisted in thread state and controlled through:
+
+- `POST /api/threads/:threadId/canvas/write-suggestions/:suggestionId/accept`
+- `POST /api/threads/:threadId/canvas/write-suggestions/:suggestionId/dismiss`

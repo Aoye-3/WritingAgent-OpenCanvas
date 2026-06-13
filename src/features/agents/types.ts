@@ -3,7 +3,7 @@ import type { Locale } from "../i18n/types";
 export type AgentCategory = "writing" | "education" | "summarise" | "rewrite";
 export type AgentIcon = "pen" | "lines" | "mail" | "book" | "report" | "refresh";
 export type AgentAccent = "blue" | "green" | "orange" | "violet" | "rose";
-export type ToolRef = "web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write" | "plan_update" | "artifact_stage";
+export type ToolRef = "web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write" | "plan_clarification_submit" | "plan_revision_submit" | "artifact_stage";
 export type ToolRiskLevel = "low" | "medium" | "high";
 export type ToolGroup = "web" | "context" | "chat";
 export type AgentModelResponseMode = "normal" | "prefix_completion";
@@ -191,9 +191,15 @@ export type StoredToolEvent = {
   createdAt: string;
 };
 
-export type CanvasNodeKind = "document" | "note" | "reference" | "role";
+export type CanvasNodeKind = "document" | "note" | "reference" | "role" | "plan";
 export type CanvasWriteOperation = "create" | "replace" | "append" | "replace_range";
 export type CanvasWriteRequestStatus = "pending" | "approved" | "rejected" | "stale";
+export type CanvasWriteSuggestion = {
+  id: string; threadId: string; projectId: string; runId: string;
+  status: "pending" | "accepted" | "dismissed" | "stale";
+  items: Array<{ title: string; content: string }>;
+  nodeIds: string[]; createdAt: string; updatedAt: string;
+};
 export type CanvasWorkflowStage = "inspiration" | "research" | "structure" | "writing" | "polish" | "publish";
 export type CanvasWorkflowSuggestionStatus = "pending" | "accepted" | "ignored";
 
@@ -256,14 +262,28 @@ export type CanvasWriteRequest = {
 };
 
 export type PlanStepStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+export type PlanClarification = {
+  question: string;
+  options: Array<{ id: string; label: string; description: string; recommended: boolean }>;
+  status: "pending" | "answered";
+  selectedOptionId?: string;
+  customAnswer?: string;
+};
 export type PlanRun = {
   id: string; projectId: string; threadId: string; title: string; goal: string;
-  status: "draft" | "awaiting_approval" | "running" | "awaiting_user" | "completed" | "failed" | "cancelled";
+  status: "draft" | "awaiting_approval" | "running" | "paused" | "awaiting_user" | "completed" | "failed" | "cancelled";
   approval: "pending" | "approved" | "rejected"; statusMessage: string;
+  canvasNodeId?: string; currentStepId?: string; executionVersion: number;
+  clarification?: PlanClarification;
   steps: Array<{ id: string; title: string; detail: string; status: PlanStepStatus; attempt: number; error?: string }>;
   artifacts: Array<{ id: string; stepId: string; type: "text" | "image"; status: "staged" | "committing" | "committed" | "failed"; title: string; canvasTargetId?: string; error?: string }>;
   links: Array<{ id: string; fromArtifactId: string; toArtifactId: string; label: string; canvasEdgeId?: string }>;
   createdAt: string; updatedAt: string;
+};
+export type PlanActivity = {
+  id: string; threadId: string; planRunId: string; runId?: string; stepId?: string;
+  type: "intent_recognized" | "clarification_preparing" | "clarification_ready" | "plan_preparing" | "plan_ready" | "step_started" | "tool_started" | "tool_completed" | "artifact_committed" | "step_completed" | "plan_paused" | "plan_resumed" | "plan_failed" | "plan_completed";
+  status: string; summary: string; sequence: number; createdAt: string;
 };
 
 import type { CanvasObject } from "../../../shared/canvasObjects";
@@ -304,7 +324,9 @@ export type ThreadStateResponse = {
   canvasEdges?: CanvasEdge[];
   canvasObjects?: CanvasObject[];
   canvasWriteRequests?: CanvasWriteRequest[];
+  canvasWriteSuggestions?: CanvasWriteSuggestion[];
   canvasWorkflow?: CanvasWorkflow;
   canvasWorkflowSuggestions?: CanvasWorkflowSuggestion[];
   plans?: PlanRun[];
+  planActivities?: PlanActivity[];
 };

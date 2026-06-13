@@ -42,7 +42,12 @@ CONFIG_FILE_DATABASE_DEFAULTS = {
 }
 
 FACETWRITE_REQUIRED_TOOLS = (
-    {"name": "plan_update", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:plan_update_tool"},
+    {"name": "knowledge_base", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:knowledge_base_tool"},
+    {"name": "quick_messages", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:quick_messages_tool"},
+    {"name": "clear_context", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:clear_context_tool"},
+    {"name": "canvas_write", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:canvas_write_tool"},
+    {"name": "plan_clarification_submit", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:plan_clarification_submit_tool"},
+    {"name": "plan_revision_submit", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:plan_revision_submit_tool"},
     {"name": "artifact_stage", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:artifact_stage_tool"},
 )
 

@@ -390,6 +390,33 @@ test("only accepts assistant text from AgentBackend message tuples", async () =>
   assert.equal(result.text.includes('"results"'), false);
 });
 
+test("explicit Canvas creation forces canvas_write and sends a structured action", () => {
+  const card = getAgentCard("summary");
+  const request = buildRunRequest({
+    threadId: "thread_canvas",
+    projectId: "project_canvas",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings: defaultAgentSettings(card),
+    messages: [{ role: "user", content: "帮我在画布里创建一个节点" }],
+    prompt: "帮我在画布里创建一个节点",
+    chatInstruction: "帮我在画布里创建一个节点",
+    allowedToolRefs: [],
+    toolState: {}
+  }, { enabled: true, baseUrl: "http://127.0.0.1:8000", assistantId: "lead_agent" });
+
+  assert.equal(request.context.facetwrite_tool_state.canvas_write, true);
+  assert.ok(request.context.facetwrite_allowed_tool_refs.includes("canvas_write"));
+  assert.equal((request.context.facetwrite_canvas_action as { operation: string }).operation, "create");
+});
+
+test("maps structured Canvas envelopes from bridged tool results", async () => {
+  const envelope = JSON.stringify({ content: "Committed.", event: { tool: "canvas_write", eventType: "canvas_mutation_committed", nodeId: "node_1", projectId: "project_1", status: "committed" } });
+  const body = `event: messages\ndata: [{"type":"tool","name":"canvas_write","tool_call_id":"call_canvas","content":${JSON.stringify(`Committed.\n__FACETWRITE_EVENT__${envelope}`)}}]\n\n`;
+  const result = await runWithBody(body);
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_canvas_mutation_committed" && event.payload.nodeId === "node_1"));
+});
+
 test("marks slash Plan requests as the AgentBackend planning phase", () => {
   const card = getAgentCard("summary");
   const request = buildRunRequest({
@@ -401,7 +428,7 @@ test("marks slash Plan requests as the AgentBackend planning phase", () => {
     messages: [{ role: "user", content: "/plan Compare two laptops" }],
     prompt: "/plan Compare two laptops",
     chatInstruction: "/plan Compare two laptops",
-    toolState: { plan_update: true }
+    toolState: { plan_clarification_submit: true }
   }, {
     enabled: true,
     baseUrl: "http://127.0.0.1:8000",
@@ -409,7 +436,31 @@ test("marks slash Plan requests as the AgentBackend planning phase", () => {
   });
 
   assert.equal(request.context.facetwrite_plan_phase, "planning");
+  assert.equal(request.context.facetwrite_plan_stage, "intake");
   assert.equal(request.config.configurable.facetwrite_plan_phase, "planning");
+  assert.equal(request.config.configurable.facetwrite_plan_stage, "intake");
+});
+
+test("marks an answered Plan as the revision planning stage", () => {
+  const card = getAgentCard("summary");
+  const request = buildRunRequest({
+    threadId: "thread_plan",
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings: defaultAgentSettings(card),
+    messages: [{ role: "user", content: "Best value" }],
+    prompt: "Best value",
+    chatInstruction: "Best value",
+    contextValues: { awaitingPlan: { id: "plan_1" } },
+    toolState: { plan_revision_submit: true }
+  }, {
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8000",
+    assistantId: "lead_agent"
+  });
+
+  assert.equal(request.context.facetwrite_plan_stage, "revise");
 });
 
 test("returns only the last visible AI message across a tool loop", async () => {

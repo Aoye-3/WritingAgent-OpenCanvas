@@ -31,6 +31,7 @@ import {
 import { createStoredCanvasAsset, normalizeStoredCanvasObject, validateCanvasObjectWrite, type CanvasAssetObject } from "../../shared/canvasObjects.js";
 import { sanitizeVisibleText } from "../services/generation/outputNormalizer.js";
 import { isSingleParagraphRange, replaceTextRange } from "../../shared/canvasRangeEdit.js";
+import { splitCanvasText, stableDeliveryId } from "../services/canvasDelivery.js";
 import {
   cleanText,
   defaultCanvasTitle,
@@ -121,7 +122,7 @@ export class CanvasRepository {
     }
     const now = nowIso();
     const edge: CanvasEdge = {
-      id: randomId("edge"),
+      id: input.id ? cleanCanvasRecordId(input.id, "edgeId") : randomId("edge"),
       projectId,
       sourceNodeId: input.sourceNodeId,
       targetNodeId: input.targetNodeId,
@@ -225,7 +226,7 @@ export class CanvasRepository {
     validateId(projectId, "projectId");
     const operation = validateWriteOperation(input.operation);
     const targetNode = input.targetNodeId ? this.getCanvasNode(projectId, input.targetNodeId) : undefined;
-    if ((operation === "replace" || operation === "append" || operation === "replace_range") && !targetNode) {
+    if ((operation === "replace" || operation === "append" || operation === "replace_range" || operation === "delete") && !targetNode) {
       throw new Error("A valid target node is required for canvas update operations");
     }
     const nodeKind = validateNodeKind(input.nodeKind ?? targetNode?.kind ?? "document");
@@ -247,7 +248,7 @@ export class CanvasRepository {
       createdAt: now,
       updatedAt: now
     };
-    if (!request.content) {
+    if (!request.content && operation !== "delete") {
       throw new Error("Canvas write content is required");
     }
     if (operation === "replace_range") {
@@ -332,6 +333,14 @@ export class CanvasRepository {
       } else {
         const existing = request.targetNodeId ? this.getCanvasNode(projectId, request.targetNodeId) : undefined;
         if (!existing) throw new Error("Target node was not found");
+        if (request.operation === "delete") {
+          node = existing;
+          this.db.prepare(`DELETE FROM canvas_edges WHERE project_id = ? AND (source_node_id = ? OR target_node_id = ?)`).run(projectId, existing.id, existing.id);
+          this.db.prepare(`DELETE FROM canvas_nodes WHERE id = ? AND project_id = ?`).run(existing.id, projectId);
+          this.deps.touchProject(projectId);
+          this.updateCanvasWriteRequestStatus(projectId, requestId, "approved", now);
+          return;
+        }
         if (request.operation === "replace_range") {
           const start = request.rangeStart;
           const end = request.rangeEnd;
@@ -372,6 +381,52 @@ export class CanvasRepository {
     const now = nowIso();
     this.updateCanvasWriteRequestStatus(projectId, requestId, "rejected", now);
     return { ...request, status: "rejected" as const, updatedAt: now };
+  }
+
+  createWriteSuggestion(threadId: string, projectId: string, runId: string, items: Array<{ title: string; content: string }>) {
+    if (items.length < 3) throw new Error("Canvas write suggestions require at least three items");
+    const id = `suggestion_${runId}`.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 120);
+    const now = nowIso();
+    this.db.prepare(`INSERT INTO canvas_write_suggestions (id, thread_id, project_id, run_id, status, items_json, node_ids_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'pending', ?, '[]', ?, ?) ON CONFLICT(id) DO NOTHING`)
+      .run(id, threadId, projectId, runId, JSON.stringify(items), now, now);
+    return this.listWriteSuggestions(threadId).find((suggestion) => suggestion.id === id);
+  }
+
+  listWriteSuggestions(threadId: string) {
+    type Row = { id: string; threadId: string; projectId: string; runId: string; status: "pending" | "accepted" | "dismissed" | "stale"; itemsJson: string; nodeIdsJson: string; createdAt: string; updatedAt: string };
+    return (this.db.prepare(`SELECT id, thread_id as threadId, project_id as projectId, run_id as runId, status, items_json as itemsJson, node_ids_json as nodeIdsJson, created_at as createdAt, updated_at as updatedAt
+      FROM canvas_write_suggestions WHERE thread_id = ? ORDER BY created_at DESC`).all(threadId) as Row[])
+      .map(({ itemsJson, nodeIdsJson, ...row }) => ({ ...row, items: parseJson(itemsJson) as Array<{ title: string; content: string }>, nodeIds: parseJson(nodeIdsJson) as string[] }));
+  }
+
+  acceptWriteSuggestion(threadId: string, suggestionId: string) {
+    const suggestion = this.listWriteSuggestions(threadId).find((item) => item.id === suggestionId);
+    if (!suggestion || suggestion.status !== "pending") return suggestion;
+    const existingNodes = new Set(this.listCanvasNodes(suggestion.projectId).map((node) => node.id));
+    const existingEdges = new Set(this.listCanvasEdges(suggestion.projectId).map((edge) => edge.id));
+    const nodeIds: string[] = [];
+    for (const item of suggestion.items) {
+      for (const chunk of splitCanvasText(item.content)) {
+        const index = nodeIds.length + 1;
+        const nodeId = stableDeliveryId("node", suggestion.id, index);
+        if (!existingNodes.has(nodeId)) this.createCanvasNode(suggestion.projectId, { id: nodeId, kind: "document", title: item.title, content: chunk, x: 120 + ((index - 1) % 3) * 360, y: 120 + Math.floor((index - 1) / 3) * 280 });
+        nodeIds.push(nodeId);
+        if (nodeIds.length > 1) {
+          const edgeId = stableDeliveryId("edge", suggestion.id, nodeIds.length - 1);
+          if (!existingEdges.has(edgeId)) this.createCanvasEdge(suggestion.projectId, { id: edgeId, sourceNodeId: nodeIds[nodeIds.length - 2], targetNodeId: nodeId, label: "continues" });
+        }
+      }
+    }
+    const now = nowIso();
+    this.db.prepare(`UPDATE canvas_write_suggestions SET status = 'accepted', node_ids_json = ?, updated_at = ? WHERE id = ? AND thread_id = ?`).run(JSON.stringify(nodeIds), now, suggestionId, threadId);
+    return this.listWriteSuggestions(threadId).find((item) => item.id === suggestionId);
+  }
+
+  dismissWriteSuggestion(threadId: string, suggestionId: string) {
+    const now = nowIso();
+    this.db.prepare(`UPDATE canvas_write_suggestions SET status = 'dismissed', updated_at = ? WHERE id = ? AND thread_id = ? AND status = 'pending'`).run(now, suggestionId, threadId);
+    return this.listWriteSuggestions(threadId).find((item) => item.id === suggestionId);
   }
 
   getCanvasSettings(): CanvasSettings {

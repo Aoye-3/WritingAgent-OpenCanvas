@@ -42,15 +42,15 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     allowedToolRefs: allowedToolsForRequest(input),
     toolState: input.payload.toolState,
     selectedCanvasNodeId: input.payload.selectedCanvasNodeId,
-    contextValues: input.payload.contextValues,
+    contextValues: { ...input.payload.contextValues, ...(input.payload.canvasAction ? { canvasAction: input.payload.canvasAction } : {}), ...(input.payload.planGeneration ? { planGeneration: input.payload.planGeneration } : {}) },
     chatInstruction: input.payload.chatInstruction ?? input.payload.freeTextPrompt,
     onToolEvent: input.onToolEvent,
     onToken: input.onToken,
     onStatus: input.onStatus
   });
 
-  if (!run.text && !run.events.some((event) => /(?:^|_)(?:plan|artifact)_/.test(event.eventType))) {
-    throw new Error("AgentBackend completed with no visible assistant text or structured Plan events");
+  if (!run.text && !run.events.some((event) => /(?:^|_)(?:plan|artifact|canvas)_/.test(event.eventType))) {
+    throw new Error("AgentBackend completed with no visible assistant text or structured lifecycle events");
   }
 
   return run;
@@ -58,7 +58,9 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
 
 function allowedToolsForRequest(input: AgentBackendRunnerInput) {
   const allowed = new Set(input.runtimeConfig.enabledTools);
-  if (input.payload.toolState?.plan_update) allowed.add("plan_update");
-  if (input.payload.toolState?.artifact_stage) allowed.add("artifact_stage");
+  for (const tool of ["plan_clarification_submit", "plan_revision_submit", "artifact_stage"] as const) {
+    if (input.payload.toolState?.[tool]) allowed.add(tool);
+  }
+  if (input.payload.canvasAction?.requiresTool) allowed.add("canvas_write");
   return [...allowed];
 }

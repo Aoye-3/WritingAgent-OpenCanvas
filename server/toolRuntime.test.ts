@@ -78,7 +78,7 @@ test("returns structured unavailable result for web search", async () => {
   assert.match(result.content, /not configured/i);
 });
 
-test("canvas_write creates a pending request instead of writing directly", async () => {
+test("canvas_write does not degrade low-risk creates into pending proposals", async () => {
   const result = await executeToolCall(
     {
       id: "call_3",
@@ -95,24 +95,16 @@ test("canvas_write creates a pending request instead of writing directly", async
       }
     },
     {
-      createCanvasWriteRequest(input) {
-        assert.equal(input.operation, "create");
-        assert.equal(input.content, "Pending draft");
-        return {
-          id: "write_1",
-          operation: input.operation,
-          nodeKind: input.nodeKind ?? "document",
-          title: input.title ?? "",
-          status: "pending"
-        };
+      createCanvasWriteRequest() {
+        throw new Error("low-risk writes must not create proposals");
       }
     }
   );
 
-  assert.equal(result.ok, true);
-  assert.equal(result.payload.requestId, "write_1");
-  assert.equal(result.payload.status, "pending");
-  assert.match(result.content, /ready for user confirmation/i);
+  assert.equal(result.ok, false);
+  assert.equal(result.payload.eventType, "canvas_mutation_failed");
+  assert.equal(result.payload.reason, "direct_commit_unavailable");
+  assert.match(result.content, /cannot commit low-risk writes directly/i);
 });
 
 test("executes local knowledge tool from KnowledgeService before context fallback", async () => {
@@ -186,76 +178,148 @@ test("canvas_write normalizes replace unless the user explicitly asks to replace
     {
       selectedCanvasNodeId: "node_1",
       chatInstruction: "写入画板",
-      createCanvasWriteRequest(input) {
+      commitCanvasWrite(input) {
         assert.equal(input.operation, "append");
         assert.equal(input.targetNodeId, "node_1");
-        return {
-          id: "write_replace",
-          operation: input.operation,
-          targetNodeId: input.targetNodeId,
-          nodeKind: input.nodeKind ?? "document",
-          title: input.title ?? "",
-          status: "pending"
-        };
+        return { id: "node_1", projectId: "project_1", kind: "document", title: "Draft" };
       }
     }
   );
 
   assert.equal(result.ok, true);
   assert.equal(result.payload.operation, "append");
+  assert.equal(result.payload.status, "committed");
 });
 
-test("canvas_write rejects malformed write arguments", async () => {
+test("canvas_write keeps delete operations pending for approval", async () => {
   const result = await executeToolCall(
     {
       id: "call_4",
       type: "function",
-      function: { name: "canvas_write", arguments: JSON.stringify({ operation: "delete", content: "Nope" }) }
+      function: { name: "canvas_write", arguments: JSON.stringify({ operation: "delete", targetNodeId: "node_1" }) }
     },
     {
-      createCanvasWriteRequest() {
-        throw new Error("should not be called");
+      createCanvasWriteRequest(input) {
+        assert.equal(input.operation, "delete");
+        assert.equal(input.targetNodeId, "node_1");
+        return { id: "write_delete", operation: "delete", targetNodeId: "node_1", nodeKind: "document", title: "Delete node", status: "pending" };
       }
     }
   );
 
-  assert.equal(result.ok, false);
-  assert.equal(result.payload.reason, "invalid_operation");
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.eventType, "canvas_write_pending_approval");
 });
 
-test("plan_update creates a plan before approval and updates steps after approval", async () => {
-  const calls: unknown[] = [];
-  const created = await executeToolCall({ id: "plan", type: "function", function: { name: "plan_update", arguments: JSON.stringify({ action: "create", title: "Research", goal: "Compare", steps: [{ id: "search", title: "Search" }] }) } }, {
-    allowedToolRefs: ["plan_update"], toolState: { plan_update: true },
-    createPlanRun: (input) => (calls.push(input), { id: "plan_1", status: "awaiting_approval" })
-  });
-  assert.equal(created.ok, true);
-  assert.equal(created.payload.eventType, "plan_created");
-  assert.equal(calls.length, 1);
+test("canvas_write commits low-risk create operations and returns the real node id", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_commit",
+      type: "function",
+      function: { name: "canvas_write", arguments: JSON.stringify({ operation: "create", title: "Identity", content: "Assistant identity" }) }
+    },
+    {
+      commitCanvasWrite(input) {
+        assert.equal(input.operation, "create");
+        return { id: "node_identity", projectId: "project_1", kind: "document", title: "Identity" };
+      }
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.eventType, "canvas_mutation_committed");
+  assert.equal(result.payload.nodeId, "node_identity");
+  assert.equal(result.payload.status, "committed");
 });
 
-test("plan_update can pause a pending plan for clarification before approval", async () => {
-  let nextStatus = "";
-  const result = await executeToolCall({ id: "clarify", type: "function", function: { name: "plan_update", arguments: JSON.stringify({ action: "request_input", planId: "plan_1", message: "Which market?" }) } }, {
-    allowedToolRefs: ["plan_update"], toolState: { plan_update: true },
-    getPlanRun: () => ({ id: "plan_1", approval: "pending", status: "draft", steps: [] }) as never,
-    setPlanStatus: (_planId, status) => { nextStatus = status; }
+test("canvas_write uses the server-recognized operation instead of the model-selected operation", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_authoritative_action",
+      type: "function",
+      function: { name: "canvas_write", arguments: JSON.stringify({ operation: "create", content: "Replacement" }) }
+    },
+    {
+      canvasAction: { operation: "replace", targetNodeId: "node_1" },
+      createCanvasWriteRequest(input) {
+        assert.equal(input.operation, "replace");
+        assert.equal(input.targetNodeId, "node_1");
+        return { id: "write_replace", operation: "replace", targetNodeId: "node_1", nodeKind: "document", title: "", status: "pending" };
+      },
+      commitCanvasWrite() {
+        throw new Error("high-risk replacement must not commit directly");
+      }
+    }
+  );
+
+  assert.equal(result.payload.eventType, "canvas_write_pending_approval");
+  assert.equal(result.payload.status, "pending");
+});
+
+test("plan_clarification_submit updates only the server-created intake Plan", async () => {
+  let submittedPlanId = "";
+  const result = await executeToolCall({ id: "intake-contract", type: "function", function: {
+    name: "plan_clarification_submit",
+    arguments: JSON.stringify({
+      title: "Clarify laptop purchase",
+      goal: "Choose the primary purchase priority",
+      question: "What matters most?",
+      options: [
+        { id: "value", label: "Best value", description: "Balance price and performance", recommended: true },
+        { id: "power", label: "Maximum power", description: "Prefer performance", recommended: false }
+      ]
+    })
+  } }, {
+    allowedToolRefs: ["plan_clarification_submit"],
+    toolState: { plan_clarification_submit: true },
+    contextValues: { planGeneration: { planId: "plan_intake" } },
+    submitPlanClarification: (planId) => {
+      submittedPlanId = planId;
+      return { id: "plan_intake", status: "awaiting_user" };
+    }
   });
+
   assert.equal(result.ok, true);
   assert.equal(result.payload.eventType, "plan_waiting_for_user");
-  assert.equal(nextStatus, "awaiting_user");
+  assert.equal(submittedPlanId, "plan_intake");
 });
 
-test("plan_update revises the same pending plan after clarification", async () => {
+test("plan_revision_submit revises only the specified pending Plan", async () => {
   let revisedPlanId = "";
-  const result = await executeToolCall({ id: "revise", type: "function", function: { name: "plan_update", arguments: JSON.stringify({ action: "revise", planId: "plan_1", title: "Phone comparison", goal: "Compare in China", steps: [{ id: "sources", title: "Collect sources" }] }) } }, {
-    allowedToolRefs: ["plan_update"], toolState: { plan_update: true },
+  const result = await executeToolCall({ id: "revision-contract", type: "function", function: {
+    name: "plan_revision_submit",
+    arguments: JSON.stringify({
+      planId: "plan_1",
+      title: "Laptop comparison",
+      goal: "Choose a laptop",
+      steps: [{ id: "compare", title: "Compare models" }]
+    })
+  } }, {
+    allowedToolRefs: ["plan_revision_submit"],
+    toolState: { plan_revision_submit: true },
     getPlanRun: () => ({ id: "plan_1", approval: "pending", status: "draft", steps: [] }) as never,
-    revisePlanRun: (planId) => { revisedPlanId = planId; return { id: planId, status: "awaiting_approval" }; }
+    revisePlanRun: (planId) => {
+      revisedPlanId = planId;
+      return { id: planId, status: "awaiting_approval" };
+    }
   });
+
   assert.equal(result.ok, true);
   assert.equal(result.payload.eventType, "plan_updated");
   assert.equal(revisedPlanId, "plan_1");
+});
+
+test("removed plan_update cannot mutate Plan state through Tool Runtime", async () => {
+  const result = await executeToolCall(
+    { id: "retired-plan-tool", type: "function", function: { name: "plan_update", arguments: JSON.stringify({ action: "finish", planId: "plan_1" }) } },
+    {
+      allowedToolRefs: ["plan_update"],
+      setPlanStatus: () => { throw new Error("retired tool must not mutate Plan state"); }
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.payload.reason, "policy_denied");
 });
 
 test("artifact_stage requires an approved plan", async () => {
@@ -266,27 +330,6 @@ test("artifact_stage requires an approved plan", async () => {
   });
   assert.equal(result.ok, false);
   assert.equal(result.payload.reason, "plan_not_approved");
-});
-
-test("plan_update refuses to finish while steps are incomplete", async () => {
-  const result = await executeToolCall({ id: "finish", type: "function", function: { name: "plan_update", arguments: JSON.stringify({ action: "finish", planId: "plan_1" }) } }, {
-    allowedToolRefs: ["plan_update"], toolState: { plan_update: true },
-    getPlanRun: () => ({ id: "plan_1", approval: "approved", status: "running", steps: [{ status: "pending" }] }) as never,
-    setPlanStatus: () => { throw new Error("must not finish"); }
-  });
-  assert.equal(result.ok, false);
-  assert.equal(result.payload.reason, "steps_incomplete");
-});
-
-test("plan_update cannot start a step outside the designated execution unit", async () => {
-  const result = await executeToolCall({ id: "wrong-step", type: "function", function: { name: "plan_update", arguments: JSON.stringify({ action: "update_step", planId: "plan_1", stepId: "compare", status: "running" }) } }, {
-    allowedToolRefs: ["plan_update"], toolState: { plan_update: true },
-    contextValues: { planExecution: { planId: "plan_1", stepId: "sources" } },
-    getPlanRun: () => ({ id: "plan_1", approval: "approved", status: "running", steps: [{ id: "sources", status: "pending" }, { id: "compare", status: "pending" }] }) as never,
-    updatePlanStep: () => { throw new Error("must not update another step"); }
-  });
-  assert.equal(result.ok, false);
-  assert.equal(result.payload.reason, "wrong_execution_step");
 });
 
 test("artifact_stage accepts a batch of artifacts and links", async () => {

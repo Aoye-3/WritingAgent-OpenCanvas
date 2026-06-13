@@ -10,36 +10,59 @@ from langchain_core.messages import ToolMessage
 
 
 class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
-    """Require the first planning model call to use ``plan_update``."""
+    """Select one phase-scoped Plan contract without retrying failed submissions."""
 
-    @staticmethod
-    def _prepare(request: ModelRequest) -> ModelRequest:
+    def __init__(self):
+        self._forced_attempts: set[str] = set()
+
+    def _prepare(self, request: ModelRequest) -> ModelRequest:
         runtime = getattr(request, "runtime", None)
         context = getattr(runtime, "context", None)
         phase = context.get("facetwrite_plan_phase") if isinstance(context, dict) else None
+        canvas_action = context.get("facetwrite_canvas_action") if isinstance(context, dict) else None
+        if phase == "chat" and isinstance(canvas_action, dict) and canvas_action.get("requiresTool") is True:
+            if not PlanToolChoiceMiddleware._has_tool_result(request, "canvas_write") and PlanToolChoiceMiddleware._has_tool(request, "canvas_write"):
+                return request.override(tool_choice="canvas_write")
         if phase != "planning":
             return request
 
-        already_updated = any(
-            isinstance(message, ToolMessage) and getattr(message, "name", None) == "plan_update"
-            for message in request.messages
-        )
-        if already_updated:
+        contract = PlanToolChoiceMiddleware._planning_contract(request)
+        if contract is None or PlanToolChoiceMiddleware._has_tool_result(request, contract):
             return request
+        attempt_id = context.get("facetwrite_plan_phase_attempt_id") if isinstance(context, dict) else None
+        if isinstance(attempt_id, str) and attempt_id:
+            if attempt_id in self._forced_attempts:
+                return request
+            self._forced_attempts.add(attempt_id)
 
         tool_names = {
             tool.get("name") if isinstance(tool, dict) else getattr(tool, "name", None)
             for tool in request.tools
         }
-        if "plan_update" not in tool_names:
+        if contract not in tool_names:
             return request
-        return request.override(tool_choice="plan_update")
+        return request.override(tool_choice=contract)
+
+    @staticmethod
+    def _planning_contract(request: ModelRequest) -> str | None:
+        stage = PlanToolChoiceMiddleware._stage(request)
+        if stage in (None, "intake"):
+            return "plan_clarification_submit"
+        if stage == "revise":
+            return "plan_revision_submit"
+        return None
 
     @staticmethod
     def _phase(request: ModelRequest) -> str | None:
         runtime = getattr(request, "runtime", None)
         context = getattr(runtime, "context", None)
         return context.get("facetwrite_plan_phase") if isinstance(context, dict) else None
+
+    @staticmethod
+    def _stage(request: ModelRequest) -> str | None:
+        runtime = getattr(request, "runtime", None)
+        context = getattr(runtime, "context", None)
+        return context.get("facetwrite_plan_stage") if isinstance(context, dict) else None
 
     @staticmethod
     def _has_tool_result(request: ModelRequest, name: str) -> bool:
@@ -62,14 +85,6 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             messages = [result]
         return any(bool(getattr(message, "tool_calls", None)) for message in messages)
 
-    def _should_force_artifact(self, request: ModelRequest, result: ModelCallResult) -> bool:
-        return (
-            self._phase(request) == "execution"
-            and not self._has_tool_result(request, "artifact_stage")
-            and self._has_tool(request, "artifact_stage")
-            and not self._contains_tool_call(result)
-        )
-
     @override
     def wrap_model_call(
         self,
@@ -77,10 +92,7 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelCallResult:
         prepared = self._prepare(request)
-        result = handler(prepared)
-        if self._should_force_artifact(prepared, result):
-            return handler(prepared.override(tool_choice="artifact_stage"))
-        return result
+        return handler(prepared)
 
     @override
     async def awrap_model_call(
@@ -89,7 +101,4 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelCallResult:
         prepared = self._prepare(request)
-        result = await handler(prepared)
-        if self._should_force_artifact(prepared, result):
-            return await handler(prepared.override(tool_choice="artifact_stage"))
-        return result
+        return await handler(prepared)

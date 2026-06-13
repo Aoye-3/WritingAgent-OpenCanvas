@@ -141,3 +141,13 @@ File uploads are stored outside the main database under `.facetwrite/knowledge/u
 
 Schema version 3 intentionally clears legacy workspace data to complete the physical Project migration. Model Config, Agent definitions, and knowledge-base data are retained.
 Schema version 4 adds `threads.context_reset_at` without deleting history.
+
+Schema version 6 adds `plan_runs.clarification_json`. It stores the structured intake question, options, answer status, selected option, and optional custom answer while preserving the existing Plan ID through revision and execution.
+
+Schema version 7 adds persistent Plan execution and feedback state: Plan projection/current-step/version fields on `plan_runs`, recoverable executor state in `plan_executions`, and ordered safe user-visible events in `run_activities`.
+
+Schema version 8 repairs historical `canvas_write_requests.project_id` values that incorrectly stored a valid Thread ID. It resolves the real Project through `threads.project_id` and marks old pending create/append requests as `stale` so they cannot be executed after the new direct-commit policy is enabled.
+Plan execution leases are stored in `plan_executions` with owner, expiry, heartbeat, attempt, current step, and cancellation state. `run_activities` stores ordered safe activity summaries used by the compact conversation timeline. Canvas Plan nodes are read-only projections of `plan_runs`.
+`canvas_write_suggestions` persists UI-only write suggestions derived from ordinary replies. It stores structured points, status, and committed stable node IDs without modifying assistant message text.
+
+`plan_executions` leases are renewed while a step runs. Startup does not clear active leases; expired leases are reclaimed by the executor.

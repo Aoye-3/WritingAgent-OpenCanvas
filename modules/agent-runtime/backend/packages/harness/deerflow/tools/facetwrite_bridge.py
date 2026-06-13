@@ -10,7 +10,7 @@ from deerflow.tools.types import Runtime
 
 _DEFAULT_BASE_URL = "http://host.docker.internal:8787"
 _INTERNAL_ENDPOINT = "/api/internal/agent-runtime/tool-call"
-_BRIDGED_TOOL_NAMES = ("knowledge_base", "quick_messages", "clear_context", "plan_update", "artifact_stage", "canvas_write")
+_BRIDGED_TOOL_NAMES = ("knowledge_base", "quick_messages", "clear_context", "plan_clarification_submit", "plan_revision_submit", "artifact_stage", "canvas_write")
 _SECRET_PATTERN = re.compile(r"(?i)(api[_-]?key|authorization|token|password|secret)=?[^\s,;]+")
 
 
@@ -19,13 +19,14 @@ def _bridge_base_url() -> str:
 
 
 def _bridge_headers() -> dict[str, str]:
+    token = os.getenv("FACETWRITE_INTERNAL_TOOL_TOKEN")
+    if not token:
+        raise RuntimeError("FACETWRITE_INTERNAL_TOOL_TOKEN is required")
     headers = {
         "content-type": "application/json",
         "x-facetwrite-internal": "agent-runtime",
+        "x-facetwrite-tool-token": token,
     }
-    token = os.getenv("FACETWRITE_INTERNAL_TOOL_TOKEN")
-    if token:
-        headers["x-facetwrite-tool-token"] = token
     return headers
 
 
@@ -103,6 +104,8 @@ def _build_payload(runtime: Runtime, tool_name: str, arguments: dict[str, Any]) 
         "selectedCanvasNodeId": context.get("facetwrite_selected_canvas_node_id"),
         "contextValues": _context_record(context, "facetwrite_context_values"),
         "chatInstruction": context.get("facetwrite_chat_instruction") or context.get("facetwrite_prompt"),
+        "projectId": context.get("facetwrite_project_id"),
+        "canvasAction": _context_record(context, "facetwrite_canvas_action"),
     }
 
 
@@ -203,39 +206,45 @@ def clear_context_tool(runtime: Runtime, reason: str) -> str:
     return _call_facetwrite_tool(runtime, "clear_context", {"reason": reason})
 
 
-@tool("plan_update", parse_docstring=True)
-def plan_update_tool(
+@tool("plan_clarification_submit", parse_docstring=True)
+def plan_clarification_submit_tool(
     runtime: Runtime,
-    action: str,
-    planId: str | None = None,
-    title: str | None = None,
-    goal: str | None = None,
-    steps: list[dict[str, Any]] | None = None,
-    stepId: str | None = None,
-    status: str | None = None,
-    detail: str | None = None,
-    message: str | None = None,
-    error: str | None = None,
+    title: str,
+    goal: str,
+    question: str,
+    options: list[dict[str, Any]],
 ) -> str:
-    """Create or update a persistent FacetWrite plan.
+    """Submit the one structured clarification required for a new Plan.
 
     Args:
-        action: create, revise, update_step, request_input, finish, or fail.
-        planId: Existing plan id for actions other than create.
-        title: Plan title when creating a plan.
-        goal: Plan goal when creating a plan.
-        steps: Ordered plan steps when creating a plan.
-        stepId: Step id when updating a step.
-        status: Step status when updating a step.
-        detail: Optional step detail.
-        message: User-facing plan status or question.
-        error: Failure detail.
+        title: Short intake Plan title.
+        goal: User-facing goal inferred from the request.
+        question: One critical clarification question.
+        options: Two or three mutually exclusive answer options.
     """
+    return _call_facetwrite_tool(runtime, "plan_clarification_submit", {
+        "title": title, "goal": goal, "question": question, "options": options,
+    })
 
-    return _call_facetwrite_tool(runtime, "plan_update", {
-        "action": action, "planId": planId, "title": title, "goal": goal,
-        "steps": steps, "stepId": stepId, "status": status, "detail": detail,
-        "message": message, "error": error,
+
+@tool("plan_revision_submit", parse_docstring=True)
+def plan_revision_submit_tool(
+    runtime: Runtime,
+    planId: str,
+    title: str,
+    goal: str,
+    steps: list[dict[str, Any]],
+) -> str:
+    """Submit an approval-ready revision for an existing intake Plan.
+
+    Args:
+        planId: Existing intake Plan id.
+        title: Approval-ready Plan title.
+        goal: Confirmed Plan goal.
+        steps: Ordered executable and verifiable Plan steps.
+    """
+    return _call_facetwrite_tool(runtime, "plan_revision_submit", {
+        "planId": planId, "title": title, "goal": goal, "steps": steps,
     })
 
 
@@ -267,7 +276,7 @@ def canvas_write_tool(
     title: str | None = None,
     rationale: str | None = None,
 ) -> str:
-    """Create a pending FacetWrite Canvas write request; it does not apply changes.
+    """Write through FacetWrite's operation-level Canvas safety policy.
 
     Args:
         operation: The requested Canvas write operation: create, replace, or append.

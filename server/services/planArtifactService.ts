@@ -3,6 +3,7 @@ import net from "node:net";
 import path from "node:path";
 import type { SQLiteStorageRepository } from "../storage.js";
 import type { PlanArtifact, PlanArtifactLink } from "../storageTypes.js";
+import { splitCanvasText, stableDeliveryId } from "./canvasDelivery.js";
 
 const maxImageBytes = 10 * 1024 * 1024;
 const imageTypes = new Map([["image/png", ".png"], ["image/jpeg", ".jpg"], ["image/gif", ".gif"], ["image/webp", ".webp"]]);
@@ -21,7 +22,25 @@ export async function commitPlanArtifact(storage: SQLiteStorageRepository, threa
       if (!content) throw new Error("Text artifact content is required");
       const nodeKind = payload.nodeKind === "reference" || payload.nodeKind === "note" ? payload.nodeKind : "document";
       const index = plan.artifacts.findIndex((item) => item.id === artifact.id);
-      targetId = storage.createCanvasNode(threadId, { kind: nodeKind, title: artifact.title, content, x: 120 + (index % 3) * 380, y: 120 + Math.floor(index / 3) * 300, metadata: { planArtifact: { planId, artifactId } } }).id;
+      const chunks = splitCanvasText(content);
+      const existingNodes = new Map(storage.listCanvasNodes(plan.projectId).map((node) => [node.id, node]));
+      const existingEdges = new Set(storage.listCanvasEdges(plan.projectId).map((edge) => edge.id));
+      const nodeIds = chunks.map((chunk, chunkIndex) => {
+        const id = stableDeliveryId("node", `${planId}_${artifactId}`, chunkIndex + 1);
+        if (!existingNodes.has(id)) {
+          storage.createCanvasNode(plan.projectId, {
+            id, kind: nodeKind, title: chunks.length === 1 ? artifact.title : `${artifact.title} ${chunkIndex + 1}/${chunks.length}`,
+            content: chunk, x: 120 + (index % 3) * 380 + chunkIndex * 360, y: 120 + Math.floor(index / 3) * 300,
+            metadata: { planArtifact: { planId, artifactId, chunkIndex, chunkCount: chunks.length } }
+          });
+        }
+        return id;
+      });
+      for (let chunkIndex = 1; chunkIndex < nodeIds.length; chunkIndex += 1) {
+        const id = stableDeliveryId("edge", `${planId}_${artifactId}`, chunkIndex);
+        if (!existingEdges.has(id)) storage.createCanvasEdge(plan.projectId, { id, sourceNodeId: nodeIds[chunkIndex - 1], targetNodeId: nodeIds[chunkIndex], label: "continues" });
+      }
+      targetId = nodeIds[0];
     } else {
       const imageUrl = string(payload.imageUrl);
       await validatePublicImageUrl(imageUrl);
@@ -36,7 +55,7 @@ export async function commitPlanArtifact(storage: SQLiteStorageRepository, threa
       if (!bytes.length || bytes.length > maxImageBytes) throw new Error("Image artifact must be between 1 byte and 10MB");
       const safeName = `${path.parse(artifact.title).name.replace(/[^A-Za-z0-9_-]/g, "_") || artifact.id}${extension}`;
       const source = record(artifact.source);
-      targetId = (await storage.createCanvasAsset(threadId, {
+      targetId = (await storage.createCanvasAsset(plan.projectId, {
         fileName: safeName,
         fileBase64: bytes.toString("base64"),
         sourceUrl: imageUrl,

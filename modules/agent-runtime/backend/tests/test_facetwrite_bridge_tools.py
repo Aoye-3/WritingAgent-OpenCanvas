@@ -7,7 +7,6 @@ from deerflow.tools.facetwrite_bridge import (
     _format_bridge_response,
     _redact,
     artifact_stage_tool,
-    plan_update_tool,
 )
 from deerflow.config.app_config import FACETWRITE_REQUIRED_TOOLS
 
@@ -21,6 +20,8 @@ def test_build_payload_uses_facetwrite_runtime_context():
             "facetwrite_context_values": {"draft": "Bridge context"},
             "facetwrite_selected_canvas_node_id": "node_123",
             "facetwrite_chat_instruction": "Use the draft",
+            "facetwrite_project_id": "project_1",
+            "facetwrite_canvas_action": {"id": "action_1", "operation": "create", "requiresTool": True},
         },
         state={},
     )
@@ -35,6 +36,8 @@ def test_build_payload_uses_facetwrite_runtime_context():
     assert payload["contextValues"] == {"draft": "Bridge context"}
     assert payload["selectedCanvasNodeId"] == "node_123"
     assert payload["chatInstruction"] == "Use the draft"
+    assert payload["projectId"] == "project_1"
+    assert payload["canvasAction"]["id"] == "action_1"
 
 
 def test_build_payload_defaults_to_requested_tool_policy_when_context_missing():
@@ -54,6 +57,15 @@ def test_bridge_headers_do_not_expose_token_in_response_formatting(monkeypatch):
     assert headers["x-facetwrite-internal"] == "agent-runtime"
     assert headers["x-facetwrite-tool-token"] == "super-secret-token"
     assert _redact("token=super-secret-token") == "token=[redacted]"
+
+
+def test_bridge_headers_require_internal_token(monkeypatch):
+    monkeypatch.delenv("FACETWRITE_INTERNAL_TOOL_TOKEN", raising=False)
+    try:
+        _bridge_headers()
+        assert False, "missing token must fail"
+    except RuntimeError as exc:
+        assert "required" in str(exc)
 
 
 def test_bridge_uses_agent_runtime_endpoint():
@@ -95,39 +107,6 @@ def test_redact_masks_common_secret_shapes(monkeypatch):
     assert redacted.startswith("authorization=[redacted]")
 
 
-def test_plan_update_tool_forwards_structured_plan_arguments(monkeypatch):
-    observed = {}
-    monkeypatch.setattr(
-        "deerflow.tools.facetwrite_bridge._call_facetwrite_tool",
-        lambda runtime, name, arguments: observed.update(name=name, arguments=arguments) or "ok",
-    )
-
-    result = plan_update_tool.func(
-        SimpleNamespace(context={}, state={}),
-        action="create",
-        title="Research",
-        goal="Compare products",
-        steps=[{"id": "search", "title": "Search sources"}],
-    )
-
-    assert result == "ok"
-    assert observed == {
-        "name": "plan_update",
-        "arguments": {
-            "action": "create",
-            "planId": None,
-            "title": "Research",
-            "goal": "Compare products",
-            "steps": [{"id": "search", "title": "Search sources"}],
-            "stepId": None,
-            "status": None,
-            "detail": None,
-            "message": None,
-            "error": None,
-        },
-    }
-
-
 def test_artifact_stage_tool_forwards_artifact_and_links(monkeypatch):
     observed = {}
     monkeypatch.setattr(
@@ -149,4 +128,7 @@ def test_artifact_stage_tool_forwards_artifact_and_links(monkeypatch):
 
 
 def test_required_plan_tools_are_available_for_existing_runtime_configs():
-    assert {tool["name"] for tool in FACETWRITE_REQUIRED_TOOLS} == {"plan_update", "artifact_stage"}
+    assert {tool["name"] for tool in FACETWRITE_REQUIRED_TOOLS} == {
+        "knowledge_base", "quick_messages", "clear_context", "canvas_write",
+        "plan_clarification_submit", "plan_revision_submit", "artifact_stage",
+    }

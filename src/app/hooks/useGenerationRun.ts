@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentCard, AgentValues, PlanRun, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
+import type { AgentCard, AgentValues, CanvasWriteSuggestion, PlanRun, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
 import { generateText, generateTextStream } from "../../features/generation/generationClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../../features/generation/types";
 import type { Locale } from "../../features/i18n/types";
@@ -41,6 +41,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const [outputVersions, setOutputVersions] = useState<StoredOutputVersion[]>([]);
   const [toolEvents, setToolEvents] = useState<StoredToolEvent[]>([]);
   const [plans, setPlans] = useState<PlanRun[]>([]);
+  const [canvasWriteSuggestions, setCanvasWriteSuggestions] = useState<CanvasWriteSuggestion[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string | undefined>();
   const [isGenerating, setIsGenerating] = useState(false);
   const [isChatSending, setIsChatSending] = useState(false);
@@ -69,18 +70,30 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     setOutputVersions([]);
     setToolEvents([]);
     setPlans([]);
+    setCanvasWriteSuggestions([]);
     setActiveVersionId(undefined);
   };
 
   const appendToolEvent = (event: unknown, threadId: string) => {
+    const eventType = String((event as { eventType?: unknown }).eventType ?? "tool_event");
+    const payload = (event as { payload?: Record<string, unknown> }).payload ?? {};
     setToolEvents((current) => [{
       id: crypto.randomUUID(),
       threadId,
       runId: "pending",
-      eventType: String((event as { eventType?: unknown }).eventType ?? "tool_event"),
-      payload: (event as { payload?: unknown }).payload ?? event,
+      eventType,
+      payload,
       createdAt: new Date().toISOString()
     }, ...current]);
+    const summary = liveActivitySummary(eventType, payload, options.locale);
+    if (summary) setCollaborationMessages((current) => [...current, {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      text: summary,
+      usedMock: false,
+      kind: "activity",
+      createdAt: new Date().toISOString()
+    }]);
   };
 
   const updateStreamingMessage = (messageId: string, patch: Partial<CollaborationMessage>) => {
@@ -180,7 +193,16 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   };
 
   const applyCollaborationMessagesFromThreadState = (state: ThreadStateResponse) => {
-    setCollaborationMessages((current) => reconcileCollaborationMessages(current, state.messages));
+    const activityMessages = (state.planActivities ?? []).map((activity) => ({
+      id: `activity:${activity.id}`,
+      role: "assistant" as const,
+      text: activity.summary,
+      usedMock: false,
+      kind: "activity" as const,
+      createdAt: activity.createdAt
+    }));
+    const timelineMessages = [...state.messages, ...activityMessages].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    setCollaborationMessages((current) => reconcileCollaborationMessages(current, timelineMessages));
     setPlans(state.plans ?? []);
   };
 
@@ -213,7 +235,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
             onToolEvent: (event) => appendToolEvent(event, threadId)
           })
         : await generateText(payload);
-      if (operationId !== operationIdRef.current) return;
+      if (operationId !== operationIdRef.current) return undefined;
 
       if (!streamingEnabled) {
         enqueueStreamingText("editable", result.text);
@@ -232,7 +254,6 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const handleChatSend = async (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => {
     const operationId = ++operationIdRef.current;
     setIsChatSending(true);
-    const previousPendingWriteIds = new Set(options.getPendingCanvasWriteRequestIds());
     const userMessageId = crypto.randomUUID();
     const assistantMessageId = crypto.randomUUID();
     const startedAt = new Date().toISOString();
@@ -266,6 +287,15 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         structuredValues: options.agentValues,
         contextValues: { ...options.getContextValues(), ...requestContext },
         chatInstruction: text,
+        planPhase: requestContext?.approvedPlan ? "execution" : requestContext?.awaitingPlan ? "revise" : isPlanInstruction(text) ? "intake" : undefined,
+        planId: typeof (requestContext?.planExecution as { planId?: unknown } | undefined)?.planId === "string"
+          ? (requestContext?.planExecution as { planId: string }).planId
+          : typeof (requestContext?.awaitingPlan as { id?: unknown } | undefined)?.id === "string"
+            ? (requestContext?.awaitingPlan as { id: string }).id
+            : undefined,
+        stepId: typeof (requestContext?.planExecution as { stepId?: unknown } | undefined)?.stepId === "string"
+          ? (requestContext?.planExecution as { stepId: string }).stepId
+          : undefined,
         toolState: buildRequestToolState(options.toolState, {
           kind: requestContext?.approvedPlan ? "execution" : isPlanInstruction(text) || Boolean(requestContext?.awaitingPlan) ? "planning" : "chat"
         }),
@@ -275,7 +305,8 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       let streamedText = "";
       const result = await generateTextStream(payload, {
         onStatus: (status) => updateStreamingMessage(assistantMessageId, {
-          status: status.phase
+          status: status.phase,
+          statusLabel: status.label
         }),
         onToken: (token) => {
           streamedText += token;
@@ -297,16 +328,11 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
 
       const state = await options.onFetchAndApplyThreadState(result.threadId);
       if (operationId !== operationIdRef.current) return;
-      const directWriteRequests = isDirectCanvasWriteInstruction(text)
-        ? (state.canvasWriteRequests ?? []).filter((request) => !previousPendingWriteIds.has(request.id) && request.status === "pending")
-        : [];
-      for (const request of directWriteRequests) {
-        await options.onApproveCanvasWriteRequest(request.id);
-      }
       await options.onRefreshThreadState(result.threadId);
       await options.onRefreshProjectSurfaces();
+      return state;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Generation failed";
+      const message = recoverableGenerationError(error instanceof Error ? error.message : "Generation failed", options.locale);
       flushStreamingText(`message:${assistantMessageId}`);
       updateStreamingMessage(assistantMessageId, {
         text: `Request failed: ${message}`,
@@ -319,6 +345,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       if (operationId === operationIdRef.current) setIsChatSending(false);
     }
   };
+
 
   const restoreVersion = (version: StoredOutputVersion) => {
     setEditableOutput(version.content);
@@ -342,6 +369,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     isGenerating,
     outputVersions,
     plans,
+    canvasWriteSuggestions,
     toolEvents,
     setActiveVersionId,
     setCollaborationMessages,
@@ -350,6 +378,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     setOutputVersions,
     setToolEvents,
     setPlans,
+    setCanvasWriteSuggestions,
     resetGeneration,
     applyCollaborationMessagesFromThreadState,
     handleGenerate,
@@ -358,10 +387,30 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   };
 }
 
-function isDirectCanvasWriteInstruction(text: string) {
-  return /canvas|\u753b\u677f|\u756b\u677f|\u5199\u5165|\u5beb\u5165|\u4fdd\u5b58\u5230|\u52a0\u5165|\u6dfb\u52a0\u5230|\u653e\u5230|save\s+to\s+canvas|write\s+this|write\s+to\s+canvas|add\s+to\s+canvas/i.test(text);
-}
-
 function isPlanInstruction(text: string) {
   return /^\s*\/plan\b/i.test(text) || /^\s*continue approved plan\b/i.test(text);
+}
+
+function liveActivitySummary(eventType: string, payload: Record<string, unknown>, locale: Locale) {
+  const tool = typeof payload.toolName === "string" ? payload.toolName : typeof payload.tool === "string" ? payload.tool : "";
+  const skill = typeof payload.skill === "string" ? payload.skill : "";
+  if (skill) return locale === "zh" ? `正在使用技能：${skill === "brainstorming" ? "头脑风暴" : skill === "writing-plans" ? "计划编写" : skill}` : `Using skill: ${skill}`;
+  if (/(?:^|_)tool_started$/.test(eventType)) return locale === "zh" ? `正在调用工具${tool ? `：${tool}` : ""}` : `Using tool${tool ? `: ${tool}` : ""}`;
+  if (/(?:^|_)tool_completed$/.test(eventType)) return locale === "zh" ? `工具调用完成${tool ? `：${tool}` : ""}` : `Tool completed${tool ? `: ${tool}` : ""}`;
+  if (/(?:^|_)artifact_committed$/.test(eventType)) return locale === "zh" ? "当前步骤产物已写入画板" : "Current step artifact committed to Canvas";
+  if (/(?:^|_)canvas_action_recognized$/.test(eventType)) return locale === "zh" ? "已识别 Canvas 操作" : "Canvas action recognized";
+  if (/(?:^|_)canvas_mutation_started$/.test(eventType)) return locale === "zh" ? "正在执行 Canvas 操作" : "Applying Canvas action";
+  if (/(?:^|_)canvas_mutation_committed$/.test(eventType)) return locale === "zh" ? "Canvas 节点已创建或更新" : "Canvas node created or updated";
+  if (/(?:^|_)canvas_write_pending_approval$/.test(eventType)) return locale === "zh" ? "Canvas 覆盖操作等待批准" : "Canvas replacement is waiting for approval";
+  if (/(?:^|_)canvas_mutation_failed$/.test(eventType)) return locale === "zh" ? "Canvas 写入失败" : "Canvas write failed";
+  return undefined;
+}
+
+function recoverableGenerationError(message: string, locale: Locale) {
+  if (/Plan planning phase completed without|Plan execution phase completed without/i.test(message)) {
+    return locale === "zh"
+      ? "Plan 状态没有正确更新，执行已暂停。请重试当前步骤或修改计划。"
+      : "The Plan state was not updated correctly, so execution paused. Retry the current step or revise the Plan.";
+  }
+  return message;
 }

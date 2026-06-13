@@ -28,8 +28,9 @@ export function normalizeAgentRunOutput(input: NormalizeInput): { text: string; 
   const withoutJson = stripLeakedToolJson(input.text);
   const sanitized = sanitizeVisibleText(withoutJson.text, input.locale);
   const events = [...sourceEvents, ...withoutJson.events];
+  const canvasCorrected = correctCanvasOutcomeClaim(sanitized, events, input.locale);
 
-  if (isBlockedPlaceholder(sanitized, input.locale) && input.text.trim()) {
+  if (isBlockedPlaceholder(canvasCorrected, input.locale) && input.text.trim()) {
     events.push({
       eventType: "internal_output_blocked",
       payload: {
@@ -40,7 +41,7 @@ export function normalizeAgentRunOutput(input: NormalizeInput): { text: string; 
     });
   }
 
-  return { text: sanitized, events };
+  return { text: canvasCorrected, events };
 }
 
 export function sanitizeVisibleText(text: string, locale: Locale = "en") {
@@ -132,6 +133,20 @@ function blockedMessage(locale: Locale) {
   return locale === "zh"
     ? "本次运行返回了内部运行信息，已拦截；请重新生成。"
     : "This run returned internal runtime information and was blocked. Please regenerate.";
+}
+
+function correctCanvasOutcomeClaim(text: string, events: ToolEventRecord[], locale: Locale) {
+  const committed = events.find((event) => /(?:^|_)canvas_mutation_committed$/.test(event.eventType));
+  const pending = events.find((event) => /(?:^|_)canvas_write_pending_approval$/.test(event.eventType));
+  const failed = events.find((event) => /(?:^|_)canvas_mutation_failed$/.test(event.eventType));
+  if (!text && committed) return locale === "zh" ? "Canvas 节点已创建或更新。" : "The Canvas node was created or updated.";
+  if (!text && failed) return locale === "zh" ? "画布操作未完成，请查看错误信息后重试。" : "The Canvas operation did not complete. Review the error and try again.";
+  if (!text && pending) return locale === "zh" ? "画布操作正在等待你的批准，尚未写入。" : "The Canvas operation is waiting for your approval and has not been applied yet.";
+  const claimsCommitted = /已(?:经)?(?:创建|新增|写入|追加)|创建成功|写入成功|节点已|(?:created|added|written|appended|saved).*(?:canvas|node)|(?:canvas|node).*(?:created|added|written|appended|saved)/i.test(text);
+  if (!claimsCommitted) return text;
+  if (failed) return locale === "zh" ? "画布操作未完成，请查看错误信息后重试。" : "The Canvas operation did not complete. Review the error and try again.";
+  if (pending) return locale === "zh" ? "画布操作正在等待你的批准，尚未写入。" : "The Canvas operation is waiting for your approval and has not been applied yet.";
+  return text;
 }
 
 function preview(text: string) {

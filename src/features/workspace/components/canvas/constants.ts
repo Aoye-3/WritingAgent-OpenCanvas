@@ -7,7 +7,8 @@ export const MIN_NODE_SIZE: Record<CanvasNodeKind, { width: number; height: numb
   document: { width: 260, height: 180 },
   note: { width: 220, height: 150 },
   reference: { width: 240, height: 160 },
-  role: { width: 240, height: 170 }
+  role: { width: 240, height: 170 },
+  plan: { width: 320, height: 220 }
 };
 
 export const MAX_NODE_WIDTH = 920;
@@ -17,10 +18,12 @@ export const AUTO_NODE_VERTICAL_CHROME = 112;
 export const kindLabels: Record<string, { en: string; zh: string }> = {
   document: { en: "Document", zh: "文档" },
   note: { en: "Note", zh: "便签" },
-  reference: { en: "Reference", zh: "引用" }
+  reference: { en: "Reference", zh: "引用" },
+  role: { en: "role", zh: "角色" },
+  plan: { en: "Plan", zh: "计划" }
 };
 
-export const canvasNodeKinds = ["document", "note", "reference", "role"] as const;
+export const canvasNodeKinds = ["document", "note", "reference", "role", "plan"] as const;
 
 export const workflowStageLabels: Record<CanvasWorkflowStage, { en: string; zh: string }> = {
   inspiration: { en: "Inspiration", zh: "灵感" },

@@ -1,6 +1,6 @@
 import type { ChatCompletionTool } from "../providerRuntime.js";
 
-export type ToolRef = "web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write" | "plan_update" | "artifact_stage";
+export type ToolRef = "web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write" | "plan_clarification_submit" | "plan_revision_submit" | "artifact_stage";
 export type ToolState = Partial<Record<ToolRef, boolean>>;
 export type ToolRiskLevel = "low" | "medium" | "high";
 export type ToolGroup = "web" | "context" | "chat";
@@ -107,17 +107,31 @@ export const toolCatalog: ToolDefinition[] = [
     requiresApproval: false
   },
   {
-    name: "plan_update",
+    name: "plan_clarification_submit",
     group: "chat",
-    label: "Plan Update",
-    description: "Create and update a persistent multi-step task plan. Creating a plan pauses for user approval.",
-    promptHint: "For /plan work, create a concise ordered plan first. Do not execute steps until the plan is approved.",
+    label: "Submit Plan Clarification",
+    description: "Submit the single structured clarification required for a new Plan.",
+    promptHint: "Submit exactly one question with 2-3 mutually exclusive options and exactly one recommended option.",
     schema: { type: "object", properties: {
-      action: { type: "string", enum: ["create", "revise", "update_step", "request_input", "finish", "fail"] },
-      planId: { type: "string" }, stepId: { type: "string" }, title: { type: "string" }, goal: { type: "string" }, detail: { type: "string" }, error: { type: "string" }, message: { type: "string" },
-      status: { type: "string", enum: ["pending", "running", "completed", "failed", "skipped"] },
-      steps: { type: "array", items: { type: "object", properties: { id: { type: "string" }, title: { type: "string" }, detail: { type: "string" } }, required: ["id", "title"], additionalProperties: false } }
-    }, required: ["action"], additionalProperties: false },
+      title: { type: "string" }, goal: { type: "string" }, question: { type: "string" },
+      options: { type: "array", minItems: 2, maxItems: 3, items: { type: "object", properties: {
+        id: { type: "string" }, label: { type: "string" }, description: { type: "string" }, recommended: { type: "boolean" }
+      }, required: ["id", "label", "description", "recommended"], additionalProperties: false } }
+    }, required: ["title", "goal", "question", "options"], additionalProperties: false },
+    executorKind: "local", enabledByDefault: false, requiresExternalConfig: false, riskLevel: "low", requiresApproval: false
+  },
+  {
+    name: "plan_revision_submit",
+    group: "chat",
+    label: "Submit Plan Revision",
+    description: "Submit an approval-ready revision for the existing intake Plan.",
+    promptHint: "Revise only the supplied Plan id with short sequential executable steps.",
+    schema: { type: "object", properties: {
+      planId: { type: "string" }, title: { type: "string" }, goal: { type: "string" },
+      steps: { type: "array", minItems: 1, items: { type: "object", properties: {
+        id: { type: "string" }, title: { type: "string" }, detail: { type: "string" }
+      }, required: ["id", "title"], additionalProperties: false } }
+    }, required: ["planId", "title", "goal", "steps"], additionalProperties: false },
     executorKind: "local", enabledByDefault: false, requiresExternalConfig: false, riskLevel: "low", requiresApproval: false
   },
   {
@@ -136,27 +150,27 @@ export const toolCatalog: ToolDefinition[] = [
   {
     name: "canvas_write",
     group: "chat",
-    label: "Canvas Write Proposal",
-    description: "Propose content to write to the user's Canvas. The application will ask the user to confirm before applying the change.",
-    promptHint: "Use canvas_write to propose a Canvas write when the user asks to save or when the response is useful for Canvas. Never claim the Canvas was changed until the user confirms the proposal.",
+    label: "Canvas Write",
+    description: "Create or append Canvas content directly; destructive replacements remain pending until user approval.",
+    promptHint: "Use canvas_write when the user explicitly asks to create or append Canvas content. Claim success only when the tool returns status committed and a nodeId.",
     schema: {
       type: "object",
       properties: {
-        operation: { type: "string", enum: ["create", "replace", "append"], description: "The requested Canvas write operation" },
+        operation: { type: "string", enum: ["create", "replace", "append", "delete"], description: "The requested Canvas write operation" },
         nodeKind: { type: "string", enum: ["document", "note", "reference"], description: "Node type for created content or fallback target type" },
         targetNodeId: { type: "string", description: "Existing Canvas node id for replace or append. Omit to use the currently selected node when available." },
         title: { type: "string", description: "Short title for the node or write request" },
         content: { type: "string", description: "The exact Markdown/plain text content to write" },
         rationale: { type: "string", description: "Brief explanation of why this write is useful" }
       },
-      required: ["operation", "content"],
+      required: ["operation"],
       additionalProperties: false
     },
     executorKind: "local",
     enabledByDefault: true,
     requiresExternalConfig: false,
-    riskLevel: "high",
-    requiresApproval: true
+    riskLevel: "medium",
+    requiresApproval: false
   }
 ];
 

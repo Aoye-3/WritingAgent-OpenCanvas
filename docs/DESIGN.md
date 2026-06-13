@@ -1006,3 +1006,12 @@ Before implementing or reviewing a page, verify:
 - Reduced motion is respected.
 - Color is not the only status indicator.
 - The page still works at `375px`, `768px`, `1024px`, and `1440px`.
+
+## Plan Interaction
+
+The first Plan response is a Codex-style choice card with 2-3 mutually exclusive options, one recommended option, and an inline Other field. Normal options submit immediately. Answered choices persist in Plan history; intake placeholder steps are not shown. The revised task board requests approval once, then reports automatic sequential progress.
+## Plan Feedback Experience
+
+The Plan experience is deliberately staged: one mandatory choice card, one approval-ready Plan board plus Canvas projection, then continuous safe activity feedback while approved steps execute. The UI shows phase, tool purpose/result summaries, Artifact commits, progress, pause, and recovery without exposing private model reasoning.
+
+Plan activities render as compact 12px timeline rows rather than full assistant message bubbles. Skill usage is visible as a safe summary, including `brainstorming` and `writing-plans`; skill content and private prompts remain hidden.

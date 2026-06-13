@@ -14,7 +14,6 @@ type InternalAgentRuntimeRouteDeps = {
 
 export function registerInternalAgentRuntimeRoutes(app: Express, deps: InternalAgentRuntimeRouteDeps) {
   registerInternalToolBridgeRoute(app, "/api/internal/agent-runtime/tool-call", deps, "Agent Runtime");
-  registerInternalToolBridgeRoute(app, "/api/internal/deerflow/tool-call", deps, "Deprecated DeerFlow");
 }
 
 export function registerInternalToolBridgeRoute(
@@ -38,12 +37,15 @@ export function registerInternalToolBridgeRoute(
         selectedCanvasNodeId: body.selectedCanvasNodeId,
         contextValues: body.contextValues,
         chatInstruction: body.chatInstruction,
+        canvasAction: body.canvasAction,
         knowledgeService,
         resetContext: () => {
           if (!storage.resetThreadContext(body.threadId)) throw new Error("Thread not found");
         },
-        createCanvasWriteRequest: (input) => storage.createCanvasWriteRequest(body.threadId, input),
+        createCanvasWriteRequest: (input) => storage.createCanvasWriteRequest(projectIdForBridge(storage, body), input),
+        commitCanvasWrite: (input) => commitLowRiskCanvasWrite(storage, projectIdForBridge(storage, body), input, body.canvasAction),
         createPlanRun: (input) => storage.createPlanRun(body.threadId, input),
+        submitPlanClarification: (planId, clarification) => storage.submitPlanClarification(body.threadId, planId, clarification),
         revisePlanRun: (planId, input) => storage.revisePlanRun(body.threadId, planId, input),
         getPlanRun: (planId) => storage.getPlanRun(body.threadId, planId),
         updatePlanStep: (planId, stepId, patch) => storage.updatePlanStep(body.threadId, planId, stepId, patch),
@@ -68,14 +70,12 @@ export function registerInternalToolBridgeRoute(
 function isAllowedInternalRequest(request: Request) {
   const token = process.env.FACETWRITE_INTERNAL_TOOL_TOKEN?.trim();
   const providedToken = request.header("x-facetwrite-tool-token")?.trim();
-  if (token && providedToken && token === providedToken) return true;
-
-  const source = request.header("x-facetwrite-internal");
-  return source === "agent-runtime" || source === "agent-backend" || source === "deerflow";
+  return Boolean(token && providedToken && token === providedToken);
 }
 
 type BridgeRequest = {
   threadId: string;
+  projectId?: string;
   toolName: string;
   arguments: Record<string, unknown>;
   allowedToolRefs?: string[];
@@ -83,6 +83,7 @@ type BridgeRequest = {
   selectedCanvasNodeId?: string;
   contextValues?: Record<string, unknown>;
   chatInstruction?: string;
+  canvasAction?: Record<string, unknown>;
 };
 
 function parseBridgeRequest(value: unknown): BridgeRequest {
@@ -94,14 +95,46 @@ function parseBridgeRequest(value: unknown): BridgeRequest {
   const toolName = readRequiredString(body.toolName, "toolName");
   return {
     threadId,
+    projectId: readString(body.projectId),
     toolName,
     arguments: readRecord(body.arguments) ?? {},
     allowedToolRefs: readStringArray(body.allowedToolRefs),
     toolState: readBooleanRecord(body.toolState),
     selectedCanvasNodeId: readString(body.selectedCanvasNodeId),
     contextValues: readRecord(body.contextValues),
-    chatInstruction: readString(body.chatInstruction)
+    chatInstruction: readString(body.chatInstruction),
+    canvasAction: readRecord(body.canvasAction)
   };
+}
+
+function projectIdForBridge(storage: SQLiteStorageRepository, body: BridgeRequest) {
+  const projectId = storage.getThread(body.threadId)?.projectId;
+  if (!projectId) throw new Error("Thread not found");
+  if (body.projectId && body.projectId !== projectId) throw new Error("Runtime project does not match the Thread project");
+  return projectId;
+}
+
+function commitLowRiskCanvasWrite(storage: SQLiteStorageRepository, projectId: string, input: import("../storage.js").CanvasWriteRequestInput, action?: Record<string, unknown>) {
+  if (input.operation === "create") {
+    const stableId = typeof action?.id === "string" ? `node_${action.id.replace(/[^A-Za-z0-9_-]/g, "_")}` : undefined;
+    const existing = stableId ? storage.listCanvasNodes(projectId).find((node) => node.id === stableId) : undefined;
+    if (existing) return existing;
+    return storage.createCanvasNode(projectId, {
+      id: stableId,
+      kind: input.nodeKind ?? "document",
+      title: input.title,
+      content: input.content
+    });
+  }
+  if (input.operation === "append" && input.targetNodeId) {
+    const existing = storage.listCanvasNodes(projectId).find((node) => node.id === input.targetNodeId);
+    if (!existing) throw new Error("Target node was not found");
+    const updated = storage.updateCanvasNode(projectId, existing.id, {
+      content: existing.content ? `${existing.content}\n\n${input.content}` : input.content
+    });
+    if (updated) return updated;
+  }
+  throw new Error("Only create and append Canvas operations can be committed without approval");
 }
 
 function toToolCall(input: BridgeRequest): ChatToolCall {

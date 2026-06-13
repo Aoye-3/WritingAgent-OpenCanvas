@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
 import { Topbar } from "../../shared/Topbar";
-import type { AgentCard, AgentValues, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, PlanRun, StoredOutputVersion, StoredThread, StoredToolEvent } from "../agents/types";
+import type { AgentCard, AgentValues, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, StoredOutputVersion, StoredThread, StoredToolEvent } from "../agents/types";
 import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../generation/types";
 import { useI18n } from "../i18n/I18nProvider";
@@ -33,6 +33,7 @@ type WorkspaceViewProps = {
   canvasEdges: CanvasEdge[];
   canvasObjects: CanvasObject[];
   canvasWriteRequests: CanvasWriteRequest[];
+  canvasWriteSuggestions: CanvasWriteSuggestion[];
   canvasWorkflow?: CanvasWorkflow;
   canvasWorkflowSuggestions: CanvasWorkflowSuggestion[];
   selectedCanvasNodeId?: string;
@@ -53,7 +54,7 @@ type WorkspaceViewProps = {
   onSelectThread: (threadId: string) => Promise<void>;
   onApproveCanvasWriteRequest: (requestId: string) => Promise<{ request: CanvasWriteRequest; node?: CanvasNode }>;
   onAcceptCanvasWorkflowSuggestion: (suggestionId: string) => Promise<void>;
-  onChatSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => Promise<void>;
+  onChatSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => Promise<unknown>;
   onConvertCanvasWorkflowSuggestionToNode: (suggestionId: string, kind?: CanvasNodeKind) => Promise<void>;
   onCreateCanvasEdge: (draft: CanvasEdgeDraft) => Promise<CanvasEdge | undefined>;
   onCreateCanvasNode: (draft: CanvasNodeDraft) => Promise<unknown>;
@@ -100,6 +101,7 @@ export function WorkspaceView({
   canvasEdges,
   canvasObjects,
   canvasWriteRequests,
+  canvasWriteSuggestions,
   canvasWorkflow,
   canvasWorkflowSuggestions,
   selectedCanvasNodeId,
@@ -290,6 +292,7 @@ export function WorkspaceView({
           activeAgent={activeAgent}
           agentCards={agentCards}
           canvasWriteRequests={canvasWriteRequests}
+          canvasWriteSuggestions={canvasWriteSuggestions}
           collapsed={rightCollapsed}
           isSending={isChatSending}
           inputDraft={composerDraft}

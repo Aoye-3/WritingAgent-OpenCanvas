@@ -111,11 +111,16 @@ function buildToolBridgeStatus(): AgentBackendToolBridgeStatus[] {
       target: "FacetWrite internal ToolUse bridge",
       executionBoundary: "AgentBackend can request clear-context behavior through FacetWrite's controlled ToolUse bridge."
     },
-    plan_update: {
-      bridgeState: "facetwrite_bridge",
-      target: "FacetWrite Plan Runtime bridge",
-      executionBoundary: "AgentBackend creates and updates persistent task plans while FacetWrite owns approval and state."
-    },
+  plan_clarification_submit: {
+    bridgeState: "facetwrite_bridge",
+    target: "FacetWrite Plan intake",
+    executionBoundary: "Creates one structured clarification intake Plan"
+  },
+  plan_revision_submit: {
+    bridgeState: "facetwrite_bridge",
+    target: "FacetWrite Plan revision",
+    executionBoundary: "Revises only the existing pending Plan"
+  },
     artifact_stage: {
       bridgeState: "facetwrite_bridge",
       target: "FacetWrite artifact staging bridge",

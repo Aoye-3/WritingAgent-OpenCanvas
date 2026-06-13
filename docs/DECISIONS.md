@@ -190,6 +190,8 @@ Reason: Duplicating Tool definitions across UI, runtime, and prompt code causes 
 Impact: New tools must update catalog/policy docs and Agent runtime config behavior.
 
 ## 2026-05-15: Canvas Writes Require User Approval
+Status: Superseded by `2026-06-13: Canvas Writes Use Operation-Level Risk`.
+
 Decision: The `canvas_write` tool can create pending write requests only. It cannot directly change Canvas nodes. This decision is preserved by the 2026-05-16 proposal UI: user confirmation may auto-call approval, but the Agent still cannot write silently.
 
 Reason: Canvas mutation is a user-visible data write and should not happen solely because a model produced a tool call.
@@ -254,3 +256,22 @@ The Windows double-click entry `start-opencanvas-shell.vbs` is a stricter local-
 - Context assembly is private and bounded: explicit mind chains/selections, selected and directed-related nodes, Workflow/Role state, structured inputs, post-reset Thread history, then Knowledge.
 - `threads.context_reset_at` is a soft boundary that preserves visible history. The `clear_context` bridge tool uses the same persisted reset operation.
 - Mock fallback requires explicit `FACETWRITE_MOCK_FALLBACK_ENABLED=true`; normal runtime/model failures use stable error codes.
+
+## 2026-06-12: Plan Runtime Owns Orchestration
+
+- Superpowers-inspired brainstorming and plan writing are adapted as project-local skills.
+- Persisted Plan state, approval, step isolation, Artifact ownership, and Canvas safety remain server-owned.
+- A new Plan always requests one structured clarification before producing an approval-ready task board.
+- Approved execution is sequential and pauses on interruption or failure.
+## 2026-06-13: Product Runtime Owns Plan Lifecycle
+
+Plan state transitions and execution scheduling are server-owned. Models receive one phase-scoped structured contract and cannot mark steps or Plans complete. Safe activities are persisted separately from private reasoning and raw tool payloads. Canvas Plan nodes are disposable read-only projections, not authoritative state.
+
+## 2026-06-13: Canvas Writes Use Operation-Level Risk
+
+Explicit Canvas actions are recognized and scheduled by product services instead of relying on model tool selection. Create and append are low-risk direct commits with stable action IDs and authoritative node results. Replace, range replacement, and delete remain destructive approval-gated operations. Runtime-supplied Project IDs are never trusted over Thread ownership.
+## 2026-06-13: Product Server Owns Plan Attempts And Execution
+
+Decision: The server creates Plan intake state, injects one phase-specific model contract, and runs approved steps through a leased persistent executor. React renders state and activities but does not initiate execution steps.
+
+Reason: Model-selected lifecycle actions and frontend-memory loops caused repeated clarification calls, silent stalls, and unrecoverable execution after refresh.

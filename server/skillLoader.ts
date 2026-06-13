@@ -15,7 +15,10 @@ type Frontmatter = {
   "allowed-tools"?: string[];
 };
 
-const skillsRoot = path.resolve(process.cwd(), "skills", "public");
+const skillsRoots = [
+  path.resolve(process.cwd(), "skills", "public"),
+  path.resolve(process.cwd(), "modules", "agent-runtime", "skills", "public")
+];
 
 export async function loadSkillsByRefs(skillRefs: string[]) {
   const requested = new Set(skillRefs);
@@ -24,19 +27,24 @@ export async function loadSkillsByRefs(skillRefs: string[]) {
 }
 
 export async function loadPublicSkills() {
-  let entries: string[] = [];
-  try {
-    entries = await readdir(skillsRoot);
-  } catch {
-    return [];
+  const skills: Skill[] = [];
+  for (const root of skillsRoots) {
+    let entries: string[] = [];
+    try {
+      entries = await readdir(root);
+    } catch {
+      continue;
+    }
+    const loaded = await Promise.all(entries.map((entry) => readSkill(root, entry)));
+    for (const skill of loaded) {
+      if (skill && !skills.some((item) => item.name === skill.name)) skills.push(skill);
+    }
   }
-
-  const skills = await Promise.all(entries.map((entry) => readSkill(entry)));
-  return skills.filter((skill): skill is Skill => Boolean(skill));
+  return skills;
 }
 
-async function readSkill(relativePath: string): Promise<Skill | null> {
-  const skillFile = path.join(skillsRoot, relativePath, "SKILL.md");
+async function readSkill(root: string, relativePath: string): Promise<Skill | null> {
+  const skillFile = path.join(root, relativePath, "SKILL.md");
   try {
     const raw = await readFile(skillFile, "utf8");
     const parsed = parseSkillMarkdown(raw);

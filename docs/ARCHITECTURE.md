@@ -142,7 +142,7 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 - FacetWrite Task cards are mapped to AgentBackend subagent metadata with skills, tools, model inheritance, timeout, and max-turn defaults.
 - FacetWrite exposes Agent Runtime status, config overview, dashboard, and FacetWrite-managed Memory endpoints at `/api/agent-runtime/*`, with `/api/agent-backend/*` kept as compatibility aliases where applicable.
 - FacetWrite exposes an AI Dashboard that summarizes Agent Runtime health, auth, Skills/MCP, AgentCard-to-subagent mapping, ToolUse bridge status, and editable FacetWrite-managed Memory.
-- FacetWrite exposes `/api/internal/agent-runtime/tool-call` as the service-to-service ToolUse bridge, with `/api/internal/agent-backend/tool-call` kept as a compatibility alias. Deprecated `/api/internal/deerflow/tool-call` exists only for old sidecars. The bridge accepts only trusted local/container calls, reuses `executeToolCall`, applies the Tool catalog policy guard, and keeps Canvas writes as pending requests.
+- FacetWrite exposes `/api/internal/agent-runtime/tool-call` as the only service-to-service ToolUse bridge. Every request requires `FACETWRITE_INTERNAL_TOOL_TOKEN`; source headers are metadata only. The bridge reuses `executeToolCall` and applies the Tool catalog policy guard.
 - AgentBackend loads `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write` through `AgentBackend.tools.facetwrite_bridge`. The Docker default callback URL is `http://host.docker.internal:8837`.
 - AgentBackend `web_search` remains a AgentBackend built-in tool and is not counted as a FacetWrite local bridge tool.
 - AgentBackend global memory is not injected or updated for FacetWrite runs by default. Per-run context carries `facetwrite_memory_enabled`; when enabled, only FacetWrite-managed Memory content is injected.
@@ -192,7 +192,7 @@ The frontend keeps orchestration in `DocumentCanvas`, tool overlays and file inp
 
 ## Important Current Constraints
 - Canvas background drag, context-menu creation, and node resize depend on pointer events reaching the correct React Flow pane or FacetWrite node control. Any future decorative grid, empty state, alignment guide, selection marquee, or overlay should be verified with browser hit testing so it does not become an invisible interaction blocker.
-- Canvas writes are never applied directly by the Agent. The Agent can only create a pending write proposal/request. The UI may ask the user to write all content or only annotated snippets, then convert that explicit confirmation into the backend approve/apply flow. Direct user commands such as "鍐欏叆" or "save to canvas" are treated as explicit confirmation for the new request from that same run, not as permission to apply older pending proposals.
+- Canvas create and append operations are low-risk direct commits with stable IDs and authoritative results. Replace, range replacement, delete, and other destructive mutations remain approval-gated. Ordinary assistant text is never written automatically.
 - Agent Runtime-generated write or side-effect proposals must still be converted into FacetWrite confirmation and approval flows before data changes. AgentRuntime does not read or write Canvas storage directly; it receives frontend-filtered context through the backend generation request and can affect Canvas only through the internal ToolUse bridge.
 - Tool definitions, prompt hints, schemas, risk levels, and approval requirements should stay in the Tool catalog/policy layer.
 - Provider details should stay behind provider runtime/profile code rather than being inferred in UI components.
@@ -213,3 +213,7 @@ Model selection and context assembly are hidden runtime policies. Threads select
 Generation context is bounded to explicit mind chains/selections, the selected node and directed related nodes, Workflow/Role state, current draft and structured inputs, messages after `context_reset_at`, and Knowledge results. Ordinary notes and the rest of an unselected Canvas are excluded. Frontend generation and Thread restoration use operation ownership checks so stale asynchronous results cannot apply after a Project or Thread switch.
 
 Agent Runtime is the sole real generation path. Default failures return stable model/runtime errors, emit redacted failure events, and do not persist Mock messages or output versions.
+
+## Structured Plan Lifecycle
+
+New `/plan` requests force-load the project-local `brainstorming` skill and expose only `plan_clarification_submit`. After the structured clarification is answered, `writing-plans` exposes only `plan_revision_submit` for the same Plan ID. `PlanOrchestrator` owns step status, failure-to-pause behavior, and persistent safe activities; `PlanExecutor` owns lease-backed sequential execution and restart recovery. Skill usage and execution progress are projected into the compact conversation activity timeline. Models never own Plan lifecycle status.

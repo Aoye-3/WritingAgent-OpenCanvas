@@ -18,6 +18,10 @@ import type { ProviderRunnerDeps } from "./providerRunner.js";
 import { recordGenerationRun } from "./runRecorder.js";
 import { resolveConfiguredModelApi, type ConfiguredModelApi } from "../../domains/model-config/index.js";
 import { isConfiguredModelRuntimeReady } from "../../runtime/agentBackendAdapter/modelSync.js";
+import { PlanOrchestrator } from "../planOrchestrator.js";
+import { resolveCanvasAction } from "./canvasActionPolicy.js";
+import { resolvePlanRequestPolicy } from "./planRequestPolicy.js";
+import { resolveOrchestrationPolicy } from "./orchestrationPolicy.js";
 
 export type GenerationService = {
   generateAndRecord: (payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void) => Promise<GenerateResponse>;
@@ -65,15 +69,31 @@ export function createGenerationService(
   deps: GenerationServiceDeps = {}
 ): GenerationService {
   const executionRuntime = deps.agentRuntime ?? (deps.agentBackend ? createAgentBackendRuntimePort(deps.agentBackend) : undefined);
+  const planOrchestrator = new PlanOrchestrator(storage);
 
   async function generateAndRecord(payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
+    payload = withOrchestrationPolicy(withCanvasAction(payload, threadId, storage));
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
+    payload = withPlanGeneration(payload, threadId, storage);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     const agentCard = context.runtimeConfig.agentCard;
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
+    const observeToolEvent = (event: ToolEventRecord) => {
+      planOrchestrator.observe(threadId, event);
+      onToolEvent?.(event);
+    };
+    for (const event of canvasActionEvents(payload)) {
+      runtimeEvents.push(event);
+      observeToolEvent(event);
+    }
+    for (const event of planPhaseEvents(payload)) {
+      runtimeEvents.push(event);
+      observeToolEvent(event);
+    }
 
     try {
+      planOrchestrator.prepare(threadId, payload);
       const agentBackendRun = await runAgentRuntimeGeneration({
         payload: { ...payload, toolState: context.effectiveToolState },
         threadId,
@@ -82,7 +102,7 @@ export function createGenerationService(
         runtimeConfig: context.runtimeConfig,
         messages: context.messages,
         prompt: context.prompt,
-        onToolEvent
+        onToolEvent: observeToolEvent
       }, executionRuntime);
 
       if (agentBackendRun) {
@@ -95,10 +115,11 @@ export function createGenerationService(
         if (hasBlockedInternalOutput(normalized.events)) {
           const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend returned internal runtime output"), isMockFallbackEnabled(deps));
           runtimeEvents.push(...(normalized.events ?? []), event);
-          onToolEvent?.(event);
+          observeToolEvent(event);
         } else {
           const events = [...runtimeEvents, ...(normalized.events ?? [])];
-          return recordGenerationRun({
+          planOrchestrator.complete(threadId, payload);
+          const recorded = recordGenerationRun({
             storage,
             payload,
             threadId,
@@ -116,16 +137,18 @@ export function createGenerationService(
             finishReason: agentBackendRun.finishReason,
             usage: agentBackendRun.usage
           });
+          return recorded;
         }
       } else {
         const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend is disabled or unavailable"), isMockFallbackEnabled(deps));
         runtimeEvents.push(event);
-        onToolEvent?.(event);
+        observeToolEvent(event);
       }
     } catch (error) {
+      planOrchestrator.fail(threadId, payload, error);
       const event = createRuntimeFallbackEvent("agent-backend", error, isMockFallbackEnabled(deps));
       runtimeEvents.push(event);
-      onToolEvent?.(event);
+      observeToolEvent(event);
     }
 
     if (!isMockFallbackEnabled(deps)) throw runtimeGenerationError(runtimeEvents);
@@ -153,15 +176,30 @@ export function createGenerationService(
     } = {}
   ): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
+    payload = withOrchestrationPolicy(withCanvasAction(payload, threadId, storage));
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
+    payload = withPlanGeneration(payload, threadId, storage);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     const agentCard = context.runtimeConfig.agentCard;
     let textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
+    const observeToolEvent = (event: ToolEventRecord) => {
+      planOrchestrator.observe(threadId, event);
+      callbacks.onToolEvent?.(event);
+    };
+    for (const event of canvasActionEvents(payload)) {
+      runtimeEvents.push(event);
+      observeToolEvent(event);
+    }
+    for (const event of planPhaseEvents(payload)) {
+      runtimeEvents.push(event);
+      observeToolEvent(event);
+    }
 
     callbacks.onStatus?.({ phase: "thinking", label: streamLabels.thinking });
 
     try {
+      planOrchestrator.prepare(threadId, payload);
       const agentBackendRun = await runAgentRuntimeGeneration({
         payload: { ...payload, toolState: context.effectiveToolState },
         threadId,
@@ -170,7 +208,7 @@ export function createGenerationService(
         runtimeConfig: context.runtimeConfig,
         messages: context.messages,
         prompt: context.prompt,
-        onToolEvent: callbacks.onToolEvent,
+        onToolEvent: observeToolEvent,
         onToken: textGate.push,
         onStatus: callbacks.onStatus
       }, executionRuntime);
@@ -185,13 +223,14 @@ export function createGenerationService(
         if (hasBlockedInternalOutput(normalized.events)) {
           const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend returned internal runtime output"), isMockFallbackEnabled(deps));
           runtimeEvents.push(...(normalized.events ?? []), event);
-          callbacks.onToolEvent?.(event);
+          observeToolEvent(event);
           textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
         } else {
           textGate.flush();
           callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
           const events = [...runtimeEvents, ...(normalized.events ?? [])];
-          return recordGenerationRun({
+          planOrchestrator.complete(threadId, payload);
+          const recorded = recordGenerationRun({
             storage,
             payload,
             threadId,
@@ -209,16 +248,18 @@ export function createGenerationService(
             finishReason: agentBackendRun.finishReason,
             usage: agentBackendRun.usage
           });
+          return recorded;
         }
       } else {
         const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend is disabled or unavailable"), isMockFallbackEnabled(deps));
         runtimeEvents.push(event);
-        callbacks.onToolEvent?.(event);
+        observeToolEvent(event);
       }
     } catch (error) {
+      planOrchestrator.fail(threadId, payload, error);
       const event = createRuntimeFallbackEvent("agent-backend", error, isMockFallbackEnabled(deps));
       runtimeEvents.push(event);
-      callbacks.onToolEvent?.(event);
+      observeToolEvent(event);
       textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     }
 
@@ -242,6 +283,7 @@ export function createGenerationService(
   }
 
   return { generateAndRecord, generateAndRecordStream };
+
 }
 
 function hasBlockedInternalOutput(events?: ToolEventRecord[]) {
@@ -249,12 +291,14 @@ function hasBlockedInternalOutput(events?: ToolEventRecord[]) {
 }
 
 function createRuntimeFallbackEvent(source: "agent-backend", error: unknown, mockFallbackEnabled: boolean): ToolEventRecord {
+  const message = safeRuntimeErrorMessage(error);
+  const planProtocolFailure = /^Plan (?:planning|execution) phase completed/i.test(message);
   return {
-    eventType: "agent_backend_runtime_failed",
+    eventType: planProtocolFailure ? "agent_backend_plan_protocol_failed" : "agent_backend_runtime_failed",
     payload: {
       source,
-      message: safeRuntimeErrorMessage(error),
-      fallback: mockFallbackEnabled ? "mock" : "none"
+      message,
+      fallback: planProtocolFailure ? "none" : mockFallbackEnabled ? "mock" : "none"
     }
   };
 }
@@ -268,7 +312,7 @@ function safeRuntimeErrorMessage(error: unknown) {
 }
 
 function formatGenerationFailure(runtimeEvents: ToolEventRecord[]) {
-  const agentBackendMessage = runtimeEvents.find((event) => event.eventType === "agent_backend_runtime_failed")?.payload?.message;
+  const agentBackendMessage = runtimeEvents.find((event) => event.eventType === "agent_backend_plan_protocol_failed" || event.eventType === "agent_backend_runtime_failed")?.payload?.message;
   if (typeof agentBackendMessage === "string") {
     return `AgentBackend failed: ${agentBackendMessage}`;
   }
@@ -342,3 +386,84 @@ function recordMockFallback(input: {
     finishReason: "mock_fallback"
   });
 }
+
+function withCanvasAction(payload: GenerateRequest, threadId: string, storage: SQLiteStorageRepository): GenerateRequest {
+  if (payload.canvasAction || !payload.chatInstruction) return payload;
+  const canvasAction = resolveCanvasAction({
+    threadId,
+    instruction: payload.chatInstruction,
+    selectedCanvasNodeId: payload.selectedCanvasNodeId,
+    sequence: storage.listMessages(threadId).length
+  });
+  return canvasAction
+    ? { ...payload, canvasAction, contextValues: { ...payload.contextValues, canvasAction } }
+    : payload;
+}
+
+function canvasActionEvents(payload: GenerateRequest): ToolEventRecord[] {
+  if (!payload.canvasAction) return [];
+  return [{
+    eventType: "canvas_action_recognized",
+    payload: {
+      eventType: "canvas_action_recognized",
+      actionId: payload.canvasAction.id,
+      operation: payload.canvasAction.operation,
+      risk: payload.canvasAction.risk,
+      targetNodeId: payload.canvasAction.targetNodeId
+    }
+  }];
+}
+
+function withPlanGeneration(payload: GenerateRequest, threadId: string, storage: SQLiteStorageRepository): GenerateRequest {
+  if (payload.planGeneration) return payload;
+  const policy = resolvePlanRequestPolicy(payload);
+  if (policy.phase === "chat") return payload;
+  const phase = policy.stage === "execution" ? "execution" : policy.stage === "revise" ? "revise" : "intake";
+  const existingPlanId = payload.planId || readString(record(payload.contextValues?.awaitingPlan).id);
+  const planId = existingPlanId || storage.createPlanIntake(threadId, {
+    title: "Plan intake",
+    goal: payload.chatInstruction || "Clarify intent"
+  }).id;
+  const phaseAttemptId = `${policy.stage}_${crypto.randomUUID()}`;
+  return {
+    ...payload,
+    contextValues: { ...payload.contextValues, planGeneration: {
+      phase,
+      planId,
+      stepId: payload.stepId ?? policy.executionStepId,
+      phaseAttemptId
+    } },
+    planGeneration: {
+      phase,
+      planId,
+      stepId: payload.stepId ?? policy.executionStepId,
+      phaseAttemptId
+    }
+  };
+}
+
+function withOrchestrationPolicy(payload: GenerateRequest): GenerateRequest {
+  if (payload.orchestrationPolicy) return payload;
+  const orchestrationPolicy = resolveOrchestrationPolicy(payload.chatInstruction ?? payload.freeTextPrompt ?? "");
+  return { ...payload, orchestrationPolicy, contextValues: { ...payload.contextValues, orchestrationPolicy } };
+}
+
+function planPhaseEvents(payload: GenerateRequest): ToolEventRecord[] {
+  const phase = payload.planGeneration?.phase;
+  if (!phase) return [];
+  const skill = phase === "intake" ? "brainstorming" : phase === "revise" ? "writing-plans" : undefined;
+  return [{
+    eventType: "agent_backend_plan_activity",
+    payload: {
+      eventType: phase === "intake" ? "intent_recognized" : phase === "revise" ? "plan_preparing" : "step_started",
+      planId: payload.planGeneration?.planId,
+      stepId: payload.planGeneration?.stepId,
+      phase,
+      phaseAttemptId: payload.planGeneration?.phaseAttemptId,
+      ...(skill ? { skill, summary: `Using skill: ${skill}` } : {})
+    }
+  }];
+}
+
+function record(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
+function readString(value: unknown) { return typeof value === "string" ? value.trim() : ""; }

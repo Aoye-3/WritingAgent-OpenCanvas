@@ -12,12 +12,12 @@ export function validateId(value: string, label: string) {
 }
 
 export function validateNodeKind(value: string): CanvasNodeKind {
-  if (value === "document" || value === "note" || value === "reference" || value === "role") return value;
+  if (value === "document" || value === "note" || value === "reference" || value === "role" || value === "plan") return value;
   throw new Error("Invalid canvas node kind");
 }
 
 export function validateWriteOperation(value: string): CanvasWriteOperation {
-  if (value === "create" || value === "replace" || value === "append" || value === "replace_range") return value;
+  if (value === "create" || value === "replace" || value === "append" || value === "replace_range" || value === "delete") return value;
   throw new Error("Invalid canvas write operation");
 }
 
@@ -33,6 +33,7 @@ export function defaultCanvasTitle(kind: CanvasNodeKind) {
   if (kind === "note") return "Untitled note";
   if (kind === "reference") return "Untitled reference";
   if (kind === "role") return "Role";
+  if (kind === "plan") return "Plan";
   return "Untitled document";
 }
 

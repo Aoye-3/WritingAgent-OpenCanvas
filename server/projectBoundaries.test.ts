@@ -4,14 +4,23 @@ import { DatabaseSync } from "node:sqlite";
 import { migrateStorageSchema } from "./db/schema.js";
 import { createStorage } from "./storage.js";
 
-test("schema v5 uses project-owned Canvas tables and persistent plan artifacts", () => {
+test("schema v11 uses project-owned Canvas tables and persistent recoverable plans", () => {
   const db = new DatabaseSync(":memory:");
   migrateStorageSchema(db);
 
   const version = db.prepare(`SELECT MAX(version) as version FROM schema_version`).get() as { version: number };
-  assert.equal(version.version, 5);
+  assert.equal(version.version, 11);
   assert.equal(tableExists(db, "plan_runs"), true);
+  assert.equal(tableExists(db, "plan_executions"), true);
+  assert.equal(tableExists(db, "run_activities"), true);
+  assert.equal(tableExists(db, "canvas_write_suggestions"), true);
   assert.equal(tableExists(db, "plan_artifact_links"), true);
+  assert.equal(columnNames(db, "plan_runs").includes("clarification_json"), true);
+  assert.equal(columnNames(db, "plan_runs").includes("canvas_node_id"), true);
+  assert.equal(columnNames(db, "plan_runs").includes("current_step_id"), true);
+  assert.equal(columnNames(db, "plan_runs").includes("execution_version"), true);
+  assert.equal(columnNames(db, "plan_executions").includes("lease_expires_at"), true);
+  assert.equal(columnNames(db, "plan_executions").includes("last_heartbeat_at"), true);
   assert.equal(tableExists(db, "thread_inputs"), false);
   assert.equal(columnNames(db, "threads").includes("agent_card_id"), false);
   assert.equal(columnNames(db, "threads").includes("context_reset_at"), true);
@@ -44,6 +53,36 @@ test("schema v3 migrates a legacy thread table without retaining Agent ownership
   assert.equal(columnNames(db, "threads").includes("agent_card_id"), false);
   assert.equal(columnNames(db, "threads").includes("project_id"), true);
   assert.equal(columnNames(db, "threads").includes("configured_model_api_id"), true);
+});
+
+test("schema v8 repairs Thread-owned Canvas requests and makes old low-risk proposals stale", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+    INSERT INTO schema_version (version, applied_at) VALUES
+      (1, datetime('now')), (2, datetime('now')), (3, datetime('now')), (4, datetime('now')),
+      (5, datetime('now')), (6, datetime('now')), (7, datetime('now'));
+    CREATE TABLE threads (id TEXT PRIMARY KEY, project_id TEXT NOT NULL);
+    CREATE TABLE canvas_write_requests (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      operation TEXT NOT NULL,
+      status TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO threads (id, project_id) VALUES ('thread_orphan', 'project_real');
+    INSERT INTO canvas_write_requests (id, project_id, operation, status, updated_at)
+    VALUES ('write_orphan', 'thread_orphan', 'create', 'pending', datetime('now'));
+  `);
+
+  migrateStorageSchema(db);
+
+  const request = db.prepare(`SELECT project_id as projectId, status FROM canvas_write_requests WHERE id = 'write_orphan'`).get() as {
+    projectId: string;
+    status: string;
+  };
+  assert.equal(request.projectId, "project_real");
+  assert.equal(request.status, "stale");
 });
 
 test("projects own threads, models, and agent inputs without cross-project leakage", async () => {

@@ -28,7 +28,7 @@ Agent tools are configured through the tool catalog and policy layer:
 
 Runtime tool calls pass through `server/tools/toolPolicyGuard.ts` before executor logic runs. The guard rejects unknown tools, tools outside the active Agent's refs, tools disabled for the current run, and tools missing required external configuration.
 
-Agent Runtime bridge tool calls use the same executor path through `/api/internal/agent-runtime/tool-call`. The historical `/api/internal/agent-backend/tool-call` path remains a compatibility alias. This endpoint is service-to-service only: it requires a trusted local/container marker or optional `FACETWRITE_INTERNAL_TOOL_TOKEN`, and it does not bypass tool policy or Canvas confirmation/approval. Bridge adapter errors redact token-like strings before returning content to the runtime.
+Agent Runtime bridge tool calls use `/api/internal/agent-runtime/tool-call`. This service-to-service endpoint requires `FACETWRITE_INTERNAL_TOOL_TOKEN` on every request; source headers are metadata and never authentication. Bridge calls do not bypass tool policy or destructive Canvas approval. Persisted and streamed tool events pass through a field allowlist/redactor before reaching the UI.
 
 Streaming assistant text is a temporary UI preview, not a persistence boundary. `/api/generate/stream` must keep an initial safety buffer and must not stream obvious internal prompt headings, raw ToolUse/search JSON, provider reasoning metadata, or AgentBackend replay payloads. The final assistant message is still normalized before it is recorded, and thread-state reconciliation should replace temporary UI text with the persisted safe output.
 
@@ -43,7 +43,7 @@ When Agent Runtime is enabled, FacetWrite accesses protected runtime APIs throug
 - AgentBackend health may be checked through `/health`.
 - Protected calls such as `/api/skills`, `/api/mcp/config`, and `/api/runs/stream` must use the backend auth helper.
 - `GET /api/agent-runtime/status`, `GET /api/agent-runtime/config`, and `GET /api/agent-runtime/dashboard` are read-only FacetWrite surfaces and must redact secret-like values. `/api/agent-backend/*` remains a compatibility alias.
-- `FACETWRITE_INTERNAL_TOOL_TOKEN`, when configured, is only used between Agent Runtime and FacetWrite backend bridge calls and must not be shown in frontend payloads, logs, or ToolUse output.
+- `FACETWRITE_INTERNAL_TOOL_TOKEN` is mandatory between Agent Runtime and FacetWrite backend bridge calls and must not be shown in frontend payloads, logs, or ToolUse output. App Shell injects one shared random token and stores only its SHA-256 fingerprint in local Runtime ownership metadata.
 - Agent Runtime-proposed writes or external side effects must still pass through FacetWrite Human-in-the-loop confirmation before changing product data.
 - Default local mode uses `LocalSandboxProvider` with `allow_host_bash:false`. Node/npm/npx are available to declared Skills, MCP, and ACP processes, but this does not grant arbitrary host Bash.
 - The FacetWrite Agent Runtime dev compose is an optional isolation profile. It intentionally does not mount the host Docker socket or local CLI credential directories into the gateway container. Add those mounts only for isolated sandbox or CLI-auth work after explicitly accepting the credential and host-control risk.

@@ -10,6 +10,7 @@ import type {
   ToolCatalogItem
 } from "./types";
 import type { PlanRun } from "./types";
+import type { CanvasWriteSuggestion } from "./types";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "../../shared/apiClient";
 
 export async function fetchAgentCards(): Promise<AgentCard[]> {
@@ -143,9 +144,21 @@ export async function approvePlan(threadId: string, planId: string): Promise<Pla
 export async function cancelPlan(threadId: string, planId: string): Promise<PlanRun> {
   return (await apiPost<{ plan: PlanRun }>(`/api/threads/${encodeURIComponent(threadId)}/plans/${encodeURIComponent(planId)}/cancel`)).plan;
 }
+export async function pausePlan(threadId: string, planId: string, message = "Conversation changed"): Promise<PlanRun> {
+  return (await apiPost<{ plan: PlanRun }>(`/api/threads/${encodeURIComponent(threadId)}/plans/${encodeURIComponent(planId)}/pause`, { message })).plan;
+}
 export async function retryPlanStep(threadId: string, planId: string, stepId: string) {
   return apiPost<{ step: unknown }>(`/api/threads/${encodeURIComponent(threadId)}/plans/${encodeURIComponent(planId)}/steps/${encodeURIComponent(stepId)}/retry`);
 }
-export async function answerPlan(threadId: string, planId: string, answer: string): Promise<PlanRun> {
-  return (await apiPost<{ plan: PlanRun }>(`/api/threads/${encodeURIComponent(threadId)}/plans/${encodeURIComponent(planId)}/answer`, { answer })).plan;
+export async function answerPlan(threadId: string, planId: string, answer: string | { optionId?: string; customAnswer?: string }): Promise<PlanRun> {
+  const body = typeof answer === "string" ? { answer } : answer;
+  return (await apiPost<{ plan: PlanRun }>(`/api/threads/${encodeURIComponent(threadId)}/plans/${encodeURIComponent(planId)}/answer`, body)).plan;
+}
+
+export async function acceptCanvasWriteSuggestion(threadId: string, suggestionId: string): Promise<CanvasWriteSuggestion> {
+  return (await apiPost<{ suggestion: CanvasWriteSuggestion }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/write-suggestions/${encodeURIComponent(suggestionId)}/accept`)).suggestion;
+}
+
+export async function dismissCanvasWriteSuggestion(threadId: string, suggestionId: string): Promise<CanvasWriteSuggestion> {
+  return (await apiPost<{ suggestion: CanvasWriteSuggestion }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/write-suggestions/${encodeURIComponent(suggestionId)}/dismiss`)).suggestion;
 }

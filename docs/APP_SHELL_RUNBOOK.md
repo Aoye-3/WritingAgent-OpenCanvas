@@ -68,4 +68,6 @@ The acceptance starts through the same VBS used by double-click, asserts that Do
 - Docker mode: set `AGENT_RUNTIME_MODE=docker` and ensure Docker is already running.
 - External mode: set `AGENT_RUNTIME_MODE=external` and an accessible `AGENT_BACKEND_BASE_URL`.
 - Ports `17776`/`17777` occupied: resolve the conflict; the shell never terminates unrelated services.
+
+Local Runtime ownership metadata includes the actual port, Bridge URL, Runtime source fingerprint, and internal Tool token fingerprint. App Shell reuses a healthy local Runtime only when project, Bridge, source, and token fingerprints match; stale project-owned processes are stopped and cold-started. `agent-runtime:status` reads the actual port and Bridge from ownership metadata, including App Shell's `17777` Bridge.
 - The workspace Runtime badge polls `/api/agent-runtime/status`; it does not infer current health from historical Mock outputs.

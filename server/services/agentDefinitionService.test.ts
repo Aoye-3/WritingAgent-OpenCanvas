@@ -32,7 +32,7 @@ test("builds runtime config with tool policies and deprecated refs", async () =>
   };
   const runtimeConfig = await buildAgentRuntimeConfig(card, settings);
 
-  assert.ok(runtimeConfig.availableTools.some((tool) => tool.name === "canvas_write" && tool.requiresApproval));
-  assert.ok(runtimeConfig.toolPolicies.some((policy) => policy.name === "canvas_write" && policy.requiresApproval && !policy.canAutoRun));
+  assert.ok(runtimeConfig.availableTools.some((tool) => tool.name === "canvas_write" && tool.riskLevel === "medium" && !tool.requiresApproval));
+  assert.ok(runtimeConfig.toolPolicies.some((policy) => policy.name === "canvas_write" && !policy.requiresApproval && policy.canAutoRun));
   assert.deepEqual(runtimeConfig.deprecatedToolRefs, ["web_search"]);
 });

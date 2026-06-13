@@ -56,7 +56,7 @@ export type ProjectSummary = {
 
 export type StoredStructuredValues = Record<string, string | string[]>;
 
-export type PlanRunStatus = "draft" | "awaiting_approval" | "running" | "awaiting_user" | "completed" | "failed" | "cancelled";
+export type PlanRunStatus = "draft" | "awaiting_approval" | "running" | "paused" | "awaiting_user" | "completed" | "failed" | "cancelled";
 export type PlanStepStatus = "pending" | "running" | "completed" | "failed" | "skipped";
 export type PlanArtifactStatus = "staged" | "committing" | "committed" | "failed";
 export type PlanArtifactType = "text" | "image";
@@ -91,6 +91,57 @@ export type PlanArtifact = {
 };
 
 export type PlanArtifactLink = { id: string; planRunId: string; fromArtifactId: string; toArtifactId: string; label: string; canvasEdgeId?: string };
+export type PlanClarificationOption = { id: string; label: string; description: string; recommended: boolean };
+export type PlanClarification = {
+  question: string;
+  options: PlanClarificationOption[];
+  status: "pending" | "answered";
+  selectedOptionId?: string;
+  customAnswer?: string;
+};
+export type PlanActivityType =
+  | "intent_recognized"
+  | "clarification_preparing"
+  | "clarification_ready"
+  | "plan_preparing"
+  | "plan_ready"
+  | "step_started"
+  | "tool_started"
+  | "tool_completed"
+  | "artifact_committed"
+  | "step_completed"
+  | "plan_paused"
+  | "plan_resumed"
+  | "plan_failed"
+  | "plan_completed";
+export type PlanActivity = {
+  id: string;
+  threadId: string;
+  planRunId: string;
+  runId?: string;
+  stepId?: string;
+  type: PlanActivityType;
+  status: string;
+  summary: string;
+  detail: JsonValue;
+  sequence: number;
+  createdAt: string;
+};
+export type PlanExecution = {
+  planRunId: string;
+  threadId: string;
+  status: "running" | "paused" | "completed" | "failed" | "cancelled";
+  currentStepId?: string;
+  leaseOwner?: string;
+  leaseExpiresAt?: string;
+  lastHeartbeatAt?: string;
+  cancelToken: string;
+  attempt: number;
+  startedAt: string;
+  pausedAt?: string;
+  completedAt?: string;
+  updatedAt: string;
+};
 export type PlanRun = {
   id: string;
   projectId: string;
@@ -101,6 +152,10 @@ export type PlanRun = {
   status: PlanRunStatus;
   approval: "pending" | "approved" | "rejected";
   statusMessage: string;
+  canvasNodeId?: string;
+  currentStepId?: string;
+  executionVersion: number;
+  clarification?: PlanClarification;
   steps: PlanStep[];
   artifacts: PlanArtifact[];
   links: PlanArtifactLink[];
@@ -129,9 +184,20 @@ export type StoredToolEvent = {
   createdAt: string;
 };
 
-export type CanvasNodeKind = "document" | "note" | "reference" | "role";
-export type CanvasWriteOperation = "create" | "replace" | "append" | "replace_range";
+export type CanvasNodeKind = "document" | "note" | "reference" | "role" | "plan";
+export type CanvasWriteOperation = "create" | "replace" | "append" | "replace_range" | "delete";
 export type CanvasWriteRequestStatus = "pending" | "approved" | "rejected" | "stale";
+export type CanvasWriteSuggestion = {
+  id: string;
+  threadId: string;
+  projectId: string;
+  runId: string;
+  status: "pending" | "accepted" | "dismissed" | "stale";
+  items: Array<{ title: string; content: string }>;
+  nodeIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
 
 export type CanvasNode = {
   id: string;
@@ -212,6 +278,7 @@ export type CanvasWriteRequestInput = {
 };
 
 export type CanvasEdgeInput = {
+  id?: string;
   sourceNodeId: string;
   targetNodeId: string;
   label?: string;

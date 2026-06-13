@@ -1,10 +1,11 @@
 import { app, BrowserWindow } from "electron";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLifecycle } from "./runtime.mjs";
-import { parseLocalRuntimeMetadata } from "./local-runtime-metadata.mjs";
+import { isLocalRuntimeStale, parseLocalRuntimeMetadata } from "./local-runtime-metadata.mjs";
 import { resolveRuntimeMode } from "./runtime-config.mjs";
 import { parseRunningServices, run, runDetachedCommand, startProcess, waitForHttp } from "./platform.mjs";
 import { sendWindowStage } from "./window-status.mjs";
@@ -20,6 +21,7 @@ const runtimePort = Number(new URL(runtime.baseUrl).port || 80);
 const localBridgeUrl = `http://127.0.0.1:${apiPort}`;
 const dockerBridgeUrl = `http://host.docker.internal:${apiPort}`;
 const bridgeUrl = runtime.mode === "docker" ? dockerBridgeUrl : localBridgeUrl;
+const internalToolToken = process.env.FACETWRITE_INTERNAL_TOOL_TOKEN || randomBytes(32).toString("hex");
 const iconPath = path.join(root, "public", "assets", "ui", "brand", "opencanvas-icon.png");
 const tsxCli = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
 const viteCli = path.join(root, "node_modules", "vite", "bin", "vite.js");
@@ -31,6 +33,7 @@ const shellEnv = {
   PORT: String(apiPort),
   VITE_PORT: String(frontendPort),
   FACETWRITE_INTERNAL_BASE_URL: bridgeUrl,
+  FACETWRITE_INTERNAL_TOOL_TOKEN: internalToolToken,
   AGENT_RUNTIME_MODE: runtime.mode,
   AGENT_BACKEND_BASE_URL: runtime.baseUrl,
 };
@@ -180,7 +183,38 @@ async function inspectLocalRuntime() {
   if (metadata.projectRoot !== root || metadata.bridgeBaseUrl !== bridgeUrl) {
     throw new Error("The running local Agent Runtime uses incompatible project or bridge settings.");
   }
+  if (metadata.toolTokenFingerprint !== toolTokenFingerprint() || isLocalRuntimeStale(metadata, localRuntimeSourceFingerprint())) {
+    await stopRuntime();
+    return [];
+  }
   return ["facetwrite-agent-runtime-nginx", "facetwrite-agent-runtime-frontend", "facetwrite-agent-runtime-gateway"];
+}
+
+function localRuntimeSourceFingerprint() {
+  const roots = [
+    path.join(root, "modules", "agent-runtime", "backend", "app"),
+    path.join(root, "modules", "agent-runtime", "backend", "packages", "harness"),
+    path.join(root, "modules", "agent-runtime", "skills"),
+    path.join(root, "modules", "agent-runtime", "config.yaml"),
+  ];
+  let latest = 0;
+  const visit = (target) => {
+    if (!existsSync(target)) return;
+    const stat = statSync(target);
+    if (stat.isDirectory()) {
+      if (["__pycache__", ".pytest_cache", ".uv-cache", ".venv", "node_modules"].includes(path.basename(target))) return;
+      for (const entry of readdirSync(target)) visit(path.join(target, entry));
+      return;
+    }
+    if (![".py", ".md", ".yaml", ".yml", ".json", ".toml"].includes(path.extname(target))) return;
+    latest = Math.max(latest, stat.mtimeMs);
+  };
+  roots.forEach(visit);
+  return String(Math.trunc(latest));
+}
+
+function toolTokenFingerprint() {
+  return createHash("sha256").update(internalToolToken).digest("hex");
 }
 
 async function ensureDockerReady() {
@@ -199,7 +233,9 @@ async function existingRuntimeTargetsBridge() {
     "--format",
     "{{range .Config.Env}}{{println .}}{{end}}",
   ], { cwd: root, timeout: 20_000 });
-  return stdout.split(/\r?\n/).includes(`FACETWRITE_INTERNAL_BASE_URL=${bridgeUrl}`);
+  const environment = stdout.split(/\r?\n/);
+  return environment.includes(`FACETWRITE_INTERNAL_BASE_URL=${bridgeUrl}`)
+    && environment.includes(`FACETWRITE_INTERNAL_TOOL_TOKEN=${internalToolToken}`);
 }
 
 async function startRuntime() {

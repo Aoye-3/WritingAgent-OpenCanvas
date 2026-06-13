@@ -8,6 +8,8 @@ import { getAgentBackendRuntimeConfig, type AgentBackendRuntimeConfig } from "./
 import { parseSseChunk } from "./sse.js";
 import { buildAgentBackendRuntimeMetadata } from "./taskAgentMapping.js";
 import { resolvePlanRequestPolicy } from "../../services/generation/planRequestPolicy.js";
+import { resolveCanvasAction } from "../../services/generation/canvasActionPolicy.js";
+import type { CanvasAction } from "../../services/generation/canvasActionPolicy.js";
 
 export type AgentBackendRunInput = {
   threadId: string;
@@ -52,6 +54,8 @@ type AgentBackendRunContext = {
   facetwrite_memory_scope_id: string;
   facetwrite_project_id: string;
   facetwrite_plan_phase: "chat" | "planning" | "execution";
+  facetwrite_plan_stage: "chat" | "intake" | "revise" | "execution";
+  facetwrite_plan_phase_attempt_id?: string;
   facetwrite_memory_content?: string;
 };
 
@@ -99,6 +103,17 @@ async function formatRuntimeHttpError(response: Response) {
 
 export function buildRunRequest(input: AgentBackendRunInput, config: AgentBackendRuntimeConfig) {
   const runtimeContext = buildAgentBackendRunContext(input);
+  const canvasAction = input.contextValues?.canvasAction as CanvasAction | undefined ?? resolveCanvasAction({
+    threadId: input.threadId,
+    instruction: input.chatInstruction,
+    selectedCanvasNodeId: input.selectedCanvasNodeId
+  });
+  const allowedToolRefs = canvasAction?.requiresTool
+    ? [...new Set([...(input.allowedToolRefs ?? input.agentCard.toolRefs), "canvas_write"])]
+    : input.allowedToolRefs ?? input.agentCard.toolRefs;
+  const toolState = canvasAction?.requiresTool
+    ? { ...(input.toolState ?? {}), canvas_write: true }
+    : input.toolState ?? {};
   return {
     assistant_id: config.assistantId,
     input: {
@@ -116,11 +131,12 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
     },
     context: {
       facetwrite_prompt: input.prompt,
-      facetwrite_allowed_tool_refs: input.allowedToolRefs ?? input.agentCard.toolRefs,
-      facetwrite_tool_state: input.toolState ?? {},
+      facetwrite_allowed_tool_refs: allowedToolRefs,
+      facetwrite_tool_state: toolState,
       facetwrite_selected_canvas_node_id: input.selectedCanvasNodeId,
       facetwrite_context_values: input.contextValues ?? {},
       facetwrite_chat_instruction: input.chatInstruction ?? input.prompt,
+      facetwrite_canvas_action: canvasAction,
       ...runtimeContext
     },
     stream_mode: ["messages-tuple", "custom", "values"],
@@ -135,18 +151,21 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
 function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId" | "projectId" | "configuredModelApiId" | "settings" | "facetwriteMemoryContent" | "chatInstruction" | "contextValues" | "toolState">): AgentBackendRunContext {
   const memoryEnabled = false;
   const memoryContent = memoryEnabled ? input.facetwriteMemoryContent?.trim() : "";
-  const planPhase = resolvePlanRequestPolicy({
+  const planPolicy = resolvePlanRequestPolicy({
     chatInstruction: input.chatInstruction,
     contextValues: input.contextValues,
     toolState: input.toolState
-  }).phase;
+  });
   if (!input.settings) {
     return {
       model_name: input.configuredModelApiId,
       facetwrite_memory_enabled: false,
       facetwrite_memory_scope_id: input.threadId,
       facetwrite_project_id: input.projectId,
-      facetwrite_plan_phase: planPhase
+      facetwrite_plan_phase: planPolicy.phase,
+      facetwrite_plan_stage: planPolicy.stage
+      ,facetwrite_plan_phase_attempt_id: input.contextValues?.planGeneration && isRecord(input.contextValues.planGeneration)
+        ? String(input.contextValues.planGeneration.phaseAttemptId ?? "") : undefined
     };
   }
   const settings = input.settings;
@@ -158,7 +177,10 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     facetwrite_memory_enabled: memoryEnabled,
     facetwrite_memory_scope_id: input.threadId,
     facetwrite_project_id: input.projectId,
-    facetwrite_plan_phase: planPhase,
+    facetwrite_plan_phase: planPolicy.phase,
+    facetwrite_plan_stage: planPolicy.stage,
+    facetwrite_plan_phase_attempt_id: input.contextValues?.planGeneration && isRecord(input.contextValues.planGeneration)
+      ? String(input.contextValues.planGeneration.phaseAttemptId ?? "") : undefined,
     ...(memoryContent ? { facetwrite_memory_content: memoryContent } : {})
   };
 }
@@ -316,7 +338,7 @@ function textFromUnknown(value: unknown): string | undefined {
 function mapToolEvents(event: string, data: unknown): ToolEventRecord[] {
   if (event === "custom" && isRecord(data)) {
     const type = typeof data.type === "string" ? data.type : typeof data.event === "string" ? data.event : undefined;
-    return type && /^(?:task_|plan_|artifact_)/.test(type) ? [{ eventType: `agent_backend_${type}`, payload: data }] : [];
+    return type && /^(?:task_|plan_|artifact_|canvas_)/.test(type) ? [{ eventType: `agent_backend_${type}`, payload: data }] : [];
   }
   if (event !== "messages" && event !== "messages-tuple") return [];
   const message = Array.isArray(data) ? data[0] : data;
@@ -327,14 +349,24 @@ function mapToolEvents(event: string, data: unknown): ToolEventRecord[] {
       if (!isRecord(toolCall)) return [];
       const toolName = typeof toolCall.name === "string" ? toolCall.name : undefined;
       if (!toolName) return [];
-      return [{
+      const started: ToolEventRecord = {
         eventType: "agent_backend_tool_started",
         payload: {
           type: "tool_started",
           toolName,
           toolCallId: typeof toolCall.id === "string" ? toolCall.id : undefined
         }
-      }];
+      };
+      return toolName === "canvas_write"
+        ? [started, {
+            eventType: "agent_backend_canvas_mutation_started",
+            payload: {
+              type: "canvas_mutation_started",
+              toolName,
+              toolCallId: typeof toolCall.id === "string" ? toolCall.id : undefined
+            }
+          }]
+        : [started];
     });
   }
 
@@ -359,7 +391,7 @@ function structuredToolEvents(content: unknown): ToolEventRecord[] {
   try {
     const envelope = JSON.parse(content.slice(markerIndex + "__FACETWRITE_EVENT__".length)) as unknown;
     if (!isRecord(envelope) || !isRecord(envelope.event) || typeof envelope.event.eventType !== "string") return [];
-    if (!/^(?:plan_|artifact_)/.test(envelope.event.eventType)) return [];
+    if (!/^(?:plan_|artifact_|canvas_)/.test(envelope.event.eventType)) return [];
     const events: ToolEventRecord[] = [{ eventType: `agent_backend_${envelope.event.eventType}`, payload: envelope.event }];
     if (envelope.event.eventType === "artifact_staged" && Array.isArray(envelope.event.artifacts) && envelope.event.artifacts.some((artifact) => isRecord(artifact) && artifact.status === "committed")) {
       events.push({ eventType: "agent_backend_artifact_committed", payload: { ...envelope.event, eventType: "artifact_committed" } });

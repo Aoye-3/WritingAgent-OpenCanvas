@@ -4,9 +4,13 @@
 
 FacetWrite separates Conversation, Plan, and Artifact output. Conversation is user-facing dialogue; Plan is persistent task state and approval; Artifact is Agent-selected text, image, and link output committed to Canvas.
 
-`/plan` forces a two-phase workflow. Planning enables `plan_update` and disables search, browsing, Canvas writes, and `artifact_stage`. If scope is missing, the Agent creates a preliminary PlanRun, requests one concise user answer, then revises that same plan in place. Execution starts only after approval and every request is bound to one `planExecution.stepId`.
+`/plan` forces a staged workflow. The product server creates the intake Plan before model generation. Intake exposes only `plan_clarification_submit`, revision exposes only `plan_revision_submit`, and execution exposes `artifact_stage` for the current step. Search, browsing, and ordinary Canvas writes are disabled during planning.
 
-Outside `/plan`, Agent-configured tools remain available. `plan_update` and `artifact_stage` are disabled by default and hidden from the composer ToolUse icons to avoid duplicate Plan controls, but they may be enabled in Agent settings. Plan mode always overrides those settings with its required phase policy.
+Outside `/plan`, Agent-configured tools remain available. Plan lifecycle tools are hidden from the composer and injected only by the server phase policy. The legacy broad `plan_update` contract is not exposed to models.
+
+Ordinary requests are classified by the server as `direct`, `guided`, or `managed_plan`. Guided requests may use decomposition skills without writing to Canvas. Explicit `/plan` always uses the managed workflow and requires a durable Artifact for every completed step.
+
+Successful ordinary replies with at least three top-level list items create a persistent, UI-only Canvas write suggestion. Accepting it creates one or more stable document nodes per point; long content is split near 1200 Chinese characters or 250 English words and linked in order.
 
 Development must occur in the current `F:\.FinalProject` checkout on a normal `codex/` branch. Git worktrees and project copies outside this workspace are prohibited.
 
@@ -175,7 +179,7 @@ build messages
 
 Tool events are recorded as `tool_call_requested`, `tool_call_completed`, `tool_call_failed`, and `tool_loop_stopped`.
 
-Plan mode has stricter completion rules than ordinary chat. AgentBackend receives the resolved `chat | planning | execution` phase in runtime context. The first planning model call is forced to `plan_update`, so a slash Plan request cannot silently become a normal assistant answer. During execution, search and browsing tools remain available, but a model attempt to finish before `artifact_stage` is retried with `artifact_stage` forced. FacetWrite accepts a successful execution unit only after an `artifact_committed` event; waiting-for-user and failed states are the only valid no-artifact exits.
+Plan mode has stricter completion rules than ordinary chat. AgentBackend receives a stable phase attempt id and exactly one stage-specific submission contract. Repeated model calls in the same attempt are not allowed to force the stage tool again. The server-owned executor accepts a successful execution unit only after an `artifact_committed` event; waiting-for-user and failed states are the only valid no-artifact exits.
 
 For `/api/generate/stream`, the TypeScript run loop uses provider streaming when available. It forwards assistant content deltas as `token` events, emits transient `status` events around thinking, ToolUse/searching, writing, and finalizing phases, and still accumulates the same final text for normalization and persistence.
 
@@ -207,3 +211,11 @@ DeepSeek prefix completion remains a separate response mode: only the final assi
 - Context composition is private and bounded. The default UI does not expose Project model allowlists or manual Canvas/output context checkboxes.
 - Clear context is a one-shot persisted Thread operation. It keeps history visible and excludes messages before `context_reset_at` from later model requests.
 - Runtime/model failures never become successful Mock assistant messages unless explicit local fallback is enabled.
+
+## Plan Skills
+
+Plan phases force-load `modules/agent-runtime/skills/public/brainstorming` or `writing-plans`. Skills guide content only. Intake exposes `plan_clarification_submit`, revision exposes `plan_revision_submit`, and approved execution exposes `artifact_stage`; broad `plan_update` is not exposed to models. Product services own lifecycle status, retries, pause/resume, and completion.
+
+## Canvas Action Orchestration
+
+Explicit Canvas create/append instructions are recognized before generation and carried as a structured `canvasAction`. Agent Runtime forces `canvas_write` once for that action; the server-recognized operation is authoritative over model arguments. The internal Bridge resolves the real Project from the Thread, commits low-risk create/append operations directly, and returns a real `nodeId`. Replace and other destructive operations remain pending for approval. An Agent response is not evidence of success without a structured committed event.
