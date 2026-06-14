@@ -2142,7 +2142,7 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 .canvas-node-resize-line-s {
   left: 8px;
   right: 8px;
-  height: 1px;
+  height: 2px;
 }
 
 .canvas-node-resize-line-n { top: 0; }
@@ -2152,7 +2152,7 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 .canvas-node-resize-line-w {
   top: 8px;
   bottom: 8px;
-  width: 1px;
+  width: 2px;
 }
 
 .canvas-node-resize-line-e { right: 0; }
@@ -2169,14 +2169,7 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 }
 
 .canvas-node-resize-handle::after {
-  content: "";
-  position: absolute;
-  width: 10px;
-  height: 10px;
-  border: 1px solid var(--color-primary);
-  border-radius: 2px;
-  background: var(--color-surface);
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.16);
+  display: none;
 }
 
 .canvas-node-resize-nw,
@@ -2189,14 +2182,15 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 
 .canvas-node-resize-n,
 .canvas-node-resize-s {
-  width: 72px;
-  height: 24px;
+  width: calc(100% - 18px);
+  height: 20px;
 }
 
 .canvas-node-resize-w,
 .canvas-node-resize-e {
-  width: 24px;
-  height: 72px;
+  width: 20px;
+  height: calc(100% - 18px);
+  min-height: 0;
 }
 
 .canvas-node-resize-nw,
@@ -2235,17 +2229,8 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   transform: translateY(-50%);
 }
 
-.canvas-node-resize-nw::after { left: 2px; top: 2px; }
-.canvas-node-resize-ne::after { right: 2px; top: 2px; }
-.canvas-node-resize-sw::after { left: 2px; bottom: 2px; }
-.canvas-node-resize-se::after { right: 2px; bottom: 2px; }
-.canvas-node-resize-n::after,
-.canvas-node-resize-s::after,
-.canvas-node-resize-w::after,
-.canvas-node-resize-e::after {
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+.canvas-node-resize-handle:hover {
+  background: rgba(37, 99, 235, 0.08);
 }
 
 .canvas-node-resize-nw,
@@ -3234,12 +3219,92 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+.assistant-run-trace {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.78);
+  color: var(--color-text-muted);
+}
+.assistant-run-trace-summary {
+  display: grid;
+  grid-template-columns: 8px auto minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 6px 8px;
+  text-align: left;
+  cursor: pointer;
+}
+.assistant-run-trace-summary strong {
+  color: var(--color-text);
+  font-size: 12px;
+}
+.assistant-run-trace-summary small {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assistant-run-trace-list {
+  display: grid;
+  gap: 5px;
+  padding: 0 8px 8px;
+}
+.assistant-run-trace-item {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  font-size: 12px;
+}
+.assistant-run-trace-item strong {
+  display: block;
+  color: var(--color-text);
+  line-height: 1.35;
+}
+.assistant-run-trace-item p {
+  margin: 1px 0 0;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+.assistant-run-trace-item button {
+  margin-top: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--color-primary);
+  padding: 3px 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.assistant-run-trace .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-success);
+}
+.assistant-run-trace .status-dot.running {
+  background: var(--color-primary);
+}
+.assistant-run-trace .status-dot.failed {
+  background: var(--color-danger);
+}
 .message-user .message-bubble { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
 .message-streaming .message-bubble {
   border-color: rgba(37, 99, 235, 0.22);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 249, 255, 0.98));
   box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.06), 0 8px 26px rgba(37, 99, 235, 0.08);
+}
+.message-assistant.message-streaming .message-bubble {
+  min-width: min(320px, calc(100% - 46px));
 }
 .message-thinking {
   align-items: center;
@@ -5425,6 +5490,9 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   width: 30px;
 }
 .canvas-source-markdown {
+  color: inherit;
+  line-height: 1.52;
+  overflow-wrap: anywhere;
   white-space: normal;
 }
 
@@ -5433,14 +5501,88 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   min-height: 1.35em;
 }
 
-.canvas-source-markdown p:last-child {
+.canvas-source-markdown p:last-child,
+.canvas-source-markdown ul:last-child,
+.canvas-source-markdown ol:last-child,
+.canvas-source-table-wrap:last-child {
   margin-bottom: 0;
+}
+
+.canvas-source-markdown h1,
+.canvas-source-markdown h2,
+.canvas-source-markdown h3,
+.canvas-source-markdown h4 {
+  color: #111827;
+  font-weight: 850;
+  line-height: 1.25;
+  margin: 0.7em 0 0.45em;
+}
+
+.canvas-source-markdown h1:first-child,
+.canvas-source-markdown h2:first-child,
+.canvas-source-markdown h3:first-child,
+.canvas-source-markdown h4:first-child {
+  margin-top: 0;
+}
+
+.canvas-source-markdown h1 { font-size: 1.08em; }
+.canvas-source-markdown h2 { font-size: 1.04em; }
+.canvas-source-markdown h3,
+.canvas-source-markdown h4 { font-size: 1em; }
+
+.canvas-source-markdown ul,
+.canvas-source-markdown ol {
+  margin: 0 0 0.75em;
+  padding-left: 1.3em;
+}
+
+.canvas-source-markdown li {
+  margin: 0.28em 0;
 }
 
 .canvas-source-markdown a {
   color: var(--blue, #1677ff);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+.canvas-source-markdown code {
+  background: #f3f6fb;
+  border: 1px solid #dfe7f3;
+  border-radius: 4px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+  padding: 1px 4px;
+}
+
+.canvas-source-table-wrap {
+  margin: 0.45em 0 0.8em;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.canvas-source-markdown table {
+  border-collapse: collapse;
+  font-size: 0.92em;
+  line-height: 1.36;
+  min-width: 100%;
+  table-layout: auto;
+  width: max-content;
+}
+
+.canvas-source-markdown th,
+.canvas-source-markdown td {
+  border: 1px solid #dfe7f3;
+  max-width: 220px;
+  padding: 5px 7px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.canvas-source-markdown th {
+  background: #f7faff;
+  color: #111827;
+  font-weight: 800;
 }
 
 .canvas-selection-toolbar,

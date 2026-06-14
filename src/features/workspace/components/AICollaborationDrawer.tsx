@@ -2,11 +2,11 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, SearchIcon, SendIcon, SparkleIcon, StopIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
-import type { AgentCard, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, StoredThread, StoredToolEvent } from "../../agents/types";
+import type { AgentCard, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, StoredThread } from "../../agents/types";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
 import { useI18n } from "../../i18n/I18nProvider";
 import { AnnotationChipRow, CanvasWriteProposalPanel, type MessageAnnotation } from "./CanvasWriteProposalPanel";
-import { ToolEventDrawer } from "./ToolEventDrawer";
+import { AssistantRunTrace } from "./AssistantRunTrace";
 import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain";
 import { PlanTaskBoard } from "./PlanTaskBoard";
 import { PlanClarificationCard } from "./PlanClarificationCard";
@@ -55,7 +55,6 @@ type AICollaborationDrawerProps = {
   configuredModels: ConfiguredModelApiSummary[];
   selectedModelConfigId?: string | null;
   modelSettings?: ConversationModelControls;
-  toolEvents: StoredToolEvent[];
   onApproveWriteRequest: (requestId: string) => Promise<void>;
   onCreateConversation: () => Promise<void>;
   onResetContext: () => Promise<void>;
@@ -107,7 +106,6 @@ export function AICollaborationDrawer({
   configuredModels,
   selectedModelConfigId,
   modelSettings,
-  toolEvents,
   onApproveWriteRequest,
   onCreateConversation,
   onResetContext,
@@ -427,14 +425,20 @@ export function AICollaborationDrawer({
           }
           const messageAnnotations = annotations.filter((annotation) => annotation.messageId === message.id);
           const isPendingAssistant = message.role === "assistant" && message.isStreaming && !message.text.trim();
+          const hasRunTrace = message.role === "assistant" && Boolean(message.timeline?.length);
+          const usesThinkingStatus = isPendingAssistant && !hasRunTrace;
           return (
-            <article className={`message message-${message.role}${message.isStreaming ? " message-streaming" : ""}${isPendingAssistant ? " message-thinking" : ""}`} key={message.id}>
+            <article className={`message message-${message.role}${message.isStreaming ? " message-streaming" : ""}${usesThinkingStatus ? " message-thinking" : ""}`} key={message.id}>
               <div className="message-avatar" aria-hidden="true">{message.role === "user" ? "U" : "F"}</div>
-              <div className={isPendingAssistant ? "message-thinking-status" : "message-bubble"}>
+              <div className={usesThinkingStatus ? "message-thinking-status" : "message-bubble"}>
                 {message.role === "assistant" && message.isStreaming && !message.text.trim() ? (
-                  <StreamingStatus label={streamingStatusLabel(message, locale)} />
+                  <>
+                    <AssistantRunTrace events={message.timeline} onFocusNode={onFocusPlanArtifact} />
+                    <StreamingStatus label={streamingStatusLabel(message, locale)} />
+                  </>
                 ) : message.role === "assistant" ? (
                   <div className="assistant-selectable-text" onMouseUp={(event) => captureSelection(event, message)}>
+                    <AssistantRunTrace events={message.timeline} onFocusNode={onFocusPlanArtifact} />
                     <MarkdownText text={message.text} highlights={messageAnnotations.map((annotation) => annotation.text)} />
                     {message.isStreaming ? <span className="typing-caret" aria-hidden="true" /> : null}
                   </div>
@@ -477,8 +481,6 @@ export function AICollaborationDrawer({
           {locale === "zh" ? "批注" : "Annotate"}
         </button>
       ) : null}
-
-      <ToolEventDrawer events={toolEvents} />
 
       <form className={pendingClarificationPlan ? "drawer-chat-composer drawer-chat-composer-clarification" : "drawer-chat-composer"} onSubmit={submit}>
         <div className="composer-agent-row" data-testid="composer-agent-row">

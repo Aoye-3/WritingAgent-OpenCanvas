@@ -16,10 +16,10 @@ const nodeToolKinds: Record<NodeCreationTool, CanvasNodeKind> = {
 };
 
 const creationSizes: Record<CreationTool, CanvasSize> = {
-  reference: { width: 300, height: 190 },
-  document: { width: 520, height: 260 },
-  note: { width: 300, height: 190 },
-  role: { width: 280, height: 190 },
+  reference: { width: 420, height: 190 },
+  document: { width: 640, height: 260 },
+  note: { width: 380, height: 190 },
+  role: { width: 340, height: 190 },
   text: { width: 320, height: 40 },
   shape: { width: 220, height: 140 },
   table: { width: 360, height: 180 },

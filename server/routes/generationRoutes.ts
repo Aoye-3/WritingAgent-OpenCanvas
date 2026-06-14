@@ -36,6 +36,7 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
       const result = await generationService.generateAndRecordStream(payload, {
         onStatus: (status) => writeSse(response, "status", status),
         onToken: (token) => writeSse(response, "token", { text: token }),
+        onTimelineEvent: (event) => writeSse(response, "timeline_event", event),
         onToolEvent: (event) => {
           const safePayload = sanitizeToolEventPayload(event.payload);
           const safeEvent = { ...event, payload: safePayload };

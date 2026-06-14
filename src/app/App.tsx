@@ -119,6 +119,7 @@ function AppContent() {
     threadSession.setThreadId(state.thread.id);
     generationRun.setOutputVersions(state.outputVersions);
     generationRun.setToolEvents(state.toolEvents);
+    generationRun.setRunTimelineEvents(state.runTimelineEvents ?? []);
     generationRun.setCanvasWriteSuggestions(state.canvasWriteSuggestions ?? []);
     canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? [], state.canvasWorkflow, state.canvasWorkflowSuggestions ?? [], state.canvasObjects ?? []);
     const latestVersion = state.outputVersions[0];
@@ -209,6 +210,7 @@ function AppContent() {
     const state = await fetchThreadState(threadId);
     generationRun.setOutputVersions(state.outputVersions);
     generationRun.setToolEvents(state.toolEvents);
+    generationRun.setRunTimelineEvents(state.runTimelineEvents ?? []);
     generationRun.setCanvasWriteSuggestions(state.canvasWriteSuggestions ?? []);
     generationRun.setActiveVersionId(state.outputVersions[0]?.id);
     generationRun.applyCollaborationMessagesFromThreadState(state);
@@ -222,6 +224,7 @@ function AppContent() {
     activeProjectIdRef.current = state.thread.projectId;
     activeThreadIdRef.current = state.thread.id;
     generationRun.setToolEvents(state.toolEvents);
+    generationRun.setRunTimelineEvents(state.runTimelineEvents ?? []);
     generationRun.setCanvasWriteSuggestions(state.canvasWriteSuggestions ?? []);
     generationRun.setPlans(state.plans ?? []);
     canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? [], state.canvasWorkflow, state.canvasWorkflowSuggestions ?? [], state.canvasObjects ?? []);
@@ -511,7 +514,6 @@ function AppContent() {
         canvasWorkflowSuggestions={canvasState.canvasWorkflowSuggestions}
         selectedCanvasNodeId={canvasState.selectedCanvasNodeId}
         canUndoCanvas={canvasState.canUndoCanvas}
-        toolEvents={generationRun.toolEvents}
         plans={generationRun.plans}
         projectTitle={activeProjectTitle}
         configuredModels={configuredModels}

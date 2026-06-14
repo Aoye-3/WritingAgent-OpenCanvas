@@ -7,7 +7,6 @@ import type { ChatClient } from "../providerRuntime.js";
 import type { SQLiteStorageRepository } from "../storage.js";
 import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
 import type { KnowledgeSearchInput } from "../knowledge/service.js";
-import { resolveCanvasAction } from "./generation/canvasActionPolicy.js";
 
 function runtimeConfig(): AgentRuntimeConfig {
   const agentCard = agentCards[0];
@@ -60,6 +59,8 @@ function fakeAgentRuntime(config = runtimeConfig()): AgentRuntimeAdapter {
 function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string }> = [], contextResetAt?: string) {
   const records: unknown[] = [];
   const canvasWriteRequests: unknown[] = [];
+  const canvasNodes: Array<Record<string, unknown>> = [];
+  const canvasEdges: Array<Record<string, unknown>> = [];
   const planState: Record<string, unknown> = {
     id: "plan_intake_test",
     status: "draft",
@@ -70,6 +71,8 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
   return {
     records,
     canvasWriteRequests,
+    canvasNodes,
+    canvasEdges,
     planState,
     storage: {
       ensureThread: async () => undefined,
@@ -102,6 +105,24 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
           title: "Draft",
           status: "pending"
         };
+      },
+      listCanvasNodes: () => canvasNodes,
+      listCanvasEdges: () => canvasEdges,
+      createCanvasNode: (_projectId: string, input: Record<string, unknown>) => {
+        const node = { ...input, id: input.id ?? `node_${canvasNodes.length + 1}` };
+        canvasNodes.push(node);
+        return node;
+      },
+      updateCanvasNode: (_projectId: string, nodeId: string, patch: Record<string, unknown>) => {
+        const node = canvasNodes.find((candidate) => candidate.id === nodeId);
+        if (!node) return undefined;
+        Object.assign(node, patch);
+        return node;
+      },
+      createCanvasEdge: (_projectId: string, input: Record<string, unknown>) => {
+        const edge = { ...input, id: input.id ?? `edge_${canvasEdges.length + 1}` };
+        canvasEdges.push(edge);
+        return edge;
       },
       recordRun: (input: unknown) => {
         records.push(input);
@@ -250,36 +271,51 @@ test("generation facade does not copy assistant text into Canvas without a tool 
   assert.ok((records[0] as { events: Array<{ payload: { tool?: string; requestId?: string } }> }).events.some((event) => event.payload.tool === "canvas_write" && event.payload.requestId === "write_1"));
 });
 
-test("explicit Canvas intent requires a structured Canvas tool result", async () => {
-  for (const chatInstruction of ["请写入画板", "save to canvas", "write this"]) {
-    const { storage, canvasWriteRequests } = fakeStorage();
-    const service = createGenerationService(storage, fakeAgentRuntime(), {
-      modelRuntime: fakeModelRuntime,
-      agentBackend: {
-        getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
-        runAgent: async () => ({
-          text: "Reusable answer",
-          finishReason: "stop",
-          events: []
-        })
-      }
-    });
-
-    const generate = () => service.generateAndRecord({
-      mode: "chat",
-      locale: "zh",
-      agentCardId: "blog-post",
-      chatInstruction,
-      toolState: { canvas_write: true }
-    });
-    if (resolveCanvasAction({ threadId: "test", instruction: chatInstruction })) {
-      await assert.rejects(generate, /Canvas action completed without a committed node or pending approval request/);
-    } else {
-      await generate();
+test("direct Canvas delivery is committed by the server planner without copying assistant chatter", async () => {
+  const { storage, canvasWriteRequests, canvasNodes, canvasEdges } = fakeStorage();
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: [
+          "新闻搜索和总结已经完成！",
+          "我已经通过网络搜索获取了最新新闻，并将详细总结更新到了画板。",
+          "",
+          "画板内容现在包含：",
+          "1. **科技领域** - AI 投资与模型竞争继续升温。",
+          "2. **财经市场** - 股市与跨境基金出现波动。",
+          "",
+          "## 来源",
+          "- [News A](https://news.example/a)"
+        ].join("\n"),
+        finishReason: "stop",
+        events: [{
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "web_search",
+            sources: [{ title: "News A", url: "https://news.example/a" }]
+          }
+        }]
+      })
     }
+  });
 
-    assert.equal(canvasWriteRequests.length, 0);
-  }
+  const result = await service.generateAndRecord({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "blog-post",
+    chatInstruction: "帮我查最近新闻，然后总结到画板里",
+    toolState: { web_search: true }
+  });
+
+  assert.equal(result.provider, "agent-backend");
+  assert.equal(canvasWriteRequests.length, 0);
+  assert.deepEqual(canvasNodes.map((node) => node.title), ["摘要分区", "正文", "来源"]);
+  assert.equal(String(canvasNodes[1]?.content).includes("新闻搜索和总结已经完成"), false);
+  assert.equal(String(canvasNodes[1]?.content).includes("我已经通过网络搜索"), false);
+  assert.match(String(canvasNodes[1]?.content), /科技领域/);
+  assert.equal(canvasEdges.length, 2);
 });
 
 test("generation facade falls back to mock without calling provider when AgentBackend fails", async () => {

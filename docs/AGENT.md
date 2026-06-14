@@ -12,6 +12,8 @@ Ordinary requests are classified by the server as `direct`, `guided`, or `manage
 
 Successful ordinary replies with at least three top-level list items create a persistent, UI-only Canvas write suggestion. Accepting it creates one or more stable document nodes per point; long content is split near 1200 Chinese characters or 250 English words and linked in order.
 
+Explicit Canvas delivery requests are different from ordinary suggestions. When the user clearly asks to summarize, organize, save, write, split, or turn content into Canvas/board nodes/cards, the server derives a `CanvasDeliveryContent` object from the final run output and tool events, then commits stable Canvas nodes automatically. The assistant reply and Canvas delivery content are separate products: `assistantText` is recorded in chat, while `outlineMarkdown`, `bodyMarkdown`, and `sources` are the only inputs to the direct delivery planner. The Canvas delivery intent detector is shared by `canvasActionPolicy` and `CanvasDeliveryPlanner`; add Chinese and English trigger wording there instead of creating a second regex policy.
+
 Development must occur in the current `F:\.FinalProject` checkout on a normal `codex/` branch. Git worktrees and project copies outside this workspace are prohibited.
 
 ## AgentCard
@@ -87,9 +89,13 @@ AgentBackend and provider responses are classified before recording:
 - `tool_event`: ToolUse requests/results, AgentBackend task events, and Canvas write request events.
 - `internal_event`: blocked system prompts, AgentCard prompt blocks, reasoning payloads, replayed values, and raw tool/search JSON.
 
-Only `assistant_text` may enter `messages` and `output_versions`. `tool_event` and `internal_event` are exposed through the runtime timeline with redacted payload previews.
+Only `assistant_text` may enter `messages` and `output_versions`. `tool_event` and `internal_event` remain internal audit/debug records and are not shown as a default workspace UI surface. Safe `timeline_event` summaries may be streamed and restored into the current assistant message as a collapsible run trace, but provider reasoning, prompts, raw tool JSON, and replayed messages must never be included.
 
 If `web_search` is used, the visible assistant answer must include clickable source URLs. The AgentBackend adapter extracts sanitized `sources` from the `web_search` tool result, and the output normalizer appends a Sources section when the model omitted citations. If no usable source URL is available, the answer is blocked instead of being stored as an unsourced search conclusion.
+
+Direct Canvas delivery also uses those sanitized sources. Source links are collected from `web_search` events first and Markdown links second, deduplicated by URL, and written to a dedicated `来源` / `Sources` reference node when available.
+
+Direct delivery source nodes store sources as Markdown links. The Canvas node renderer is responsible for displaying clickable link titles instead of raw `[title](url)` syntax, and table-heavy body nodes rely on the Canvas Markdown renderer for compact table display.
 
 Recoverable AgentBackend failures are runtime events and explicit API errors. If AgentBackend returns no user-visible text or returns content classified as internal/runtime-only, FacetWrite records `agent_backend_runtime_failed` without creating a successful assistant response. Mock output requires explicit local development opt-in; the local Provider runtime is not called by generation.
 
@@ -152,11 +158,11 @@ A tool can auto-run only when it is enabled, does not require approval, and does
 
 `server/tools/toolPolicyGuard.ts` is the execution-time gate. It rejects unknown tools, tools not allowed by the active Agent, tools disabled for the current run, and tools that require missing external configuration before the executor branch runs.
 
-`canvas_write` must never directly mutate Canvas content from model output. It can only create a pending request/proposal. The user-facing UI may offer "write all" or "write annotated snippets"; once the user confirms, FacetWrite applies the same backend approve path.
+`canvas_write` must never bypass FacetWrite policy or trust model arguments over server-recognized intent. Replace, overwrite, delete, and other destructive operations create a pending request/proposal for user confirmation. Low-risk create/append operations may be committed directly only by the server-owned bridge or direct Canvas delivery planner, using the Thread-owned Project and stable ids.
 
 `canvas_write` defaults created nodes to `document` unless the tool request explicitly supplies a valid Canvas node kind. This preserves the rule that AI output appears as editable documents by default.
 
-If the user directly says to write/save/add content to Canvas, the generation hook treats that message as confirmation for newly created write requests from the same run and auto-calls the approve path after the thread state refresh. Existing pending requests from earlier runs are deliberately excluded so stale suggestions cannot be applied accidentally.
+If the user directly says to write/save/add content to Canvas and the operation is low risk, the server may commit it during the run and emit safe Canvas node timeline summaries. Existing pending requests from earlier runs are deliberately excluded so stale suggestions cannot be applied accidentally.
 
 When a model proposes a `replace` Canvas operation without an explicit user replace/overwrite instruction, the runtime downgrades it to `append` for the selected node or `create` when no node is selected. This keeps ordinary "write this to Canvas" requests non-destructive by default.
 
@@ -179,7 +185,7 @@ Tool events are recorded as `tool_call_requested`, `tool_call_completed`, `tool_
 
 Plan mode has stricter completion rules than ordinary chat. AgentBackend receives a stable phase attempt id and exactly one stage-specific submission contract. Repeated model calls in the same attempt are not allowed to force the stage tool again. The server-owned executor accepts a successful execution unit only after an `artifact_committed` event; waiting-for-user and failed states are the only valid no-artifact exits.
 
-For `/api/generate/stream`, the TypeScript run loop uses provider streaming when available. It forwards assistant content deltas as `token` events, emits transient `status` events around thinking, ToolUse/searching, writing, and finalizing phases, and still accumulates the same final text for normalization and persistence.
+For `/api/generate/stream`, the TypeScript run loop uses provider streaming when available. It forwards assistant content deltas as `token` events, emits transient `status` events around thinking, ToolUse/searching, writing, and finalizing phases, and still accumulates the same final text for normalization and persistence. `timeline_event` is a separate safe UX stream for public run summaries; the frontend attaches it to the active assistant message rather than showing raw tool events in a separate drawer. If a direct Canvas delivery run emits a `facetwrite_canvas_delivery` fenced block, the progressive text gate suppresses that block from streamed UI text; the final backfill uses the parsed `assistantText`.
 
 When Agent Runtime is enabled, `server/runtime/agentBackendAdapter/client.ts` calls `/api/runs/stream` through the backend AgentBackend auth session, maps token/message stream output into the FacetWrite response, forwards assistant message chunks as `token` events, and maps AgentBackend custom task events into `AgentBackend_*` tool events for the run history. Canvas and Artifact lifecycle events are safe to consume during the stream; the frontend may refresh Canvas/Plan surfaces immediately and still reconcile the final Thread state after `final`.
 
@@ -214,4 +220,10 @@ Plan phases force-load `modules/agent-runtime/skills/public/brainstorming` or `w
 
 ## Canvas Action Orchestration
 
-Explicit Canvas create/append instructions are recognized before generation and carried as a structured `canvasAction`. Agent Runtime forces `canvas_write` once for that action; the server-recognized operation is authoritative over model arguments. The internal Bridge resolves the real Project from the Thread, commits low-risk create/append operations directly, and returns a real `nodeId`. Replace and other destructive operations remain pending for approval. An Agent response is not evidence of success without a structured committed event.
+Explicit single-node Canvas create/append instructions are recognized before generation and carried as a structured `canvasAction`. Agent Runtime forces `canvas_write` once for those tool-managed actions; the server-recognized operation is authoritative over model arguments. The internal Bridge resolves the real Project from the Thread, commits low-risk create/append operations directly, and returns a real `nodeId`. Replace and other destructive operations remain pending for approval. An Agent response is not evidence of success without a structured committed event.
+
+Direct multi-node Canvas delivery is server-managed and does not depend on the model calling `canvas_write`. It is handled after output normalization for requests such as "总结到画板里", "整理成节点", "放进 Canvas", "summarize this to canvas", "turn this into nodes", and "make canvas cards". The Agent prompt receives a private `Canvas Delivery Contract` asking for a `facetwrite_canvas_delivery` block with `assistant_reply`, `outline_markdown`, `body_markdown`, and `sources`; this block is deliverable content, not hidden reasoning. If the block is missing, the server falls back to cleaning completion chatter from the assistant text and extracting headings/lists and source links.
+
+The direct delivery planner always commits the same phase order: `outline` document node, one or more `body` document nodes split with `splitCanvasText()`, then a `sources` reference node when links exist. Nodes and edges use stable delivery ids and metadata with delivery id, phase, page index, and page count. Timeline summaries report the safe public phases and node commits only; prompts, messages, raw tool JSON, and provider reasoning remain excluded.
+
+Current default delivery geometry is intentionally wider for readability: `outline` 520x260, `body` 640x520, and `sources` 520x320, with wider horizontal spacing between phases. Retrying the same delivery id updates existing delivery nodes with the current content and layout contract instead of keeping stale narrow geometry.

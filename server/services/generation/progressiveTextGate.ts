@@ -9,7 +9,8 @@ const minimumSafeLength = 80;
 const minChunkLength = 24;
 const preferredChunkLength = 48;
 const maxChunkLength = 80;
-const unsafeStreamPattern = /#\s*AgentCard|#\s*Loaded Skills|#\s*Current User Instruction|#\s*Output Contract|FacetWrite runtime context|reasoning_content|LLM request failed:|Content Exists Risk|The configured LLM provider (?:is|rejected the request)|"results"\s*:|"tool_call_id"\s*:/i;
+const canvasDeliveryBlockPattern = /```facetwrite_canvas_delivery|facetwrite_canvas_delivery/i;
+const unsafeStreamPattern = /#\s*AgentCard|#\s*Loaded Skills|#\s*Current User Instruction|#\s*Output Contract|FacetWrite runtime context|reasoning_content|LLM request failed:|Content Exists Risk|The configured LLM provider (?:is|rejected the request)|"results"\s*:|"tool_call_id"\s*:|facetwrite_canvas_delivery/i;
 
 export function createProgressiveTextGate(
   locale: GenerateRequest["locale"],
@@ -18,6 +19,7 @@ export function createProgressiveTextGate(
   let buffer = "";
   let released = false;
   let blocked = false;
+  let suppressingCanvasDeliveryBlock = false;
 
   const emitChunk = (chunk: string) => {
     if (!chunk) return;
@@ -45,8 +47,17 @@ export function createProgressiveTextGate(
   };
 
   const push = (token: string) => {
-    if (!token || blocked) return;
+    if (!token || blocked || suppressingCanvasDeliveryBlock) return;
     buffer += token;
+    const deliveryBlockStart = findCanvasDeliveryBlockStart(buffer);
+    if (deliveryBlockStart >= 0) {
+      const visible = buffer.slice(0, deliveryBlockStart);
+      buffer = visible;
+      releaseAvailable(true);
+      buffer = "";
+      suppressingCanvasDeliveryBlock = true;
+      return;
+    }
     if (looksUnsafeForStream(buffer)) {
       blocked = true;
       buffer = "";
@@ -79,6 +90,11 @@ export function splitProgressiveTextForTest(text: string, locale: GenerateReques
 
 export function looksUnsafeForStream(text: string) {
   return unsafeStreamPattern.test(text);
+}
+
+function findCanvasDeliveryBlockStart(text: string) {
+  const match = text.match(canvasDeliveryBlockPattern);
+  return match?.index ?? -1;
 }
 
 export function splitIntoUiChunks(text: string) {

@@ -3,6 +3,7 @@ import type { CanvasNode } from "../../../../agents/types";
 import type { CanvasNodePatch } from "../../../../canvas/canvasClient";
 import { getAutoNodeHeight, hasManualCanvasSize } from "../nodeLayout";
 import type { CanvasLocale } from "../types";
+import { SourceMarkdownText } from "./SourceMarkdownText";
 
 type EditableTextNodeProps = {
   isResizing: boolean;
@@ -60,7 +61,9 @@ export function EditableTextNode({ isResizing, locale, node, onUpdateNode }: Edi
         }}
         onKeyDown={(event) => { if (event.key === "Escape") event.currentTarget.blur(); }}
         onChange={(event) => setContent(event.currentTarget.value)}
-      /> : <div className="canvas-node-content canvas-node-readonly" data-testid="canvas-node-content" onDoubleClick={() => setEditing("content")}>{content || (locale === "zh" ? "双击编辑内容" : "Double-click to edit content")}</div>}
+      /> : <div className="canvas-node-content canvas-node-readonly" data-testid="canvas-node-content" onDoubleClick={() => setEditing("content")}>
+        {content ? <SourceMarkdownText text={content} /> : (locale === "zh" ? "双击编辑内容" : "Double-click to edit content")}
+      </div>}
     </div>
   );
 }

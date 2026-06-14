@@ -31,30 +31,25 @@ export function enqueueTypewriterToken<TTarget extends string>(
   token: string
 ): TypewriterState<TTarget> | null {
   if (!token) return current;
-  const queuedCharacters = Array.from(token);
   if (current?.target === target) {
     return {
       ...current,
-      queue: [...current.queue, ...queuedCharacters]
+      queue: [...current.queue, token]
     };
   }
-  return { target, queue: queuedCharacters, timer: null };
+  return { target, queue: [token], timer: null };
 }
 
 export function takeTypewriterText(queue: string[]) {
-  const take = queue.length > 800 ? 3 : queue.length > 260 ? 2 : 1;
   return {
-    text: queue.slice(0, take).join(""),
-    rest: queue.slice(take)
+    text: queue.join(""),
+    rest: []
   };
 }
 
 export function getTypewriterFinalPatch(visibleText: string, finalText: string) {
   if (visibleText === finalText) return null;
-  if (finalText.startsWith(visibleText)) {
-    return { reset: false, token: finalText.slice(visibleText.length) };
-  }
-  return { reset: true, token: finalText };
+  return { reset: !finalText.startsWith(visibleText), text: finalText, immediate: true };
 }
 
 export function sameVisibleMessages(left: CollaborationMessageLike[], right: CollaborationMessageLike[]) {

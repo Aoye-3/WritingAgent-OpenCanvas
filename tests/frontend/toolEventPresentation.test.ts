@@ -32,6 +32,17 @@ test("repeated tool events update one streaming status instead of chat activity 
   assert.equal(completed.statusLabel, "Web search completed (2 calls)");
 });
 
+test("tool event presentation uses readable Chinese labels", () => {
+  const result = reduceLiveToolEvent(createLiveToolEventState(), {
+    eventType: "agent_backend_tool_started",
+    payload: { toolName: "web_search" }
+  }, "zh");
+
+  assert.equal(result.statusLabel, "联网搜索运行中");
+  assert.equal(JSON.stringify(result).includes("�"), false);
+  assert.equal(JSON.stringify(result).includes("杩"), false);
+});
+
 test("Canvas and artifact lifecycle events request live thread-state refresh", () => {
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_canvas_mutation_committed", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_artifact_committed", payload: {} }), true);

@@ -196,6 +196,19 @@ export type StoredToolEvent = {
   createdAt: string;
 };
 
+export type RunTimelineEvent = {
+  id: string;
+  threadId?: string;
+  runId?: string;
+  sequence: number;
+  eventType: "phase_started" | "decision" | "tool_started" | "tool_completed" | "canvas_node_committed" | "artifact_committed" | "run_completed" | "run_failed";
+  status: "running" | "completed" | "failed" | "waiting";
+  title: string;
+  summary: string;
+  payload?: Record<string, unknown>;
+  createdAt: string;
+};
+
 export type CanvasNodeKind = "document" | "note" | "reference" | "role" | "plan";
 export type CanvasWriteOperation = "create" | "replace" | "append" | "replace_range";
 export type CanvasWriteRequestStatus = "pending" | "approved" | "rejected" | "stale";
@@ -325,6 +338,7 @@ export type ThreadStateResponse = {
   taskBrief: StoredBrief<TaskBrief>;
   outputVersions: StoredOutputVersion[];
   toolEvents: StoredToolEvent[];
+  runTimelineEvents?: RunTimelineEvent[];
   canvasNodes?: CanvasNode[];
   canvasEdges?: CanvasEdge[];
   canvasObjects?: CanvasObject[];

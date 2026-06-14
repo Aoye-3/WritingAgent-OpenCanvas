@@ -40,6 +40,19 @@ export type GenerationEvent = {
   payload: unknown;
 };
 
+export type RunTimelineEvent = {
+  id: string;
+  threadId?: string;
+  runId?: string;
+  sequence: number;
+  eventType: "phase_started" | "decision" | "tool_started" | "tool_completed" | "canvas_node_committed" | "artifact_committed" | "run_completed" | "run_failed";
+  status: "running" | "completed" | "failed" | "waiting";
+  title: string;
+  summary: string;
+  payload?: Record<string, unknown>;
+  createdAt: string;
+};
+
 export type StreamStatus = {
   phase: "thinking" | "searching" | "writing" | "finalizing";
   label: string;
@@ -49,6 +62,7 @@ export type CollaborationMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
+  timeline?: RunTimelineEvent[];
   usedMock?: boolean;
   isStreaming?: boolean;
   status?: StreamStatus["phase"] | "error" | "stopped";

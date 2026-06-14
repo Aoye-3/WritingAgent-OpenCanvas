@@ -423,6 +423,34 @@ test("explicit Canvas creation forces canvas_write and sends a structured action
   assert.equal((request.context.facetwrite_canvas_action as { operation: string }).operation, "create");
 });
 
+test("sends Canvas delivery contract as top-level AgentBackend context", () => {
+  const card = getAgentCard("summary");
+  const request = buildRunRequest({
+    threadId: "thread_canvas_delivery",
+    projectId: "project_canvas",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings: defaultAgentSettings(card),
+    messages: [{ role: "user", content: "summarize this to canvas" }],
+    prompt: "summarize this to canvas",
+    contextValues: {
+      canvasDeliveryContract: {
+        id: "facetwrite_canvas_delivery_v1",
+        format: "facetwrite_canvas_delivery",
+        locale: "en"
+      }
+    },
+    chatInstruction: "summarize this to canvas"
+  }, { enabled: true, baseUrl: "http://127.0.0.1:8000", assistantId: "lead_agent" });
+
+  assert.deepEqual(request.context.facetwrite_canvas_delivery_contract, {
+    id: "facetwrite_canvas_delivery_v1",
+    format: "facetwrite_canvas_delivery",
+    locale: "en"
+  });
+  assert.equal(JSON.stringify(request.context.facetwrite_canvas_delivery_contract).includes("reasoning"), false);
+});
+
 test("maps structured Canvas envelopes from bridged tool results", async () => {
   const envelope = JSON.stringify({ content: "Committed.", event: { tool: "canvas_write", eventType: "canvas_mutation_committed", nodeId: "node_1", projectId: "project_1", status: "committed" } });
   const body = `event: messages\ndata: [{"type":"tool","name":"canvas_write","tool_call_id":"call_canvas","content":${JSON.stringify(`Committed.\n__FACETWRITE_EVENT__${envelope}`)}}]\n\n`;

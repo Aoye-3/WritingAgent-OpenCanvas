@@ -1,5 +1,5 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
-import type { AgentCard, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, StoredThread, StoredToolEvent } from "../../agents/types";
+import type { AgentCard, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, StoredThread } from "../../agents/types";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
 import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain";
 import { AICollaborationDrawer, type ConversationModelControls } from "./AICollaborationDrawer";
@@ -41,7 +41,6 @@ type AICollaborationPanelProps = {
   onRemoveMindChainContext: () => void;
   onToggleCollapsed: () => void;
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
-  toolEvents: StoredToolEvent[];
   toolState: GenerateRequest["toolState"];
   onPlansChanged: () => Promise<void>;
   onFocusPlanArtifact: (targetId: string) => void;

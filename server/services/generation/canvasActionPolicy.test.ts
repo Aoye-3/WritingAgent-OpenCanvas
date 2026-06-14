@@ -33,3 +33,21 @@ test("classifies append as low risk and destructive operations as approval-gated
   assert.equal(deletion?.risk, "high");
   assert.equal(deletion?.requiresTool, true);
 });
+
+test("recognizes English and mixed Canvas delivery wording as create actions", () => {
+  for (const instruction of [
+    "turn this into nodes",
+    "make canvas cards",
+    "总结成 canvas nodes"
+  ]) {
+    const action = resolveCanvasAction({
+      threadId: "thread_2",
+      instruction,
+      sequence: 3
+    });
+
+    assert.equal(action?.operation, "create", instruction);
+    assert.equal(action?.risk, "low", instruction);
+    assert.equal(action?.requiresTool, false, instruction);
+  }
+});
