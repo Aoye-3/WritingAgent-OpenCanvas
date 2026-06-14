@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import { timelineEventFromToolEvent } from "../services/generation/runTimeline.js";
 import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
 import { resolveConversationModelId } from "../domains/model-config/index.js";
 import type { SQLiteStorageRepository } from "../storage.js";
@@ -188,6 +189,7 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
     const project = storage.listProjects().find((candidate) => candidate.id === projectId);
     storage.migrateCanvasWorkflowRoleNodes(projectId);
     const plans = storage.listPlanRuns(request.params.threadId);
+    const toolEvents = storage.listToolEvents(request.params.threadId);
     sendOk(response, {
       thread,
       project,
@@ -195,7 +197,8 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
       projectBrief: storage.getProjectBrief(projectId),
       taskBrief: storage.getTaskBrief(request.params.threadId),
       outputVersions: storage.listOutputVersions(request.params.threadId),
-      toolEvents: storage.listToolEvents(request.params.threadId),
+      toolEvents,
+      runTimelineEvents: toolEvents.map(timelineEventFromToolEvent).filter((event): event is NonNullable<typeof event> => Boolean(event)),
       canvasNodes: storage.listCanvasNodes(projectId),
       canvasEdges: storage.listCanvasEdges(projectId),
       canvasObjects: storage.listCanvasObjects(projectId),

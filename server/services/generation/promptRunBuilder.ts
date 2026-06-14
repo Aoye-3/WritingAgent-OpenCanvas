@@ -14,6 +14,8 @@ import { isChatMode } from "./mockFallback.js";
 import type { ConfiguredModelApi } from "../../domains/model-config/index.js";
 import { shouldExcludeFromModelContext } from "./outputNormalizer.js";
 import { planPhaseSystemPrompt, resolvePlanRequestPolicy } from "./planRequestPolicy.js";
+import { isDirectCanvasDeliveryIntent } from "./canvasDeliveryIntent.js";
+import { createCanvasDeliveryContract, type CanvasDeliveryContract } from "./canvasDeliveryContent.js";
 
 export type GenerateModelSettings = ConversationModelRuntimeSettings;
 
@@ -38,6 +40,7 @@ export type GenerationRunContext = {
   messages: ChatMessage[];
   effectiveToolState: ToolState;
   knowledgeEvents: ToolEventRecord[];
+  canvasDeliveryContract?: CanvasDeliveryContract;
 };
 
 export async function buildGenerationRunContext(
@@ -60,6 +63,7 @@ export async function buildGenerationRunContext(
     ? (payload.contextValues?.awaitingPlan ? "writing-plans" : "brainstorming")
     : undefined;
   const skills = await loadSkillsByRefs([...agentCard.skillRefs, ...(planSkillRef ? [planSkillRef] : [])]);
+  const canvasDeliveryContract = canvasDeliveryContractForPayload(payload);
   const prompt = buildAgentPrompt({
     agentCard,
     skills,
@@ -69,7 +73,8 @@ export async function buildGenerationRunContext(
     contextValues: payload.contextValues,
     chatInstruction: payload.chatInstruction,
     freeTextPrompt: payload.freeTextPrompt,
-    toolState: effectiveToolState
+    toolState: effectiveToolState,
+    canvasDeliveryContract
   });
   const modelSettings = await resolveModelSettings(configuredModel, undefined, payload.modelOverrides);
   const userPrompt = userPromptForModel(payload, agentCard.outputContract.type);
@@ -99,8 +104,14 @@ export async function buildGenerationRunContext(
     mode: isChatMode(payload.mode) ? "chat" : "structured",
     messages,
     effectiveToolState,
-    knowledgeEvents: knowledge.events
+    knowledgeEvents: knowledge.events,
+    canvasDeliveryContract
   };
+}
+
+function canvasDeliveryContractForPayload(payload: GenerateRequest) {
+  const instruction = payload.chatInstruction?.trim() || payload.freeTextPrompt?.trim() || "";
+  return isDirectCanvasDeliveryIntent(instruction) ? createCanvasDeliveryContract(payload.locale) : undefined;
 }
 
 export async function resolveModelSettings(

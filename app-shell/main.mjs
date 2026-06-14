@@ -16,11 +16,8 @@ const frontendPort = 17776;
 const apiPort = 17777;
 const frontendUrl = `http://127.0.0.1:${frontendPort}`;
 const apiUrl = `http://127.0.0.1:${apiPort}`;
-const runtime = resolveRuntimeMode(process.env);
-const runtimePort = Number(new URL(runtime.baseUrl).port || 80);
 const localBridgeUrl = `http://127.0.0.1:${apiPort}`;
 const dockerBridgeUrl = `http://host.docker.internal:${apiPort}`;
-const bridgeUrl = runtime.mode === "docker" ? dockerBridgeUrl : localBridgeUrl;
 const internalToolToken = process.env.FACETWRITE_INTERNAL_TOOL_TOKEN || randomBytes(32).toString("hex");
 const iconPath = path.join(root, "public", "assets", "ui", "brand", "opencanvas-icon.png");
 const tsxCli = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
@@ -28,20 +25,15 @@ const viteCli = path.join(root, "node_modules", "vite", "bin", "vite.js");
 const logsRoot = path.join(root, "logs");
 const shellLogPath = path.join(logsRoot, "app-shell.log");
 mkdirSync(logsRoot, { recursive: true });
-const shellEnv = {
-  ...process.env,
-  PORT: String(apiPort),
-  VITE_PORT: String(frontendPort),
-  FACETWRITE_INTERNAL_BASE_URL: bridgeUrl,
-  FACETWRITE_INTERNAL_TOOL_TOKEN: internalToolToken,
-  AGENT_RUNTIME_MODE: runtime.mode,
-  AGENT_BACKEND_BASE_URL: runtime.baseUrl,
-};
 
 let splashWindow;
 let mainWindow;
 let lifecycle;
 let shuttingDown = false;
+let runtime;
+let runtimePort;
+let bridgeUrl;
+let shellEnv;
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -65,6 +57,10 @@ if (!app.requestSingleInstanceLock()) {
 async function startShell() {
   splashWindow = createSplashWindow();
   await Promise.all([assertPortAvailable(frontendPort), assertPortAvailable(apiPort)]);
+  runtime = await resolveShellRuntime(resolveRuntimeMode(process.env));
+  runtimePort = Number(new URL(runtime.baseUrl).port || 80);
+  bridgeUrl = runtime.mode === "docker" ? dockerBridgeUrl : localBridgeUrl;
+  shellEnv = buildShellEnv();
 
   lifecycle = createLifecycle({
     inspectRuntime,
@@ -98,6 +94,28 @@ async function startShell() {
     if (smokeExitMs > 0) setTimeout(() => void shutdown(), smokeExitMs);
   });
   await mainWindow.loadURL(frontendUrl);
+}
+
+async function resolveShellRuntime(config) {
+  if (config.mode !== "local" || config.baseUrl) return config;
+  const port = await findAvailablePort();
+  return {
+    ...config,
+    baseUrl: `http://127.0.0.1:${port}`,
+  };
+}
+
+function buildShellEnv() {
+  return {
+    ...process.env,
+    PORT: String(apiPort),
+    VITE_PORT: String(frontendPort),
+    FACETWRITE_INTERNAL_BASE_URL: bridgeUrl,
+    FACETWRITE_INTERNAL_TOOL_TOKEN: internalToolToken,
+    AGENT_RUNTIME_MODE: runtime.mode,
+    AGENT_BACKEND_BASE_URL: runtime.baseUrl,
+    AGENT_RUNTIME_PORT: String(runtimePort),
+  };
 }
 
 function createSplashWindow() {
@@ -278,6 +296,21 @@ async function assertPortAvailable(port) {
       reject(new Error(`Port ${port} ${detail}. Resolve the conflict and try again.`));
     });
     server.listen(port, "127.0.0.1", () => server.close(resolve));
+  });
+}
+
+async function findAvailablePort() {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close(() => {
+        if (port > 0) resolve(port);
+        else reject(new Error("Unable to allocate a local Agent Runtime port."));
+      });
+    });
   });
 }
 

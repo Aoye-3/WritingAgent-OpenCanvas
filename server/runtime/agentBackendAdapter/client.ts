@@ -141,6 +141,7 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
       facetwrite_context_values: input.contextValues ?? {},
       facetwrite_chat_instruction: input.chatInstruction ?? input.prompt,
       facetwrite_canvas_action: canvasAction,
+      facetwrite_canvas_delivery_contract: input.contextValues?.canvasDeliveryContract,
       ...runtimeContext
     },
     stream_mode: ["messages-tuple", "custom", "values"],

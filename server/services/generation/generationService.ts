@@ -22,6 +22,17 @@ import { PlanOrchestrator } from "../planOrchestrator.js";
 import { resolveCanvasAction } from "./canvasActionPolicy.js";
 import { resolvePlanRequestPolicy } from "./planRequestPolicy.js";
 import { resolveOrchestrationPolicy } from "./orchestrationPolicy.js";
+import { commitCanvasDelivery, planCanvasDelivery } from "../canvasDeliveryPlanner.js";
+import { resolveCanvasDeliveryContent, type CanvasDeliveryContract } from "./canvasDeliveryContent.js";
+import { isDirectCanvasDeliveryIntent } from "./canvasDeliveryIntent.js";
+import {
+  createRunTimelineBuilder,
+  safeDecisionTimelineEvent,
+  timelineEventFromToolEvent,
+  timelineEventToToolEvent,
+  toolEventToTimelineEvent,
+  type RunTimelineEvent
+} from "./runTimeline.js";
 
 export type GenerationService = {
   generateAndRecord: (payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void) => Promise<GenerateResponse>;
@@ -31,6 +42,7 @@ export type GenerationService = {
       onToken?: (token: string) => void;
       onStatus?: (status: StreamStatus) => void;
       onToolEvent?: (event: ToolEventRecord) => void;
+      onTimelineEvent?: (event: RunTimelineEvent) => void;
     }
   ) => Promise<GenerateResponse>;
 };
@@ -77,6 +89,7 @@ export function createGenerationService(
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
     payload = withPlanGeneration(payload, threadId, storage);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
+    payload = withRuntimeContext(payload, context.canvasDeliveryContract);
     const agentCard = context.runtimeConfig.agentCard;
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
     const observeToolEvent = (event: ToolEventRecord) => {
@@ -119,7 +132,16 @@ export function createGenerationService(
           runtimeEvents.push(...(normalized.events ?? []), event);
           observeToolEvent(event);
         } else {
-          const events = [...runtimeEvents, ...(normalized.events ?? [])];
+          const baseEvents = [...runtimeEvents, ...(normalized.events ?? [])];
+          const finalized = finalizeCanvasDelivery({
+            payload,
+            threadId,
+            projectId: selection.projectId,
+            storage,
+            text: normalized.text,
+            events: baseEvents
+          });
+          const events = [...baseEvents, ...finalized.timelineEvents.map(timelineEventToToolEvent)];
           planOrchestrator.complete(threadId, payload);
           const recorded = recordGenerationRun({
             storage,
@@ -131,7 +153,7 @@ export function createGenerationService(
             modelId: context.modelSettings.model,
             mode: context.mode,
             prompt: context.prompt,
-            text: normalized.text,
+            text: finalized.text,
             provider: "agent-backend",
             usedMock: false,
             toolState: context.effectiveToolState,
@@ -175,6 +197,7 @@ export function createGenerationService(
       onToken?: (token: string) => void;
       onStatus?: (status: StreamStatus) => void;
       onToolEvent?: (event: ToolEventRecord) => void;
+      onTimelineEvent?: (event: RunTimelineEvent) => void;
     } = {}
   ): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
@@ -182,12 +205,20 @@ export function createGenerationService(
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
     payload = withPlanGeneration(payload, threadId, storage);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
+    payload = withRuntimeContext(payload, context.canvasDeliveryContract);
     const agentCard = context.runtimeConfig.agentCard;
     let textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
+    const timeline = createRunTimelineBuilder({ threadId, locale: payload.locale });
+    const timelineEvents: RunTimelineEvent[] = [];
+    const emitTimeline = (event: RunTimelineEvent) => {
+      timelineEvents.push(event);
+      callbacks.onTimelineEvent?.(event);
+    };
     const observeToolEvent = (event: ToolEventRecord) => {
       planOrchestrator.observe(threadId, event);
       callbacks.onToolEvent?.(event);
+      emitTimeline(timelineEventFromToolEvent(event) ?? toolEventToTimelineEvent(timeline, event));
     };
     for (const event of canvasActionEvents(payload)) {
       runtimeEvents.push(event);
@@ -199,6 +230,7 @@ export function createGenerationService(
     }
 
     callbacks.onStatus?.({ phase: "thinking", label: streamLabels.thinking });
+    emitTimeline(timeline.event("phase_started", "running", payload.locale === "zh" ? "准备执行" : "Preparing run", payload.locale === "zh" ? "正在准备上下文、工具和运行环境。" : "Preparing context, tools, and runtime."));
 
     try {
       planOrchestrator.prepare(threadId, payload);
@@ -232,7 +264,20 @@ export function createGenerationService(
         } else {
           textGate.flush();
           callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
-          const events = [...runtimeEvents, ...(normalized.events ?? [])];
+          const baseEvents = [...runtimeEvents, ...(normalized.events ?? [])];
+          const finalized = finalizeCanvasDelivery({
+            payload,
+            threadId,
+            projectId: selection.projectId,
+            storage,
+            text: normalized.text,
+            events: baseEvents,
+            timeline,
+            emitTimeline
+          });
+          const completed = timeline.event("run_completed", "completed", payload.locale === "zh" ? "运行完成" : "Run completed", payload.locale === "zh" ? "最终内容已生成。" : "Final content is ready.");
+          emitTimeline(completed);
+          const events = [...baseEvents, ...timelineEvents.map(timelineEventToToolEvent)];
           planOrchestrator.complete(threadId, payload);
           const recorded = recordGenerationRun({
             storage,
@@ -244,7 +289,7 @@ export function createGenerationService(
             modelId: context.modelSettings.model,
             mode: context.mode,
             prompt: context.prompt,
-            text: normalized.text,
+            text: finalized.text,
             provider: "agent-backend",
             usedMock: false,
             toolState: context.effectiveToolState,
@@ -264,6 +309,7 @@ export function createGenerationService(
       const event = createRuntimeFallbackEvent("agent-backend", error, isMockFallbackEnabled(deps));
       runtimeEvents.push(event);
       observeToolEvent(event);
+      emitTimeline(timeline.event("run_failed", "failed", payload.locale === "zh" ? "运行失败" : "Run failed", safeRuntimeErrorMessage(error)));
       textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     }
 
@@ -279,7 +325,7 @@ export function createGenerationService(
       mode: context.mode,
       prompt: context.prompt,
       toolState: context.effectiveToolState,
-      events: runtimeEvents
+      events: [...runtimeEvents, ...timelineEvents.map(timelineEventToToolEvent)]
     });
     textGate.push(result.text);
     textGate.flush();
@@ -471,3 +517,60 @@ function planPhaseEvents(payload: GenerateRequest): ToolEventRecord[] {
 
 function record(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function readString(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
+
+function stableCanvasDeliveryId(threadId: string, payload: GenerateRequest, storage: SQLiteStorageRepository) {
+  const sequence = storage.listMessages(threadId).length + 1;
+  const actionId = payload.canvasAction?.id ?? "direct";
+  return `delivery_${threadId}_${sequence}_${actionId}`;
+}
+
+function withRuntimeContext(payload: GenerateRequest, canvasDeliveryContract?: CanvasDeliveryContract): GenerateRequest {
+  if (!canvasDeliveryContract) return payload;
+  return {
+    ...payload,
+    contextValues: {
+      ...payload.contextValues,
+      canvasDeliveryContract
+    }
+  };
+}
+
+function finalizeCanvasDelivery(input: {
+  payload: GenerateRequest;
+  threadId: string;
+  projectId: string;
+  storage: SQLiteStorageRepository;
+  text: string;
+  events: ToolEventRecord[];
+  timeline?: ReturnType<typeof createRunTimelineBuilder>;
+  emitTimeline?: (event: RunTimelineEvent) => void;
+}) {
+  const instruction = input.payload.chatInstruction ?? input.payload.freeTextPrompt ?? "";
+  if (!isDirectCanvasDeliveryIntent(instruction)) return { text: input.text, timelineEvents: [] as RunTimelineEvent[] };
+  const timeline = input.timeline ?? createRunTimelineBuilder({ threadId: input.threadId, locale: input.payload.locale });
+  const localTimelineEvents: RunTimelineEvent[] = [];
+  const emit = input.emitTimeline ?? ((event: RunTimelineEvent) => localTimelineEvents.push(event));
+  const content = resolveCanvasDeliveryContent({
+    instruction,
+    locale: input.payload.locale,
+    text: input.text,
+    events: input.events
+  });
+  const delivery = planCanvasDelivery({
+    deliveryId: stableCanvasDeliveryId(input.threadId, input.payload, input.storage),
+    projectId: input.projectId,
+    instruction,
+    locale: input.payload.locale,
+    content
+  });
+  if (!delivery.required) return { text: content.assistantText || input.text, timelineEvents: localTimelineEvents };
+
+  emit(safeDecisionTimelineEvent(timeline, input.payload.locale === "zh"
+    ? "检测到明确 Canvas 交付请求，按“摘要分区 -> 正文 -> 来源”提交节点。"
+    : "Detected an explicit Canvas delivery request and committed outline, body, and sources nodes."));
+  const committed = commitCanvasDelivery(input.storage, input.projectId, delivery);
+  for (const item of committed) {
+    emit(timeline.event("canvas_node_committed", "completed", item.title, input.payload.locale === "zh" ? `已创建或更新节点：${item.title}` : `Created or updated node: ${item.title}`, { nodeId: item.nodeId, title: item.title }));
+  }
+  return { text: content.assistantText || input.text, timelineEvents: localTimelineEvents };
+}

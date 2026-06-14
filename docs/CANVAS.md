@@ -36,14 +36,14 @@ Current frontend responsibilities:
 - Render directed edges through `components/canvas/CanvasCurveEdge.tsx`.
 - Format explicit user-sent mind chains through the shared pure helper in `shared/canvasMindChain.ts`.
 - Render node bodies through the kind-based renderer boundary in `components/canvas/renderers/`.
-- Support viewport pan, wheel pan, Ctrl-wheel zoom, reset, selection, context-menu creation, node dragging, node resizing, title editing, content editing, and deletion.
+- Support viewport pan, wheel pan, Ctrl-wheel zoom, reset, selection, context-menu creation, node dragging, edge-based node resizing, title editing, content editing, and deletion.
 - Persist node position after drag stop through `PATCH /api/threads/:threadId/canvas/nodes/:nodeId`.
 - Persist node size after resize stop through the same PATCH endpoint.
 - Persist title/content only on blur, not on every keystroke.
 
 React Flow is only a view/interaction layer. It must not become the source of truth for node persistence.
 
-Common node behavior is intentionally separated from node-kind content rendering. Selection, deletion, resize, drag handle, and the punched-hole link port live in the shared node frame. `note`, `document`, and `reference` rendering live in separate renderer entry points, even when they currently share the same editable text implementation, so future kind-specific behavior does not leak into the common frame.
+Common node behavior is intentionally separated from node-kind content rendering. Selection, deletion, resize edges, drag handle, and the punched-hole link port live in the shared node frame. `note`, `document`, and `reference` rendering live in separate renderer entry points, even when they share Markdown-capable text rendering, so future kind-specific behavior does not leak into the common frame.
 
 Canvas state is also split by responsibility. `src/app/hooks/useCanvasState.ts` is the public composition hook, `useCanvasActions.ts` owns API operation orchestration, `useCanvasHistory.ts` owns the session undo stack, and pure history helpers live in `shared/canvasHistory.ts` for backend-compatible unit tests. Small action-state helpers live under `src/app/hooks/canvasActions/` so failure-prone state transitions can be tested without rendering React Flow.
 
@@ -128,6 +128,20 @@ Text nodes start in an automatic layout mode: when content enters or changes thr
 
 The UI clamps node size with frontend minimum/maximum dimensions. These constraints are presentation rules, not database constraints.
 
+Current default content-node sizes are deliberately wider than the minimum size constraints so generated Markdown is readable without immediate manual resizing:
+
+- Manual Canvas creation defaults in `canvasCreation.ts`: `document` 640x260, `reference` 420x190, `note` 380x190, and `role` 340x190.
+- Direct multi-node Canvas delivery defaults in `server/services/canvasDeliveryPlanner.ts`: `outline` 520x260, `body` 640x520, and `sources` 520x320.
+
+The backend direct-delivery planner persists those dimensions in the created node draft. Retrying the same stable delivery id updates existing delivery nodes with the current title, content, position, size, kind, and metadata, so old narrow nodes do not keep stale geometry after a layout contract change.
+
+## Node Markdown Rendering
+Canvas content nodes render Markdown in read-only mode. Editing still uses the raw Markdown textarea so users can revise the source text directly.
+
+`SourceMarkdownText` is the Canvas node renderer for selectable Markdown text. It supports compact headings, ordered and unordered lists, inline emphasis, inline code, Markdown links, and simple GitHub-style pipe tables. Each rendered text span keeps source-offset metadata so document range rewrite and inline formatting can still map a browser selection back to the original node content.
+
+Reference and note nodes use the same read-only Markdown renderer through `EditableTextNode`, so a source list such as `- [Apple](https://example.com)` is displayed as a clickable title rather than raw `[title](url)` syntax. Table rendering is horizontally scrollable inside the node instead of expanding or clipping the card.
+
 ## Canvas Workflow
 Canvas Workflow is a layer on top of Canvas V2. Stage remains project-level state, while Role is represented as an independent Canvas function node. Workflow control capabilities should be modeled as nodes and relationships when they need spatial behavior or targeted influence, instead of being stacked into ordinary content-node UI.
 
@@ -170,18 +184,18 @@ Suggestions are anchored to the Role node that produced the perspective while re
 Pure Workflow types and filters live in `shared/canvasWorkflow.ts` so frontend context selection, backend storage behavior, and tests use the same stage/Role vocabulary.
 
 ## Resize Behavior
-Canvas V2 uses a custom eight-handle resize frame rather than the default React Flow `NodeResizer`.
+Canvas V2 uses a custom four-edge resize frame rather than the default React Flow `NodeResizer`.
 
-Reason: In the FacetWrite workspace layout, resize handles must be easy to hit without visually muddying the content frame. The custom resize frame is rendered as an outer selected-node outline around the actual node box, uses enlarged transparent hit targets with small visible handles, uses `nodrag nopan`, and updates React Flow visual state during the drag before persisting on pointer release.
+Reason: In the FacetWrite workspace layout, resizing should feel like pulling the card edge, not grabbing small corner points. The custom resize frame is rendered as an outer selected-node outline around the actual node box, uses enlarged transparent edge hit targets, uses `nodrag nopan`, and updates React Flow visual state during the drag before persisting on pointer release.
 
 Resize rules:
 
-- Resize handles show only on the selected node.
-- The selected outline and visible handles sit outside the actual node box.
-- The visible handle is intentionally smaller than the actual pointer hit target.
-- Dragging a corner changes width and height.
-- Dragging an edge changes one dimension.
-- Dragging north or west handles also changes `x` or `y`.
+- Resize edges show only on the selected node.
+- The selected outline and edge hit targets sit outside the actual node box.
+- The current resize handles are `n`, `e`, `s`, and `w`; point/corner handles are intentionally not rendered.
+- Dragging east or west changes width.
+- Dragging north or south changes height.
+- Dragging north or west also changes `x` or `y`.
 - During resize, React Flow node dragging, pane dragging, and position-change application are temporarily disabled for that gesture.
 - Resize marks the node as manual layout in metadata so later auto-expansion does not fight the user's chosen frame.
 - Persistence happens once on pointer release.
@@ -255,7 +269,7 @@ Important class roles:
 - `.canvas-node`: FacetWrite node shell.
 - `.canvas-node-drag-handle`: header area used for node dragging.
 - `.canvas-node-resize-frame`: selected-node resize outline rendered outside the actual node box.
-- `.canvas-node-resize-handle`: resize controls.
+- `.canvas-node-resize-handle`: transparent draggable edge controls for `n`, `e`, `s`, and `w`.
 - `.canvas-menu`: right-click creation menu.
 - `.canvas-node-link-port`: common top-right punched-hole link control.
 - `.canvas-node-link-handle`: source/target React Flow handles inside the common link port.
@@ -282,7 +296,7 @@ Before claiming Canvas work is complete, verify:
 - Canvas renders in the workspace.
 - Background right-click menu creates `document`, `note`, `reference`, and `role` nodes.
 - Node drag persists `x/y`.
-- Node resize persists `x/y/width/height`.
+- Node resize uses draggable edges, not point handles, and persists `x/y/width/height`.
 - Title/content edit persists after blur.
 - Node kind conversion preserves title, content, position, and size.
 - Delete removes the node.

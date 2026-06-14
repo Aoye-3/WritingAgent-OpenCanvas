@@ -9,8 +9,10 @@ const viteConfig = readFileSync(join(process.cwd(), "vite.config.ts"), "utf8");
 
 test("launcher defaults to the project-managed local Agent Runtime", () => {
   assert.match(launcher, /Get-ConfigValue -Name "AGENT_RUNTIME_MODE" -DefaultValue "local"/);
+  assert.match(launcher, /Get-FreeTcpPort/);
+  assert.match(launcher, /AGENT_RUNTIME_PORT/);
   assert.match(launcher, /scripts\\agent-runtime-local\.ps1/);
-  assert.match(launcher, /http:\/\/127\.0\.0\.1:8001/);
+  assert.doesNotMatch(launcher, /DefaultValue "http:\/\/127\.0\.0\.1:8001"/);
 });
 
 test("launcher shares one authenticated Tool Bridge token with managed services", () => {

@@ -2,7 +2,7 @@ param(
   [ValidateSet("up", "down", "status", "doctor")]
   [string] $Action = "status",
 
-  [int] $Port = 8001,
+  [int] $Port = 0,
 
   [string] $BridgeBaseUrl = ""
 )
@@ -18,27 +18,13 @@ $metadataPath = Join-Path $logsRoot "agent-runtime-local.json"
 $stdoutPath = Join-Path $logsRoot "gateway-local.out.log"
 $stderrPath = Join-Path $logsRoot "gateway-local.err.log"
 
-if ($Action -eq "status" -and (Test-Path -LiteralPath $metadataPath)) {
+function Get-FreeTcpPort {
+  $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
   try {
-    $statusMetadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
-    $Port = [int] $statusMetadata.port
-    $BridgeBaseUrl = [string] $statusMetadata.bridgeBaseUrl
-  } catch {}
-}
-$healthUrl = "http://127.0.0.1:$Port/health"
-
-if (-not $BridgeBaseUrl) {
-  $apiPort = if ($env:PORT) { $env:PORT } else { "8837" }
-  $BridgeBaseUrl = "http://127.0.0.1:$apiPort"
-}
-$BridgeBaseUrl = $BridgeBaseUrl.TrimEnd("/")
-
-function Test-HttpOk {
-  try {
-    $response = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3
-    return $response.StatusCode -ge 200 -and $response.StatusCode -lt 300
-  } catch {
-    return $false
+    $listener.Start()
+    return ([System.Net.IPEndPoint] $listener.LocalEndpoint).Port
+  } finally {
+    $listener.Stop()
   }
 }
 
@@ -57,6 +43,17 @@ function Read-Metadata {
 function Remove-OwnershipFiles {
   Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $metadataPath -Force -ErrorAction SilentlyContinue
+}
+
+$healthUrl = ""
+
+function Test-HttpOk {
+  try {
+    $response = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3
+    return $response.StatusCode -ge 200 -and $response.StatusCode -lt 300
+  } catch {
+    return $false
+  }
 }
 
 function Get-ToolTokenFingerprint {
@@ -99,7 +96,7 @@ function Assert-CompatibleOwner {
   }
   $tokenFingerprint = if ($env:FACETWRITE_INTERNAL_TOOL_TOKEN) { Get-ToolTokenFingerprint } else { $null }
   $tokenMismatch = $tokenFingerprint -and $metadata.toolTokenFingerprint -ne $tokenFingerprint
-  if ($metadata.projectRoot -ne $root -or [int] $metadata.port -ne $Port -or $metadata.bridgeBaseUrl -ne $BridgeBaseUrl -or $tokenMismatch) {
+  if ($metadata.projectRoot -ne $root -or $metadata.port -ne $Port -or $metadata.bridgeBaseUrl -ne $BridgeBaseUrl -or $tokenMismatch) {
     throw "The running local Agent Runtime uses incompatible project, port, or FacetWrite bridge settings."
   }
   if (-not $metadata.runtimePython) {
@@ -173,6 +170,36 @@ function Import-DotEnv {
   Import-DotEnvFile -Path (Join-Path $root ".env.local")
 }
 
+function Resolve-LocalRuntimeEndpoint {
+  if (($Action -in @("status", "down")) -and (Test-Path -LiteralPath $metadataPath)) {
+    try {
+      $statusMetadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+      $script:Port = [int] $statusMetadata.port
+      $script:BridgeBaseUrl = [string] $statusMetadata.bridgeBaseUrl
+    } catch {}
+  } elseif ($Action -eq "up" -and $Port -eq 0 -and (Test-Path -LiteralPath $metadataPath)) {
+    $statusMetadata = Read-Metadata
+    if ($statusMetadata -and (Get-OwnedProcess)) {
+      $script:Port = [int] $statusMetadata.port
+      $script:BridgeBaseUrl = [string] $statusMetadata.bridgeBaseUrl
+    } else {
+      Remove-OwnershipFiles
+      $script:Port = Get-FreeTcpPort
+    }
+  }
+  if ($script:Port -eq 0) {
+    $configuredRuntimePort = if ($env:AGENT_RUNTIME_PORT) { [int] $env:AGENT_RUNTIME_PORT } else { 0 }
+    $script:Port = if ($configuredRuntimePort -gt 0) { $configuredRuntimePort } else { Get-FreeTcpPort }
+  }
+  $script:healthUrl = "http://127.0.0.1:$($script:Port)/health"
+
+  if (-not $script:BridgeBaseUrl) {
+    $apiPort = if ($env:PORT) { $env:PORT } else { "8837" }
+    $script:BridgeBaseUrl = "http://127.0.0.1:$apiPort"
+  }
+  $script:BridgeBaseUrl = $script:BridgeBaseUrl.TrimEnd("/")
+}
+
 function Initialize-Environment {
   Ensure-LocalFile -RelativePath ".env" -AllowEmpty
   Ensure-LocalFile -RelativePath "config.yaml" -ExampleRelativePath "config.example.yaml"
@@ -222,6 +249,8 @@ function Stop-OwnedRuntime {
 
 switch ($Action) {
   "doctor" {
+    Import-DotEnv
+    Resolve-LocalRuntimeEndpoint
     $uv = Initialize-Environment
     $pythonStatus = Invoke-Uv -UvPath $uv.Source -Arguments @("python", "find", "--managed-python", "3.12") -Quiet
     if ($pythonStatus -ne 0) { Write-Host "Python 3.12 is not installed yet; the first up command will install it." -ForegroundColor Yellow }
@@ -232,6 +261,7 @@ switch ($Action) {
   }
   "status" {
     Import-DotEnv
+    Resolve-LocalRuntimeEndpoint
     if (Test-HttpOk) {
       Assert-CompatibleOwner
       $process = Get-OwnedProcess
@@ -242,12 +272,15 @@ switch ($Action) {
     exit 1
   }
   "down" {
+    Import-DotEnv
+    Resolve-LocalRuntimeEndpoint
     Stop-OwnedRuntime
     Write-Host "Agent Runtime local Gateway stopped." -ForegroundColor Green
     exit 0
   }
   "up" {
     Import-DotEnv
+    Resolve-LocalRuntimeEndpoint
     if (Test-HttpOk) {
       try {
         Assert-CompatibleOwner
@@ -261,6 +294,11 @@ switch ($Action) {
         if (-not $restartable) { throw }
         Stop-OwnedRuntime
       }
+    }
+    $ownedProcess = Get-OwnedProcess
+    $metadata = Read-Metadata
+    if ($ownedProcess -and $metadata -and $metadata.port -ne $Port) {
+      Stop-OwnedRuntime
     }
     if (Get-OwnedProcess) {
       throw "The project-owned Agent Runtime process is running but unhealthy. Run agent-runtime:down and inspect $stderrPath."

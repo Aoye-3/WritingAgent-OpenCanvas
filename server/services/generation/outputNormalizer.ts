@@ -1,5 +1,6 @@
 import type { Locale } from "../../promptBuilder.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
+import { extractSourceLinks, formatSourceLinks } from "./sourceLinks.js";
 
 const blockedPromptPatterns = [
   /You are FacetWrite(?:'s)? (?:writing assistant|text agent)/i,
@@ -156,7 +157,7 @@ function correctCanvasOutcomeClaim(text: string, events: ToolEventRecord[], loca
 function enforceWebSearchSources(text: string, events: ToolEventRecord[], locale: Locale) {
   if (!webSearchWasUsed(events) || hasVisibleUrl(text)) return text;
 
-  const sources = extractWebSearchSources(events);
+  const sources = extractSourceLinks({ events });
   if (!sources.length) {
     events.push({
       eventType: "web_search_sources_missing",
@@ -176,7 +177,7 @@ function enforceWebSearchSources(text: string, events: ToolEventRecord[], locale
     }
   });
   const heading = locale === "zh" ? "来源" : "Sources";
-  return `${text.trim()}\n\n## ${heading}\n${sources.map((source) => `- [${escapeMarkdownLinkText(source.title)}](${source.url})`).join("\n")}`;
+  return `${text.trim()}\n\n## ${heading}\n${formatSourceLinks(sources)}`;
 }
 
 function webSearchWasUsed(events: ToolEventRecord[]) {
@@ -187,33 +188,8 @@ function webSearchWasUsed(events: ToolEventRecord[]) {
   });
 }
 
-function extractWebSearchSources(events: ToolEventRecord[]) {
-  const seen = new Set<string>();
-  const sources: Array<{ title: string; url: string }> = [];
-  for (const event of events) {
-    const rawSources = Array.isArray(event.payload.sources) ? event.payload.sources : [];
-    for (const rawSource of rawSources) {
-      if (!rawSource || typeof rawSource !== "object" || Array.isArray(rawSource)) continue;
-      const source = rawSource as Record<string, unknown>;
-      const url = readString(source.url);
-      if (!/^https?:\/\//i.test(url) || seen.has(url)) continue;
-      seen.add(url);
-      sources.push({
-        title: readString(source.title).slice(0, 120) || url,
-        url
-      });
-      if (sources.length >= 10) return sources;
-    }
-  }
-  return sources;
-}
-
 function hasVisibleUrl(text: string) {
   return /https?:\/\/\S+/i.test(text);
-}
-
-function escapeMarkdownLinkText(text: string) {
-  return text.replace(/[[\]\\]/g, "\\$&");
 }
 
 function readString(value: unknown) {

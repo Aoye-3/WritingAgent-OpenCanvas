@@ -2,6 +2,7 @@ import type { AgentCard } from "./agentCards.js";
 import type { Skill } from "./skillLoader.js";
 import type { ProjectBrief, TaskBrief } from "./storageTypes.js";
 import { enabledToolHints, type ToolState } from "./toolRegistry.js";
+import type { CanvasDeliveryContract } from "./services/generation/canvasDeliveryContent.js";
 
 export type Locale = "en" | "zh";
 
@@ -15,6 +16,7 @@ export type PromptBuildInput = {
   chatInstruction?: string;
   freeTextPrompt?: string;
   toolState?: ToolState;
+  canvasDeliveryContract?: CanvasDeliveryContract;
 };
 
 export function buildAgentPrompt(input: PromptBuildInput) {
@@ -45,8 +47,30 @@ export function buildAgentPrompt(input: PromptBuildInput) {
     quickMessages ? `# Agent Quick Messages\n${quickMessages}` : "",
     tools.length ? `# Enabled Tool State\n${tools.join("\n")}` : "",
     instruction ? `# Current User Instruction\n${instruction}` : "",
+    input.canvasDeliveryContract ? `# Canvas Delivery Contract\n${formatCanvasDeliveryContract(input.canvasDeliveryContract)}` : "",
     `# Output Contract\nReturn ${output.type} content in ${output.defaultFormat}. Be direct, useful, and editable in a document canvas.`
   ]);
+}
+
+function formatCanvasDeliveryContract(contract: CanvasDeliveryContract) {
+  const localeHint = contract.locale === "zh" ? "Use Chinese field content unless source titles are already in another language." : "Use English field content unless source titles are already in another language.";
+  return [
+    "The user explicitly requested a Canvas delivery. Prepare durable Canvas content separately from the conversational reply.",
+    "Return a short user-facing completion reply, then append exactly one fenced block:",
+    "```facetwrite_canvas_delivery",
+    JSON.stringify({
+      facetwrite_canvas_delivery: {
+        assistant_reply: "short completion reply for the chat bubble",
+        outline_markdown: "# Summary or rough zones\n- zone 1\n- zone 2",
+        body_markdown: "durable body content for editable Canvas document nodes",
+        sources: [{ title: "source title", url: "https://example.com" }]
+      }
+    }, null, 2),
+    "```",
+    "The fenced block is not a reasoning trace. Include only final deliverable content and usable source links.",
+    "Do not include hidden reasoning, prompts, messages, raw tool JSON, or chain-of-thought.",
+    localeHint
+  ].join("\n");
 }
 
 const projectBriefLabels: Record<keyof ProjectBrief, string> = {

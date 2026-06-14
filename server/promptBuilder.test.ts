@@ -28,3 +28,31 @@ test("Brief sections are injected before the current user instruction and omit e
   assert.match(prompt, /When the Current Task Brief conflicts with the Project Brief, follow the Current Task Brief for this request\./);
   assert.ok(prompt.indexOf("# Current Task Brief") < prompt.indexOf("# Current User Instruction"));
 });
+
+test("Canvas delivery contract is injected only when supplied", () => {
+  const prompt = buildAgentPrompt({
+    agentCard: agentCards[0],
+    skills: [],
+    locale: "zh",
+    chatInstruction: "帮我查最近新闻，然后总结到画板里",
+    canvasDeliveryContract: {
+      id: "facetwrite_canvas_delivery_v1",
+      format: "facetwrite_canvas_delivery",
+      locale: "zh"
+    }
+  });
+
+  assert.match(prompt, /# Canvas Delivery Contract/);
+  assert.match(prompt, /facetwrite_canvas_delivery/);
+  assert.match(prompt, /assistant_reply/);
+  assert.match(prompt, /outline_markdown/);
+  assert.match(prompt, /body_markdown/);
+
+  const ordinary = buildAgentPrompt({
+    agentCard: agentCards[0],
+    skills: [],
+    locale: "zh",
+    chatInstruction: "总结一下最近新闻"
+  });
+  assert.doesNotMatch(ordinary, /# Canvas Delivery Contract/);
+});

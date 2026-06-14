@@ -70,7 +70,9 @@ function buildToolStatusLabel(toolName: string, eventType: string, count: number
 
 function toolLabel(toolName: string, locale: Locale) {
   if (toolName === "web_search") return locale === "zh" ? "联网搜索" : "Web search";
+  if (toolName === "knowledge_base") return locale === "zh" ? "知识库" : "Knowledge base";
   if (toolName === "canvas_write") return locale === "zh" ? "Canvas 写入" : "Canvas write";
+  if (toolName === "artifact_stage") return locale === "zh" ? "产物暂存" : "Artifact staging";
   return humanizeToolName(toolName);
 }
 

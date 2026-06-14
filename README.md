@@ -32,7 +32,7 @@ For an independent Electron development window with Vite HMR, install dependenci
 npm.cmd run shell:dev
 ```
 
-The double-click VBS entry always forces local Runtime mode at `127.0.0.1:8001`; machine-level or stale Docker mode variables cannot change that entry. The shell shows startup progress, uses Vite `17776` and API `17777`, and stops Vite/API plus only the Runtime process it created. Docker Desktop is not started or required. This remains a source-development shell, not an installer. See [App Shell Runbook](docs/APP_SHELL_RUNBOOK.md).
+The double-click VBS entry always forces local Runtime mode and lets the shell choose an available Runtime port; machine-level or stale Docker mode variables cannot change that entry. The shell shows startup progress, uses Vite `17776` and API `17777`, and stops Vite/API plus only the Runtime process it created. Docker Desktop is not started or required. This remains a source-development shell, not an installer. See [App Shell Runbook](docs/APP_SHELL_RUNBOOK.md).
 
 ### Recommended: OpenCanvas + Agent Runtime
 
@@ -43,7 +43,7 @@ Prerequisites:
 - Node.js 22+
 - `uv` available; it installs project-local Python 3.12 automatically
 - npm dependencies installed by the launcher if `node_modules/` is missing
-- `.env.local` configured with `AGENT_RUNTIME_MODE=local`, `AGENT_BACKEND_ENABLED=true`, and `AGENT_BACKEND_BASE_URL=http://127.0.0.1:8001`
+- `.env.local` configured with `AGENT_RUNTIME_MODE=local`, `AGENT_BACKEND_ENABLED=true`, and optional `AGENT_RUNTIME_PORT=0` for automatic Runtime port selection
 - Provider values in `.env.local` or `modules/agent-runtime/.env`
 
 Recommended App Shell entry:
@@ -58,14 +58,14 @@ Or through npm:
 npm run dev
 ```
 
-The VBS entry forces `AGENT_RUNTIME_MODE=local` and starts or reuses a compatible project-owned Gateway at `http://127.0.0.1:8001`, then starts OpenCanvas. It never starts Docker and only stops the Runtime process it created. Use the explicit Docker commands below for Compose, or use `external` with the PowerShell/npm launcher to connect to a user-managed `AGENT_BACKEND_BASE_URL`.
+The VBS entry forces `AGENT_RUNTIME_MODE=local`, chooses an available local Gateway port unless `AGENT_RUNTIME_PORT` is set, then starts OpenCanvas. It never starts Docker and only stops the Runtime process it created. Use the explicit Docker commands below for Compose, or use `external` with the PowerShell/npm launcher to connect to a user-managed `AGENT_BACKEND_BASE_URL`.
 
 Useful URLs:
 
 - OpenCanvas App Shell UI: `http://127.0.0.1:17776`
 - FacetWrite API health: `http://127.0.0.1:17777/api/health`
 - Agent Runtime status through FacetWrite: `http://127.0.0.1:17777/api/agent-runtime/status`
-- Agent Runtime Gateway health: `http://127.0.0.1:8001/health`
+- Agent Runtime Gateway health: read `/api/agent-runtime/status` or `modules/agent-runtime/logs/agent-runtime-local.json` for the actual local port
 
 Useful commands:
 
@@ -95,7 +95,7 @@ This starts only the Vite frontend and FacetWrite API and is reserved for narrow
 
 ## Acceptance Checks
 
-Run the real Windows launch-to-reply acceptance with Docker stopped and ports `8001`, `17777`, and `17776` free:
+Run the real Windows launch-to-reply acceptance with Docker stopped and ports `17777` and `17776` free:
 
 ```powershell
 npm.cmd run acceptance:local-runtime

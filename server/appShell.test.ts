@@ -17,6 +17,8 @@ test("Electron shell keeps renderer privileges disabled", () => {
 test("Electron shell owns fixed non-reserved development ports and shutdown", () => {
   assert.match(main, /const frontendPort = 17776/);
   assert.match(main, /const apiPort = 17777/);
+  assert.match(main, /resolveShellRuntime/);
+  assert.match(main, /findAvailablePort/);
   assert.match(main, /startProcess\("node\.exe", \[tsxCli/);
   assert.match(main, /startProcess\("node\.exe", \[viteCli/);
   assert.doesNotMatch(main, /startProcess\("npm\.cmd"/);
@@ -29,13 +31,20 @@ test("Electron shell owns fixed non-reserved development ports and shutdown", ()
   assert.doesNotMatch(main, /Docker Desktop\.exe/);
 });
 
+test("Electron shell resolves runtime configuration inside startup error handling", () => {
+  assert.doesNotMatch(main, /let runtime = resolveRuntimeMode\(process\.env\)/);
+  assert.match(main, /app\.whenReady\(\)\.then\(startShell\)\.catch\(showStartupError\)/);
+  assert.match(main, /runtime = await resolveShellRuntime\(resolveRuntimeMode\(process\.env\)\)/);
+});
+
 test("shell commands and hidden shortcut are present", () => {
   assert.equal(packageJson.scripts?.["shell:dev"], "electron app-shell/main.mjs");
   assert.equal(packageJson.scripts?.["shell:test"], "node --test app-shell/*.test.mjs");
   assert.equal(packageJson.devDependencies?.electron, "41.2.1");
   const shortcut = read("start-opencanvas-shell.vbs");
   assert.match(shortcut, /AGENT_RUNTIME_MODE/);
-  assert.match(shortcut, /AGENT_BACKEND_BASE_URL/);
+  assert.doesNotMatch(shortcut, /AGENT_BACKEND_BASE_URL/);
+  assert.doesNotMatch(shortcut, /127\.0\.0\.1:8001/);
   assert.match(shortcut, /npm\.cmd run shell:dev/);
 });
 

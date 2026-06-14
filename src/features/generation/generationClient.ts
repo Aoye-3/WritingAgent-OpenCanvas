@@ -1,4 +1,4 @@
-import type { GenerateRequest, GenerateResponse, StreamStatus } from "./types";
+import type { GenerateRequest, GenerateResponse, RunTimelineEvent, StreamStatus } from "./types";
 import { apiPost } from "../../shared/apiClient";
 
 export async function generateText(payload: GenerateRequest): Promise<GenerateResponse> {
@@ -11,6 +11,7 @@ export async function generateTextStream(
     onToken?: (token: string) => void;
     onStatus?: (status: StreamStatus) => void;
     onToolEvent?: (event: unknown) => void;
+    onTimelineEvent?: (event: RunTimelineEvent) => void;
   } = {},
   options: { signal?: AbortSignal } = {}
 ): Promise<GenerateResponse> {
@@ -45,6 +46,8 @@ export async function generateTextStream(
         handlers.onStatus?.(parsed.data as StreamStatus);
       } else if (parsed.event === "tool_event") {
         handlers.onToolEvent?.(parsed.data);
+      } else if (parsed.event === "timeline_event") {
+        handlers.onTimelineEvent?.(parsed.data as RunTimelineEvent);
       } else if (parsed.event === "final") {
         finalResult = parsed.data as GenerateResponse;
       } else if (parsed.event === "error") {

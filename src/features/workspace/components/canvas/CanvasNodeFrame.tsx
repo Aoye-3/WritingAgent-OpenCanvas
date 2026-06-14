@@ -7,7 +7,7 @@ import { computeResize, isKnownCanvasKind, readDimension, withManualCanvasSize }
 import { CanvasNodeRenderer } from "./renderers/CanvasNodeRenderer";
 import type { CanvasFlowNode, CanvasLocale, ResizeHandle } from "./types";
 
-const resizeHandles: ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+export const resizeHandles: ResizeHandle[] = ["n", "e", "s", "w"];
 
 export function CanvasNodeFrame({ data, selected }: NodeProps<CanvasFlowNode>) {
   const { isResizing, locale, node, onDeleteNode, onResizeStateChange, onUpdateNode } = data;

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
 import { Topbar } from "../../shared/Topbar";
-import type { AgentCard, BriefSaveStatus, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, ProjectBrief, StoredOutputVersion, StoredThread, StoredToolEvent, TaskBrief } from "../agents/types";
+import type { AgentCard, BriefSaveStatus, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, ProjectBrief, StoredOutputVersion, StoredThread, TaskBrief } from "../agents/types";
 import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../generation/types";
 import { useI18n } from "../i18n/I18nProvider";
@@ -38,7 +38,6 @@ type WorkspaceViewProps = {
   canvasWorkflowSuggestions: CanvasWorkflowSuggestion[];
   selectedCanvasNodeId?: string;
   canUndoCanvas: boolean;
-  toolEvents: StoredToolEvent[];
   plans: PlanRun[];
   projectTitle: string;
   configuredModels: ConfiguredModelApiSummary[];
@@ -114,7 +113,6 @@ export function WorkspaceView({
   canvasWorkflowSuggestions,
   selectedCanvasNodeId,
   canUndoCanvas,
-  toolEvents,
   plans,
   projectTitle,
   configuredModels,
@@ -348,7 +346,6 @@ export function WorkspaceView({
           onToolStateChange={onToolStateChange}
           onPlansChanged={onPlansChanged}
           onFocusPlanArtifact={onSelectCanvasNode}
-          toolEvents={toolEvents}
           toolState={toolState}
         />
       </WorkspaceLayout>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentCard, CanvasWriteSuggestion, PlanRun, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
+import type { AgentCard, CanvasWriteSuggestion, PlanRun, RunTimelineEvent, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
 import { generateText, generateTextStream } from "../../features/generation/generationClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../../features/generation/types";
 import type { Locale } from "../../features/i18n/types";
@@ -46,6 +46,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const [collaborationMessages, setCollaborationMessages] = useState<CollaborationMessage[]>([]);
   const [outputVersions, setOutputVersions] = useState<StoredOutputVersion[]>([]);
   const [toolEvents, setToolEvents] = useState<StoredToolEvent[]>([]);
+  const [runTimelineEvents, setRunTimelineEvents] = useState<RunTimelineEvent[]>([]);
   const [plans, setPlans] = useState<PlanRun[]>([]);
   const [canvasWriteSuggestions, setCanvasWriteSuggestions] = useState<CanvasWriteSuggestion[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string | undefined>();
@@ -89,6 +90,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     setCollaborationMessages([]);
     setOutputVersions([]);
     setToolEvents([]);
+    setRunTimelineEvents([]);
     setPlans([]);
     setCanvasWriteSuggestions([]);
     setActiveVersionId(undefined);
@@ -159,6 +161,18 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     if (shouldRefreshThreadStateForToolEvent(liveEvent)) {
       refreshLiveThreadState(threadId, operationId);
     }
+  };
+
+  const appendTimelineEvent = (event: RunTimelineEvent) => {
+    setRunTimelineEvents((current) => [event, ...current.filter((item) => item.id !== event.id)]);
+    const activeMessageId = activeChatMessageIdRef.current;
+    if (!activeMessageId) return;
+    setCollaborationMessages((messages) => messages.map((message) => {
+      if (message.id !== activeMessageId) return message;
+      const timeline = [...(message.timeline ?? []).filter((item) => item.id !== event.id), event]
+        .sort((left, right) => left.sequence - right.sequence);
+      return { ...message, timeline };
+    }));
   };
 
   const updateStreamingMessage = (messageId: string, patch: Partial<CollaborationMessage>) => {
@@ -250,11 +264,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const syncFinalTypewriterText = async (target: TypewriterTarget, visibleText: string, finalText: string) => {
     const patch = getTypewriterFinalPatch(visibleText, finalText);
     if (!patch) return;
-    if (patch.reset) {
-      replaceTypewriterText(target, "");
-    }
-    enqueueStreamingText(target, patch.token);
-    await drainStreamingText(target);
+    replaceTypewriterText(target, patch.text);
   };
 
   const applyCollaborationMessagesFromThreadState = (state: ThreadStateResponse) => {
@@ -266,9 +276,11 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       kind: "activity" as const,
       createdAt: activity.createdAt
     }));
-    const timelineMessages = [...state.messages, ...activityMessages].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    const messagesWithTimeline = attachTimelineToLatestAssistant(state.messages, state.runTimelineEvents ?? []);
+    const timelineMessages = [...messagesWithTimeline, ...activityMessages].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     setCollaborationMessages((current) => reconcileCollaborationMessages(current, timelineMessages));
     setPlans(state.plans ?? []);
+    setRunTimelineEvents(state.runTimelineEvents ?? []);
   };
 
   const handleGenerate = async () => {
@@ -298,7 +310,8 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
               streamedText += token;
               enqueueStreamingText("editable", token);
             },
-            onToolEvent: (event) => appendToolEvent(event, threadId, operationId)
+            onToolEvent: (event) => appendToolEvent(event, threadId, operationId),
+            onTimelineEvent: appendTimelineEvent
           })
         : await generateText(payload);
       if (operationId !== operationIdRef.current) return undefined;
@@ -344,6 +357,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         role: "assistant",
         text: "",
         usedMock: false,
+        timeline: [],
         isStreaming: true,
         status: "thinking",
         createdAt: startedAt
@@ -383,7 +397,8 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
           streamedText += token;
           enqueueStreamingText(`message:${assistantMessageId}`, token);
         },
-        onToolEvent: (event) => appendToolEvent(event, threadId, operationId)
+        onToolEvent: (event) => appendToolEvent(event, threadId, operationId),
+        onTimelineEvent: appendTimelineEvent
       }, { signal: abortController.signal });
       if (operationId !== operationIdRef.current) return;
 
@@ -456,6 +471,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     outputVersions,
     plans,
     canvasWriteSuggestions,
+    runTimelineEvents,
     toolEvents,
     setActiveVersionId,
     setCollaborationMessages,
@@ -463,6 +479,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     setGeneration,
     setOutputVersions,
     setToolEvents,
+    setRunTimelineEvents,
     setPlans,
     setCanvasWriteSuggestions,
     resetGeneration,
@@ -494,4 +511,15 @@ function recoverableGenerationError(message: string, locale: Locale) {
       : "The Plan state was not updated correctly, so execution paused. Retry the current step or revise the Plan.";
   }
   return message;
+}
+
+function attachTimelineToLatestAssistant<T extends CollaborationMessage>(messages: T[], events: RunTimelineEvent[]) {
+  if (events.length === 0) return messages;
+  const latestAssistantIndex = [...messages].reverse().findIndex((message) => message.role === "assistant");
+  if (latestAssistantIndex < 0) return messages;
+  const targetIndex = messages.length - 1 - latestAssistantIndex;
+  const timeline = [...events].sort((left, right) => left.sequence - right.sequence);
+  return messages.map((message, index) => (
+    index === targetIndex ? { ...message, timeline } : message
+  ));
 }

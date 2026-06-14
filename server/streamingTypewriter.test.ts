@@ -8,9 +8,9 @@ import {
   TYPEWRITER_TICK_MS
 } from "../src/app/hooks/streamingTypewriter.js";
 
-test("typewriter tokens are queued in character order without dropping or duplicating text", () => {
-  let state = enqueueTypewriterToken(null, "editable", "你好");
-  state = enqueueTypewriterToken(state, "editable", "，FacetWrite");
+test("typewriter tokens are queued in order without dropping or duplicating text", () => {
+  let state = enqueueTypewriterToken(null, "editable", "Hello");
+  state = enqueueTypewriterToken(state, "editable", ", FacetWrite");
 
   const rendered: string[] = [];
   while (state?.queue.length) {
@@ -19,61 +19,57 @@ test("typewriter tokens are queued in character order without dropping or duplic
     state = { ...state, queue: next.rest };
   }
 
-  assert.equal(rendered.join(""), "你好，FacetWrite");
+  assert.equal(rendered.join(""), "Hello, FacetWrite");
 });
 
 test("typewriter uses a fast visible cadence", () => {
   assert.ok(TYPEWRITER_TICK_MS <= 16);
 });
 
-test("typewriter reveals large final chunks over multiple fast ticks instead of one flush", () => {
-  const state = enqueueTypewriterToken(null, "message:assistant", "这是一段后端一次返回但前端需要逐字逐行展示的长文本。\n".repeat(20));
+test("typewriter exposes large available chunks in one UI tick", () => {
+  const text = "This final response is already available and should not be artificially slowed down. ".repeat(20);
+  const state = enqueueTypewriterToken(null, "message:assistant", text);
   assert.ok(state);
 
   const first = takeTypewriterText(state.queue);
-  assert.ok(first.text.length <= 3);
-  assert.ok(first.text.length < state.queue.length);
-  assert.ok(first.rest.length > 0);
+  assert.equal(first.text, text);
+  assert.equal(first.rest.length, 0);
 });
 
-test("typewriter keeps one-shot large text queued across the first few ticks", () => {
-  let state = enqueueTypewriterToken(null, "message:assistant", "A large final response should still be rendered through the typewriter queue. ".repeat(25));
+test("typewriter does not keep one-shot final text queued across visible ticks", () => {
+  let state = enqueueTypewriterToken(null, "message:assistant", "A large final response should render without artificial typing delay. ".repeat(25));
   assert.ok(state);
 
-  let rendered = "";
-  for (let index = 0; index < 4; index += 1) {
-    const next = takeTypewriterText(state.queue);
-    rendered += next.text;
-    state = { ...state, queue: next.rest };
-  }
+  const next = takeTypewriterText(state.queue);
+  state = { ...state, queue: next.rest };
 
-  assert.ok(rendered.length < 20);
-  assert.ok(state.queue.length > 100);
+  assert.ok(next.text.length > 100);
+  assert.equal(state.queue.length, 0);
 });
 
-test("final text backfill returns a queued suffix instead of bypassing the typewriter", () => {
+test("final text backfill returns an immediate full-text synchronization", () => {
   const patch = getTypewriterFinalPatch("Partial answer", "Partial answer with final citations.");
 
-  assert.deepEqual(patch, { reset: false, token: " with final citations." });
+  assert.deepEqual(patch, { reset: false, text: "Partial answer with final citations.", immediate: true });
 });
 
-test("final text correction requests a reset plus queued full text", () => {
+test("final text correction requests an immediate full-text reset", () => {
   const patch = getTypewriterFinalPatch("wrong draft", "correct final answer");
 
-  assert.deepEqual(patch, { reset: true, token: "correct final answer" });
+  assert.deepEqual(patch, { reset: true, text: "correct final answer", immediate: true });
 });
 
 test("reconciles matching final thread state without replacing visible streaming messages", () => {
   const current = [
-    { id: "tmp_user", role: "user" as const, text: "写一段介绍", usedMock: false },
+    { id: "tmp_user", role: "user" as const, text: "Write an intro", usedMock: false },
     {
       id: "tmp_assistant",
       role: "assistant" as const,
-      text: "这是逐字流出的内容。",
+      text: "This is streamed content.",
       usedMock: false,
       isStreaming: true,
       status: "writing" as const,
-      statusLabel: "正在生成回复"
+      statusLabel: "Writing"
     }
   ];
   const reconciled = reconcileCollaborationMessages(current, [
@@ -81,7 +77,7 @@ test("reconciles matching final thread state without replacing visible streaming
       id: "stored_user",
       threadId: "thread_1",
       role: "user",
-      text: "写一段介绍",
+      text: "Write an intro",
       usedMock: false,
       createdAt: "2026-05-18T00:00:00.000Z"
     },
@@ -89,14 +85,14 @@ test("reconciles matching final thread state without replacing visible streaming
       id: "stored_assistant",
       threadId: "thread_1",
       role: "assistant",
-      text: "这是逐字流出的内容。",
+      text: "This is streamed content.",
       usedMock: false,
       createdAt: "2026-05-18T00:00:01.000Z"
     }
   ]);
 
   assert.equal(reconciled[1]?.id, "tmp_assistant");
-  assert.equal(reconciled[1]?.text, "这是逐字流出的内容。");
+  assert.equal(reconciled[1]?.text, "This is streamed content.");
   assert.equal(reconciled[1]?.isStreaming, false);
   assert.equal(reconciled[1]?.status, undefined);
 });

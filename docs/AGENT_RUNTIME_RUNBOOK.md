@@ -4,7 +4,7 @@ Agent Runtime is the primary AI execution subsystem when `AGENT_BACKEND_ENABLED=
 
 ## Modes
 
-- `local` (default): the project manages `uvicorn app.gateway.app:app` on `127.0.0.1:8001`.
+- `local` (default): managed launchers choose an available `127.0.0.1` port and record it in ownership metadata; direct low-level calls can pin a port with `AGENT_RUNTIME_PORT`.
 - `docker`: explicit Compose isolation/deployment mode through nginx on `127.0.0.1:2026`.
 - `external`: FacetWrite connects to `AGENT_BACKEND_BASE_URL` and does not manage lifecycle.
 
@@ -21,13 +21,13 @@ The default local path does not start the Runtime Next.js frontend or nginx beca
 ```env
 AGENT_RUNTIME_MODE=local
 AGENT_BACKEND_ENABLED=true
-AGENT_BACKEND_BASE_URL=http://127.0.0.1:8001
+AGENT_RUNTIME_PORT=0
 AGENT_BACKEND_ASSISTANT_ID=lead_agent
 AGENT_BACKEND_AUTH_EMAIL=admin@example.com
 AGENT_BACKEND_AUTH_PASSWORD=<local password>
 ```
 
-The local launcher reads process environment first, then `modules/agent-runtime/.env`, then root `.env.local`. It sets project, home, config, extensions, Skills, and FacetWrite bridge paths explicitly. Secrets are never printed. Runtime state remains in `modules/agent-runtime/backend/.deer-flow` in both local and Docker modes.
+The local launcher reads process environment first, then `modules/agent-runtime/.env`, then root `.env.local`. Managed local startup ignores a stale `.env.local` `AGENT_BACKEND_BASE_URL`; use `AGENT_RUNTIME_PORT=<port>` or a process-level `AGENT_BACKEND_BASE_URL` when a fixed local port is required. App Shell and `npm run dev` are managed local dynamic-port flows. If the Express API/server config is run directly without launcher-injected `AGENT_BACKEND_BASE_URL`, it keeps `http://127.0.0.1:8001` only as a low-level debugging fallback. It sets project, home, config, extensions, Skills, and FacetWrite bridge paths explicitly. Secrets are never printed. Runtime state remains in `modules/agent-runtime/backend/.deer-flow` in both local and Docker modes.
 
 ## Lifecycle
 
@@ -38,7 +38,7 @@ npm.cmd run agent-runtime:status
 npm.cmd run agent-runtime:down
 ```
 
-Logs and ownership metadata are written under `modules/agent-runtime/logs/`. A healthy compatible project-owned process is reused only while its source fingerprint still matches; changed Python/config sources trigger a managed restart. An unmanaged or incompatible process on the configured port blocks startup. Shutdown only terminates the process recorded as project-owned. `status` and `up` load project dotenv files before comparing the Tool Bridge token fingerprint.
+Logs and ownership metadata are written under `modules/agent-runtime/logs/`. The metadata includes the actual local port, PID, Bridge URL, source fingerprint, and token fingerprint. A healthy compatible project-owned process is reused only while its source fingerprint still matches; changed Python/config sources trigger a managed restart. An unmanaged or incompatible process on the configured port blocks startup. Shutdown only terminates the process recorded as project-owned. `status` and `down` read the actual port from ownership metadata.
 
 Docker remains available explicitly:
 
@@ -59,7 +59,7 @@ These remain Docker-specific and are not claimed as local equivalents: `AioSandb
 ## Smoke Checks
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8001/health
+Invoke-RestMethod http://127.0.0.1:<metadata-port>/health
 Invoke-RestMethod http://127.0.0.1:8837/api/agent-runtime/status
 ```
 
@@ -76,7 +76,7 @@ It starts from `start-opencanvas-shell.vbs`, requires Docker and port `2026` to 
 ## Troubleshooting
 
 - `uv`/Node/npm/npx missing: run `npm.cmd run agent-runtime:doctor` and install the reported prerequisite.
-- Port `8001` occupied: stop the external process or configure `external` mode with its URL.
+- Need a stable local Runtime port: set `AGENT_RUNTIME_PORT=<port>` before starting, or use process-level `AGENT_BACKEND_BASE_URL=http://127.0.0.1:<port>`.
 - Gateway startup failure: inspect `modules/agent-runtime/logs/gateway-local.err.log`; the launcher rolls back its owned process.
 - Missing model variables: configure `.env.local` or `modules/agent-runtime/.env` without committing secrets.
 - Protected endpoints return 401/403: verify Agent Runtime setup/login credentials; do not bypass auth.
