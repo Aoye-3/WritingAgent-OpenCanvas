@@ -64,7 +64,6 @@ export function normalizeAgentSettings(
     tools: normalizeTools(base.tools, saved?.tools, allowedToolRefs),
     knowledge: { ...base.knowledge, ...saved?.knowledge },
     memory: { ...base.memory, ...saved?.memory },
-    quickMessages: saved?.quickMessages?.length ? saved.quickMessages : base.quickMessages,
     mcpRefs: Array.isArray(saved?.mcpRefs) ? saved.mcpRefs.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim()) : base.mcpRefs
   };
 

@@ -45,11 +45,11 @@ def test_build_payload_uses_facetwrite_runtime_context():
 def test_build_payload_defaults_to_requested_tool_policy_when_context_missing():
     runtime = SimpleNamespace(context={}, state={})
 
-    payload = _build_payload(runtime, "quick_messages", {"instruction": "shorten"})
+    payload = _build_payload(runtime, "clear_context", {"reason": "new task"})
 
     assert payload["threadId"] == "thread_deerflow"
-    assert "quick_messages" in payload["allowedToolRefs"]
-    assert payload["toolState"] == {"quick_messages": True}
+    assert "clear_context" in payload["allowedToolRefs"]
+    assert payload["toolState"] == {"clear_context": True}
 
 
 def test_build_payload_prefers_top_level_plan_identifiers():
@@ -209,6 +209,6 @@ def test_plan_clarification_tool_forwards_valid_structured_options(monkeypatch):
 
 def test_required_plan_tools_are_available_for_existing_runtime_configs():
     assert {tool["name"] for tool in FACETWRITE_REQUIRED_TOOLS} == {
-        "knowledge_base", "quick_messages", "clear_context", "canvas_write",
+        "knowledge_base", "clear_context", "canvas_write",
         "plan_clarification_submit", "plan_revision_submit", "artifact_stage",
     }

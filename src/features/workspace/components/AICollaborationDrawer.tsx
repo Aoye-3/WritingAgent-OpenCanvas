@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, SearchIcon, SendIcon, SparkleIcon, StopIcon } from "../../../shared/icons";
+import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, SearchIcon, SendIcon, StopIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
 import type { AgentCard, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, StoredThread } from "../../agents/types";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
@@ -80,7 +80,6 @@ type AICollaborationDrawerProps = {
 const toolMeta: Record<string, { en: string; zh: string; hint: string }> = {
   web_search: { en: "Web search", zh: "联网搜索", hint: "Web search intent only" },
   knowledge_base: { en: "Knowledge base", zh: "知识库引用", hint: "Use selected knowledge hints" },
-  quick_messages: { en: "Quick message", zh: "快捷消息", hint: "Treat input as a quick editing command" },
   clear_context: { en: "Clear context", zh: "清除上下文", hint: "Ignore previous conversational context" }
 };
 
@@ -667,7 +666,6 @@ function ToolUseIconBar({ allowedTools, toolState, onToolStateChange }: Pick<AIC
 function ToolIcon({ tool }: { tool: string }) {
   if (tool === "web_search") return <SearchIcon aria-hidden="true" size={16} />;
   if (tool === "knowledge_base") return <KnowledgeIcon aria-hidden="true" size={16} />;
-  if (tool === "quick_messages") return <SparkleIcon aria-hidden="true" size={16} />;
   return null;
 }
 

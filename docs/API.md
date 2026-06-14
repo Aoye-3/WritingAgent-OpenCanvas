@@ -102,7 +102,7 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `GET /api/agent-cards`
   - Returns `{ agentCards }`. The only default product Agent is `chat-agent` / `ChatAgent`; historical writing Agent ids are compatibility aliases, not returned as built-in templates.
 - `GET /api/agent-cards/:agentCardId/settings`
-  - Returns `{ settings }` for the resolved Agent card. Settings contain Prompt, Tools, Knowledge, MCP refs, Quick phrases, and Memory; they do not contain model identity or provider credentials.
+  - Returns `{ settings }` for the resolved Agent card. Settings contain Prompt, Tools, Knowledge, MCP refs, and Memory; they do not contain model identity or provider credentials.
 - `GET /api/agent-cards/:agentCardId/runtime-config`
   - Returns resolved Agent runtime config, including card, merged settings, available tools, tool policies, available skills, and missing/deprecated refs. It does not expose provider profile as an Agent model property.
 - `PUT /api/agent-cards/:agentCardId/settings`

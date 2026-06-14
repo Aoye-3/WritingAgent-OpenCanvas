@@ -14,7 +14,7 @@ export const builtInAgentCards: AgentCard[] = [
     },
     identityPrompt: agentIdentityPrompts.chatAgent,
     skillRefs: [],
-    toolRefs: ["web_search", "knowledge_base", "quick_messages", "clear_context", "canvas_write"],
+    toolRefs: ["web_search", "knowledge_base", "clear_context", "canvas_write"],
     outputContract: { type: "chat", defaultFormat: "markdown" }
   }
 ];

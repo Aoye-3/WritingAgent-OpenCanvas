@@ -4,7 +4,6 @@ description: Draft structured blog articles from a topic, audience, tone, and re
 allowed-tools:
   - web_search
   - knowledge_base
-  - quick_messages
   - clear_context
 ---
 

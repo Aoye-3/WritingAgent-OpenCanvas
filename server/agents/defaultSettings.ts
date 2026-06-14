@@ -23,11 +23,6 @@ export function defaultAgentSettings(card: AgentCard): AgentSettings {
     memory: {
       enabled: false
     },
-    quickMessages: [
-      "Make this clearer.",
-      "Shorten the current draft.",
-      "Rewrite in a more professional tone."
-    ],
     mcpRefs: []
   };
 }

@@ -101,11 +101,6 @@ function buildToolBridgeStatus(): AgentBackendToolBridgeStatus[] {
       target: "FacetWrite internal ToolUse bridge",
       executionBoundary: "AgentBackend calls back into FacetWrite for selected workspace context while FacetWrite owns source selection."
     },
-    quick_messages: {
-      bridgeState: "facetwrite_bridge",
-      target: "FacetWrite internal ToolUse bridge",
-      executionBoundary: "AgentBackend can normalize quick editing intent through FacetWrite's controlled ToolUse bridge."
-    },
     clear_context: {
       bridgeState: "facetwrite_bridge",
       target: "FacetWrite internal ToolUse bridge",

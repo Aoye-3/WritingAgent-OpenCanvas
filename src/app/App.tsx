@@ -41,7 +41,7 @@ const fallbackAgentCards: AgentCard[] = [
     },
     identityPrompt: "You are ChatAgent, a neutral assistant that follows the user's current instruction.",
     skillRefs: [],
-    toolRefs: ["web_search", "knowledge_base", "quick_messages", "clear_context", "canvas_write"],
+    toolRefs: ["web_search", "knowledge_base", "clear_context", "canvas_write"],
     outputContract: { type: "chat", defaultFormat: "markdown" }
   }
 ];

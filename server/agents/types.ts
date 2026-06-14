@@ -64,6 +64,5 @@ export type AgentSettings = {
   memory: {
     enabled: boolean;
   };
-  quickMessages: string[];
   mcpRefs: string[];
 };

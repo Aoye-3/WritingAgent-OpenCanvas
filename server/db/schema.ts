@@ -101,14 +101,6 @@ export function migrateStorageSchema(db: DatabaseSync) {
       updated_at TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS quick_messages (
-      id TEXT PRIMARY KEY,
-      agent_card_id TEXT NOT NULL,
-      text TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
     CREATE TABLE IF NOT EXISTS canvas_nodes (
       id TEXT PRIMARY KEY,
       thread_id TEXT NOT NULL,

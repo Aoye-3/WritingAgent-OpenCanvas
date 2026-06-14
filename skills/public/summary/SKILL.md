@@ -3,7 +3,6 @@ name: summary
 description: Condense source material into a clear summary for a specific audience.
 allowed-tools:
   - knowledge_base
-  - quick_messages
   - clear_context
 ---
 

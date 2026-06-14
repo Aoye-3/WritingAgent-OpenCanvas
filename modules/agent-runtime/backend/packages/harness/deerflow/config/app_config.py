@@ -43,7 +43,6 @@ CONFIG_FILE_DATABASE_DEFAULTS = {
 
 FACETWRITE_REQUIRED_TOOLS = (
     {"name": "knowledge_base", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:knowledge_base_tool"},
-    {"name": "quick_messages", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:quick_messages_tool"},
     {"name": "clear_context", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:clear_context_tool"},
     {"name": "canvas_write", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:canvas_write_tool"},
     {"name": "plan_clarification_submit", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:plan_clarification_submit_tool"},

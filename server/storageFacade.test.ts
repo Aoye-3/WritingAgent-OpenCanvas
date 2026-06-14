@@ -98,12 +98,12 @@ test("storage facade saves and returns Agent settings", async () => {
 
   storage.saveAgentSettings(agentCardId, {
     ...settings,
-    quickMessages: ["Shorten this", "Make it clearer"]
+    memory: { enabled: true }
   });
 
   const saved = storage.getAgentSettings(agentCardId);
   assert.equal("model" in (saved as Record<string, unknown>), false);
-  assert.deepEqual(saved?.quickMessages, ["Shorten this", "Make it clearer"]);
+  assert.deepEqual(saved?.memory, { enabled: true });
 });
 
 test("storage facade sanitizes historical leaked assistant messages and output versions", async () => {

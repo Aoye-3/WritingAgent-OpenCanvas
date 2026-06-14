@@ -5,7 +5,7 @@ import { knowledgeClient } from "../../knowledge/knowledgeClient";
 import type { KnowledgeBase } from "../../knowledge/types";
 import type { AgentRuntimeConfig, AgentSettings } from "../types";
 
-export const tabs = ["prompt", "knowledge", "tools", "mcp", "quick", "memory"] as const;
+export const tabs = ["prompt", "knowledge", "tools", "mcp", "memory"] as const;
 export type SettingsTab = (typeof tabs)[number];
 
 type McpServerSummary = {
@@ -30,7 +30,6 @@ export function AgentSettingsTabs({
   if (tab === "knowledge") return <AgentKnowledgeTab settings={settings} onChange={onChange} />;
   if (tab === "tools") return <AgentToolsTab runtimeConfig={runtimeConfig} settings={settings} onChange={onChange} />;
   if (tab === "mcp") return <AgentMcpTab settings={settings} onChange={onChange} />;
-  if (tab === "quick") return <AgentQuickMessagesTab settings={settings} onChange={onChange} />;
   return <AgentMemoryTab settings={settings} onChange={onChange} />;
 }
 
@@ -255,30 +254,6 @@ function AgentMcpTab({ settings, onChange }: TabProps) {
   );
 }
 
-function AgentQuickMessagesTab({ settings, onChange }: TabProps) {
-  const { locale } = useI18n();
-  return (
-    <div className="agent-editor-section">
-      {settings.quickMessages.map((message, index) => (
-        <div className="quick-message-row" key={`${message}-${index}`}>
-          <input
-            value={message}
-            onChange={(event) => {
-              const next = [...settings.quickMessages];
-              next[index] = event.target.value;
-              onChange({ ...settings, quickMessages: next });
-            }}
-          />
-          <button className="icon-button" type="button" onClick={() => onChange({ ...settings, quickMessages: settings.quickMessages.filter((_, itemIndex) => itemIndex !== index) })}>x</button>
-        </div>
-      ))}
-      <button className="button button-secondary" type="button" onClick={() => onChange({ ...settings, quickMessages: [...settings.quickMessages, ""] })}>
-        {text(locale, "addPhrase")}
-      </button>
-    </div>
-  );
-}
-
 function AgentMemoryTab({ settings, onChange }: TabProps) {
   const { locale } = useI18n();
   return (
@@ -335,7 +310,6 @@ export function tabLabel(tab: SettingsTab, locale: "en" | "zh") {
     knowledge: { en: "Knowledge", zh: "知识库" },
     tools: { en: "Tools", zh: "工具" },
     mcp: { en: "MCP", zh: "MCP" },
-    quick: { en: "Quick phrases", zh: "快捷短语" },
     memory: { en: "Memory", zh: "记忆" }
   };
   return labels[tab][locale];
@@ -347,7 +321,6 @@ function text(locale: "en" | "zh", key: keyof typeof copy.en) {
 
 const copy = {
   en: {
-    addPhrase: "Add phrase",
     allKnowledgeBases: "All knowledge bases",
     allKnowledgeBasesNote: "Use every enabled knowledge base for this Agent.",
     allowedTools: "Allowed tools",
@@ -379,7 +352,6 @@ const copy = {
     unknownSkills: "Unknown skills"
   },
   zh: {
-    addPhrase: "添加短语",
     allKnowledgeBases: "全部知识库",
     allKnowledgeBasesNote: "此 Agent 可使用全部已启用知识库。",
     allowedTools: "允许工具",

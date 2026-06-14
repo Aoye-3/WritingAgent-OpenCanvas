@@ -72,7 +72,7 @@ try {
 
   const skillResult = await generate({
     chatInstruction: "Use the deep-research skill and web_search. Find the official Python homepage and answer with two short bullet points: title and URL.",
-    toolState: { web_search: true, knowledge_base: false, quick_messages: false, clear_context: false, canvas_write: false }
+    toolState: { web_search: true, knowledge_base: false, clear_context: false, canvas_write: false }
   });
   assert.equal(skillResult.provider, "agent-backend");
   assert.equal(skillResult.usedMock, false);
@@ -84,7 +84,7 @@ try {
   const beforeCanvas = await api(`/api/threads/${threadId}/state`);
   const canvasResult = await generate({
     chatInstruction: "Use canvas_write to propose creating a document titled Acceptance Draft with content Local canvas approval test. Do not claim it is already approved.",
-    toolState: { web_search: false, knowledge_base: false, quick_messages: false, clear_context: false, canvas_write: true }
+    toolState: { web_search: false, knowledge_base: false, clear_context: false, canvas_write: true }
   });
   assert.equal(canvasResult.provider, "agent-backend");
   assert.equal(canvasResult.usedMock, false);

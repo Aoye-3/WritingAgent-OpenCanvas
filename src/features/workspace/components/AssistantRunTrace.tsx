@@ -20,15 +20,11 @@ export function deriveAssistantRunTraceState(input: {
   };
 }
 
-export function visibleAssistantRunTraceEvents<T extends Pick<RunTimelineEvent, "eventType" | "title"> & { payload?: Record<string, unknown> }>(events: T[]) {
-  return events.filter((event) => !isLowSignalToolEvent(event));
-}
-
 export function AssistantRunTrace({ events = [], onFocusNode }: AssistantRunTraceProps) {
   const { locale } = useI18n();
   const [userExpanded, setUserExpanded] = useState<boolean | undefined>();
   const orderedEvents = useMemo(
-    () => visibleAssistantRunTraceEvents([...events].sort((left, right) => left.sequence - right.sequence)),
+    () => [...events].sort((left, right) => left.sequence - right.sequence),
     [events]
   );
   const state = deriveAssistantRunTraceState({ events: orderedEvents, userExpanded });
@@ -74,13 +70,4 @@ export function AssistantRunTrace({ events = [], onFocusNode }: AssistantRunTrac
       ) : null}
     </section>
   );
-}
-
-function isLowSignalToolEvent(event: Pick<RunTimelineEvent, "eventType" | "title"> & { payload?: Record<string, unknown> }) {
-  if (!event.eventType.startsWith("tool_")) return false;
-  const payload = event.payload ?? {};
-  const toolName = typeof payload.toolName === "string"
-    ? payload.toolName
-    : typeof payload.tool === "string" ? payload.tool : "";
-  return toolName === "quick_messages" || event.title.toLowerCase() === "quick messages";
 }

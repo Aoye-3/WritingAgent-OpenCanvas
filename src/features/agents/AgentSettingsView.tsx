@@ -127,7 +127,7 @@ const copy = {
   en: {
     allCategories: "All categories",
     deprecatedTools: "Deprecated tools were ignored",
-    editorNote: "Prompt, skills, tools, MCP, knowledge, memory, and quick phrases define the Agent profile. Conversation models are selected in the workspace.",
+    editorNote: "Prompt, skills, tools, MCP, knowledge, and memory define the Agent profile. Conversation models are selected in the workspace.",
     education: "Education",
     empty: "Select an Agent to configure",
     rewrite: "Rewrite",

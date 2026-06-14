@@ -11,7 +11,7 @@ from deerflow.tools.types import Runtime
 
 _DEFAULT_BASE_URL = "http://host.docker.internal:8787"
 _INTERNAL_ENDPOINT = "/api/internal/agent-runtime/tool-call"
-_BRIDGED_TOOL_NAMES = ("knowledge_base", "quick_messages", "clear_context", "plan_clarification_submit", "plan_revision_submit", "artifact_stage", "canvas_write")
+_BRIDGED_TOOL_NAMES = ("knowledge_base", "clear_context", "plan_clarification_submit", "plan_revision_submit", "artifact_stage", "canvas_write")
 _SECRET_PATTERN = re.compile(r"(?i)(api[_-]?key|authorization|token|password|secret)=?[^\s,;]+")
 
 
@@ -213,17 +213,6 @@ def knowledge_base_tool(runtime: Runtime, query: str, limit: int = 6) -> str:
     """
 
     return _call_facetwrite_tool(runtime, "knowledge_base", {"query": query, "limit": limit})
-
-
-@tool("quick_messages", parse_docstring=True)
-def quick_messages_tool(runtime: Runtime, instruction: str) -> str:
-    """Normalize a quick editing instruction for the current FacetWrite draft.
-
-    Args:
-        instruction: The quick edit instruction.
-    """
-
-    return _call_facetwrite_tool(runtime, "quick_messages", {"instruction": instruction})
 
 
 @tool("clear_context", parse_docstring=True)

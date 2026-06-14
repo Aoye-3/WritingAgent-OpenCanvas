@@ -70,7 +70,7 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 - Canvas node context is kind-aware and workflow-aware: notes are excluded by default, documents contribute previews, references contribute reference content, Role nodes contribute prompts only when connected to selected/filtered content nodes, and Canvas Workflow filters narrow runtime context by selected/specified chain, current stage, and `Role -> content` edges. Explicitly sent mind chains may include notes because they are user-selected context.
 - `src/features/ai-dashboard/AiDashboardView.tsx` renders the AI runtime dashboard for Agent Runtime status, Skills/MCP visibility, Agent mapping, and ToolUse bridge progress.
 - `src/features/knowledge/KnowledgeSettingsView.tsx` renders the local Knowledge Base management console for creating RAG bases, importing text/URL/sitemap/local-file sources, viewing indexing status, and testing retrieval.
-- Agent Settings renders Agent profile controls only: Prompt, Knowledge, Tools, MCP selection, Quick phrases, and Memory. It has no Model tab. Users can enable Knowledge, search all bases or selected base ids, tune retrieval count/threshold, and choose from already configured Agent Runtime MCP servers without adding new MCP installation/editing APIs.
+- Agent Settings renders Agent profile controls only: Prompt, Knowledge, Tools, MCP selection, and Memory. It has no Model tab. Users can enable Knowledge, search all bases or selected base ids, tune retrieval count/threshold, and choose from already configured Agent Runtime MCP servers without adding new MCP installation/editing APIs.
 - `src/shared/apiClient.ts` provides shared frontend API helpers used by feature clients.
 
 ## Backend
@@ -144,7 +144,7 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 - FacetWrite exposes Agent Runtime status, config overview, dashboard, and FacetWrite-managed Memory endpoints at `/api/agent-runtime/*`, with `/api/agent-backend/*` kept as compatibility aliases where applicable.
 - FacetWrite exposes an AI Dashboard that summarizes Agent Runtime health, auth, Skills/MCP, AgentCard-to-subagent mapping, ToolUse bridge status, and editable FacetWrite-managed Memory.
 - FacetWrite exposes `/api/internal/agent-runtime/tool-call` as the only service-to-service ToolUse bridge. Every request requires `FACETWRITE_INTERNAL_TOOL_TOKEN`; source headers are metadata only. The bridge reuses `executeToolCall` and applies the Tool catalog policy guard.
-- AgentBackend loads `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write` through `AgentBackend.tools.facetwrite_bridge`. The Docker default callback URL is `http://host.docker.internal:8837`.
+- AgentBackend loads `knowledge_base`, `clear_context`, and `canvas_write` through `AgentBackend.tools.facetwrite_bridge`. The Docker default callback URL is `http://host.docker.internal:8837`.
 - AgentBackend `web_search` remains a AgentBackend built-in tool and is not counted as a FacetWrite local bridge tool.
 - AgentBackend global memory is not injected or updated for FacetWrite runs by default. Per-run context carries `facetwrite_memory_enabled`; when enabled, only FacetWrite-managed Memory content is injected.
 - FacetWrite remains responsible for product data, SQLite persistence, frontend state, Canvas approval, and local fallback behavior.
@@ -203,7 +203,7 @@ FacetWrite uses `Project` as the only workspace and shared-context boundary.
 
 - A Project owns one Project Brief, Canvas resources, project summary, model bindings, and shared outputs.
 - A Thread belongs to one Project and owns its Current Task Brief, conversation messages, runs, and current explicit Model Config selection.
-- An Agent is selected per run. Agent definitions contain capabilities, prompts, Skills, tools, Knowledge, Memory, MCP refs, and quick phrases; they do not own Briefs or model configuration.
+- An Agent is selected per run. Agent definitions contain capabilities, prompts, Skills, tools, Knowledge, Memory, and MCP refs; they do not own Briefs or model configuration.
 - New Projects and Threads start with empty Briefs. Runs automatically receive the current Project Brief and Current Task Brief plus the current Thread history, never another Project's context.
 - AgentBackend receives the real `facetwrite_project_id` and current `thread_id`; the former `local-project` scope is forbidden.
 

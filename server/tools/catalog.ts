@@ -1,6 +1,6 @@
 import type { ChatCompletionTool } from "../providerRuntime.js";
 
-export type ToolRef = "web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write" | "plan_clarification_submit" | "plan_revision_submit" | "artifact_stage";
+export type ToolRef = "web_search" | "knowledge_base" | "clear_context" | "canvas_write" | "plan_clarification_submit" | "plan_revision_submit" | "artifact_stage";
 export type ToolState = Partial<Record<ToolRef, boolean>>;
 export type ToolRiskLevel = "low" | "medium" | "high";
 export type ToolGroup = "web" | "context" | "chat";
@@ -58,26 +58,6 @@ export const toolCatalog: ToolDefinition[] = [
         }
       },
       required: ["query", "limit"],
-      additionalProperties: false
-    },
-    executorKind: "local",
-    enabledByDefault: true,
-    requiresExternalConfig: false,
-    riskLevel: "low",
-    requiresApproval: false
-  },
-  {
-    name: "quick_messages",
-    group: "chat",
-    label: "Quick Messages",
-    description: "Normalize a quick editing instruction for the current draft.",
-    promptHint: "The user may be applying a quick instruction. Treat it as an editing or generation command scoped to the current draft.",
-    schema: {
-      type: "object",
-      properties: {
-        instruction: { type: "string", description: "The quick edit instruction" }
-      },
-      required: ["instruction"],
       additionalProperties: false
     },
     executorKind: "local",

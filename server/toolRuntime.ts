@@ -120,15 +120,6 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
     return { ok: true, content, payload: { tool: name, entries: entries.length } };
   }
 
-  if (name === "quick_messages") {
-    const instruction = readString(args.instruction) || context.chatInstruction || "";
-    return {
-      ok: true,
-      content: `Quick edit instruction: ${instruction}`,
-      payload: { tool: name, instruction }
-    };
-  }
-
   if (name === "clear_context") {
     if (!context.resetContext) {
       return {

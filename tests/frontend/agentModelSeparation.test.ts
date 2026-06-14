@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 test("Agent settings no longer expose an Agent-owned Model tab", async () => {
   const source = await readFile("src/features/agents/components/AgentSettingsTabs.tsx", "utf8");
 
-  assert.match(source, /export const tabs = \["prompt", "knowledge", "tools", "mcp", "quick", "memory"\]/);
+  assert.match(source, /export const tabs = \["prompt", "knowledge", "tools", "mcp", "memory"\]/);
   assert.doesNotMatch(source, /function AgentModelTab/);
   assert.doesNotMatch(source, /settings\.model/);
 });

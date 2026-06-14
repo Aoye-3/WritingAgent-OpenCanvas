@@ -66,9 +66,7 @@ Knowledge Base vector stores and uploads are created under:
 - `settings`
   - Generic settings key/value table.
 - `agent_settings`
-  - Per-Agent profile settings JSON payloads: Prompt, Tools, Knowledge, MCP refs, Quick phrases, and Memory. Model identity and provider credentials are not stored here; legacy `payload_json.model` is ignored during normalization and is not written back.
-- `quick_messages`
-  - Per-Agent quick message text.
+  - Per-Agent profile settings JSON payloads: Prompt, Tools, Knowledge, MCP refs, and Memory. Model identity and provider credentials are not stored here; legacy `payload_json.model` is ignored during normalization and is not written back.
 - `canvas_nodes`
   - Project-owned Canvas node state, including `project_id` and `include_in_project_context`.
 - `canvas_objects`

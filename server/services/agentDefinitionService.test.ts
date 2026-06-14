@@ -56,7 +56,7 @@ test("builds runtime config with tool policies and deprecated refs", async () =>
   const card = getAgentCard("chat-agent");
   const settings = {
     ...defaultAgentSettings(card),
-    tools: { quick_messages: true, canvas_write: true, web_search: true, artifact_stage: true }
+    tools: { canvas_write: true, web_search: true, artifact_stage: true }
   };
   const runtimeConfig = await buildAgentRuntimeConfig(card, settings);
 

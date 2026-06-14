@@ -2,7 +2,6 @@
 name: email-writer
 description: Write concise email drafts with a clear purpose, recipient fit, and call to action.
 allowed-tools:
-  - quick_messages
   - clear_context
 ---
 

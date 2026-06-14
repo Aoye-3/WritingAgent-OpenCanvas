@@ -29,7 +29,6 @@ export function buildAgentPrompt(input: PromptBuildInput) {
   const output = input.agentCard.outputContract;
   const instruction = input.chatInstruction?.trim() || input.freeTextPrompt?.trim();
   const settings = input.agentCard.settings;
-  const quickMessages = settings?.quickMessages?.length ? settings.quickMessages.map((message) => `- ${message}`).join("\n") : "";
 
   return compactLines([
     `# AgentCard`,
@@ -44,7 +43,6 @@ export function buildAgentPrompt(input: PromptBuildInput) {
     context ? `# Context\n${context}` : "",
     settings?.knowledge.enabled ? `# Knowledge Scope\n${settings.knowledge.scope}` : "",
     settings?.memory.enabled ? "# Memory State\nGlobal memory is enabled for this Agent, but this local MVP only uses memory hints explicitly included in the current prompt context." : "",
-    quickMessages ? `# Agent Quick Messages\n${quickMessages}` : "",
     tools.length ? `# Enabled Tool State\n${tools.join("\n")}` : "",
     instruction ? `# Current User Instruction\n${instruction}` : "",
     input.canvasDeliveryContract ? `# Canvas Delivery Contract\n${formatCanvasDeliveryContract(input.canvasDeliveryContract)}` : "",

@@ -230,7 +230,7 @@ Findings:
 Completed:
 - Added `/api/internal/deerflow/tool-call` with internal-source checks and reuse of `executeToolCall`, Tool policy, and Canvas pending request creation.
 - Passed bridge context from FacetWrite DeerFlow run requests: allowed tool refs, effective tool state, explicit context values, selected Canvas node, and current instruction.
-- Added DeerFlow `deerflow.tools.facetwrite_bridge` tools for `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write`.
+- Added DeerFlow `deerflow.tools.facetwrite_bridge` tools for `knowledge_base`, `clear_context`, and `canvas_write`.
 - Registered FacetWrite bridge tools in DeerFlow `config.yaml` and `config.example.yaml`.
 - Switched the local DeerFlow model config to `PatchedChatDeepSeek` so DeepSeek reasoning metadata survives multi-turn tool-call conversations.
 - Updated AI Dashboard bridge states so FacetWrite tools show `facetwrite_bridge` and DeerFlow `web_search` shows `deerflow_builtin`.

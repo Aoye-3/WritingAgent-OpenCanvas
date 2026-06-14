@@ -12,7 +12,6 @@ type CommandBarProps = {
 const toolLabels: Record<string, { en: string; zh: string }> = {
   web_search: { en: "Web", zh: "联网" },
   knowledge_base: { en: "Knowledge", zh: "知识库" },
-  quick_messages: { en: "Quick", zh: "快捷" },
   clear_context: { en: "Clear", zh: "清除上下文" }
 };
 

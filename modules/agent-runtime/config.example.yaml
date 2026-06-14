@@ -397,10 +397,6 @@ tools:
     group: context
     use: deerflow.tools.facetwrite_bridge:knowledge_base_tool
 
-  - name: quick_messages
-    group: chat
-    use: deerflow.tools.facetwrite_bridge:quick_messages_tool
-
   - name: clear_context
     group: context
     use: deerflow.tools.facetwrite_bridge:clear_context_tool

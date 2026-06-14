@@ -9,7 +9,6 @@ test("server enforces planning-only tools for slash plan requests", () => {
     web_search: false,
     artifact_stage: false,
     knowledge_base: false,
-    quick_messages: false,
     clear_context: false,
     canvas_write: false,
     plan_clarification_submit: true,

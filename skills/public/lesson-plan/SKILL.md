@@ -4,7 +4,6 @@ description: Build practical lesson plans and teaching materials from structured
 allowed-tools:
   - web_search
   - knowledge_base
-  - quick_messages
   - clear_context
 ---
 

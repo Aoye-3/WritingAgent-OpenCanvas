@@ -10,7 +10,7 @@ export type GenerateRequest = {
   contextValues?: Record<string, unknown>;
   freeTextPrompt?: string;
   chatInstruction?: string;
-  toolState?: Partial<Record<"web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write" | "plan_update" | "plan_clarification_submit" | "plan_revision_submit" | "artifact_stage", boolean>>;
+  toolState?: Partial<Record<"web_search" | "knowledge_base" | "clear_context" | "canvas_write" | "plan_update" | "plan_clarification_submit" | "plan_revision_submit" | "artifact_stage", boolean>>;
   systemPrompt?: string;
   modelOverrides?: {
     thinkingMode?: "enabled" | "disabled";

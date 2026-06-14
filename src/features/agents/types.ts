@@ -3,7 +3,7 @@ import type { Locale } from "../i18n/types";
 export type AgentCategory = "chat";
 export type AgentIcon = "bot" | "pen" | "lines" | "mail" | "book" | "report" | "refresh";
 export type AgentAccent = "blue" | "green" | "orange" | "violet" | "rose";
-export type ToolRef = "web_search" | "knowledge_base" | "quick_messages" | "clear_context" | "canvas_write" | "plan_clarification_submit" | "plan_revision_submit" | "artifact_stage";
+export type ToolRef = "web_search" | "knowledge_base" | "clear_context" | "canvas_write" | "plan_clarification_submit" | "plan_revision_submit" | "artifact_stage";
 export type ToolRiskLevel = "low" | "medium" | "high";
 export type ToolGroup = "web" | "context" | "chat";
 export type AgentModelResponseMode = "normal" | "prefix_completion";
@@ -80,7 +80,6 @@ export type AgentSettings = {
   memory: {
     enabled: boolean;
   };
-  quickMessages: string[];
   mcpRefs: string[];
 };
 

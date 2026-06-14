@@ -2,7 +2,6 @@
 name: rewrite-polish
 description: Improve existing text for clarity, tone, structure, and audience fit.
 allowed-tools:
-  - quick_messages
   - clear_context
 ---
 

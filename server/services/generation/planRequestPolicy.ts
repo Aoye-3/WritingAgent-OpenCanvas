@@ -51,7 +51,6 @@ function toolsForStage(current: ToolState, stage: PlanRequestStage): ToolState {
       web_search: false,
       artifact_stage: false,
       knowledge_base: false,
-      quick_messages: false,
       clear_context: false,
       canvas_write: false,
       plan_clarification_submit: stage === "intake",
@@ -61,7 +60,6 @@ function toolsForStage(current: ToolState, stage: PlanRequestStage): ToolState {
   if (stage === "execution") {
     return {
       ...current,
-      quick_messages: false,
       clear_context: false,
       canvas_write: false,
       plan_clarification_submit: false,

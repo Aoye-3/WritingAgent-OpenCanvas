@@ -50,7 +50,7 @@ npm.cmd run agent-runtime:docker:down
 
 ## Security And Capability Boundary
 
-Local mode uses `deerflow.sandbox.local:LocalSandboxProvider` with `allow_host_bash: false`. It preserves Gateway auth/cookies/CSRF, `/api/runs/stream`, Skills and hot reload, stdio/HTTP/SSE MCP, Memory/SQLite/uploads/events, web search, providers, ACP, subagents, and the FacetWrite bridge tools `knowledge_base`, `quick_messages`, `clear_context`, and `canvas_write`.
+Local mode uses `deerflow.sandbox.local:LocalSandboxProvider` with `allow_host_bash: false`. It preserves Gateway auth/cookies/CSRF, `/api/runs/stream`, Skills and hot reload, stdio/HTTP/SSE MCP, Memory/SQLite/uploads/events, web search, providers, ACP, subagents, and the FacetWrite bridge tools `knowledge_base`, `clear_context`, and `canvas_write`.
 
 `canvas_write` directly commits low-risk create and append operations with stable IDs. Replace, range replacement, delete, and other destructive operations remain approval-gated.
 
