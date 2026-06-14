@@ -6,7 +6,9 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $entrypoint = Join-Path $root "start-opencanvas-shell.vbs"
 $acceptanceScript = Join-Path $root "scripts\local-runtime-acceptance.mjs"
-$servicePorts = @(8001, 17777, 17776)
+$metadataPath = Join-Path $root "modules\agent-runtime\logs\agent-runtime-local.json"
+$servicePorts = @(17777, 17776)
+$runtimePort = $null
 
 function Get-ListeningPortOwners {
   param([int[]] $Ports)
@@ -18,6 +20,21 @@ function Get-OwnedAppShellProcessInfo {
   return @(Get-CimInstance Win32_Process | Where-Object {
     $_.Name -eq "electron.exe" -and $_.CommandLine -match $escapedRoot -and $_.CommandLine -match "app-shell/main\.mjs"
   })
+}
+
+function Get-LocalRuntimeMetadata {
+  if (-not (Test-Path -LiteralPath $metadataPath)) { return $null }
+  try { return Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json } catch { return $null }
+}
+
+function Wait-LocalRuntimeMetadata {
+  $deadline = (Get-Date).AddSeconds($StartupTimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    $metadata = Get-LocalRuntimeMetadata
+    if ($metadata -and $metadata.port) { return $metadata }
+    Start-Sleep -Seconds 1
+  }
+  throw "Local Runtime metadata did not appear at $metadataPath within $StartupTimeoutSeconds seconds."
 }
 
 function Assert-DockerStopped {
@@ -52,6 +69,9 @@ function Wait-HttpReady {
 
 function Stop-OwnedAppShell {
   $escapedRoot = [regex]::Escape($root)
+  $portsToCheck = @($servicePorts)
+  $metadata = Get-LocalRuntimeMetadata
+  if ($metadata -and $metadata.port) { $portsToCheck += [int] $metadata.port }
   $electron = Get-OwnedAppShellProcessInfo
   foreach ($processInfo in $electron) {
     $process = Get-Process -Id $processInfo.ProcessId -ErrorAction SilentlyContinue
@@ -59,7 +79,7 @@ function Stop-OwnedAppShell {
   }
 
   for ($attempt = 0; $attempt -lt 30; $attempt++) {
-    if ((Get-ListeningPortOwners -Ports $servicePorts).Count -eq 0 -and (Get-OwnedAppShellProcessInfo).Count -eq 0) { return }
+    if ((Get-ListeningPortOwners -Ports $portsToCheck).Count -eq 0 -and (Get-OwnedAppShellProcessInfo).Count -eq 0) { return }
     Start-Sleep -Seconds 1
   }
 
@@ -67,7 +87,7 @@ function Stop-OwnedAppShell {
     Stop-Process -Id $processInfo.ProcessId -Force -ErrorAction SilentlyContinue
   }
 
-  foreach ($listener in Get-ListeningPortOwners -Ports $servicePorts) {
+  foreach ($listener in Get-ListeningPortOwners -Ports $portsToCheck) {
     $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($listener.OwningProcess)" -ErrorAction SilentlyContinue
     if ($processInfo -and $processInfo.CommandLine -match $escapedRoot) {
       Stop-Process -Id $listener.OwningProcess -Force -ErrorAction SilentlyContinue
@@ -83,7 +103,7 @@ if ($staleAppShell.Count -gt 0) {
 }
 $occupied = Get-ListeningPortOwners -Ports $servicePorts
 if ($occupied.Count -gt 0) {
-  throw "Local Runtime acceptance requires ports 8001, 17777, and 17776 to be free."
+  throw "Local Runtime acceptance requires ports 17777 and 17776 to be free."
 }
 
 try {
@@ -94,7 +114,9 @@ try {
     Pop-Location
   }
 
-  Wait-HttpReady -Url "http://127.0.0.1:8001/health"
+  $runtimeMetadata = Wait-LocalRuntimeMetadata
+  $runtimePort = [int] $runtimeMetadata.port
+  Wait-HttpReady -Url "http://127.0.0.1:$runtimePort/health"
   Wait-HttpReady -Url "http://127.0.0.1:17777/api/health"
   Wait-HttpReady -Url "http://127.0.0.1:17776"
   Assert-DockerStopped
@@ -105,7 +127,9 @@ try {
   Stop-OwnedAppShell
 }
 
-$remaining = Get-ListeningPortOwners -Ports @(8001, 17777, 17776, 2026)
+$cleanupPorts = @(17777, 17776, 2026)
+if ($runtimePort) { $cleanupPorts += $runtimePort }
+$remaining = Get-ListeningPortOwners -Ports $cleanupPorts
 if ($remaining.Count -gt 0) {
   throw "Acceptance cleanup left service ports listening: $($remaining.LocalPort -join ', ')."
 }

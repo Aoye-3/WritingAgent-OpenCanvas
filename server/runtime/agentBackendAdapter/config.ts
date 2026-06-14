@@ -20,9 +20,13 @@ export type AgentBackendAuthConfig = {
 
 export function getAgentBackendRuntimeConfig(env: NodeJS.ProcessEnv = process.env): AgentBackendRuntimeConfig {
   const deploymentMode = readDeploymentMode(env.AGENT_RUNTIME_MODE);
+  const configuredBaseUrl = env.AGENT_BACKEND_BASE_URL?.trim();
+  if (deploymentMode === "external" && !configuredBaseUrl) {
+    throw new Error("AGENT_BACKEND_BASE_URL is required when AGENT_RUNTIME_MODE=external");
+  }
   return {
     enabled: readBoolean(env.AGENT_BACKEND_ENABLED),
-    baseUrl: (env.AGENT_BACKEND_BASE_URL ?? defaultBaseUrl(deploymentMode)).replace(/\/+$/, ""),
+    baseUrl: (configuredBaseUrl || defaultBaseUrl(deploymentMode, env)).replace(/\/+$/, ""),
     assistantId: env.AGENT_BACKEND_ASSISTANT_ID?.trim() || "lead_agent",
     deploymentMode,
     sandboxProvider: env.AGENT_RUNTIME_SANDBOX_PROVIDER?.trim() || localSandboxProvider,
@@ -41,8 +45,10 @@ function readDeploymentMode(value: string | undefined): AgentRuntimeDeploymentMo
   throw new Error(`AGENT_RUNTIME_MODE must be local, docker, or external; received ${value}`);
 }
 
-function defaultBaseUrl(mode: AgentRuntimeDeploymentMode) {
-  return mode === "docker" ? "http://127.0.0.1:2026" : "http://127.0.0.1:8001";
+function defaultBaseUrl(mode: AgentRuntimeDeploymentMode, env: NodeJS.ProcessEnv) {
+  if (mode === "docker") return "http://127.0.0.1:2026";
+  const port = readPositiveInteger(env.AGENT_RUNTIME_PORT, 8001);
+  return `http://127.0.0.1:${port}`;
 }
 
 function readBoolean(value: string | undefined) {

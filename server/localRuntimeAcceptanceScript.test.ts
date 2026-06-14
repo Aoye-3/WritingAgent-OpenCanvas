@@ -16,7 +16,9 @@ test("local runtime acceptance starts through the user VBS entry and checks Dock
   assert.match(orchestrator, /app-shell\/main\\\.mjs|app-shell\\\/main\\\.mjs/);
   assert.match(orchestrator, /Docker/i);
   assert.match(orchestrator, /2026/);
-  assert.match(orchestrator, /8001/);
+  assert.match(orchestrator, /agent-runtime-local\.json/);
+  assert.match(orchestrator, /Get-LocalRuntimeMetadata/);
+  assert.doesNotMatch(orchestrator, /requires ports 8001/);
   assert.match(orchestrator, /17777/);
   assert.match(orchestrator, /17776/);
 });

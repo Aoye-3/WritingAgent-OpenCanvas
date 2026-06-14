@@ -27,6 +27,16 @@ function Test-PortInUse {
   return [bool] (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | Select-Object -First 1)
 }
 
+function Get-FreeTcpPort {
+  $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+  try {
+    $listener.Start()
+    return ([System.Net.IPEndPoint] $listener.LocalEndpoint).Port
+  } finally {
+    $listener.Stop()
+  }
+}
+
 function Test-HttpOk {
   param([string] $Url)
   try {
@@ -47,8 +57,21 @@ $runtimeMode = (Get-ConfigValue -Name "AGENT_RUNTIME_MODE" -DefaultValue "local"
 if ($runtimeMode -notin @("local", "docker", "external")) {
   throw "AGENT_RUNTIME_MODE must be local, docker, or external."
 }
-$defaultRuntimeUrl = if ($runtimeMode -eq "docker") { "http://127.0.0.1:2026" } else { "http://127.0.0.1:8001" }
-$agentBackendBaseUrl = (Get-ConfigValue -Name "AGENT_BACKEND_BASE_URL" -DefaultValue $defaultRuntimeUrl).TrimEnd("/")
+$processRuntimeBaseUrl = [Environment]::GetEnvironmentVariable("AGENT_BACKEND_BASE_URL")
+if ($runtimeMode -eq "local") {
+  if ($processRuntimeBaseUrl) {
+    $agentBackendBaseUrl = $processRuntimeBaseUrl.TrimEnd("/")
+  } else {
+    $configuredRuntimePort = [int] (Get-ConfigValue -Name "AGENT_RUNTIME_PORT" -DefaultValue "0")
+    if ($configuredRuntimePort -eq 0) { $configuredRuntimePort = Get-FreeTcpPort }
+    $agentBackendBaseUrl = "http://127.0.0.1:$configuredRuntimePort"
+  }
+} elseif ($runtimeMode -eq "docker") {
+  $agentBackendBaseUrl = (Get-ConfigValue -Name "AGENT_BACKEND_BASE_URL" -DefaultValue "http://127.0.0.1:2026").TrimEnd("/")
+} else {
+  $agentBackendBaseUrl = (Get-ConfigValue -Name "AGENT_BACKEND_BASE_URL" -DefaultValue "").TrimEnd("/")
+  if (-not $agentBackendBaseUrl) { throw "AGENT_BACKEND_BASE_URL is required when using an external Agent Runtime." }
+}
 $runtimeUri = [uri] $agentBackendBaseUrl
 $runtimePort = $runtimeUri.Port
 $agentBackendEnabled = (Get-ConfigValue -Name "AGENT_BACKEND_ENABLED" -DefaultValue "false") -match "^(true|1)$"
@@ -76,6 +99,7 @@ if (Test-PortInUse -Port $apiPort) { throw "API port $apiPort is already in use.
 
 $env:AGENT_RUNTIME_MODE = $runtimeMode
 $env:AGENT_BACKEND_BASE_URL = $agentBackendBaseUrl
+$env:AGENT_RUNTIME_PORT = "$runtimePort"
 $runtimeOwned = $false
 $localRuntimeScript = "scripts\agent-runtime-local.ps1"
 $dockerRuntimeScript = "scripts\agent-runtime.ps1"

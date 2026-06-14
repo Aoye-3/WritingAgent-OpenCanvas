@@ -8,6 +8,8 @@ const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { script
 
 test("local Agent Runtime script manages the Gateway lifecycle", () => {
   assert.match(script, /ValidateSet\("up", "down", "status", "doctor"\)/);
+  assert.match(script, /\[int\] \$Port = 0/);
+  assert.match(script, /Get-FreeTcpPort/);
   assert.match(script, /python", "install", "3\.12/);
   assert.match(script, /python find --managed-python 3\.12/);
   assert.match(script, /"sync", "--python", \$managedPython, "--locked", "--all-packages"/);
@@ -34,11 +36,27 @@ test("local Agent Runtime preserves runtime paths and executable tools", () => {
   assert.doesNotMatch(script, /SHA256\]::HashData/);
   assert.doesNotMatch(script, /Convert\]::ToHexString/);
   assert.match(script, /Join-Path \$root "\.env\.local"/);
+  assert.match(script, /AGENT_RUNTIME_PORT/);
   assert.match(script, /Assert-Command "node"/);
   assert.match(script, /Assert-Command "npx\.cmd"/);
   assert.match(script, /\$env:Path =/);
   assert.doesNotMatch(script, /\$env:PATH =/);
   assert.match(script, /SetEnvironmentVariable\("PATH", \$null, "Process"\)/);
+});
+
+test("local Agent Runtime status and shutdown resolve the actual port from metadata", () => {
+  assert.match(script, /\$Action -in @\("status", "down"\)/);
+  assert.match(script, /\$statusMetadata\.port/);
+  assert.match(script, /\$metadata\.port -ne \$Port/);
+});
+
+test("automatic local Agent Runtime startup ignores stale metadata without an owned process", () => {
+  assert.match(
+    script,
+    /elseif \(\$Action -eq "up" -and \$Port -eq 0 -and \(Test-Path -LiteralPath \$metadataPath\)\)/,
+  );
+  assert.match(script, /if \(\$statusMetadata -and \(Get-OwnedProcess\)\) \{/);
+  assert.match(script, /Remove-OwnershipFiles\s+\$script:Port = Get-FreeTcpPort/);
 });
 
 test("package scripts expose local default and explicit Docker lifecycle", () => {

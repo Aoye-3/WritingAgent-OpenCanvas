@@ -12,7 +12,7 @@ Recommended one-click local entry:
 start-opencanvas-shell.vbs
 ```
 
-This entry explicitly sets `AGENT_RUNTIME_MODE=local` and `AGENT_BACKEND_BASE_URL=http://127.0.0.1:8001` for its child process. It never selects or starts Docker, even if the parent machine environment contains stale Docker mode variables.
+This entry explicitly sets `AGENT_RUNTIME_MODE=local` for its child process and lets the shell choose an available Runtime port. It never selects or starts Docker, even if the parent machine environment contains stale Docker mode variables.
 
 ```powershell
 npm.cmd install
@@ -25,7 +25,7 @@ The shell uses Vite `17776` and API `17777`.
 
 1. Acquire the single-instance lock and show Splash.
 2. Validate frontend/API ports.
-3. Resolve `AGENT_RUNTIME_MODE` and `AGENT_BACKEND_BASE_URL`.
+3. Resolve `AGENT_RUNTIME_MODE` and choose or read the local Runtime URL.
 4. Run `runtime-check`; reuse only a compatible healthy Runtime.
 5. Run `runtime-bootstrap` for managed local or Docker mode.
 6. Wait for `runtime-ready`, then start Express and Vite.
@@ -50,7 +50,7 @@ With Docker stopped and the shell closed:
 npm.cmd run acceptance:local-runtime
 ```
 
-The acceptance starts through the same VBS used by double-click, asserts that Docker and port `2026` remain absent, performs five real Agent Runtime generations, verifies Skill/Web Search, Memory, and pending-only Canvas writes, and confirms owned processes are reclaimed. Generated test Projects are deleted automatically; the report is written to `test-results/local-runtime-acceptance-report.json`.
+The acceptance starts through the same VBS used by double-click, reads the actual Runtime port from ownership metadata, asserts that Docker and port `2026` remain absent, performs five real Agent Runtime generations, verifies Skill/Web Search, Memory, and pending-only Canvas writes, and confirms owned processes are reclaimed. Generated test Projects are deleted automatically; the report is written to `test-results/local-runtime-acceptance-report.json`.
 
 ## Ownership And Shutdown
 
@@ -71,3 +71,4 @@ The acceptance starts through the same VBS used by double-click, asserts that Do
 
 Local Runtime ownership metadata includes the actual port, Bridge URL, Runtime source fingerprint, and internal Tool token fingerprint. App Shell reuses a healthy local Runtime only when project, Bridge, source, and token fingerprints match; stale project-owned processes are stopped and cold-started. `agent-runtime:status` reads the actual port and Bridge from ownership metadata, including App Shell's `17777` Bridge.
 - The workspace Runtime badge polls `/api/agent-runtime/status`; it does not infer current health from historical Mock outputs.
+- Set `AGENT_RUNTIME_PORT=<port>` to pin local Runtime to a known port for debugging. Leave it unset or set `0` for the default private-port development shell behavior.
