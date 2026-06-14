@@ -14,6 +14,7 @@ import {
   UserRoundCog,
   type LucideIcon
 } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { iconProps } from "../../../shared/icons";
 import { useI18n } from "../../i18n/I18nProvider";
 import type { CanvasTool } from "./canvas/toolState";
@@ -55,27 +56,53 @@ export function WorkspaceUtilityBar({
   promptPreview: string;
 }) {
   const { locale } = useI18n();
+  const reduceMotion = useReducedMotion();
   const hasPrompt = promptPreview.trim().length > 0;
+  const dockTransition = reduceMotion ? { duration: 0 } : { type: "spring" as const, stiffness: 360, damping: 32 };
 
   return (
-    <aside className="board-tool-dock" aria-label={locale === "zh" ? "画板工具栏" : "Board toolbar"}>
-      <div className="board-tool-group">
+    <motion.aside
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      className="board-tool-dock"
+      initial={reduceMotion ? false : { opacity: 0, y: 12, scale: 0.98 }}
+      transition={dockTransition}
+      aria-label={locale === "zh" ? "画板工具栏" : "Board toolbar"}
+    >
+      <motion.div className="board-tool-group" layout transition={dockTransition}>
         {primaryTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} locale={locale} onClick={onToolChange} />)}
-      </div>
+      </motion.div>
       <div className="board-tool-divider" aria-hidden="true" />
-      <div className="board-tool-group" data-testid="board-node-tools">
+      <motion.div className="board-tool-group" data-testid="board-node-tools" layout transition={dockTransition}>
         {nodeTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} locale={locale} onClick={onToolChange} />)}
-      </div>
+      </motion.div>
       <div className="board-tool-divider" aria-hidden="true" />
-      <div className="board-tool-group" data-testid="board-other-tools">
+      <motion.div className="board-tool-group" data-testid="board-other-tools" layout transition={dockTransition}>
         {otherTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} locale={locale} onClick={onToolChange} />)}
-      </div>
+      </motion.div>
       <div className="board-tool-divider" aria-hidden="true" />
-      <button className="board-tool-button board-tool-add" type="button" title={locale === "zh" ? "后续增加工具" : "Add tools later"} aria-label={locale === "zh" ? "后续增加工具" : "Add tools later"}>
+      <motion.button
+        className="board-tool-button board-tool-add"
+        type="button"
+        title={locale === "zh" ? "后续增加工具" : "Add tools later"}
+        aria-label={locale === "zh" ? "后续增加工具" : "Add tools later"}
+        whileTap={reduceMotion ? undefined : { scale: 0.96 }}
+      >
         <Plus {...iconProps} size={18} aria-hidden="true" />
-      </button>
-      {hasPrompt ? <span className="board-tool-status">{locale === "zh" ? "Prompt 已生成" : "Prompt ready"}</span> : null}
-    </aside>
+      </motion.button>
+      <AnimatePresence>
+        {hasPrompt ? (
+          <motion.span
+            animate={{ opacity: 1, width: "auto" }}
+            className="board-tool-status"
+            exit={{ opacity: 0, width: 0 }}
+            initial={reduceMotion ? false : { opacity: 0, width: 0 }}
+            transition={dockTransition}
+          >
+            {locale === "zh" ? "Prompt 已生成" : "Prompt ready"}
+          </motion.span>
+        ) : null}
+      </AnimatePresence>
+    </motion.aside>
   );
 }
 
@@ -83,8 +110,18 @@ function BoardToolButton({ active, locale, onClick, tool }: { active?: boolean; 
   const Icon = tool.icon;
   const label = tool.label[locale];
   return (
-    <button className={`board-tool-button${active ? " is-active" : ""}`} type="button" title={label} aria-label={label} onClick={() => onClick(tool.id)}>
+    <motion.button
+      className={`board-tool-button${active ? " is-active" : ""}`}
+      layout
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={() => onClick(tool.id)}
+      whileHover={active ? undefined : { y: -1 }}
+      whileTap={{ scale: 0.96 }}
+    >
+      {active ? <motion.span className="board-tool-active-indicator" layoutId="board-tool-active" transition={{ type: "spring", stiffness: 420, damping: 34 }} /> : null}
       <Icon {...iconProps} size={18} aria-hidden="true" />
-    </button>
+    </motion.button>
   );
 }

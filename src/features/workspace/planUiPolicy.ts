@@ -3,7 +3,7 @@ import type { GenerateRequest } from "../generation/types";
 type ToolState = NonNullable<GenerateRequest["toolState"]>;
 export type PlanRequestPhase = { kind: "chat" | "planning" | "execution" };
 
-const internalComposerTools = new Set(["artifact_stage", "canvas_write", "clear_context"]);
+const internalComposerTools = new Set(["artifact_stage", "canvas_write", "clear_context", "quick_messages"]);
 
 export function visibleComposerTools(tools: string[]) {
   return tools.filter((tool) => !internalComposerTools.has(tool));

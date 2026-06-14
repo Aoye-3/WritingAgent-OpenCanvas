@@ -4,8 +4,8 @@ import { buildRequestToolState, visibleComposerTools } from "../../src/features/
 
 test("composer hides internal orchestration tools and keeps one dedicated Plan entry", () => {
   assert.deepEqual(
-    visibleComposerTools(["web_search", "artifact_stage", "canvas_write", "clear_context"]),
-    ["web_search"]
+    visibleComposerTools(["web_search", "knowledge_base", "quick_messages", "artifact_stage", "canvas_write", "clear_context"]),
+    ["web_search", "knowledge_base"]
   );
 });
 

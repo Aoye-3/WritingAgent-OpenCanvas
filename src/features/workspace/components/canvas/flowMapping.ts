@@ -9,6 +9,7 @@ type CanvasFlowCallbacks = {
   onDeleteNode: (nodeId: string) => Promise<void>;
   onIgnoreSuggestion: (suggestionId: string) => Promise<void>;
   onCreationPreviewBlocked: () => void;
+  onRequestNodeMenu: (nodeId: string, screen: { x: number; y: number }) => void;
   onResizeStateChange: (nodeId?: string) => void;
   onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
   onRequestRangeRewrite: (draft: CanvasRangeRewriteDraft) => Promise<CanvasWriteRequest>;

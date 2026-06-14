@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
 import { Topbar } from "../../shared/Topbar";
 import type { AgentCard, BriefSaveStatus, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, ProjectBrief, StoredOutputVersion, StoredThread, TaskBrief } from "../agents/types";
@@ -168,8 +168,8 @@ export function WorkspaceView({
   toolState
 }: WorkspaceViewProps) {
   const { locale, t } = useI18n();
-  const [leftCollapsed, setLeftCollapsed] = useState(false);
-  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [leftCollapsed, setLeftCollapsed] = useState(true);
+  const [rightCollapsed, setRightCollapsed] = useState(true);
   const [rightDrawerWidth, setRightDrawerWidth] = useState(RIGHT_DRAWER_MIN_WIDTH);
   const [composerDraft, setComposerDraft] = useState("");
   const [mindChainContext, setMindChainContext] = useState<CanvasMindChainContext | null>(null);
@@ -201,6 +201,9 @@ export function WorkspaceView({
     : locale === "zh" ? "Agent Runtime 不可用" : "Agent Runtime unavailable";
 
   const selectedConfiguredModel = configuredModels.find((model) => model.id === selectedModelConfigId);
+  const workspaceChromeStyle = {
+    "--ai-drawer-width": `${rightDrawerWidth}px`
+  } as CSSProperties;
 
   const startRightDrawerResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -233,7 +236,14 @@ export function WorkspaceView({
   };
 
   return (
-    <section className="view view-workspace" id="workspace-view" aria-label={`${projectTitle} workspace`}>
+    <section
+      className="view view-workspace"
+      data-left-collapsed={leftCollapsed}
+      data-right-collapsed={rightCollapsed}
+      id="workspace-view"
+      style={workspaceChromeStyle}
+      aria-label={`${projectTitle} workspace`}
+    >
       <Topbar
         activeView={activeView}
         contextLabel={`${projectTitle} / ${projectThreads.find((thread) => thread.id === currentThreadId)?.title ?? "New conversation"}`}
@@ -290,8 +300,14 @@ export function WorkspaceView({
           onPaste={onPasteCanvas}
           onConvertText={onConvertCanvasText}
           onIgnoreSuggestion={onIgnoreCanvasWorkflowSuggestion}
-          onAttachMindChain={setMindChainContext}
-          onSendMindChainToChat={setComposerDraft}
+          onAttachMindChain={(context) => {
+            setMindChainContext(context);
+            setRightCollapsed(false);
+          }}
+          onSendMindChainToChat={(text) => {
+            setComposerDraft(text);
+            setRightCollapsed(false);
+          }}
           onSelectNode={onSelectCanvasNode}
           onUndo={onUndoCanvas}
           onUpdateNode={onUpdateCanvasNode}

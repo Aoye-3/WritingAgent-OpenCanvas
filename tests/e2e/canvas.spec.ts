@@ -27,8 +27,12 @@ type CanvasState = {
 
 async function openNewCanvas(page: Page) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.getByTestId("start-button").click();
-  await page.getByTestId("home-create-board").click();
+  if (await page.getByTestId("start-button").isVisible()) {
+    await page.getByTestId("start-button").click();
+  }
+  if (await page.getByTestId("home-create-board").isVisible()) {
+    await page.getByTestId("home-create-board").click();
+  }
   await expect(page.getByTestId("document-canvas")).toBeVisible();
 }
 
@@ -50,6 +54,8 @@ test("Project-first workspace separates sessions, models, and run Agent without 
   await openNewCanvas(page);
 
   const briefDrawer = page.getByRole("complementary", { name: "Project and task Briefs" });
+  await expect(briefDrawer.getByRole("button", { name: /Expand Project panel|展开项目面板/ })).toBeVisible();
+  await briefDrawer.getByRole("button", { name: /Expand Project panel|展开项目面板/ }).click();
   const projectBriefSection = briefDrawer.locator(".brief-section").nth(0);
   const taskBriefSection = briefDrawer.locator(".brief-section").nth(1);
   await expect(briefDrawer).toBeVisible();
@@ -69,6 +75,8 @@ test("Project-first workspace separates sessions, models, and run Agent without 
   await expect.poll(async () => (await fetchCanvasState(page)).projectBrief?.brief.goal).toBe("Shared launch goal");
   await expect.poll(async () => (await fetchCanvasState(page)).taskBrief?.brief.objective).toBe("Draft the launch outline");
   await expect(page.getByRole("button", { name: /History|历史/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Expand AI collaboration|展开 AI 协作层/ })).toBeVisible();
+  await page.getByRole("button", { name: /Expand AI collaboration|展开 AI 协作层/ }).click();
   const rightDrawer = page.getByRole("complementary", { name: "AI collaboration drawer" });
   const compactHeader = rightDrawer.getByTestId("conversation-compact-header");
   const agentRow = rightDrawer.getByTestId("composer-agent-row");
@@ -207,9 +215,9 @@ test("reference tool previews centered placement and returns to select", async (
   await expect(page.getByRole("button", { name: "Select" })).toHaveClass(/is-active/);
   await expect.poll(async () => (await fetchCanvasState(page)).canvasNodes[0]).toMatchObject({
     kind: "reference",
-    x: 270,
+    x: 210,
     y: 205,
-    width: 300,
+    width: 420,
     height: 190,
   });
 });

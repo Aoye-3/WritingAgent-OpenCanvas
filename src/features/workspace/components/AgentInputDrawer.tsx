@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ChevronLeftIcon, ChevronRightIcon } from "../../../shared/icons";
 import { Button, IconButton, SelectField, TextareaField, TextField } from "../../../shared/ui";
 import type { BriefSaveStatus, ProjectBrief, TaskBrief } from "../../agents/types";
@@ -28,6 +29,8 @@ export function AgentInputDrawer(props: AgentInputDrawerProps) {
     onRetryProjectBrief, onRetryTaskBrief
   } = props;
   const [projectTitleDraft, setProjectTitleDraft] = useState(projectTitle);
+  const reduceMotion = useReducedMotion();
+  const drawerTransition = reduceMotion ? { duration: 0 } : { type: "spring" as const, stiffness: 320, damping: 34 };
 
   useEffect(() => setProjectTitleDraft(projectTitle), [projectTitle]);
 
@@ -46,12 +49,24 @@ export function AgentInputDrawer(props: AgentInputDrawerProps) {
   };
 
   return (
-    <aside className="input-drawer ui-drawer" aria-label="Project and task Briefs" data-collapsed={collapsed}>
+    <motion.aside className="input-drawer ui-drawer" aria-label="Project and task Briefs" data-collapsed={collapsed} layout transition={drawerTransition}>
+      <AnimatePresence initial={false}>
       {collapsed ? (
-        <button className="drawer-rail drawer-rail-left" type="button" onClick={onExpand} aria-label={locale === "zh" ? "展开项目面板" : "Expand Project panel"}>
+        <motion.button
+          animate={{ opacity: 1, x: 0 }}
+          className="drawer-rail drawer-rail-left"
+          exit={{ opacity: 0, x: -8 }}
+          initial={reduceMotion ? false : { opacity: 0, x: -8 }}
+          key="project-rail"
+          transition={drawerTransition}
+          type="button"
+          onClick={onExpand}
+          aria-label={locale === "zh" ? "展开项目面板" : "Expand Project panel"}
+        >
           <span>{projectTitle.slice(0, 1)}</span><small>Briefs</small><b><ChevronRightIcon aria-hidden="true" size={18} /></b>
-        </button>
+        </motion.button>
       ) : null}
+      </AnimatePresence>
 
       <div className="drawer-expanded-content" aria-hidden={collapsed}>
         <div className="drawer-header">
@@ -105,7 +120,7 @@ export function AgentInputDrawer(props: AgentInputDrawerProps) {
           <Button type="button" onClick={() => onTaskBriefChange({})}>{locale === "zh" ? "清空当前任务" : "Clear current task"}</Button>
         </div>
       </div>
-    </aside>
+    </motion.aside>
   );
 }
 

@@ -15,6 +15,11 @@ export function CanvasNodeFrame({ data, selected }: NodeProps<CanvasFlowNode>) {
   const viewport = useViewport();
   const kindClass = isKnownCanvasKind(node.kind) ? `canvas-node-${node.kind}` : "canvas-node-unknown";
   const minSize = isKnownCanvasKind(node.kind) ? MIN_NODE_SIZE[node.kind] : { width: 220, height: 150 };
+  const openContextMenu = (event: React.MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    data.onRequestNodeMenu(node.id, { x: event.clientX, y: event.clientY });
+  };
 
   const startResize = (handle: ResizeHandle, event: React.PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -73,7 +78,7 @@ export function CanvasNodeFrame({ data, selected }: NodeProps<CanvasFlowNode>) {
   };
 
   return (
-    <article className={`canvas-node ${kindClass} ${selected ? "is-selected" : ""}`} data-testid="canvas-node" onPointerEnter={data.onCreationPreviewBlocked}>
+    <article className={`canvas-node ${kindClass} ${selected ? "is-selected" : ""}`} data-testid="canvas-node" onContextMenu={openContextMenu} onPointerEnter={data.onCreationPreviewBlocked}>
       <NodeLinkPort />
       {selected ? <ResizeFrame onResizeStart={startResize} /> : null}
       <CanvasNodeHeader locale={locale} node={node} />

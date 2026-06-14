@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deriveAssistantRunTraceState } from "../../src/features/workspace/components/AssistantRunTrace";
+import { deriveAssistantRunTraceState, visibleAssistantRunTraceEvents } from "../../src/features/workspace/components/AssistantRunTrace";
 
 test("assistant run trace derives failed and running states from visible events", () => {
   assert.deepEqual(deriveAssistantRunTraceState({
@@ -17,4 +17,14 @@ test("assistant run trace derives failed and running states from visible events"
     ],
     userExpanded: undefined
   }), { expanded: true, failed: true, running: false });
+});
+
+test("assistant run trace hides low-signal quick message tool events", () => {
+  const events = visibleAssistantRunTraceEvents([
+    { id: "1", eventType: "tool_started", status: "running", title: "Quick Messages", summary: "", sequence: 1, payload: { toolName: "quick_messages" }, createdAt: "2026-06-14T00:00:00.000Z" },
+    { id: "2", eventType: "tool_completed", status: "completed", title: "Quick Messages", summary: "", sequence: 2, payload: { toolName: "quick_messages" }, createdAt: "2026-06-14T00:00:01.000Z" },
+    { id: "3", eventType: "tool_started", status: "running", title: "Web search", summary: "", sequence: 3, payload: { toolName: "web_search" }, createdAt: "2026-06-14T00:00:02.000Z" }
+  ]);
+
+  assert.deepEqual(events.map((event) => event.id), ["3"]);
 });

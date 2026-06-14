@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, SearchIcon, SendIcon, SparkleIcon, StopIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
 import type { AgentCard, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, StoredThread } from "../../agents/types";
@@ -127,6 +128,7 @@ export function AICollaborationDrawer({
   toolState
 }: AICollaborationDrawerProps) {
   const { locale } = useI18n();
+  const reduceMotion = useReducedMotion();
   const [input, setInput] = useState("");
   const supportsThinking = modelSettings?.providerId === "deepseek";
   const [thinkEnabled, setThinkEnabled] = useState(modelSettings?.thinkingMode === "enabled");
@@ -141,6 +143,7 @@ export function AICollaborationDrawer({
   const [contextResetNotice, setContextResetNotice] = useState(false);
   const [clarificationBusy, setClarificationBusy] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const drawerTransition = reduceMotion ? { duration: 0 } : { type: "spring" as const, stiffness: 300, damping: 32 };
 
   const pendingWriteRequest = canvasWriteRequests.find((request) => request.operation !== "replace_range");
   const pendingWriteSuggestion = canvasWriteSuggestions.find((suggestion) => suggestion.status === "pending");
@@ -338,18 +341,33 @@ export function AICollaborationDrawer({
 
   if (collapsed) {
     return (
-      <aside className="ai-drawer ai-drawer-collapsed" aria-label="AI collaboration drawer collapsed">
-        <button className="drawer-rail drawer-rail-right" type="button" onClick={onToggleCollapsed} aria-label={locale === "zh" ? "展开 AI 协作层" : "Expand AI collaboration"}>
+      <motion.aside
+        animate={{ opacity: 1 }}
+        className="ai-drawer ai-drawer-collapsed"
+        initial={reduceMotion ? false : { opacity: 0.84 }}
+        layout
+        transition={drawerTransition}
+        aria-label="AI collaboration drawer collapsed"
+      >
+        <motion.button
+          animate={{ opacity: 1, x: 0 }}
+          className="drawer-rail drawer-rail-right"
+          initial={reduceMotion ? false : { opacity: 0, x: 8 }}
+          transition={drawerTransition}
+          type="button"
+          onClick={onToggleCollapsed}
+          aria-label={locale === "zh" ? "展开 AI 协作层" : "Expand AI collaboration"}
+        >
           <span>AI</span>
           <small>{messages.length}</small>
           <b><ChevronLeftIcon aria-hidden="true" size={18} /></b>
-        </button>
-      </aside>
+        </motion.button>
+      </motion.aside>
     );
   }
 
   return (
-    <aside className="ai-drawer" aria-label="AI collaboration drawer">
+    <motion.aside className="ai-drawer" aria-label="AI collaboration drawer" layout transition={drawerTransition}>
       <div
         aria-label={locale === "zh" ? "调整 AI 协作层宽度" : "Resize AI collaboration drawer"}
         aria-orientation="vertical"
@@ -379,8 +397,16 @@ export function AICollaborationDrawer({
         </div>
       </div>
 
+      <AnimatePresence>
       {historyOpen ? (
-        <div className="conversation-history-popover" aria-label={locale === "zh" ? "当前项目历史对话" : "Current Project conversation history"}>
+        <motion.div
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          className="conversation-history-popover"
+          exit={{ opacity: 0, y: -6, scale: 0.98 }}
+          initial={reduceMotion ? false : { opacity: 0, y: -6, scale: 0.98 }}
+          transition={drawerTransition}
+          aria-label={locale === "zh" ? "当前项目历史对话" : "Current Project conversation history"}
+        >
           {projectThreads.map((thread) => (
             <button className={thread.id === currentThreadId ? "is-active" : ""} key={thread.id} type="button"
               onClick={() => {
@@ -392,8 +418,9 @@ export function AICollaborationDrawer({
             </button>
           ))}
           {projectThreads.length === 0 ? <p>{locale === "zh" ? "暂无历史对话" : "No conversation history yet."}</p> : null}
-        </div>
+        </motion.div>
       ) : null}
+      </AnimatePresence>
 
       {sessionError ? <p className="session-error" role="alert">{sessionError}</p> : null}
 
@@ -583,7 +610,7 @@ export function AICollaborationDrawer({
           </button>
         </div>
       </form>
-    </aside>
+    </motion.aside>
   );
 }
 

@@ -2,21 +2,25 @@
 
 ## 1. Design Intent
 
-FacetWrite is a research prototype for comparing faceted prompt engineering with traditional free-text chat. The primary faceted interface should feel like a calm AI writing workspace, not a marketing website and not a pure chatbot. Its main purpose is to make prompt construction visible, structured, and controllable while still allowing a conventional chat baseline for comparison.
+FacetWrite is a research prototype for comparing faceted prompt engineering with traditional free-text chat. OpenCanvas is the primary visible product surface: a canvas-first AI creation workspace where generated writing artifacts, notes, references, roles, and Agent collaboration become spatial and editable. The interface should feel like a calm professional canvas tool, not a marketing website and not a pure chatbot.
 
-The design must clearly separate four layers:
+The first visual priority is canvas dominance. When a user enters the Workspace, the board should occupy the majority of attention and screen area. Project/task briefs and AI collaboration remain available, but their default posture is lightweight rails that can expand when needed.
+
+The design must clearly separate five layers:
 
 - `Task Layer`: choose what kind of text to generate.
 - `Facet Layer`: configure task-specific structured inputs.
 - `Context Layer`: configure background, knowledge sources, and reference materials.
-- `Output Layer`: preview, refine, and copy the generated text.
+- `Canvas Layer`: arrange, edit, connect, and inspect writing artifacts.
+- `Output Layer`: preview, refine, and copy generated text when outside the spatial board flow.
 
 The user should always understand:
 
 - what they are generating,
 - what information the AI will use,
 - how the prompt is being formed,
-- where the generated output appears.
+- where the generated output appears,
+- which canvas surface is currently editable or selected.
 
 ## 2. Product Personality
 
@@ -29,15 +33,17 @@ The user should always understand:
 - Research-oriented
 - Workspace-like
 - Lightweight intelligence
+- Spatial
+- Canvas-first
 
 ### 2.2 Design Dials
 
-- Design variance: `5/10`
-  - Familiar SaaS workspace structure with a few distinctive layered surfaces.
-- Motion intensity: `3/10`
-  - Motion should clarify drawer, bottom sheet, and state transitions. Avoid decorative animation.
+- Design variance: `6/10`
+  - Familiar productivity layout with a stronger infinite-canvas identity and floating tool surfaces.
+- Motion intensity: `5/10`
+  - Motion should clarify drawer, rail, dock, selected-tool, popover, and empty-state transitions. It may feel lively, but it must remain functional.
 - Visual density: `7/10`
-  - The workspace is information-rich, but should remain readable and task-focused.
+  - The workspace is information-rich, but the default screen should reserve most visual weight for the canvas.
 
 ## 3. Reference Systems
 
@@ -58,26 +64,34 @@ The user should always understand:
   - Useful for dense but clean productivity UI, restraint, focus states, and low-noise control surfaces.
 - `notion`
   - Useful for document-like output preview, editable text areas, and lightweight workspace metaphors.
+- `figma`
+  - Useful for infinite-canvas chrome, floating tool palettes, precise selection states, and direct manipulation.
+- `miro`
+  - Useful for collaborative board affordances, light blueprint surfaces, and visual creation tools.
+- `vercel`
+  - Useful for compact control surfaces, ring-border depth, and restrained developer-tool polish.
 
 ### 3.3 Adaptation Rule
 
-Do not copy Jasper, Khanmigo, Claude, Linear, or Notion directly. Combine their functional patterns into a research-specific product:
+Do not copy Jasper, Khanmigo, Claude, Linear, Notion, Figma, Miro, or Vercel directly. Combine their functional patterns into a research-specific product:
 
 - Jasper contributes workspace mechanics.
 - Khanmigo contributes task-card entry.
 - Claude contributes calm AI result readability.
 - Linear contributes density and precision.
 - Notion contributes document preview behavior.
+- Figma and Miro contribute the canvas-first interaction language.
+- Vercel contributes compact tool chrome and refined border/shadow treatment.
 
 ### 3.4 Coherence Rule
 
 FacetWrite must feel like one product, not a collage of references. References should influence structure and interaction logic, but the final interface must use one shared visual language:
 
-- One layout grammar: top bar, left drawer, main preview, bottom context layer.
-- One component grammar: 8px radius, 1px borders, restrained shadows, compact controls.
+- One layout grammar: compact top bar, left rail/drawer, canvas-first board, right rail/drawer, floating tool dock.
+- One component grammar: 8px radius, 1px borders, restrained shadows, compact controls, larger radii only for floating docks.
 - One color grammar: neutral workspace surfaces with blue as the only primary action color.
 - One typography grammar: practical sans-serif hierarchy, no decorative display typography.
-- One motion grammar: short functional transitions for drawers, sheets, tabs, and loading states.
+- One motion grammar: short functional transitions for rails, drawers, tool selection, popovers, empty states, and loading states.
 
 If a reference pattern conflicts with product clarity, product clarity wins.
 
@@ -86,10 +100,11 @@ If a reference pattern conflicts with product clarity, product clarity wins.
 ```text
 Home / Task Cards
   -> Canvas Workspace
-      Top Bar
-      Left Structured Input Drawer
-      Output Preview Area
-      Floating Context Bar
+      Compact Top Bar
+      Left Project/Task Rail + Drawer
+      Canvas Board
+      Right AI Collaboration Rail + Drawer
+      Floating Tool Dock
       Prompt Preview
       Refine Controls
 
@@ -186,42 +201,44 @@ Avoid:
 
 Purpose:
 
-Provide a layered text generation workspace where structured prompt inputs, context configuration, and output preview are visible at the same time.
+Provide a layered AI creation workspace where the Canvas Board is the primary surface and structured prompt inputs, context configuration, and AI collaboration are available on demand.
 
 Desktop layout:
 
 ```text
 +-------------------------------------------------------------+
-| Top Bar                                                     |
-+----------------------+--------------------------------------+
-| Left Drawer          | Output Preview                       |
-| Structured Inputs    | Document-like generated text         |
-|                      |                                      |
-|                      |                                      |
-+----------------------+--------------------------------------+
-| Floating Context Bar / Expanded Context Sheet               |
+| Compact Top Bar                                             |
++-------------------------------------------------------------+
+| Canvas Board                                                |
+| nodes, objects, edges, floating controls                    |
+| floating left/right menus, centered dock/status             |
 +-------------------------------------------------------------+
 ```
 
 Layout rules:
 
-- Top bar height: `56-64px`.
-- Left drawer width: `380-420px`.
-- Output preview area: fills remaining width.
-- Bottom floating bar:
-  - collapsed height: `56-72px`;
-  - expanded height: `260-380px`;
-  - must not hide active form submit buttons.
-- Main workspace background: neutral light gray.
-- Drawer and output surfaces: white or near-white.
+- Top bar height: `56px` in Workspace.
+- Canvas Board has no dedicated full-width title/header row; it should start immediately below the Workspace top bar.
+- Default desktop state:
+  - left project/task layer is a floating `44-52px` side menu over the canvas;
+  - right AI collaboration layer is a floating `44-52px` side menu over the canvas;
+  - Canvas Board keeps the full available width behind those overlays.
+- Expanded desktop state:
+  - left drawer target width: `300-340px` as a floating panel;
+  - right drawer starts at `360px` as a floating panel and may be user-resized within existing constraints.
+- Floating tool dock sits over the canvas near the bottom and must not force a large reserved bottom gutter.
+- Bottom selection/status UI is a centered compact pill, not a full-width footer.
+- Main board background: a single light blueprint grid, not stacked CSS and React Flow grids.
+- Drawer and canvas chrome surfaces: white or translucent near-white with restrained borders.
+- Canvas controls should be compact floating chips and icon buttons inside the board, usually top-right; avoid large descriptive text or full-width board chrome.
+- Empty canvas state should be short and centered, pointing to right-click or the tool dock.
 
 Mobile layout:
 
-- Use a single-column flow.
-- Left structured input becomes a top sheet or full-width panel.
-- Output preview appears below the form.
-- Floating context bar becomes a bottom sheet.
-- Primary `Generate` button remains visible near the form end, not hidden behind the bottom bar.
+- Preserve usable single-column or stacked behavior.
+- Rails may become top/bottom compact bars if there is not enough horizontal room.
+- Tool dock may wrap or scroll horizontally, but controls must remain tappable.
+- Primary writing and AI actions must not be hidden behind the dock.
 
 ### 5.3 Left Structured Input Drawer
 
@@ -762,23 +779,32 @@ Wide: 1440px+
 
 ## 12. Motion
 
-Motion should communicate hierarchy and state changes.
+Motion should communicate hierarchy and state changes. OpenCanvas may use Motion for React (`motion/react`) for layout-aware UI transitions, but motion must remain secondary to canvas usability.
 
 Allowed:
 
-- Drawer open/close: `180-240ms`.
-- Bottom sheet expand/collapse: `200-260ms`.
-- Tab content crossfade: `120-180ms`.
-- Card hover elevation/border: `120-160ms`.
+- Rail and drawer open/close: `180-280ms`, preferably spring-based.
+- Floating tool dock entrance: subtle `opacity`, `scale`, and `translateY`.
+- Active tool selection: shared layout indicator or compact pill movement.
+- Popover entrance/exit: `opacity` plus small `translateY`.
+- Empty canvas state: short fade/float only.
+- Card and node hover elevation/border: `120-160ms`.
 - Loading skeleton shimmer only if generation exceeds `600ms`.
 
 Avoid:
 
-- Decorative bouncing.
+- Decorative bouncing that does not clarify state.
 - Large parallax.
 - Slow transitions over `500ms`.
 - Animating width/height for large layout surfaces.
 - Motion that blocks input.
+- Continuous animation except small status indicators.
+
+Reduced motion:
+
+- Always respect `prefers-reduced-motion: reduce`.
+- Disable continuous status breathing.
+- Prefer instant state changes or very short opacity transitions.
 
 Easing:
 
@@ -786,6 +812,12 @@ Easing:
 --ease-standard: cubic-bezier(0.2, 0, 0, 1);
 --ease-exit: cubic-bezier(0.4, 0, 1, 1);
 ```
+
+Implementation notes:
+
+- Use `transform` and `opacity` for animated movement.
+- Use `layout` / `layoutId` only for small UI surfaces such as tool buttons, rails, and popovers.
+- Do not animate React Flow node geometry persistence through unrelated layout effects.
 
 ## 13. Content and Microcopy
 

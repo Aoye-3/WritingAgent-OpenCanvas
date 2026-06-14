@@ -1,9 +1,8 @@
 import "@xyflow/react/dist/style.css";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
-  Background,
-  BackgroundVariant,
   MarkerType,
   ReactFlow,
   ReactFlowProvider,
@@ -128,6 +127,7 @@ function DocumentCanvasInner({
   onToolChange
 }: DocumentCanvasProps) {
   const { locale } = useI18n();
+  const reduceMotion = useReducedMotion();
   const reactFlow = useReactFlow<CanvasFlowNode>();
   const viewport = useViewport();
   const [flowNodes, setFlowNodes] = useState<CanvasFlowNode[]>([]);
@@ -145,6 +145,7 @@ function DocumentCanvasInner({
   const lastCanvasPointRef = useRef<{ x: number; y: number } | null>(null);
   const internalClipboardRef = useRef<CanvasClipboardPayload | null>(null);
   const focusedNodeRef = useRef<string | undefined>(undefined);
+  const floatingTransition = reduceMotion ? { duration: 0 } : { type: "spring" as const, stiffness: 300, damping: 30 };
   const selectedNode = useMemo(() => nodes.find((node) => node.id === selectedNodeId), [nodes, selectedNodeId]);
   const flowEdges = useMemo<Edge[]>(() => edges.map((edge) => ({
     id: edge.id,
@@ -162,6 +163,12 @@ function DocumentCanvasInner({
     setResizingNodeId(nodeId ?? null);
   }, []);
   const clearCreationPreview = useCallback(() => setCreationPreviewPoint(null), []);
+  const requestNodeMenu = useCallback((nodeId: string, screen: { x: number; y: number }) => {
+    const point = reactFlow.screenToFlowPosition(screen);
+    setMenu({ screenX: screen.x, screenY: screen.y, canvasX: point.x, canvasY: point.y, nodeId });
+    setSelectedEdgeId(undefined);
+    onSelectNode(nodeId);
+  }, [onSelectNode, reactFlow]);
 
   useEffect(() => {
     setFlowNodes((current) => buildCanvasFlowNodes({
@@ -181,6 +188,7 @@ function DocumentCanvasInner({
         onDeleteNode,
         onIgnoreSuggestion,
         onCreationPreviewBlocked: clearCreationPreview,
+        onRequestNodeMenu: requestNodeMenu,
         onResizeStateChange: handleResizeStateChange,
         onUpdateNode,
         onRequestRangeRewrite,
@@ -188,7 +196,7 @@ function DocumentCanvasInner({
         onRejectWriteRequest
       }
     }));
-  }, [agentCardId, clearCreationPreview, handleResizeStateChange, locale, modelOverrides, nodes, onAcceptSuggestion, onApproveWriteRequest, onConvertSuggestionToNode, onDeleteNode, onIgnoreSuggestion, onRejectWriteRequest, onRequestRangeRewrite, onUpdateNode, resizingNodeId, selectedNodeId, suggestions, workflow, writeRequests]);
+  }, [agentCardId, clearCreationPreview, handleResizeStateChange, locale, modelOverrides, nodes, onAcceptSuggestion, onApproveWriteRequest, onConvertSuggestionToNode, onDeleteNode, onIgnoreSuggestion, onRejectWriteRequest, onRequestRangeRewrite, onUpdateNode, requestNodeMenu, resizingNodeId, selectedNodeId, suggestions, workflow, writeRequests]);
 
   useEffect(() => {
     if (!selectedNode || focusedNodeRef.current === selectedNode.id) return;
@@ -235,11 +243,8 @@ function DocumentCanvasInner({
   const openNodeMenu = useCallback((event: ReactMouseEvent | globalThis.MouseEvent, node: CanvasFlowNode) => {
     event.preventDefault();
     event.stopPropagation();
-    const point = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-    setMenu({ screenX: event.clientX, screenY: event.clientY, canvasX: point.x, canvasY: point.y, nodeId: node.id });
-    setSelectedEdgeId(undefined);
-    onSelectNode(node.id);
-  }, [onSelectNode, reactFlow]);
+    requestNodeMenu(node.id, { x: event.clientX, y: event.clientY });
+  }, [requestNodeMenu]);
 
   const closeMenu = useCallback(() => setMenu(null), []);
 
@@ -395,14 +400,23 @@ function DocumentCanvasInner({
 
   return (
     <section className="canvas-shell" aria-label="Document canvas workspace" data-testid="document-canvas">
-      <div className="canvas-topline">
-        <div>
-          <p className="eyebrow">Doc Canvas</p>
-          {workflow ? <p className="canvas-workflow-summary">{locale === "zh" ? "当前环节" : "Current stage"}: {workflowStageLabels[workflow.stage][locale]}</p> : null}
-          <h2>{locale === "zh" ? "文档画板" : "Document canvas"}</h2>
-        </div>
-        <div className="canvas-controls" aria-label="Canvas controls">
-          <span className="metadata-chip">
+      <div
+        className="canvas-viewport"
+        data-testid="canvas-viewport"
+        onPointerDownCapture={handleCanvasPointerDownCapture}
+        onPointerLeave={() => setCreationPreviewPoint(null)}
+        onPointerMoveCapture={handleCanvasPointerMoveCapture}
+        onPointerOverCapture={handleCanvasPointerOverCapture}
+      >
+        <CanvasAssetInput activeTool={activeTool} onToolChange={onToolChange} onUploadAsset={onUploadAsset} />
+        <motion.div
+          className="canvas-controls"
+          aria-label="Canvas controls"
+          initial={reduceMotion ? false : { opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={floatingTransition}
+        >
+          <span className="metadata-chip canvas-runtime-chip">
             <span className="status-dot" />
             {providerLabel}
           </span>
@@ -419,7 +433,7 @@ function DocumentCanvasInner({
           <button className="icon-button canvas-zoom-button" type="button" aria-label="Zoom out" onClick={() => void reactFlow.zoomOut({ duration: 120 })}>
             <ZoomOutIcon aria-hidden="true" size={18} />
           </button>
-          <span>{Math.round(viewport.zoom * 100)}%</span>
+          <span className="canvas-zoom-value">{Math.round(viewport.zoom * 100)}%</span>
           <button className="icon-button canvas-zoom-button" type="button" aria-label="Zoom in" onClick={() => void reactFlow.zoomIn({ duration: 120 })}>
             <ZoomInIcon aria-hidden="true" size={18} />
           </button>
@@ -430,18 +444,7 @@ function DocumentCanvasInner({
           <button className="button button-secondary button-small" type="button" disabled={!canUndo} onClick={() => void onUndo()}>
             {locale === "zh" ? "撤销" : "Undo"}
           </button>
-        </div>
-      </div>
-
-      <div
-        className="canvas-viewport"
-        data-testid="canvas-viewport"
-        onPointerDownCapture={handleCanvasPointerDownCapture}
-        onPointerLeave={() => setCreationPreviewPoint(null)}
-        onPointerMoveCapture={handleCanvasPointerMoveCapture}
-        onPointerOverCapture={handleCanvasPointerOverCapture}
-      >
-        <CanvasAssetInput activeTool={activeTool} onToolChange={onToolChange} onUploadAsset={onUploadAsset} />
+        </motion.div>
         {workflow ? <CanvasStatusNode label={locale === "zh" ? "写作环节" : "Writing stage"} stageLabel={workflowStageLabels[workflow.stage][locale]} /> : null}
         <ReactFlow<CanvasFlowNode>
           className={`canvas-flow${isPreviewCreationTool(activeTool) ? " is-creating" : ""}`}
@@ -482,7 +485,6 @@ function DocumentCanvasInner({
           selectionOnDrag={!resizingNodeId && activeTool === "select"}
           selectionMode={SelectionMode.Partial}
         >
-          <Background color="#dbe7f7" gap={28} size={1} variant={BackgroundVariant.Lines} />
         </ReactFlow>
         <CanvasObjectLayer
           objects={objects}
@@ -510,12 +512,20 @@ function DocumentCanvasInner({
           transform={`translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`}
         />
 
-        {nodes.length === 0 ? (
-          <div className="canvas-empty">
-            <strong>{locale === "zh" ? "右键新建节点" : "Right-click to create a node"}</strong>
-            <span>{locale === "zh" ? "Agent 的写入申请会在批准后生成或修改这里的节点。" : "Approved Agent write requests will create or update nodes here."}</span>
-          </div>
-        ) : null}
+        <AnimatePresence>
+          {nodes.length === 0 ? (
+            <motion.div
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              className="canvas-empty"
+              exit={{ opacity: 0, y: 6, scale: 0.98 }}
+              initial={reduceMotion ? false : { opacity: 0, y: 8, scale: 0.98 }}
+              transition={floatingTransition}
+            >
+              <strong>{locale === "zh" ? "右键新建节点" : "Right-click to create a node"}</strong>
+              <span>{locale === "zh" ? "也可以从底部工具栏放置文档、便签、形状或 Agent 工具。" : "Use the dock to place documents, notes, shapes, or the Agent tool."}</span>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
 
         {menu ? (
           <CanvasContextMenu
