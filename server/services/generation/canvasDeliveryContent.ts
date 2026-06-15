@@ -1,11 +1,42 @@
 import type { GenerateRequest } from "../../contracts/generation.js";
+import type { CanvasWorkflowMode } from "../../../shared/canvasWorkflow.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import { formatSourceLinks, extractSourceLinks, type SourceLink } from "./sourceLinks.js";
 
 export type CanvasDeliveryContract = {
   id: "facetwrite_canvas_delivery_v1";
   format: "facetwrite_canvas_delivery";
+  diagramFormat: "facetwrite_diagram_delivery";
+  preferredMode: CanvasWorkflowMode;
   locale: GenerateRequest["locale"];
+};
+
+export type DiagramDeliveryKind = "mindmap" | "userflow" | "flowchart" | "freeform";
+export type DiagramDeliveryLayout = "radial" | "tree" | "left-right" | "freeform";
+export type DiagramDeliveryShape = "rounded" | "rect" | "diamond" | "parallelogram" | "circle" | "database" | "document";
+export type DiagramDeliveryTone = "primary" | "success" | "warning" | "danger" | "neutral";
+
+export type DiagramDeliveryContent = {
+  assistantText: string;
+  kind: DiagramDeliveryKind;
+  title: string;
+  layout: DiagramDeliveryLayout;
+  nodes: Array<{
+    id: string;
+    label: string;
+    body?: string;
+    shape: DiagramDeliveryShape;
+    tone: DiagramDeliveryTone;
+    parentId?: string;
+    position?: { x: number; y: number };
+  }>;
+  edges: Array<{
+    from: string;
+    to: string;
+    label?: string;
+    kind: "next" | "yes" | "no" | "depends" | "contains";
+  }>;
+  sources: SourceLink[];
 };
 
 export type CanvasDeliveryContent = {
@@ -14,12 +45,16 @@ export type CanvasDeliveryContent = {
   bodyMarkdown: string;
   sources: SourceLink[];
   usedStructuredBlock: boolean;
+  diagram?: DiagramDeliveryContent;
+  invalidDiagramBlock?: boolean;
 };
 
-export function createCanvasDeliveryContract(locale: GenerateRequest["locale"]): CanvasDeliveryContract {
+export function createCanvasDeliveryContract(locale: GenerateRequest["locale"], preferredMode: CanvasWorkflowMode = "batch_delivery"): CanvasDeliveryContract {
   return {
     id: "facetwrite_canvas_delivery_v1",
     format: "facetwrite_canvas_delivery",
+    diagramFormat: "facetwrite_diagram_delivery",
+    preferredMode,
     locale
   };
 }
@@ -30,6 +65,30 @@ export function resolveCanvasDeliveryContent(input: {
   text: string;
   events?: ToolEventRecord[];
 }): CanvasDeliveryContent {
+  const parsedDiagram = parseStructuredDiagramBlock(input.text);
+  if (parsedDiagram.invalid) {
+    return {
+      assistantText: stripDeliveryBlocks(input.text),
+      outlineMarkdown: "",
+      bodyMarkdown: "",
+      sources: [],
+      usedStructuredBlock: false,
+      invalidDiagramBlock: true
+    };
+  }
+  if (parsedDiagram.content) {
+    const eventSources = extractSourceLinks({ events: input.events, limit: 10 });
+    const sources = mergeSources(eventSources, parsedDiagram.content.sources);
+    return {
+      assistantText: assistantTextWithSources(parsedDiagram.content.assistantText || stripDeliveryBlocks(input.text), sources, input.locale),
+      outlineMarkdown: "",
+      bodyMarkdown: "",
+      sources,
+      usedStructuredBlock: true,
+      diagram: { ...parsedDiagram.content, sources }
+    };
+  }
+
   const parsed = parseStructuredDeliveryBlock(input.text);
   const eventSources = extractSourceLinks({ events: input.events, limit: 10 });
   if (parsed) {
@@ -87,6 +146,47 @@ function parseStructuredDeliveryBlock(text: string): CanvasDeliveryContent | und
   }
 }
 
+function parseStructuredDiagramBlock(text: string): { content?: DiagramDeliveryContent; invalid: boolean } {
+  const fenced = text.match(/```facetwrite_diagram_delivery\s*([\s\S]*?)```/i);
+  const jsonText = fenced?.[1]?.trim();
+  if (!jsonText) return { invalid: false };
+  try {
+    const parsed = JSON.parse(jsonText) as unknown;
+    const record = unwrapDiagramRecord(parsed);
+    if (!record) return { invalid: true };
+    const nodes = readDiagramNodes(record.nodes);
+    if (!nodes.length) return { invalid: true };
+    const nodeIds = new Set<string>();
+    for (const node of nodes) {
+      if (nodeIds.has(node.id)) return { invalid: true };
+      nodeIds.add(node.id);
+    }
+    const edges = readDiagramEdges(record.edges, nodeIds);
+    const sources = Array.isArray(record.sources)
+      ? record.sources.flatMap((source) => {
+          if (!source || typeof source !== "object" || Array.isArray(source)) return [];
+          const item = source as Record<string, unknown>;
+          const url = readString(item.url);
+          return /^https?:\/\//i.test(url) ? [{ title: readString(item.title) || url, url }] : [];
+        })
+      : [];
+    return {
+      invalid: false,
+      content: {
+        assistantText: readString(record.assistant_reply) || readString(record.assistantText),
+        kind: readDiagramKind(record.kind),
+        title: readString(record.title) || "Diagram",
+        layout: readDiagramLayout(record.layout),
+        nodes,
+        edges,
+        sources
+      }
+    };
+  } catch {
+    return { invalid: true };
+  }
+}
+
 function unwrapDeliveryRecord(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
@@ -96,7 +196,91 @@ function unwrapDeliveryRecord(value: unknown) {
 }
 
 function stripDeliveryBlocks(text: string) {
-  return text.replace(/```facetwrite_canvas_delivery\s*[\s\S]*?```/gi, "").replace(/\n{3,}/g, "\n\n").trim();
+  return text
+    .replace(/```facetwrite_canvas_delivery\s*[\s\S]*?```/gi, "")
+    .replace(/```facetwrite_diagram_delivery\s*[\s\S]*?```/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function unwrapDiagramRecord(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const nested = record.facetwrite_diagram_delivery;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) return nested as Record<string, unknown>;
+  return record;
+}
+
+function readDiagramNodes(value: unknown): DiagramDeliveryContent["nodes"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((node) => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return [];
+    const record = node as Record<string, unknown>;
+    const id = readDiagramId(record.id);
+    const label = readString(record.label);
+    if (!id || !label) return [];
+    const parentId = readDiagramId(record.parentId);
+    const position = readPosition(record.position);
+    return [{
+      id,
+      label,
+      body: readString(record.body) || undefined,
+      shape: readDiagramShape(record.shape),
+      tone: readDiagramTone(record.tone),
+      parentId: parentId || undefined,
+      ...(position ? { position } : {})
+    }];
+  });
+}
+
+function readDiagramEdges(value: unknown, nodeIds: Set<string>): DiagramDeliveryContent["edges"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((edge) => {
+    if (!edge || typeof edge !== "object" || Array.isArray(edge)) return [];
+    const record = edge as Record<string, unknown>;
+    const from = readDiagramId(record.from);
+    const to = readDiagramId(record.to);
+    if (!from || !to || from === to || !nodeIds.has(from) || !nodeIds.has(to)) return [];
+    return [{
+      from,
+      to,
+      label: readString(record.label) || undefined,
+      kind: readDiagramEdgeKind(record.kind)
+    }];
+  });
+}
+
+function readDiagramKind(value: unknown): DiagramDeliveryKind {
+  return value === "mindmap" || value === "userflow" || value === "flowchart" || value === "freeform" ? value : "mindmap";
+}
+
+function readDiagramLayout(value: unknown): DiagramDeliveryLayout {
+  return value === "radial" || value === "tree" || value === "left-right" || value === "freeform" ? value : "tree";
+}
+
+function readDiagramShape(value: unknown): DiagramDeliveryShape {
+  return value === "rounded" || value === "rect" || value === "diamond" || value === "parallelogram" || value === "circle" || value === "database" || value === "document" ? value : "rounded";
+}
+
+function readDiagramTone(value: unknown): DiagramDeliveryTone {
+  return value === "primary" || value === "success" || value === "warning" || value === "danger" || value === "neutral" ? value : "neutral";
+}
+
+function readDiagramEdgeKind(value: unknown): DiagramDeliveryContent["edges"][number]["kind"] {
+  return value === "yes" || value === "no" || value === "depends" || value === "contains" ? value : "next";
+}
+
+function readDiagramId(value: unknown) {
+  const text = readString(value).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80);
+  return text || "";
+}
+
+function readPosition(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const x = typeof record.x === "number" ? record.x : Number(record.x);
+  const y = typeof record.y === "number" ? record.y : Number(record.y);
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : undefined;
 }
 
 function stripSourcesSection(text: string) {

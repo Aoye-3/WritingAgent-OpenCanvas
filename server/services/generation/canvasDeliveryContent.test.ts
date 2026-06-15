@@ -65,3 +65,51 @@ test("canvas delivery content fallback removes completion chatter from Canvas bo
     "https://news.example/a"
   ]);
 });
+
+test("canvas delivery content parses structured diagram blocks", () => {
+  const result = resolveCanvasDeliveryContent({
+    instruction: "做成用户流程图",
+    locale: "zh",
+    text: [
+      "已整理为流程图。",
+      "",
+      "```facetwrite_diagram_delivery",
+      JSON.stringify({
+        facetwrite_diagram_delivery: {
+          assistant_reply: "已整理为流程图。",
+          kind: "userflow",
+          title: "注册流程",
+          layout: "left-right",
+          nodes: [
+            { id: "start", label: "开始", shape: "rounded", tone: "primary" },
+            { id: "decision", label: "是否注册", shape: "diamond", tone: "warning", parentId: "start" }
+          ],
+          edges: [{ from: "start", to: "decision", label: "next", kind: "next" }],
+          sources: [{ title: "Spec", url: "https://example.com/spec" }]
+        }
+      }),
+      "```"
+    ].join("\n"),
+    events: []
+  });
+
+  assert.equal(result.usedStructuredBlock, true);
+  assert.equal(result.diagram?.kind, "userflow");
+  assert.equal(result.diagram?.nodes.length, 2);
+  assert.equal(result.diagram?.nodes[1]?.shape, "diamond");
+  assert.equal(result.diagram?.edges[0]?.label, "next");
+  assert.equal(result.assistantText.includes("facetwrite_diagram_delivery"), false);
+});
+
+test("canvas delivery content marks invalid diagram blocks without falling back to document content", () => {
+  const result = resolveCanvasDeliveryContent({
+    instruction: "做成思维导图",
+    locale: "zh",
+    text: "```facetwrite_diagram_delivery\n{\"nodes\":[]}\n```",
+    events: []
+  });
+
+  assert.equal(result.invalidDiagramBlock, true);
+  assert.equal(result.diagram, undefined);
+  assert.equal(result.bodyMarkdown, "");
+});

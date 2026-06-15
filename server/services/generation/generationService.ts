@@ -25,6 +25,7 @@ import { resolveOrchestrationPolicy } from "./orchestrationPolicy.js";
 import { commitCanvasDelivery, planCanvasDelivery } from "../canvasDeliveryPlanner.js";
 import { resolveCanvasDeliveryContent, type CanvasDeliveryContract } from "./canvasDeliveryContent.js";
 import { isDirectCanvasDeliveryIntent } from "./canvasDeliveryIntent.js";
+import { isCanvasWorkflowMode, type CanvasWorkflowMode } from "../../../shared/canvasWorkflow.js";
 import {
   createRunTimelineBuilder,
   safeDecisionTimelineEvent,
@@ -565,16 +566,27 @@ function finalizeCanvasDelivery(input: {
     projectId: input.projectId,
     instruction,
     locale: input.payload.locale,
-    content
+    content,
+    workflowMode: readCanvasWorkflowMode(input.payload.contextValues)
   });
   if (!delivery.required) return { text: content.assistantText || input.text, timelineEvents: localTimelineEvents };
 
   emit(safeDecisionTimelineEvent(timeline, input.payload.locale === "zh"
-    ? "检测到明确 Canvas 交付请求，按“摘要分区 -> 正文 -> 来源”提交节点。"
-    : "Detected an explicit Canvas delivery request and committed outline, body, and sources nodes."));
+    ? delivery.moduleId === "diagram_delivery"
+      ? "检测到明确 Canvas 图形交付请求，按可编辑图形节点提交。"
+      : "检测到明确 Canvas 交付请求，按“摘要分区 -> 正文 -> 来源”提交节点。"
+    : delivery.moduleId === "diagram_delivery"
+      ? "Detected an explicit Canvas diagram delivery request and committed editable diagram nodes."
+      : "Detected an explicit Canvas delivery request and committed outline, body, and sources nodes."));
   const committed = commitCanvasDelivery(input.storage, input.projectId, delivery);
   for (const item of committed) {
     emit(timeline.event("canvas_node_committed", "completed", item.title, input.payload.locale === "zh" ? `已创建或更新节点：${item.title}` : `Created or updated node: ${item.title}`, { nodeId: item.nodeId, title: item.title }));
   }
   return { text: content.assistantText || input.text, timelineEvents: localTimelineEvents };
+}
+
+function readCanvasWorkflowMode(contextValues: GenerateRequest["contextValues"]): CanvasWorkflowMode {
+  const canvas = record(contextValues?.canvas);
+  const workflow = record(canvas.workflow);
+  return isCanvasWorkflowMode(workflow.mode) ? workflow.mode : "batch_delivery";
 }

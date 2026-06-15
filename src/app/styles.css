@@ -1949,6 +1949,21 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   stroke-width: 3;
 }
 
+.canvas-edge-label {
+  position: absolute;
+  z-index: 4;
+  border: 1px solid rgba(124, 143, 171, 0.34);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #315d8f;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1;
+  padding: 4px 7px;
+  pointer-events: none;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
+}
+
 .canvas-node {
   position: relative;
   width: 100%;
@@ -2055,6 +2070,90 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 
 .canvas-node-unknown {
   background: #f8fafc;
+}
+
+.canvas-node-diagram {
+  place-items: center;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 9px 12px;
+  border-color: rgba(49, 93, 143, 0.38);
+  background: #ffffff;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.1);
+}
+
+.canvas-node-diagram.tone-primary { background: #eef6ff; border-color: rgba(37, 99, 235, 0.48); }
+.canvas-node-diagram.tone-success { background: #eaf8ef; border-color: rgba(22, 163, 74, 0.42); }
+.canvas-node-diagram.tone-warning { background: #fff5d8; border-color: rgba(217, 119, 6, 0.42); }
+.canvas-node-diagram.tone-danger { background: #ffeceb; border-color: rgba(220, 38, 38, 0.42); }
+.canvas-node-diagram.tone-neutral { background: #ffffff; }
+
+.canvas-node-diagram.is-diamond {
+  border-radius: 4px;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  padding: 28px 34px;
+}
+
+.canvas-node-diagram.is-parallelogram {
+  border-radius: 4px;
+  clip-path: polygon(10% 0, 100% 0, 90% 100%, 0 100%);
+  padding-inline: 28px;
+}
+
+.canvas-node-diagram.is-circle {
+  border-radius: 999px;
+  padding: 18px;
+}
+
+.canvas-node-diagram.is-database {
+  border-radius: 50% / 12%;
+}
+
+.canvas-node-diagram.is-document {
+  border-radius: 6px 6px 16px 6px;
+}
+
+.canvas-node-diagram .canvas-node-header {
+  justify-content: center;
+  min-height: 20px;
+  font-size: 9px;
+  opacity: 0.76;
+}
+
+.canvas-diagram-node-body {
+  grid-row: 2;
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  place-items: center;
+  text-align: center;
+}
+
+.canvas-diagram-node-title,
+.canvas-diagram-node-content {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #172033;
+  text-align: center;
+}
+
+.canvas-diagram-node-title {
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.18;
+}
+
+.canvas-diagram-node-content {
+  max-height: 54px;
+  overflow: hidden;
+  color: #4a566f;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+  resize: none;
 }
 
 .canvas-node-header {

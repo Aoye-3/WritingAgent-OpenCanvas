@@ -9,8 +9,8 @@ const minimumSafeLength = 80;
 const minChunkLength = 24;
 const preferredChunkLength = 48;
 const maxChunkLength = 80;
-const canvasDeliveryBlockPattern = /```facetwrite_canvas_delivery|facetwrite_canvas_delivery/i;
-const unsafeStreamPattern = /#\s*AgentCard|#\s*Loaded Skills|#\s*Current User Instruction|#\s*Output Contract|FacetWrite runtime context|reasoning_content|LLM request failed:|Content Exists Risk|The configured LLM provider (?:is|rejected the request)|"results"\s*:|"tool_call_id"\s*:|facetwrite_canvas_delivery/i;
+const canvasDeliveryBlockPattern = /```facetwrite_(?:canvas|diagram)_delivery|facetwrite_(?:canvas|diagram)_delivery/i;
+const unsafeStreamPattern = /#\s*AgentCard|#\s*Loaded Skills|#\s*Current User Instruction|#\s*Output Contract|FacetWrite runtime context|reasoning_content|LLM request failed:|Content Exists Risk|The configured LLM provider (?:is|rejected the request)|"results"\s*:|"tool_call_id"\s*:|facetwrite_(?:canvas|diagram)_delivery/i;
 
 export function createProgressiveTextGate(
   locale: GenerateRequest["locale"],

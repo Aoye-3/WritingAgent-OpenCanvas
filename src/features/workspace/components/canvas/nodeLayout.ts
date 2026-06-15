@@ -50,6 +50,35 @@ export function readCanvasNodeMetadata(metadata: unknown): CanvasNodeMetadata {
   return metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata as CanvasNodeMetadata : {};
 }
 
+export type CanvasDiagramMetadata = {
+  deliveryId?: string;
+  module: "diagram_delivery";
+  diagramKind?: "mindmap" | "userflow" | "flowchart" | "freeform";
+  layout?: "radial" | "tree" | "left-right" | "freeform";
+  shape: "rounded" | "rect" | "diamond" | "parallelogram" | "circle" | "database" | "document";
+  tone: "primary" | "success" | "warning" | "danger" | "neutral";
+  sourceId?: string;
+  parentId?: string;
+};
+
+export function readDiagramMetadata(metadata: unknown): CanvasDiagramMetadata | undefined {
+  const diagram = readCanvasNodeMetadata(metadata).diagram;
+  if (!diagram || typeof diagram !== "object" || Array.isArray(diagram)) return undefined;
+  const record = diagram as Record<string, unknown>;
+  if (record.module !== "diagram_delivery") return undefined;
+  const shape = readDiagramShape(record.shape);
+  return {
+    deliveryId: readOptionalString(record.deliveryId),
+    module: "diagram_delivery",
+    diagramKind: readDiagramKind(record.diagramKind),
+    layout: readDiagramLayout(record.layout),
+    shape,
+    tone: readDiagramTone(record.tone),
+    sourceId: readOptionalString(record.sourceId),
+    parentId: readOptionalString(record.parentId)
+  };
+}
+
 export function readDimension(value: unknown, fallback: number) {
   const numeric = typeof value === "number" ? value : Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -69,4 +98,24 @@ export function withManualCanvasSize(metadata: unknown): CanvasNodeMetadata {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function readDiagramShape(value: unknown): CanvasDiagramMetadata["shape"] {
+  return value === "rect" || value === "diamond" || value === "parallelogram" || value === "circle" || value === "database" || value === "document" ? value : "rounded";
+}
+
+function readDiagramTone(value: unknown): CanvasDiagramMetadata["tone"] {
+  return value === "primary" || value === "success" || value === "warning" || value === "danger" ? value : "neutral";
+}
+
+function readDiagramKind(value: unknown): CanvasDiagramMetadata["diagramKind"] | undefined {
+  return value === "mindmap" || value === "userflow" || value === "flowchart" || value === "freeform" ? value : undefined;
+}
+
+function readDiagramLayout(value: unknown): CanvasDiagramMetadata["layout"] | undefined {
+  return value === "radial" || value === "tree" || value === "left-right" || value === "freeform" ? value : undefined;
+}
+
+function readOptionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }

@@ -1,5 +1,5 @@
 export type CanvasWorkflowStage = "inspiration" | "research" | "structure" | "writing" | "polish" | "publish";
-export type CanvasWorkflowMode = "batch_delivery";
+export type CanvasWorkflowMode = "batch_delivery" | "mind_map" | "user_flow" | "freeform_diagram";
 export type CanvasWorkflowSuggestionStatus = "pending" | "accepted" | "ignored";
 
 export type CanvasWorkflowRole = {
@@ -74,7 +74,7 @@ export type CanvasWorkflowContext = {
 };
 
 export const canvasWorkflowStages: CanvasWorkflowStage[] = ["inspiration", "research", "structure", "writing", "polish", "publish"];
-export const canvasWorkflowModes: CanvasWorkflowMode[] = ["batch_delivery"];
+export const canvasWorkflowModes: CanvasWorkflowMode[] = ["batch_delivery", "mind_map", "user_flow", "freeform_diagram"];
 
 export const defaultCanvasWorkflowRoles: CanvasWorkflowRole[] = [
   { id: "structure", label: "Structure", prompt: "Review structure, sequence, and argument flow." },

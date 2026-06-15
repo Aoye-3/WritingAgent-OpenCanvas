@@ -181,7 +181,7 @@ function AppContent() {
     const contextNodes = canvasState.canvasWorkflow
       ? canvasState.canvasNodes.filter((node) => contextNodeIds.has(node.id))
       : canvasState.canvasNodes.filter((node) => node.kind !== "note" && selectedAndRelatedNodeIds.has(node.id));
-    if (contextNodes.length > 0 || (selectedCanvasNode && selectedCanvasNode.kind !== "note")) {
+    if (canvasState.canvasWorkflow || contextNodes.length > 0 || (selectedCanvasNode && selectedCanvasNode.kind !== "note")) {
       values.canvas = {
         nodes: contextNodes.map((node) => ({
           id: node.id,

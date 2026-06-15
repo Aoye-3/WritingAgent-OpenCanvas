@@ -3,7 +3,7 @@ import { flushSync } from "react-dom";
 import type { CanvasNode, CanvasWorkflowRole, CanvasWorkflowStage } from "../../../agents/types";
 import { TrashIcon } from "../../../../shared/icons";
 import { MIN_NODE_SIZE, kindLabels, workflowStageLabels } from "./constants";
-import { computeResize, isKnownCanvasKind, readDimension, withManualCanvasSize } from "./nodeLayout";
+import { computeResize, isKnownCanvasKind, readDiagramMetadata, readDimension, withManualCanvasSize } from "./nodeLayout";
 import { CanvasNodeRenderer } from "./renderers/CanvasNodeRenderer";
 import type { CanvasFlowNode, CanvasLocale, ResizeHandle } from "./types";
 
@@ -13,7 +13,9 @@ export function CanvasNodeFrame({ data, selected }: NodeProps<CanvasFlowNode>) {
   const { isResizing, locale, node, onDeleteNode, onResizeStateChange, onUpdateNode } = data;
   const reactFlow = useReactFlow<CanvasFlowNode>();
   const viewport = useViewport();
+  const diagram = readDiagramMetadata(node.metadata);
   const kindClass = isKnownCanvasKind(node.kind) ? `canvas-node-${node.kind}` : "canvas-node-unknown";
+  const diagramClass = diagram ? `canvas-node-diagram is-${diagram.shape} tone-${diagram.tone}` : "";
   const minSize = isKnownCanvasKind(node.kind) ? MIN_NODE_SIZE[node.kind] : { width: 220, height: 150 };
   const openContextMenu = (event: React.MouseEvent<HTMLElement>) => {
     event.preventDefault();
@@ -78,7 +80,7 @@ export function CanvasNodeFrame({ data, selected }: NodeProps<CanvasFlowNode>) {
   };
 
   return (
-    <article className={`canvas-node ${kindClass} ${selected ? "is-selected" : ""}`} data-testid="canvas-node" onContextMenu={openContextMenu} onPointerEnter={data.onCreationPreviewBlocked}>
+    <article className={`canvas-node ${kindClass} ${diagramClass} ${selected ? "is-selected" : ""}`} data-testid="canvas-node" onContextMenu={openContextMenu} onPointerEnter={data.onCreationPreviewBlocked}>
       <NodeLinkPort />
       {selected ? <ResizeFrame onResizeStart={startResize} /> : null}
       <CanvasNodeHeader locale={locale} node={node} />
@@ -150,9 +152,11 @@ function CanvasNodeHeader({
   node: CanvasNode;
 }) {
   const label = isKnownCanvasKind(node.kind) ? kindLabels[node.kind]?.[locale] ?? node.kind : (locale === "zh" ? "鏈煡鑺傜偣" : "Unknown node");
+  const diagram = readDiagramMetadata(node.metadata);
+  const displayLabel = diagram ? diagram.diagramKind ?? (locale === "zh" ? "图形节点" : "Diagram") : label;
   return (
     <div className="canvas-node-header canvas-node-drag-handle">
-      <span>{label}</span>
+      <span>{displayLabel}</span>
     </div>
   );
 }

@@ -52,9 +52,19 @@ export function buildAgentPrompt(input: PromptBuildInput) {
 
 function formatCanvasDeliveryContract(contract: CanvasDeliveryContract) {
   const localeHint = contract.locale === "zh" ? "Use Chinese field content unless source titles are already in another language." : "Use English field content unless source titles are already in another language.";
+  const preferredDiagramKind = contract.preferredMode === "mind_map"
+    ? "mindmap"
+    : contract.preferredMode === "user_flow"
+      ? "userflow"
+      : contract.preferredMode === "freeform_diagram"
+        ? "freeform"
+        : "";
   return [
     "The user explicitly requested a Canvas delivery. Prepare durable Canvas content separately from the conversational reply.",
-    "Return a short user-facing completion reply, then append exactly one fenced block:",
+    preferredDiagramKind
+      ? `Current Canvas mode prefers editable diagram delivery. Use facetwrite_diagram_delivery with kind "${preferredDiagramKind}" unless the user explicitly asks for ordinary document batches.`
+      : "Current Canvas mode prefers ordinary batch delivery unless the user explicitly asks for a mind map, user flow, flowchart, diagram, or free graphic nodes.",
+    "For ordinary document batches, return a short user-facing completion reply, then append exactly one fenced block:",
     "```facetwrite_canvas_delivery",
     JSON.stringify({
       facetwrite_canvas_delivery: {
@@ -65,6 +75,25 @@ function formatCanvasDeliveryContract(contract: CanvasDeliveryContract) {
       }
     }, null, 2),
     "```",
+    "For mind maps, user flows, flowcharts, diagrams, or free graphic nodes, use this fenced block instead:",
+    "```facetwrite_diagram_delivery",
+    JSON.stringify({
+      facetwrite_diagram_delivery: {
+        assistant_reply: "short completion reply for the chat bubble",
+        kind: "mindmap",
+        title: "Diagram title",
+        layout: "tree",
+        nodes: [
+          { id: "root", label: "Main topic", shape: "rounded", tone: "primary" },
+          { id: "decision", label: "Decision", shape: "diamond", tone: "warning", parentId: "root" }
+        ],
+        edges: [{ from: "root", to: "decision", label: "next", kind: "next" }],
+        sources: [{ title: "source title", url: "https://example.com" }]
+      }
+    }, null, 2),
+    "```",
+    "Diagram kind must be one of mindmap, userflow, flowchart, freeform. Layout must be one of radial, tree, left-right, freeform.",
+    "Diagram nodes must use stable ids and labels. Optional shapes: rounded, rect, diamond, parallelogram, circle, database, document. Optional tones: primary, success, warning, danger, neutral.",
     "The fenced block is not a reasoning trace. Include only final deliverable content and usable source links.",
     "Do not include hidden reasoning, prompts, messages, raw tool JSON, or chain-of-thought.",
     localeHint

@@ -218,7 +218,7 @@ export type CanvasWriteSuggestion = {
   nodeIds: string[]; createdAt: string; updatedAt: string;
 };
 export type CanvasWorkflowStage = "inspiration" | "research" | "structure" | "writing" | "polish" | "publish";
-export type CanvasWorkflowMode = "batch_delivery";
+export type CanvasWorkflowMode = "batch_delivery" | "mind_map" | "user_flow" | "freeform_diagram";
 export type CanvasWorkflowSuggestionStatus = "pending" | "accepted" | "ignored";
 
 export type CanvasWorkflowRole = {

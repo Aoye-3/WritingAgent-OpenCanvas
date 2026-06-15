@@ -38,6 +38,8 @@ test("Canvas delivery contract is injected only when supplied", () => {
     canvasDeliveryContract: {
       id: "facetwrite_canvas_delivery_v1",
       format: "facetwrite_canvas_delivery",
+      diagramFormat: "facetwrite_diagram_delivery",
+      preferredMode: "mind_map",
       locale: "zh"
     }
   });
@@ -47,6 +49,9 @@ test("Canvas delivery contract is injected only when supplied", () => {
   assert.match(prompt, /assistant_reply/);
   assert.match(prompt, /outline_markdown/);
   assert.match(prompt, /body_markdown/);
+  assert.match(prompt, /facetwrite_diagram_delivery/);
+  assert.match(prompt, /kind "mindmap"/);
+  assert.match(prompt, /shape/);
 
   const ordinary = buildAgentPrompt({
     agentCard: agentCards[0],

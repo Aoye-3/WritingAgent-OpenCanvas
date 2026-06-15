@@ -1,6 +1,6 @@
 import type { CanvasNode, CanvasWriteRequest } from "../../../../agents/types";
 import type { CanvasNodePatch, CanvasRangeRewriteDraft } from "../../../../canvas/canvasClient";
-import { isKnownCanvasKind } from "../nodeLayout";
+import { isKnownCanvasKind, readDiagramMetadata } from "../nodeLayout";
 import type { CanvasLocale } from "../types";
 import { DocumentNodeRenderer } from "./DocumentNodeRenderer";
 import { FallbackNodeRenderer } from "./FallbackNodeRenderer";
@@ -8,6 +8,7 @@ import { NoteNodeRenderer } from "./NoteNodeRenderer";
 import { ReferenceNodeRenderer } from "./ReferenceNodeRenderer";
 import { RoleNodeRenderer } from "./RoleNodeRenderer";
 import { PlanNodeRenderer } from "./PlanNodeRenderer";
+import { DiagramNodeRenderer } from "./DiagramNodeRenderer";
 
 type CanvasNodeRendererProps = {
   isSelected: boolean;
@@ -24,6 +25,8 @@ type CanvasNodeRendererProps = {
 };
 
 export function CanvasNodeRenderer(props: CanvasNodeRendererProps) {
+  if (readDiagramMetadata(props.node.metadata)) return <DiagramNodeRenderer {...props} />;
+
   if (!isKnownCanvasKind(props.node.kind)) {
     return <FallbackNodeRenderer isSelected={props.isSelected} locale={props.locale} node={props.node} onUpdateNode={props.onUpdateNode} />;
   }

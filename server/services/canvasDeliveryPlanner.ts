@@ -1,17 +1,29 @@
 import type { SQLiteStorageRepository } from "../storage.js";
+import type { CanvasWorkflowMode } from "../../shared/canvasWorkflow.js";
 import { splitCanvasText, stableDeliveryId } from "./canvasDelivery.js";
-import type { CanvasDeliveryContent } from "./generation/canvasDeliveryContent.js";
+import type { CanvasDeliveryContent, DiagramDeliveryContent, DiagramDeliveryShape } from "./generation/canvasDeliveryContent.js";
 import { formatSourceLinks } from "./generation/sourceLinks.js";
-import { isDirectCanvasDeliveryIntent } from "./generation/canvasDeliveryIntent.js";
+import { isDiagramCanvasDeliveryIntent, isDirectCanvasDeliveryIntent } from "./generation/canvasDeliveryIntent.js";
 
 export { isDirectCanvasDeliveryIntent } from "./generation/canvasDeliveryIntent.js";
 
 type CanvasDeliveryPhase = "outline" | "body" | "sources";
+type CanvasDeliveryModuleId = "document_batch" | "diagram_delivery";
 
 const DELIVERY_NODE_SIZE: Record<CanvasDeliveryPhase, { width: number; height: number }> = {
   outline: { width: 520, height: 260 },
   body: { width: 640, height: 520 },
   sources: { width: 520, height: 320 }
+};
+
+const DIAGRAM_NODE_SIZE: Record<DiagramDeliveryShape, { width: number; height: number }> = {
+  rounded: { width: 230, height: 110 },
+  rect: { width: 230, height: 110 },
+  diamond: { width: 180, height: 150 },
+  parallelogram: { width: 230, height: 110 },
+  circle: { width: 160, height: 160 },
+  database: { width: 230, height: 120 },
+  document: { width: 250, height: 140 }
 };
 
 const DELIVERY_LAYOUT = {
@@ -21,8 +33,16 @@ const DELIVERY_LAYOUT = {
   bodyStaggerY: 280
 };
 
+const DIAGRAM_LAYOUT = {
+  startX: 560,
+  startY: 180,
+  levelGap: 320,
+  rowGap: 190
+};
+
 export type CanvasDeliveryPlan = {
   required: boolean;
+  moduleId?: CanvasDeliveryModuleId;
   nodes: Array<{
     id: string;
     kind: "document" | "reference";
@@ -37,26 +57,33 @@ export type CanvasDeliveryPlan = {
   edges: Array<{ id: string; sourceNodeId: string; targetNodeId: string; label: string }>;
 };
 
-export function planCanvasDelivery(input: {
+type CanvasDeliveryInput = {
   deliveryId: string;
   projectId: string;
   instruction?: string;
   locale: "en" | "zh";
   content: CanvasDeliveryContent;
-}): CanvasDeliveryPlan {
-  if (!isDirectCanvasDeliveryIntent(input.instruction ?? "")) return { required: false, nodes: [], edges: [] };
-  const nodes = [
-    ...outlineNodes(input),
-    ...bodyNodes(input),
-    ...sourceNodes(input)
-  ];
-  const edges = nodes.slice(1).map((node, index) => ({
-    id: stableDeliveryId("edge", input.deliveryId, index + 1),
-    sourceNodeId: nodes[index]!.id,
-    targetNodeId: node.id,
-    label: "next"
-  }));
-  return { required: nodes.length > 0, nodes, edges };
+  workflowMode?: CanvasWorkflowMode;
+};
+
+type CanvasDeliveryModule = {
+  id: CanvasDeliveryModuleId;
+  canPlan: (input: CanvasDeliveryInput) => boolean;
+  plan: (input: CanvasDeliveryInput) => Omit<CanvasDeliveryPlan, "required" | "moduleId">;
+};
+
+const deliveryModules: CanvasDeliveryModule[] = [
+  diagramDeliveryModule(),
+  documentBatchDeliveryModule()
+];
+
+export function planCanvasDelivery(input: CanvasDeliveryInput): CanvasDeliveryPlan {
+  if (!isDirectCanvasDeliveryIntent(input.instruction ?? "")) return emptyPlan();
+  if (input.content.invalidDiagramBlock) return emptyPlan();
+  const module = deliveryModules.find((candidate) => candidate.canPlan(input));
+  if (!module) return emptyPlan();
+  const planned = module.plan(input);
+  return { required: planned.nodes.length > 0, moduleId: module.id, ...planned };
 }
 
 export function commitCanvasDelivery(storage: SQLiteStorageRepository, projectId: string, plan: CanvasDeliveryPlan) {
@@ -96,7 +123,36 @@ export function commitCanvasDelivery(storage: SQLiteStorageRepository, projectId
   return committed;
 }
 
-function outlineNodes(input: Parameters<typeof planCanvasDelivery>[0]) {
+function documentBatchDeliveryModule(): CanvasDeliveryModule {
+  return {
+    id: "document_batch",
+    canPlan: (input) => !input.content.diagram && (input.workflowMode ?? "batch_delivery") === "batch_delivery",
+    plan: (input) => {
+      const nodes = [
+        ...outlineNodes(input),
+        ...bodyNodes(input),
+        ...sourceNodes(input)
+      ];
+      const edges = nodes.slice(1).map((node, index) => ({
+        id: stableDeliveryId("edge", input.deliveryId, index + 1),
+        sourceNodeId: nodes[index]!.id,
+        targetNodeId: node.id,
+        label: "next"
+      }));
+      return { nodes, edges };
+    }
+  };
+}
+
+function diagramDeliveryModule(): CanvasDeliveryModule {
+  return {
+    id: "diagram_delivery",
+    canPlan: (input) => Boolean(input.content.diagram) || isDiagramCanvasDeliveryIntent(input.instruction ?? "") || (input.workflowMode ?? "batch_delivery") !== "batch_delivery",
+    plan: (input) => input.content.diagram ? planDiagramDelivery(input, input.content.diagram) : { nodes: [], edges: [] }
+  };
+}
+
+function outlineNodes(input: CanvasDeliveryInput) {
   const content = input.content.outlineMarkdown.trim();
   if (!content) return [];
   return [node(input, {
@@ -112,7 +168,7 @@ function outlineNodes(input: Parameters<typeof planCanvasDelivery>[0]) {
   })];
 }
 
-function bodyNodes(input: Parameters<typeof planCanvasDelivery>[0]) {
+function bodyNodes(input: CanvasDeliveryInput) {
   const pages = splitCanvasText(input.content.bodyMarkdown.trim(), 1200);
   return pages.map((content, pageIndex) => node(input, {
     index: 2 + pageIndex,
@@ -129,7 +185,7 @@ function bodyNodes(input: Parameters<typeof planCanvasDelivery>[0]) {
   }));
 }
 
-function sourceNodes(input: Parameters<typeof planCanvasDelivery>[0]) {
+function sourceNodes(input: CanvasDeliveryInput) {
   if (!input.content.sources.length) return [];
   const content = `# ${input.locale === "zh" ? "来源" : "Sources"}\n${formatSourceLinks(input.content.sources)}`;
   const bodyPageCount = splitCanvasText(input.content.bodyMarkdown.trim(), 1200).length;
@@ -147,7 +203,7 @@ function sourceNodes(input: Parameters<typeof planCanvasDelivery>[0]) {
   })];
 }
 
-function node(input: Parameters<typeof planCanvasDelivery>[0], value: {
+function node(input: CanvasDeliveryInput, value: {
   index: number;
   phase: CanvasDeliveryPhase;
   kind: "document" | "reference";
@@ -174,6 +230,130 @@ function node(input: Parameters<typeof planCanvasDelivery>[0], value: {
       pageCount: value.pageCount
     }
   };
+}
+
+function planDiagramDelivery(input: CanvasDeliveryInput, diagram: DiagramDeliveryContent) {
+  const positions = layoutDiagram(diagram);
+  const nodeIdByDiagramId = new Map<string, string>();
+  const nodes = diagram.nodes.map((diagramNode, index) => {
+    const id = stableDeliveryId("node", input.deliveryId, index + 1);
+    nodeIdByDiagramId.set(diagramNode.id, id);
+    const size = DIAGRAM_NODE_SIZE[diagramNode.shape];
+    const position = positions.get(diagramNode.id) ?? { x: DIAGRAM_LAYOUT.startX, y: DIAGRAM_LAYOUT.startY };
+    return {
+      id,
+      kind: "document" as const,
+      title: diagramNode.label,
+      content: diagramNode.body ?? "",
+      x: position.x,
+      y: position.y,
+      width: size.width,
+      height: size.height,
+      metadata: {
+        deliveryId: input.deliveryId,
+        phase: "diagram",
+        diagram: {
+          deliveryId: input.deliveryId,
+          module: "diagram_delivery",
+          diagramKind: diagram.kind,
+          layout: diagram.layout,
+          shape: diagramNode.shape,
+          tone: diagramNode.tone,
+          sourceId: diagramNode.id,
+          parentId: diagramNode.parentId
+        }
+      }
+    };
+  });
+
+  const semanticEdges = normalizedDiagramEdges(diagram);
+  const edges = semanticEdges.flatMap((edge, index) => {
+    const sourceNodeId = nodeIdByDiagramId.get(edge.from);
+    const targetNodeId = nodeIdByDiagramId.get(edge.to);
+    if (!sourceNodeId || !targetNodeId) return [];
+    return [{
+      id: stableDeliveryId("edge", input.deliveryId, index + 1),
+      sourceNodeId,
+      targetNodeId,
+      label: edge.label || edge.kind
+    }];
+  });
+
+  return { nodes, edges };
+}
+
+function normalizedDiagramEdges(diagram: DiagramDeliveryContent) {
+  const seen = new Set<string>();
+  const edges: DiagramDeliveryContent["edges"] = [];
+  const add = (edge: DiagramDeliveryContent["edges"][number]) => {
+    const key = `${edge.from}->${edge.to}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    edges.push(edge);
+  };
+  for (const node of diagram.nodes) {
+    if (node.parentId) add({ from: node.parentId, to: node.id, kind: "contains" });
+  }
+  for (const edge of diagram.edges) add(edge);
+  return edges;
+}
+
+function layoutDiagram(diagram: DiagramDeliveryContent) {
+  const explicit = diagram.layout === "freeform";
+  const levels = diagram.layout === "radial"
+    ? radialLevels(diagram)
+    : directedLevels(diagram);
+  const positions = new Map<string, { x: number; y: number }>();
+  const maxRows = Math.max(...levels.map((level) => level.length), 1);
+  levels.forEach((level, levelIndex) => {
+    const levelOffset = ((maxRows - level.length) * DIAGRAM_LAYOUT.rowGap) / 2;
+    level.forEach((nodeId, rowIndex) => {
+      const node = diagram.nodes.find((item) => item.id === nodeId);
+      if (explicit && node?.position) {
+        positions.set(nodeId, { x: Math.round(node.position.x), y: Math.round(node.position.y) });
+        return;
+      }
+      positions.set(nodeId, {
+        x: DIAGRAM_LAYOUT.startX + levelIndex * DIAGRAM_LAYOUT.levelGap,
+        y: DIAGRAM_LAYOUT.startY + levelOffset + rowIndex * DIAGRAM_LAYOUT.rowGap
+      });
+    });
+  });
+  return positions;
+}
+
+function radialLevels(diagram: DiagramDeliveryContent) {
+  const levels = directedLevels(diagram);
+  if (levels.length <= 2) return levels;
+  return levels;
+}
+
+function directedLevels(diagram: DiagramDeliveryContent) {
+  const childIds = new Set<string>();
+  for (const edge of normalizedDiagramEdges(diagram)) childIds.add(edge.to);
+  const roots = diagram.nodes.filter((node) => !node.parentId && !childIds.has(node.id)).map((node) => node.id);
+  const queue = (roots.length ? roots : [diagram.nodes[0]!.id]).map((id) => ({ id, level: 0 }));
+  const byParent = new Map<string, string[]>();
+  for (const edge of normalizedDiagramEdges(diagram)) {
+    byParent.set(edge.from, [...(byParent.get(edge.from) ?? []), edge.to]);
+  }
+  const seen = new Set<string>();
+  const levels: string[][] = [];
+  while (queue.length) {
+    const current = queue.shift()!;
+    if (seen.has(current.id)) continue;
+    seen.add(current.id);
+    levels[current.level] = [...(levels[current.level] ?? []), current.id];
+    for (const child of byParent.get(current.id) ?? []) queue.push({ id: child, level: current.level + 1 });
+  }
+  for (const node of diagram.nodes) {
+    if (!seen.has(node.id)) levels[0] = [...(levels[0] ?? []), node.id];
+  }
+  return levels.filter(Boolean);
+}
+
+function emptyPlan(): CanvasDeliveryPlan {
+  return { required: false, nodes: [], edges: [] };
 }
 
 function titleFromMarkdown(content: string, fallback: string) {

@@ -35,5 +35,8 @@ export const workflowStageLabels: Record<CanvasWorkflowStage, { en: string; zh: 
 };
 
 export const workflowModeLabels: Record<CanvasWorkflowMode, { en: string; zh: string }> = {
-  batch_delivery: { en: "Batch delivery", zh: "批次交付" }
+  batch_delivery: { en: "Batch delivery", zh: "批次交付" },
+  mind_map: { en: "Mind map", zh: "思维导图" },
+  user_flow: { en: "User flow", zh: "用户流程" },
+  freeform_diagram: { en: "Freeform", zh: "自由图形" }
 };

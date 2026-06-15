@@ -16,6 +16,7 @@ import { shouldExcludeFromModelContext } from "./outputNormalizer.js";
 import { planPhaseSystemPrompt, resolvePlanRequestPolicy } from "./planRequestPolicy.js";
 import { isDirectCanvasDeliveryIntent } from "./canvasDeliveryIntent.js";
 import { createCanvasDeliveryContract, type CanvasDeliveryContract } from "./canvasDeliveryContent.js";
+import { isCanvasWorkflowMode, type CanvasWorkflowMode } from "../../../shared/canvasWorkflow.js";
 
 export type GenerateModelSettings = ConversationModelRuntimeSettings;
 
@@ -111,7 +112,18 @@ export async function buildGenerationRunContext(
 
 function canvasDeliveryContractForPayload(payload: GenerateRequest) {
   const instruction = payload.chatInstruction?.trim() || payload.freeTextPrompt?.trim() || "";
-  return isDirectCanvasDeliveryIntent(instruction) ? createCanvasDeliveryContract(payload.locale) : undefined;
+  return isDirectCanvasDeliveryIntent(instruction) ? createCanvasDeliveryContract(payload.locale, readCanvasWorkflowMode(payload.contextValues)) : undefined;
+}
+
+function readCanvasWorkflowMode(contextValues: GenerateRequest["contextValues"]): CanvasWorkflowMode {
+  const canvas = readRecord(contextValues?.canvas);
+  const workflow = readRecord(canvas?.workflow);
+  const mode = workflow?.mode;
+  return isCanvasWorkflowMode(mode) ? mode : "batch_delivery";
+}
+
+function readRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
 export async function resolveModelSettings(

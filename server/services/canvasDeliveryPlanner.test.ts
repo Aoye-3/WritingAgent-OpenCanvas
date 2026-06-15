@@ -63,6 +63,8 @@ test("direct canvas delivery intent is broad but does not match ordinary summary
   assert.equal(isDirectCanvasDeliveryIntent("整理成节点"), true);
   assert.equal(isDirectCanvasDeliveryIntent("create nodes for this"), true);
   assert.equal(isDirectCanvasDeliveryIntent("send this to board"), true);
+  assert.equal(isDirectCanvasDeliveryIntent("请生成思维导图"), true);
+  assert.equal(isDirectCanvasDeliveryIntent("make a user flow diagram"), true);
   assert.equal(isDirectCanvasDeliveryIntent("总结一下最近新闻"), false);
 });
 
@@ -76,6 +78,85 @@ test("canvas delivery planner ignores ordinary chat without explicit canvas inte
       assistantText: "普通回答",
       outlineMarkdown: "# 摘要\n普通回答",
       bodyMarkdown: "普通回答",
+      sources: [],
+      usedStructuredBlock: false
+    }
+  });
+
+  assert.equal(delivery.required, false);
+  assert.equal(delivery.nodes.length, 0);
+});
+
+test("canvas delivery planner creates editable diagram nodes for diagram delivery", () => {
+  const delivery = planCanvasDelivery({
+    deliveryId: "diagram_1",
+    projectId: "project_1",
+    instruction: "请输出用户流程图到画布",
+    locale: "zh",
+    content: {
+      assistantText: "已整理为流程图。",
+      outlineMarkdown: "",
+      bodyMarkdown: "",
+      sources: [],
+      usedStructuredBlock: true,
+      diagram: {
+        assistantText: "已整理为流程图。",
+        kind: "userflow",
+        title: "注册流程",
+        layout: "left-right",
+        nodes: [
+          { id: "start", label: "开始", shape: "rounded", tone: "primary" },
+          { id: "choice", label: "是否登录", shape: "diamond", tone: "warning", parentId: "start" },
+          { id: "success", label: "进入首页", shape: "parallelogram", tone: "success" }
+        ],
+        edges: [
+          { from: "choice", to: "success", label: "Yes", kind: "yes" }
+        ],
+        sources: []
+      }
+    }
+  });
+
+  assert.equal(delivery.required, true);
+  assert.equal(delivery.moduleId, "diagram_delivery");
+  assert.deepEqual(delivery.nodes.map((node) => node.id), ["node_diagram_1_1", "node_diagram_1_2", "node_diagram_1_3"]);
+  assert.deepEqual(delivery.nodes.map((node) => node.kind), ["document", "document", "document"]);
+  assert.equal((delivery.nodes[1]?.metadata?.diagram as { shape?: string } | undefined)?.shape, "diamond");
+  assert.equal((delivery.nodes[1]?.metadata?.diagram as { diagramKind?: string } | undefined)?.diagramKind, "userflow");
+  assert.deepEqual(delivery.edges.map((edge) => edge.label), ["contains", "Yes"]);
+});
+
+test("canvas delivery planner rejects invalid diagram blocks instead of creating document nodes", () => {
+  const delivery = planCanvasDelivery({
+    deliveryId: "diagram_invalid",
+    projectId: "project_1",
+    instruction: "做成思维导图",
+    locale: "zh",
+    content: {
+      assistantText: "无法生成图。",
+      outlineMarkdown: "# Should not write",
+      bodyMarkdown: "Should not write",
+      sources: [],
+      usedStructuredBlock: false,
+      invalidDiagramBlock: true
+    }
+  });
+
+  assert.equal(delivery.required, false);
+  assert.equal(delivery.nodes.length, 0);
+});
+
+test("canvas delivery planner does not fall back to document batch in mind map mode", () => {
+  const delivery = planCanvasDelivery({
+    deliveryId: "diagram_mode_missing_block",
+    projectId: "project_1",
+    instruction: "把相关信息整理到 Canvas 里",
+    locale: "zh",
+    workflowMode: "mind_map",
+    content: {
+      assistantText: "已整理。",
+      outlineMarkdown: "# 摘要",
+      bodyMarkdown: "普通正文",
       sources: [],
       usedStructuredBlock: false
     }
