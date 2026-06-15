@@ -10,6 +10,7 @@ import { RoleNodeRenderer } from "./RoleNodeRenderer";
 import { PlanNodeRenderer } from "./PlanNodeRenderer";
 
 type CanvasNodeRendererProps = {
+  isSelected: boolean;
   isResizing: boolean;
   locale: CanvasLocale;
   node: CanvasNode;
@@ -24,7 +25,7 @@ type CanvasNodeRendererProps = {
 
 export function CanvasNodeRenderer(props: CanvasNodeRendererProps) {
   if (!isKnownCanvasKind(props.node.kind)) {
-    return <FallbackNodeRenderer locale={props.locale} node={props.node} onUpdateNode={props.onUpdateNode} />;
+    return <FallbackNodeRenderer isSelected={props.isSelected} locale={props.locale} node={props.node} onUpdateNode={props.onUpdateNode} />;
   }
 
   if (props.node.kind === "document") return <DocumentNodeRenderer {...props} />;

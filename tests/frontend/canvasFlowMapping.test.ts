@@ -49,6 +49,36 @@ test("Canvas flow mapping preserves live geometry while a node is resizing", () 
   assert.equal(flowNodes[0].data.isResizing, true);
 });
 
+test("Canvas flow mapping keeps unselected nodes draggable in select mode", () => {
+  const nodes = [{
+    id: "node_1",
+    threadId: "thread_1",
+    kind: "document" as const,
+    title: "Draft",
+    content: "Body",
+    x: 10,
+    y: 20,
+    width: 300,
+    height: 180,
+    metadata: {},
+    createdAt: "",
+    updatedAt: ""
+  }];
+
+  const flowNodes = buildCanvasFlowNodes({
+    nodes,
+    currentNodes: [],
+    selectedNodeId: undefined,
+    resizingNodeId: null,
+    locale: "en",
+    suggestions: [],
+    callbacks
+  });
+
+  assert.equal(flowNodes[0].selected, false);
+  assert.equal(flowNodes[0].draggable, true);
+});
+
 test("Canvas flow mapping attaches only suggestions owned by the mapped node", () => {
   const nodes = [
     {

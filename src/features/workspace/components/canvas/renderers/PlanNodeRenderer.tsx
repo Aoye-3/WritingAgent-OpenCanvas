@@ -5,7 +5,7 @@ export function PlanNodeRenderer({ node }: { node: CanvasNode }) {
   if (projection?.steps.length) {
     const current = projection.steps.find((step) => step.id === projection.currentStepId);
     return (
-      <div className="canvas-plan-node nodrag">
+      <div className="canvas-plan-node">
         <p>Status: {projection.status}{current ? ` | Current: ${current.title}` : ""}</p>
         {projection.artifactCount ? <p>Artifacts: {projection.artifactCount} committed</p> : <p>Artifacts: none yet</p>}
         {projection.steps.map((step) => (
@@ -21,7 +21,7 @@ export function PlanNodeRenderer({ node }: { node: CanvasNode }) {
 
   const lines = node.content.split("\n").filter(Boolean);
   return (
-    <div className="canvas-plan-node nodrag">
+    <div className="canvas-plan-node">
       {lines.map((line, index) => {
         const match = line.match(/^\[(x| )\]\s+(.+)$/i);
         if (match) {

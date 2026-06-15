@@ -54,7 +54,7 @@ export function buildCanvasFlowNodes({
     return {
       id: node.id,
       type: "canvasNode",
-      draggable: node.id === selectedNodeId && !resizingNodeId,
+      draggable: !resizingNodeId,
       position: preserveLiveGeometry && current ? current.position : { x: node.x, y: node.y },
       selected: node.id === selectedNodeId,
       style: { width: preserveLiveGeometry ? liveWidth : node.width, height: preserveLiveGeometry ? liveHeight : node.height },

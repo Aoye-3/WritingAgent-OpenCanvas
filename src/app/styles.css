@@ -2240,12 +2240,9 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 }
 
 .canvas-node-resize-line {
-  pointer-events: auto;
-}
-
-.canvas-node-resize-line {
   position: absolute;
   background: rgba(37, 99, 235, 0.82);
+  pointer-events: none;
 }
 
 .canvas-node-resize-line-n,
@@ -2271,7 +2268,7 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 .canvas-node-resize-handle {
   position: absolute;
   z-index: 4;
-  pointer-events: none;
+  pointer-events: auto;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -5790,6 +5787,12 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   color: var(--blue, #1677ff);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+.canvas-source-markdown a[aria-disabled="true"] {
+  color: inherit;
+  cursor: inherit;
+  text-decoration-color: rgba(100, 116, 139, 0.35);
 }
 
 .canvas-source-markdown code {

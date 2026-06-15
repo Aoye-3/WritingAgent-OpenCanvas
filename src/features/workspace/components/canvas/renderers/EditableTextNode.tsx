@@ -6,13 +6,14 @@ import type { CanvasLocale } from "../types";
 import { SourceMarkdownText } from "./SourceMarkdownText";
 
 type EditableTextNodeProps = {
+  isSelected: boolean;
   isResizing: boolean;
   locale: CanvasLocale;
   node: CanvasNode;
   onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
 };
 
-export function EditableTextNode({ isResizing, locale, node, onUpdateNode }: EditableTextNodeProps) {
+export function EditableTextNode({ isSelected, isResizing, locale, node, onUpdateNode }: EditableTextNodeProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [title, setTitle] = useState(node.title);
   const [content, setContent] = useState(node.content);
@@ -47,7 +48,7 @@ export function EditableTextNode({ isResizing, locale, node, onUpdateNode }: Edi
         onKeyDown={(event) => { if (event.key === "Escape") event.currentTarget.blur(); }}
         onChange={(event) => setTitle(event.currentTarget.value)}
         value={title}
-      /> : <div className="canvas-node-title canvas-node-readonly" data-testid="canvas-node-title" onDoubleClick={() => setEditing("title")}>{title}</div>}
+      /> : <div className="canvas-node-title canvas-node-readonly" data-testid="canvas-node-title" onClick={() => { if (isSelected) setEditing("title"); }}>{title}</div>}
       {editing === "content" ? <textarea
         autoFocus
         className="canvas-node-content nodrag nowheel"
@@ -61,8 +62,8 @@ export function EditableTextNode({ isResizing, locale, node, onUpdateNode }: Edi
         }}
         onKeyDown={(event) => { if (event.key === "Escape") event.currentTarget.blur(); }}
         onChange={(event) => setContent(event.currentTarget.value)}
-      /> : <div className="canvas-node-content canvas-node-readonly" data-testid="canvas-node-content" onDoubleClick={() => setEditing("content")}>
-        {content ? <SourceMarkdownText text={content} /> : (locale === "zh" ? "双击编辑内容" : "Double-click to edit content")}
+      /> : <div className="canvas-node-content canvas-node-readonly" data-testid="canvas-node-content" onClick={() => { if (isSelected) setEditing("content"); }}>
+        {content ? <SourceMarkdownText linksEnabled={false} text={content} /> : (locale === "zh" ? "再次点击编辑内容" : "Click again to edit content")}
       </div>}
     </div>
   );

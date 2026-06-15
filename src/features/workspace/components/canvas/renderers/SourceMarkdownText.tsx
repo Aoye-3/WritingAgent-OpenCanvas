@@ -1,32 +1,32 @@
 import type { ReactNode } from "react";
 
-export function SourceMarkdownText({ text }: { text: string }) {
+export function SourceMarkdownText({ linksEnabled = true, text }: { linksEnabled?: boolean; text: string }) {
   const blocks = toBlocks(text);
   return (
     <div className="canvas-source-markdown">
       {blocks.map((block, index) => {
         if (block.kind === "heading") {
           const Tag = `h${block.level}` as "h1" | "h2" | "h3" | "h4";
-          return <Tag key={index}>{renderInline(block.text, block.offset, block.paragraph)}</Tag>;
+          return <Tag key={index}>{renderInline(block.text, block.offset, block.paragraph, linksEnabled)}</Tag>;
         }
 
         if (block.kind === "ul") {
-          return <ul key={index}>{block.items.map((item) => <li key={`${item.offset}-${item.paragraph}`}>{renderInline(item.text, item.offset, item.paragraph)}</li>)}</ul>;
+          return <ul key={index}>{block.items.map((item) => <li key={`${item.offset}-${item.paragraph}`}>{renderInline(item.text, item.offset, item.paragraph, linksEnabled)}</li>)}</ul>;
         }
 
         if (block.kind === "ol") {
-          return <ol key={index}>{block.items.map((item) => <li key={`${item.offset}-${item.paragraph}`}>{renderInline(item.text, item.offset, item.paragraph)}</li>)}</ol>;
+          return <ol key={index}>{block.items.map((item) => <li key={`${item.offset}-${item.paragraph}`}>{renderInline(item.text, item.offset, item.paragraph, linksEnabled)}</li>)}</ol>;
         }
 
         if (block.kind === "table") {
           return <div className="canvas-source-table-wrap" key={index}>
             <table>
               <thead>
-                <tr>{block.header.map((cell, cellIndex) => <th key={`${cell.offset}-${cellIndex}`}>{renderInline(cell.text, cell.offset, cell.paragraph)}</th>)}</tr>
+                <tr>{block.header.map((cell, cellIndex) => <th key={`${cell.offset}-${cellIndex}`}>{renderInline(cell.text, cell.offset, cell.paragraph, linksEnabled)}</th>)}</tr>
               </thead>
               <tbody>
                 {block.rows.map((row, rowIndex) => (
-                  <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={`${cell.offset}-${cellIndex}`}>{renderInline(cell.text, cell.offset, cell.paragraph)}</td>)}</tr>
+                  <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={`${cell.offset}-${cellIndex}`}>{renderInline(cell.text, cell.offset, cell.paragraph, linksEnabled)}</td>)}</tr>
                 ))}
               </tbody>
             </table>
@@ -35,7 +35,7 @@ export function SourceMarkdownText({ text }: { text: string }) {
 
         return <p data-source-paragraph={block.paragraph} key={`${block.offset}-${index}`}>
           {block.parts.length ? block.parts.flatMap((part, partIndex) => [
-            ...renderInline(part.text, part.offset, part.paragraph),
+            ...renderInline(part.text, part.offset, part.paragraph, linksEnabled),
             partIndex < block.parts.length - 1 ? " " : null
           ]) : <br />}
         </p>;
@@ -184,7 +184,7 @@ function parseTableRow(line: SourceLine): SourceCell[] {
   return cells;
 }
 
-function renderInline(line: string, lineOffset: number, paragraph: number) {
+function renderInline(line: string, lineOffset: number, paragraph: number, linksEnabled: boolean) {
   const nodes: ReactNode[] = [];
   const pattern = /(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_|`[^`]+`)/g;
   let cursor = 0;
@@ -197,7 +197,20 @@ function renderInline(line: string, lineOffset: number, paragraph: number) {
       const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       if (link) {
         const start = lineOffset + index + 1;
-        nodes.push(<a href={safeHref(link[2])} key={`${start}-link`} rel="noreferrer" target="_blank">
+        nodes.push(<a
+          aria-disabled={!linksEnabled}
+          href={linksEnabled ? safeHref(link[2]) : "#"}
+          key={`${start}-link`}
+          rel="noreferrer"
+          target="_blank"
+          onClick={(event) => {
+            if (!linksEnabled) {
+              event.preventDefault();
+              return;
+            }
+            event.stopPropagation();
+          }}
+        >
           {sourceSpan(link[1], start, paragraph, tokenIndex++)}
         </a>);
       }

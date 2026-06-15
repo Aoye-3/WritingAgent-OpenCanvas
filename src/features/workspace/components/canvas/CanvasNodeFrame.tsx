@@ -85,6 +85,7 @@ export function CanvasNodeFrame({ data, selected }: NodeProps<CanvasFlowNode>) {
       <CanvasNodeWorkflowBadges locale={locale} node={node} />
       <CanvasNodeRenderer
         agentCardId={data.agentCardId}
+        isSelected={Boolean(selected)}
         isResizing={isResizing}
         locale={locale}
         modelOverrides={data.modelOverrides}

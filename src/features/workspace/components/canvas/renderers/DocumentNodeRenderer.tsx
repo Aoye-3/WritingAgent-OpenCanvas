@@ -4,6 +4,7 @@ import type { CanvasLocale } from "../types";
 import { CollaborativeDocumentNode } from "./CollaborativeDocumentNode";
 
 type DocumentNodeRendererProps = {
+  isSelected: boolean;
   isResizing: boolean;
   locale: CanvasLocale;
   node: CanvasNode;

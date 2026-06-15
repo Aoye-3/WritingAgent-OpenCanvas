@@ -4,6 +4,7 @@ import type { CanvasLocale } from "../types";
 import { EditableTextNode } from "./EditableTextNode";
 
 type ReferenceNodeRendererProps = {
+  isSelected: boolean;
   isResizing: boolean;
   locale: CanvasLocale;
   node: CanvasNode;

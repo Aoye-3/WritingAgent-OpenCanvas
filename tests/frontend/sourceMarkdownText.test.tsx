@@ -23,6 +23,12 @@ test("renders source markdown links without exposing raw markdown syntax", () =>
   assert.doesNotMatch(html, /\]\(https:\/\/www\.apple\.com/);
 });
 
+test("renders source markdown links inert before content interaction", () => {
+  const html = renderToStaticMarkup(<SourceMarkdownText linksEnabled={false} text={"[Apple Compare](https://www.apple.com/mac/compare/)"} />);
+  assert.match(html, /aria-disabled="true"/);
+  assert.match(html, /<a aria-disabled="true" href="#"[^>]*>.*Apple Compare.*<\/a>/);
+});
+
 test("renders source markdown tables as compact tables", () => {
   const markdown = [
     "| 特性 | M4 MacBook Air | M3 MacBook Air |",
@@ -56,9 +62,9 @@ test("renders reference node content as markdown in readonly mode", () => {
     updatedAt: now
   };
   const html = renderToStaticMarkup(
-    <ReferenceNodeRenderer isResizing={false} locale="zh" node={node} onUpdateNode={async () => undefined} />
+    <ReferenceNodeRenderer isSelected={true} isResizing={false} locale="zh" node={node} onUpdateNode={async () => undefined} />
   );
-  assert.match(html, /<a href="https:\/\/www\.apple\.com\/mac\/compare\/"[^>]*>.*Apple Compare.*<\/a>/);
+  assert.match(html, /<a aria-disabled="true" href="#"[^>]*>.*Apple Compare.*<\/a>/);
   assert.doesNotMatch(html, /\[Apple Compare\]/);
 });
 

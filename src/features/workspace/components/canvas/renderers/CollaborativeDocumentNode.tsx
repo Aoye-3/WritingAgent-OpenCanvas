@@ -12,6 +12,7 @@ type SelectionState = { start: number; end: number; text: string; rect: DOMRect 
 
 type CollaborativeDocumentNodeProps = {
   agentCardId?: string;
+  isSelected: boolean;
   isResizing: boolean;
   locale: CanvasLocale;
   modelOverrides?: CanvasRangeRewriteDraft["modelOverrides"];
@@ -50,7 +51,7 @@ export function CollaborativeDocumentNode(props: CollaborativeDocumentNodeProps)
   }, [localRequest?.status, props.pendingRequest]);
 
   const readSelection = () => {
-    if (editing || request) return;
+    if (!props.isSelected || editing || request) return;
     const active = window.getSelection();
     if (!active || active.isCollapsed || active.rangeCount === 0) return setSelection(null);
     const range = active.getRangeAt(0);
@@ -121,7 +122,7 @@ export function CollaborativeDocumentNode(props: CollaborativeDocumentNodeProps)
         autoFocus className="canvas-node-title nodrag" data-testid="canvas-node-title" value={title}
         onChange={(event) => setTitle(event.currentTarget.value)}
         onBlur={() => { if (title !== props.node.title) void props.onUpdateNode(props.node.id, { title }); setEditing(null); }}
-      /> : <div className="canvas-node-title canvas-node-readonly" data-testid="canvas-node-title" onDoubleClick={() => setEditing("title")}>{title}</div>}
+      /> : <div className="canvas-node-title canvas-node-readonly" data-testid="canvas-node-title" onClick={() => { if (props.isSelected) setEditing("title"); }}>{title}</div>}
 
       {editing === "content" ? <textarea
         autoFocus className="canvas-node-content nodrag nowheel" data-testid="canvas-node-content" value={content}
@@ -129,16 +130,19 @@ export function CollaborativeDocumentNode(props: CollaborativeDocumentNodeProps)
         onKeyDown={(event) => { if (event.key === "Escape") event.currentTarget.blur(); }}
         onBlur={() => { if (content !== props.node.content) void props.onUpdateNode(props.node.id, { content }); setEditing(null); }}
       /> : <div
-        className="canvas-node-content canvas-node-readonly collaborative-document-content nodrag nopan nowheel"
+        className="canvas-node-content canvas-node-readonly collaborative-document-content nowheel"
         data-testid="canvas-node-content"
         ref={bodyRef}
-        onDoubleClick={() => { if (!request) setEditing("content"); }}
-        onMouseUp={readSelection}
+        onClick={() => {
+          if (!props.isSelected || request) return;
+          setEditing("content");
+        }}
+        onMouseUp={props.isSelected ? readSelection : undefined}
       >
         {request?.operation === "replace_range" ? <div className="canvas-range-proposal-shell">
           <ProposalActions locale={props.locale} onApprove={() => void approve()} onReject={() => void reject()} />
           <RangeProposal content={props.node.content} request={request} />
-        </div> : <SourceMarkdownText text={props.node.content} />}
+        </div> : <SourceMarkdownText linksEnabled={false} text={props.node.content} />}
       </div>}
 
       {error ? <div className="canvas-range-error nodrag">{error}</div> : null}

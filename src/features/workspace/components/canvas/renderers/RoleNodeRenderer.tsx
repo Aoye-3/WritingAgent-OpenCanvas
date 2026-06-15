@@ -4,12 +4,13 @@ import type { CanvasNodePatch } from "../../../../canvas/canvasClient";
 import type { CanvasLocale } from "../types";
 
 type RoleNodeRendererProps = {
+  isSelected: boolean;
   locale: CanvasLocale;
   node: CanvasNode;
   onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
 };
 
-export function RoleNodeRenderer({ locale, node, onUpdateNode }: RoleNodeRendererProps) {
+export function RoleNodeRenderer({ isSelected, locale, node, onUpdateNode }: RoleNodeRendererProps) {
   const role = useMemo(() => readWorkflowRole(node), [node]);
   const [label, setLabel] = useState(role.label);
   const [prompt, setPrompt] = useState(role.prompt);
@@ -45,7 +46,7 @@ export function RoleNodeRenderer({ locale, node, onUpdateNode }: RoleNodeRendere
         }}
         onKeyDown={(event) => { if (event.key === "Escape") event.currentTarget.blur(); }}
         onChange={(event) => setLabel(event.currentTarget.value)}
-      /> : <div className="canvas-node-title canvas-node-readonly" data-testid="canvas-role-label" onDoubleClick={() => setEditing("label")}>{label}</div>}
+      /> : <div className="canvas-node-title canvas-node-readonly" data-testid="canvas-role-label" onClick={() => { if (isSelected) setEditing("label"); }}>{label}</div>}
       {editing === "prompt" ? <textarea
         autoFocus
         className="canvas-node-content nodrag nowheel"
@@ -58,7 +59,7 @@ export function RoleNodeRenderer({ locale, node, onUpdateNode }: RoleNodeRendere
         }}
         onKeyDown={(event) => { if (event.key === "Escape") event.currentTarget.blur(); }}
         onChange={(event) => setPrompt(event.currentTarget.value)}
-      /> : <div className="canvas-node-content canvas-node-readonly" data-testid="canvas-role-prompt" onDoubleClick={() => setEditing("prompt")}>{prompt || (locale === "zh" ? "双击编辑 Role prompt" : "Double-click to edit Role prompt")}</div>}
+      /> : <div className="canvas-node-content canvas-node-readonly" data-testid="canvas-role-prompt" onClick={() => { if (isSelected) setEditing("prompt"); }}>{prompt || (locale === "zh" ? "再次点击编辑 Role prompt" : "Click again to edit Role prompt")}</div>}
     </div>
   );
 }
