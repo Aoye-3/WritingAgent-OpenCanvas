@@ -90,9 +90,9 @@ export function CanvasSelectedNodeWorkflow({
   return (
     <div className="canvas-selected-workflow" data-testid="canvas-selected-workflow">
       <label>
-        <span>{locale === "zh" ? "节点环节" : "Node stage"}</span>
+        <span>{locale === "zh" ? "批次步骤" : "Batch step"}</span>
         <select
-          aria-label="Selected node workflow stage"
+          aria-label="Selected node batch step"
           value={nodeWorkflow.stage ?? workflow.stage}
           onChange={(event) => void onUpdateNodeWorkflow(node.id, { stage: event.target.value as CanvasWorkflowStage })}
         >

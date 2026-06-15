@@ -1,4 +1,4 @@
-import type { CanvasNodeKind, CanvasWorkflowStage } from "../../../agents/types";
+import type { CanvasNodeKind, CanvasWorkflowMode, CanvasWorkflowStage } from "../../../agents/types";
 
 export const MIN_ZOOM = 0.25;
 export const MAX_ZOOM = 3;
@@ -32,4 +32,8 @@ export const workflowStageLabels: Record<CanvasWorkflowStage, { en: string; zh: 
   writing: { en: "Writing", zh: "写作" },
   polish: { en: "Polish", zh: "润色" },
   publish: { en: "Publish", zh: "发布" }
+};
+
+export const workflowModeLabels: Record<CanvasWorkflowMode, { en: string; zh: string }> = {
+  batch_delivery: { en: "Batch delivery", zh: "批次交付" }
 };

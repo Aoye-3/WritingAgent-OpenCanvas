@@ -15,14 +15,14 @@ import {
   type NodeChange,
   type OnSelectionChangeParams
 } from "@xyflow/react";
-import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowStage, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../agents/types";
+import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowMode, CanvasWorkflowStage, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../agents/types";
 import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../../canvas/canvasClient";
 import { useI18n } from "../../i18n/I18nProvider";
 import { ResetIcon, ZoomInIcon, ZoomOutIcon } from "../../../shared/icons";
 import { CanvasCurveEdge } from "./canvas/CanvasCurveEdge";
 import { CanvasNodeFrame } from "./canvas/CanvasNodeFrame";
-import { CanvasContextMenu, CanvasSelectedNodeWorkflow, CanvasSelectionBar, CanvasStatusNode, type CanvasMenuState } from "./canvas/CanvasChrome";
-import { MAX_ZOOM, MIN_ZOOM, canvasNodeKinds, kindLabels, workflowStageLabels } from "./canvas/constants";
+import { CanvasContextMenu, CanvasSelectedNodeWorkflow, CanvasSelectionBar, type CanvasMenuState } from "./canvas/CanvasChrome";
+import { MAX_ZOOM, MIN_ZOOM, canvasNodeKinds, kindLabels, workflowModeLabels } from "./canvas/constants";
 import { buildCanvasFlowNodes } from "./canvas/flowMapping";
 import { formatMindChainContext, type CanvasMindChainContext } from "../../../../shared/canvasMindChain";
 import type { CanvasFlowNode } from "./canvas/types";
@@ -69,7 +69,7 @@ type DocumentCanvasProps = {
   onUpdateObject: (objectId: string, patch: CanvasObjectPatch) => Promise<unknown>;
   onUploadAsset: (input: { fileName: string; fileBase64: string }) => Promise<unknown>;
   onUpdateNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflowStage; roles?: string[] }) => Promise<unknown>;
-  onUpdateWorkflow: (patch: { stage?: CanvasWorkflowStage; roles?: CanvasWorkflow["roles"] }) => Promise<unknown>;
+  onUpdateWorkflow: (patch: { mode?: CanvasWorkflowMode; stage?: CanvasWorkflowStage; roles?: CanvasWorkflow["roles"] }) => Promise<unknown>;
   onToolChange: (tool: CanvasTool) => void;
 };
 
@@ -422,12 +422,12 @@ function DocumentCanvasInner({
           </span>
           {workflow ? (
             <select
-              className="canvas-stage-select"
-              aria-label="Canvas workflow stage"
-              value={workflow.stage}
-              onChange={(event) => void onUpdateWorkflow({ stage: event.target.value as CanvasWorkflowStage })}
+              className="canvas-stage-select canvas-mode-select"
+              aria-label="Canvas mode"
+              value={workflow.mode}
+              onChange={(event) => void onUpdateWorkflow({ mode: event.target.value as CanvasWorkflowMode })}
             >
-              {workflow.stages.map((stage) => <option key={stage} value={stage}>{workflowStageLabels[stage][locale]}</option>)}
+              {Object.entries(workflowModeLabels).map(([mode, labels]) => <option key={mode} value={mode}>{labels[locale]}</option>)}
             </select>
           ) : null}
           <button className="icon-button canvas-zoom-button" type="button" aria-label="Zoom out" onClick={() => void reactFlow.zoomOut({ duration: 120 })}>
@@ -445,7 +445,6 @@ function DocumentCanvasInner({
             {locale === "zh" ? "撤销" : "Undo"}
           </button>
         </motion.div>
-        {workflow ? <CanvasStatusNode label={locale === "zh" ? "写作环节" : "Writing stage"} stageLabel={workflowStageLabels[workflow.stage][locale]} /> : null}
         <ReactFlow<CanvasFlowNode>
           className={`canvas-flow${isPreviewCreationTool(activeTool) ? " is-creating" : ""}`}
           colorMode="light"

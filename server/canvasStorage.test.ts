@@ -278,15 +278,18 @@ test("stores role nodes as first-class canvas nodes", async () => {
   assert.equal(edge.targetNodeId, draft.id);
 });
 
-test("canvas workflow stage is thread-scoped and inherited by new nodes", async () => {
+test("canvas workflow mode and stage are thread-scoped and inherited by new nodes", async () => {
   const storage = await createStorage();
   const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;
   await storage.ensureThread(threadId, "blog-post");
 
+  assert.equal(storage.getCanvasWorkflow(threadId).mode, "batch_delivery");
   assert.equal(storage.getCanvasWorkflow(threadId).stage, "inspiration");
-  const workflow = storage.updateCanvasWorkflow(threadId, { stage: "structure" });
+  const workflow = storage.updateCanvasWorkflow(threadId, { mode: "batch_delivery", stage: "structure" });
   const node = storage.createCanvasNode(threadId, { kind: "document", title: "Outline", content: "Draft outline" });
 
+  assert.equal(workflow.mode, "batch_delivery");
+  assert.equal(storage.getCanvasWorkflow(threadId).mode, "batch_delivery");
   assert.equal(workflow.stage, "structure");
   assert.deepEqual((node.metadata as { workflow?: unknown }).workflow, { stage: "structure" });
 });

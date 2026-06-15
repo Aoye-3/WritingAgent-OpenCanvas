@@ -8,12 +8,13 @@ import { SourceMarkdownText } from "./SourceMarkdownText";
 type EditableTextNodeProps = {
   isSelected: boolean;
   isResizing: boolean;
+  linksEnabled?: boolean;
   locale: CanvasLocale;
   node: CanvasNode;
   onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
 };
 
-export function EditableTextNode({ isSelected, isResizing, locale, node, onUpdateNode }: EditableTextNodeProps) {
+export function EditableTextNode({ isSelected, isResizing, linksEnabled = false, locale, node, onUpdateNode }: EditableTextNodeProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [title, setTitle] = useState(node.title);
   const [content, setContent] = useState(node.content);
@@ -63,7 +64,7 @@ export function EditableTextNode({ isSelected, isResizing, locale, node, onUpdat
         onKeyDown={(event) => { if (event.key === "Escape") event.currentTarget.blur(); }}
         onChange={(event) => setContent(event.currentTarget.value)}
       /> : <div className="canvas-node-content canvas-node-readonly" data-testid="canvas-node-content" onClick={() => { if (isSelected) setEditing("content"); }}>
-        {content ? <SourceMarkdownText linksEnabled={false} text={content} /> : (locale === "zh" ? "再次点击编辑内容" : "Click again to edit content")}
+        {content ? <SourceMarkdownText linksEnabled={linksEnabled} text={content} /> : (locale === "zh" ? "再次点击编辑内容" : "Click again to edit content")}
       </div>}
     </div>
   );

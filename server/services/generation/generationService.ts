@@ -547,13 +547,17 @@ function finalizeCanvasDelivery(input: {
 }) {
   const instruction = input.payload.chatInstruction ?? input.payload.freeTextPrompt ?? "";
   if (!isDirectCanvasDeliveryIntent(instruction)) return { text: input.text, timelineEvents: [] as RunTimelineEvent[] };
+  const assistantText = input.text.trim();
+  if (!assistantText) {
+    throw new Error("Direct Canvas delivery completed without assistant content.");
+  }
   const timeline = input.timeline ?? createRunTimelineBuilder({ threadId: input.threadId, locale: input.payload.locale });
   const localTimelineEvents: RunTimelineEvent[] = [];
   const emit = input.emitTimeline ?? ((event: RunTimelineEvent) => localTimelineEvents.push(event));
   const content = resolveCanvasDeliveryContent({
     instruction,
     locale: input.payload.locale,
-    text: input.text,
+    text: assistantText,
     events: input.events
   });
   const delivery = planCanvasDelivery({

@@ -318,6 +318,73 @@ test("direct Canvas delivery is committed by the server planner without copying 
   assert.equal(canvasEdges.length, 2);
 });
 
+test("direct Canvas delivery fails without creating nodes when AgentBackend returns no content", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: "",
+        finishReason: "agent_backend_completed",
+        events: []
+      })
+    }
+  });
+
+  await assert.rejects(
+    () => service.generateAndRecord({
+      mode: "chat",
+      locale: "zh",
+      agentCardId: "chat-agent",
+      chatInstruction: "帮我总结一下最新的Macbook和上一代之间的区别，我想选一个买。把相关信息整理到Canvas里",
+      toolState: { web_search: true }
+    }, (event) => events.push(event as typeof events[number])),
+    /no visible assistant text or structured lifecycle events/i
+  );
+
+  assert.equal(canvasNodes.length, 0);
+  assert.equal(records.length, 0);
+  assert.ok(events.some((event) => event.eventType === "agent_backend_runtime_failed" && event.payload.fallback === "none"));
+});
+
+test("streaming direct Canvas delivery fails without creating nodes when AgentBackend returns no content", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const tokens: string[] = [];
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: "",
+        finishReason: "agent_backend_completed",
+        events: []
+      })
+    }
+  });
+
+  await assert.rejects(
+    () => service.generateAndRecordStream({
+      mode: "chat",
+      locale: "zh",
+      agentCardId: "chat-agent",
+      chatInstruction: "\u628a\u76f8\u5173\u4fe1\u606f\u6574\u7406\u5230Canvas\u91cc",
+      toolState: { web_search: true }
+    }, {
+      onToken: (token) => tokens.push(token),
+      onToolEvent: (event) => events.push(event as typeof events[number])
+    }),
+    /no visible assistant text or structured lifecycle events/i
+  );
+
+  assert.equal(tokens.join(""), "");
+  assert.equal(canvasNodes.length, 0);
+  assert.equal(records.length, 0);
+  assert.ok(events.some((event) => event.eventType === "agent_backend_runtime_failed" && event.payload.fallback === "none"));
+});
+
 test("generation facade falls back to mock without calling provider when AgentBackend fails", async () => {
   const { storage, records } = fakeStorage();
   let providerCalls = 0;

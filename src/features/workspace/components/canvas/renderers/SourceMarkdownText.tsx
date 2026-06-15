@@ -199,10 +199,12 @@ function renderInline(line: string, lineOffset: number, paragraph: number, links
         const start = lineOffset + index + 1;
         nodes.push(<a
           aria-disabled={!linksEnabled}
+          className="nodrag nopan"
           href={linksEnabled ? safeHref(link[2]) : "#"}
           key={`${start}-link`}
           rel="noreferrer"
           target="_blank"
+          onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             if (!linksEnabled) {
               event.preventDefault();

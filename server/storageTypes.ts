@@ -1,4 +1,4 @@
-import type { CanvasWorkflowRole, CanvasWorkflowStage, CanvasWorkflowSuggestionStatus } from "../shared/canvasWorkflow.js";
+import type { CanvasWorkflowMode, CanvasWorkflowRole, CanvasWorkflowStage, CanvasWorkflowSuggestionStatus } from "../shared/canvasWorkflow.js";
 import type { Provider } from "./types.js";
 import type { ToolEventRecord } from "./toolRuntime.js";
 
@@ -310,6 +310,7 @@ export type CanvasSettings = {
 
 export type CanvasWorkflow = {
   projectId: string;
+  mode: CanvasWorkflowMode;
   stage: CanvasWorkflowStage;
   stages: CanvasWorkflowStage[];
   roles: CanvasWorkflowRole[];
@@ -317,6 +318,7 @@ export type CanvasWorkflow = {
 };
 
 export type CanvasWorkflowInput = {
+  mode?: CanvasWorkflowMode;
   stage?: CanvasWorkflowStage;
   roles?: CanvasWorkflowRole[];
 };

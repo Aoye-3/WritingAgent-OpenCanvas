@@ -18,7 +18,7 @@ test("renders source-aware markdown spans for selectable document text", () => {
 
 test("renders source markdown links without exposing raw markdown syntax", () => {
   const html = renderToStaticMarkup(<SourceMarkdownText text={"# 来源\n- [Apple Compare](https://www.apple.com/mac/compare/)"} />);
-  assert.match(html, /<a href="https:\/\/www\.apple\.com\/mac\/compare\/"[^>]*>.*Apple Compare.*<\/a>/);
+  assert.match(html, /<a [^>]*class="nodrag nopan"[^>]*href="https:\/\/www\.apple\.com\/mac\/compare\/"[^>]*>.*Apple Compare.*<\/a>/);
   assert.doesNotMatch(html, /\[Apple Compare\]/);
   assert.doesNotMatch(html, /\]\(https:\/\/www\.apple\.com/);
 });
@@ -26,7 +26,7 @@ test("renders source markdown links without exposing raw markdown syntax", () =>
 test("renders source markdown links inert before content interaction", () => {
   const html = renderToStaticMarkup(<SourceMarkdownText linksEnabled={false} text={"[Apple Compare](https://www.apple.com/mac/compare/)"} />);
   assert.match(html, /aria-disabled="true"/);
-  assert.match(html, /<a aria-disabled="true" href="#"[^>]*>.*Apple Compare.*<\/a>/);
+  assert.match(html, /<a aria-disabled="true" class="nodrag nopan" href="#"[^>]*>.*Apple Compare.*<\/a>/);
 });
 
 test("renders source markdown tables as compact tables", () => {
@@ -40,7 +40,7 @@ test("renders source markdown tables as compact tables", () => {
   assert.match(html, /<table>/);
   assert.match(html, /<th>.*特性.*<\/th>/);
   assert.match(html, /<td>.*M4.*<\/td>/);
-  assert.match(html, /<a href="https:\/\/www\.apple\.com\/mac\/compare\/"[^>]*>.*Apple.*<\/a>/);
+  assert.match(html, /<a [^>]*class="nodrag nopan"[^>]*href="https:\/\/www\.apple\.com\/mac\/compare\/"[^>]*>.*Apple.*<\/a>/);
   assert.doesNotMatch(html, /\| --- \|/);
 });
 
@@ -64,7 +64,7 @@ test("renders reference node content as markdown in readonly mode", () => {
   const html = renderToStaticMarkup(
     <ReferenceNodeRenderer isSelected={true} isResizing={false} locale="zh" node={node} onUpdateNode={async () => undefined} />
   );
-  assert.match(html, /<a aria-disabled="true" href="#"[^>]*>.*Apple Compare.*<\/a>/);
+  assert.match(html, /<a aria-disabled="false" class="nodrag nopan" href="https:\/\/www\.apple\.com\/mac\/compare\/"[^>]*>.*Apple Compare.*<\/a>/);
   assert.doesNotMatch(html, /\[Apple Compare\]/);
 });
 

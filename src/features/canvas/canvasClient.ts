@@ -1,4 +1,4 @@
-import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowRole, CanvasWorkflowStage, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../agents/types";
+import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowMode, CanvasWorkflowRole, CanvasWorkflowStage, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../agents/types";
 import type { CanvasObjectDraft, CanvasObjectPatch } from "../../../shared/canvasObjects";
 export type { CanvasObjectDraft, CanvasObjectPatch } from "../../../shared/canvasObjects";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "../../shared/apiClient";
@@ -19,6 +19,7 @@ export type CanvasNodeDraft = {
 export type CanvasNodePatch = Partial<CanvasNodeDraft>;
 
 export type CanvasWorkflowPatch = {
+  mode?: CanvasWorkflowMode;
   stage?: CanvasWorkflowStage;
   roles?: CanvasWorkflowRole[];
 };

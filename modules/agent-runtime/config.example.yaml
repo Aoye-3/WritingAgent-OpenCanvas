@@ -391,7 +391,7 @@ tool_groups:
 
 tools:
   # FacetWrite controlled ToolUse bridge. These tools call back into
-  # /api/internal/deerflow/tool-call and keep FacetWrite policy and Canvas
+  # /api/internal/agent-runtime/tool-call and keep FacetWrite policy and Canvas
   # approval semantics as the source of truth.
   - name: knowledge_base
     group: context
@@ -400,6 +400,14 @@ tools:
   - name: clear_context
     group: context
     use: deerflow.tools.facetwrite_bridge:clear_context_tool
+
+  - name: plan_clarification_submit
+    group: chat
+    use: deerflow.tools.facetwrite_bridge:plan_clarification_submit_tool
+
+  - name: plan_revision_submit
+    group: chat
+    use: deerflow.tools.facetwrite_bridge:plan_revision_submit_tool
 
   - name: artifact_stage
     group: chat

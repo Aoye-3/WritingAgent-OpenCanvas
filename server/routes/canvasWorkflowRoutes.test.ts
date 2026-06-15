@@ -33,24 +33,26 @@ test("canvas response includes workflow and node suggestions", async () => {
   const response = await request(app, `/api/threads/${threadId}/canvas`);
 
   assert.equal(response.status, 200);
+  assert.equal((response.body.workflow as { mode: string }).mode, "batch_delivery");
   assert.equal((response.body.workflow as { stage: string }).stage, "inspiration");
   assert.equal((response.body.suggestions as unknown[]).length, 1);
 });
 
-test("canvas workflow route updates stage and node workflow metadata", async () => {
+test("canvas workflow route updates mode, stage, and node workflow metadata", async () => {
   const threadId = "thread_route_canvas_workflow";
   const app = express();
   app.use(express.json());
   const storage = fakeCanvasStorage();
   registerCanvasRoutes(app, { canvasService: createCanvasDomainService(storage as never) });
 
-  const workflow = await request(app, `/api/threads/${threadId}/canvas/workflow`, { method: "PUT", body: { stage: "research" } });
+  const workflow = await request(app, `/api/threads/${threadId}/canvas/workflow`, { method: "PUT", body: { mode: "batch_delivery", stage: "research" } });
   const nodeWorkflow = await request(app, `/api/threads/${threadId}/canvas/nodes/node_1/workflow`, {
     method: "PATCH",
     body: { stage: "research" }
   });
 
   assert.equal(workflow.status, 200);
+  assert.equal((workflow.body.workflow as { mode: string }).mode, "batch_delivery");
   assert.equal((workflow.body.workflow as { stage: string }).stage, "research");
   assert.equal(nodeWorkflow.status, 200);
   assert.deepEqual(((nodeWorkflow.body.node as { metadata: { workflow: unknown } }).metadata.workflow), { stage: "research" });
@@ -115,6 +117,7 @@ function fakeCanvasStorage() {
   };
   const workflow = {
     threadId: "thread_route_canvas_workflow",
+    mode: "batch_delivery",
     stage: "inspiration",
     stages: ["inspiration", "research", "structure", "writing", "polish", "publish"],
     roles: [{ id: "evidence", label: "Evidence", prompt: "Check sources." }],
@@ -196,7 +199,7 @@ function fakeCanvasStorage() {
       },
       node: { ...node, id: "node_from_suggestion", kind: "note" }
     }),
-    updateCanvasWorkflow: (_threadId: string, input: { stage: string }) => ({ ...workflow, stage: input.stage }),
+    updateCanvasWorkflow: (_threadId: string, input: { mode?: string; stage?: string }) => ({ ...workflow, mode: input.mode ?? workflow.mode, stage: input.stage ?? workflow.stage }),
     updateCanvasNodeWorkflow: (_threadId: string, _nodeId: string, input: { stage: string }) => ({
       ...node,
       metadata: { workflow: { stage: input.stage } }
