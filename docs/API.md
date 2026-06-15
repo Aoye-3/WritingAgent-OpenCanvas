@@ -158,6 +158,7 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - Returns Agent Runtime status: enabled, baseUrl, assistantId, reachable, runtimeProvider, authState, and lastError.
   - `authState` is one of `not_configured`, `setup_required`, `authenticated`, or `auth_failed`.
   - The response also exposes `deploymentMode` and `sandboxProvider`, so callers can distinguish the recommended local Gateway from explicit Docker isolation.
+  - `reachable:true` only proves that the Gateway/status path answered. Full generation also requires AgentBackend to load the configured Lead Agent and every active `tools[*].use` target from `modules/agent-runtime/config.yaml`.
 - `GET /api/agent-runtime/config`
   - Returns read-only Agent Runtime skills and MCP server overview.
   - Secret-like MCP values such as keys, tokens, passwords, authorization headers, and OAuth client secrets are redacted.
@@ -178,7 +179,8 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - Body: `{ threadId, toolName, arguments, allowedToolRefs, toolState, selectedCanvasNodeId, contextValues, chatInstruction }`.
   - Response is the direct Tool execution result `{ ok, content, payload }`; runtime bridge clients must not expect `payload.content`.
   - Reuses FacetWrite ToolUse policy and executors. Unknown tools, disabled tools, or tools not allowed by the active Agent return an `ok:false` result rather than bypassing policy.
-  - `canvas_write` creates a pending Canvas write request only; it does not mutate Canvas content.
+  - Active Agent Runtime bridge config must match FacetWrite's current tool contracts: `knowledge_base`, `clear_context`, `plan_clarification_submit`, `plan_revision_submit`, `artifact_stage`, and `canvas_write`. `quick_messages` is not an accepted current bridge tool, and stale config references are treated as runtime configuration failures.
+  - `canvas_write` follows operation-level risk policy. Low-risk create/append operations may return a committed node result; replace, delete, and other destructive operations remain pending for approval.
   - `canvas_write` defaults to non-destructive behavior. A requested `replace` operation is honored only when the user instruction includes an explicit replace/overwrite intent; otherwise it is normalized to append/create.
   - Agent Runtime never receives direct storage access. Product data changes must pass through FacetWrite API/service code.
 
@@ -237,7 +239,7 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
   - Resolves the Thread's Project, then returns the Project-owned `{ nodes, edges, objects, writeRequests, workflow, suggestions }`.
 - `POST /api/threads/:threadId/canvas/nodes`
   - Creates a Canvas node. Body accepts the existing node draft fields: `id`, `kind`, `title`, `content`, `x`, `y`, `width`, `height`, and `metadata`. `id` is optional and is used by session undo restore paths.
-  - New nodes inherit the current Canvas Workflow stage into `metadata.workflow.stage` unless the request supplies explicit workflow metadata.
+  - New nodes inherit the current batch-delivery stage into `metadata.workflow.stage` unless the request supplies explicit workflow metadata.
 - `POST /api/threads/:threadId/canvas/write-requests`
   - Creates a pending Canvas write request from explicit user action, annotated assistant snippets, or Agent runtime intent. The request is not applied until approved.
 - `PATCH /api/threads/:threadId/canvas/nodes/:nodeId`
@@ -255,9 +257,9 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
 - `POST /api/threads/:threadId/canvas/write-requests/:requestId/reject`
   - Rejects a pending write request without changing Canvas nodes.
 - `PUT /api/threads/:threadId/canvas/workflow`
-  - Updates project-level Canvas Workflow state. Body may include `{ stage, roles }`. `stage` must be one of `inspiration`, `research`, `structure`, `writing`, `polish`, or `publish`. Returns `{ workflow }`.
+  - Updates project-level Canvas Workflow state. Body may include `{ mode, stage, roles }`. `mode` currently supports `batch_delivery`; `stage` must be one of `inspiration`, `research`, `structure`, `writing`, `polish`, or `publish`. Returns `{ workflow }`.
 - `PATCH /api/threads/:threadId/canvas/nodes/:nodeId/workflow`
-  - Updates one content node's workflow stage metadata. Body may include `{ stage }`. Legacy `{ roles }` input may still be migrated, but Role membership is no longer read from content node metadata.
+  - Updates one content node's batch-step metadata. Body may include `{ stage }`. Legacy `{ roles }` input may still be migrated, but Role membership is no longer read from content node metadata.
 - `POST /api/threads/:threadId/canvas/suggestions`
   - Creates a Role-anchored suggestion. Body: `{ roleNodeId, targetNodeId, roleId?, content, rationale? }`. The Role node must be connected to the target content node by a directed `Role -> target` edge. Returns `{ suggestion }`.
 - `POST /api/threads/:threadId/canvas/suggestions/:suggestionId/accept`

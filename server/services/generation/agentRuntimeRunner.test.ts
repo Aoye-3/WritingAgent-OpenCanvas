@@ -34,6 +34,23 @@ test("reports a diagnostic when a successful runtime has neither text nor state 
   );
 });
 
+test("rejects empty server-managed Canvas delivery instead of pretending it completed", async () => {
+  await assert.rejects(
+    () => runAgentRuntimeGeneration({
+      ...input,
+      payload: {
+        ...input.payload,
+        chatInstruction: "put this into canvas nodes",
+        canvasAction: { id: "canvas_action_direct", operation: "create", risk: "low", requiresTool: false }
+      }
+    }, {
+      ...runtimeBase,
+      run: async () => ({ text: "", finishReason: "agent_backend_completed", events: [] })
+    }),
+    /no visible assistant text or structured lifecycle events/i
+  );
+});
+
 test("defers Plan planning postconditions to persisted state validation", async () => {
   const result = await runAgentRuntimeGeneration({
       ...input,

@@ -22,6 +22,7 @@ import type {
 import {
   canvasWorkflowStages,
   defaultCanvasWorkflow,
+  isCanvasWorkflowMode,
   isCanvasWorkflowStage,
   mergeCanvasWorkflowRoles,
   nextCanvasWorkflowNodeMetadata,
@@ -539,16 +540,17 @@ export class CanvasRepository {
 
   getCanvasWorkflow(projectId: string): CanvasWorkflow {
     validateId(projectId, "projectId");
-    type Row = { stage: string; rolesJson: string; updatedAt: string };
+    type Row = { mode: string; stage: string; rolesJson: string; updatedAt: string };
     const row = this.db
-      .prepare(`SELECT stage, roles_json as rolesJson, updated_at as updatedAt FROM canvas_workflows WHERE project_id = ?`)
+      .prepare(`SELECT mode, stage, roles_json as rolesJson, updated_at as updatedAt FROM canvas_workflows WHERE project_id = ?`)
       .get(projectId) as Row | undefined;
     const defaults = defaultCanvasWorkflow();
     if (!row) {
-      return { projectId, stage: defaults.stage, stages: defaults.stages, roles: defaults.roles, updatedAt: "" };
+      return { projectId, mode: defaults.mode, stage: defaults.stage, stages: defaults.stages, roles: defaults.roles, updatedAt: "" };
     }
     return {
       projectId,
+      mode: isCanvasWorkflowMode(row.mode) ? row.mode : defaults.mode,
       stage: isCanvasWorkflowStage(row.stage) ? row.stage : defaults.stage,
       stages: [...canvasWorkflowStages],
       roles: readWorkflowRoles(parseJson(row.rolesJson), defaults.roles),
@@ -559,18 +561,19 @@ export class CanvasRepository {
   updateCanvasWorkflow(projectId: string, input: CanvasWorkflowInput): CanvasWorkflow {
     validateId(projectId, "projectId");
     const current = this.getCanvasWorkflow(projectId);
+    const mode = input.mode === undefined ? current.mode : assertWorkflowMode(input.mode);
     const stage = input.stage === undefined ? current.stage : assertWorkflowStage(input.stage);
     const roles = input.roles === undefined ? current.roles : readWorkflowRoles(input.roles, []);
     const now = nowIso();
     this.db
       .prepare(
-        `INSERT INTO canvas_workflows (project_id, stage, roles_json, updated_at)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(project_id) DO UPDATE SET stage = excluded.stage, roles_json = excluded.roles_json, updated_at = excluded.updated_at`
+        `INSERT INTO canvas_workflows (project_id, mode, stage, roles_json, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(project_id) DO UPDATE SET mode = excluded.mode, stage = excluded.stage, roles_json = excluded.roles_json, updated_at = excluded.updated_at`
       )
-      .run(projectId, stage, JSON.stringify(roles), now);
+      .run(projectId, mode, stage, JSON.stringify(roles), now);
     this.deps.touchProject(projectId, now);
-    return { projectId, stage, stages: [...canvasWorkflowStages], roles, updatedAt: now };
+    return { projectId, mode, stage, stages: [...canvasWorkflowStages], roles, updatedAt: now };
   }
 
   updateCanvasNodeWorkflow(projectId: string, nodeId: string, patch: CanvasNodeWorkflowPatch) {
@@ -789,6 +792,11 @@ function cleanCanvasRecordId(value: string, label: string) {
 function assertWorkflowStage(stage: unknown) {
   if (!isCanvasWorkflowStage(stage)) throw new Error("Invalid Canvas workflow stage");
   return stage;
+}
+
+function assertWorkflowMode(mode: unknown) {
+  if (!isCanvasWorkflowMode(mode)) throw new Error("Invalid Canvas workflow mode");
+  return mode;
 }
 
 function readWorkflowRoles(value: unknown, fallback: CanvasWorkflow["roles"]) {

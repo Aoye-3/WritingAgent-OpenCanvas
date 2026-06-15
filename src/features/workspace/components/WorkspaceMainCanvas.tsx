@@ -40,7 +40,7 @@ type WorkspaceMainCanvasProps = {
   onUpdateObject: (objectId: string, patch: CanvasObjectPatch) => Promise<unknown>;
   onUploadAsset: (input: { fileName: string; fileBase64: string }) => Promise<unknown>;
   onUpdateNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflow["stage"]; roles?: string[] }) => Promise<unknown>;
-  onUpdateWorkflow: (patch: { stage?: CanvasWorkflow["stage"]; roles?: CanvasWorkflow["roles"] }) => Promise<unknown>;
+  onUpdateWorkflow: (patch: { mode?: CanvasWorkflow["mode"]; stage?: CanvasWorkflow["stage"]; roles?: CanvasWorkflow["roles"] }) => Promise<unknown>;
   onToolChange: (tool: CanvasTool) => void;
 };
 

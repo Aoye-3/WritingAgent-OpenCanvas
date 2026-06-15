@@ -178,6 +178,7 @@ export function migrateStorageSchema(db: DatabaseSync) {
 
     CREATE TABLE IF NOT EXISTS canvas_workflows (
       thread_id TEXT PRIMARY KEY,
+      mode TEXT NOT NULL DEFAULT 'batch_delivery',
       stage TEXT NOT NULL,
       roles_json TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -262,6 +263,9 @@ export function migrateStorageSchema(db: DatabaseSync) {
   }
   if (!columnExists(db, "canvas_workflow_suggestions", "role_node_id")) {
     db.exec(`ALTER TABLE canvas_workflow_suggestions ADD COLUMN role_node_id TEXT NOT NULL DEFAULT ''`);
+  }
+  if (!columnExists(db, "canvas_workflows", "mode")) {
+    db.exec(`ALTER TABLE canvas_workflows ADD COLUMN mode TEXT NOT NULL DEFAULT 'batch_delivery'`);
   }
   if (!columnExists(db, "canvas_workflow_suggestions", "target_node_id")) {
     db.exec(`ALTER TABLE canvas_workflow_suggestions ADD COLUMN target_node_id TEXT NOT NULL DEFAULT ''`);
@@ -412,6 +416,7 @@ export function migrateStorageSchema(db: DatabaseSync) {
 
       CREATE TABLE canvas_workflows (
         project_id TEXT PRIMARY KEY,
+        mode TEXT NOT NULL DEFAULT 'batch_delivery',
         stage TEXT NOT NULL,
         roles_json TEXT NOT NULL,
         updated_at TEXT NOT NULL

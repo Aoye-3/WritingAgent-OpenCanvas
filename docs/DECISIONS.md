@@ -8,6 +8,20 @@ Reason: FigJam-style visual annotations must not silently affect Agent context, 
 
 Impact: The floating toolbar can create saved visual objects, but Agent selection actions remain proposal-oriented and Agent-originated content writes continue through the existing approval boundary.
 
+## 2026-06-15: Canvas Mode Is The User-Facing Workflow Layer
+Decision: Add `CanvasWorkflowMode` and expose `batch_delivery` as the first Canvas Mode. The existing writing stage remains as mode-specific batch-step state instead of the primary workspace concept.
+
+Reason: The product centers on text nodes, batch delivery, and the canvas. Presenting inspiration/research/writing as the top-level control made the workspace look like a linear writing-stage product, while the stage data is still valuable for context filtering and node inheritance.
+
+Impact: `canvas_workflows` stores `mode` with a default of `batch_delivery`. Existing `stage`, node `metadata.workflow.stage`, Role nodes, Role edges, suggestions, and context filtering remain compatible. Future modes can add their own behavior without deleting the current batch-delivery stage contract.
+
+## 2026-06-15: AgentBackend Bridge Config Must Match FacetWrite Tools
+Decision: Treat AgentBackend bridge tool configuration as a tested FacetWrite connection contract. The active bridge set is `knowledge_base`, `clear_context`, `plan_clarification_submit`, `plan_revision_submit`, `artifact_stage`, and `canvas_write`; stale `quick_messages` references are invalid.
+
+Reason: A FacetWrite request reached AgentBackend `/api/runs/stream` successfully, but Lead Agent startup failed when AgentBackend tried to load an obsolete `deerflow.tools.facetwrite_bridge:quick_messages_tool` target. The UI symptom looked like "AgentBackend empty response", while the actual failure was tool configuration drift between Agent Runtime YAML, the Python bridge module, and FacetWrite `ToolRef` contracts.
+
+Impact: `modules/agent-runtime/config.yaml` and `config.example.yaml` must stay aligned with `facetwrite_bridge.py`, `server/tools/catalog.ts`, and frontend tool types. `server/agentRuntimeConfig.test.ts` loads both YAML files and verifies every configured `tools[*].use` target resolves to a real exported LangChain tool. Runtime/model failures remain visible failures and must not be converted into fake Canvas delivery nodes or Mock assistant output.
+
 ## 2026-05-30: Canvas Role Controls Are Function Nodes
 Decision: Model Canvas Workflow Roles as first-class `role` Canvas nodes that apply only through directed `Role -> content` edges. Stage remains a single project/thread state and does not become a normal duplicable node.
 

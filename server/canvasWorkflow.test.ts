@@ -14,6 +14,7 @@ import {
 test("canvas workflow defaults to the inspiration stage with built-in roles", () => {
   const workflow = defaultCanvasWorkflow();
 
+  assert.equal(workflow.mode, "batch_delivery");
   assert.equal(workflow.stage, "inspiration");
   assert.deepEqual(workflow.stages, ["inspiration", "research", "structure", "writing", "polish", "publish"]);
   assert.equal(workflow.roles[0].id, "structure");

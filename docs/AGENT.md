@@ -71,11 +71,11 @@ Canvas Workflow adds a second filter before runtime context is sent. The default
 
 ```text
 selected or explicitly sent mind chain
- -> current or user-specified Canvas Workflow stage
+ -> current or user-specified batch-delivery stage
  -> Role nodes connected to the selected/filtered content nodes
 ```
 
-The Agent must not default to reading the entire Canvas. Role perspectives are not read from ordinary content node metadata; they are selected by directed `Role -> document | note | reference` edges. Only connected Role node prompts are passed as advice perspectives for the current chain/stage. If the user manually switches the project stage, new nodes inherit that stage and the Agent should treat later context as belonging to the new collaboration phase. If the Agent proposes moving to the next stage, the project stage changes only after user confirmation.
+The Agent must not default to reading the entire Canvas. Role perspectives are not read from ordinary content node metadata; they are selected by directed `Role -> document | note | reference` edges. Only connected Role node prompts are passed as advice perspectives for the current chain and batch-delivery stage. If the user manually switches the batch stage, new nodes inherit that stage and the Agent should treat later context as belonging to that collaboration phase. If the Agent proposes moving to the next batch stage, the project stage changes only after user confirmation.
 
 When a user explicitly sends a directed Canvas mind chain to the right collaboration drawer, the selected chain becomes user-provided chat text. That explicit action may include `note` nodes without changing the default context rule.
 
@@ -115,13 +115,14 @@ Agent Runtime is FacetWrite's internal execution subsystem when `AGENT_BACKEND_E
 - AI runtime status, Agent mapping, and ToolUse bridge progress are exposed through `/api/agent-runtime/dashboard` and shown in the AI Dashboard. `/api/agent-backend/*` remains a compatibility alias.
 - FacetWrite sends per-run bridge context to AgentBackend: allowed tool refs, effective tool state, explicit context values, selected Canvas node id, and current chat instruction.
 - FacetWrite also sends Memory isolation context. `facetwrite_memory_enabled` defaults to false unless the current Agent settings explicitly enable Memory; FacetWrite-managed Memory content is sent only from `.facetwrite/memory/`, never from AgentBackend's legacy global memory store.
-- AgentBackend loads FacetWrite bridge tools from `AgentBackend.tools.facetwrite_bridge` for `knowledge_base`, `clear_context`, and `canvas_write`.
+- AgentBackend loads FacetWrite bridge tools from `deerflow.tools.facetwrite_bridge`. Tool loading is part of the connection contract, not just runtime UI state. `modules/agent-runtime/config.yaml`, `modules/agent-runtime/config.example.yaml`, `modules/agent-runtime/backend/packages/harness/deerflow/tools/facetwrite_bridge.py`, `server/tools/catalog.ts`, and frontend `ToolRef` types must stay aligned on the active FacetWrite bridge set: `knowledge_base`, `clear_context`, `plan_clarification_submit`, `plan_revision_submit`, `artifact_stage`, and `canvas_write`. `quick_messages` is a historical tool reference only; it must not appear in active Agent Runtime config or ToolRef contracts.
 - `knowledge_base` bridge calls prefer KnowledgeService RAG results and pass optional selected `baseIds`; explicit runtime context values are only the fallback when no Knowledge result is available.
-- The bridge calls FacetWrite `/api/internal/agent-runtime/tool-call`, so ToolUse policy remains enforced by FacetWrite and `canvas_write` can only create a pending request. `/api/internal/agent-backend/tool-call` remains a compatibility alias; `/api/internal/deerflow/tool-call` is deprecated and exists only to protect already-running legacy sidecars.
+- The bridge calls FacetWrite `/api/internal/agent-runtime/tool-call`, so ToolUse policy remains enforced by FacetWrite. `canvas_write` may directly commit low-risk create/append operations through FacetWrite's server-owned policy path and keeps destructive operations pending for approval. `/api/internal/agent-backend/tool-call` remains a compatibility alias; `/api/internal/deerflow/tool-call` is deprecated and exists only to protect already-running legacy sidecars.
 - AgentRuntime does not own FacetWrite product data. Threads, messages, Canvas nodes/edges/write requests, settings, and Knowledge metadata stay in FacetWrite storage; AgentRuntime can affect them only through the backend adapter and internal ToolUse bridge. It must not bypass frontend Canvas context filtering, and it must not call Canvas repositories or storage facades directly.
 - Canvas Workflow suggestions are low-risk additions when routed through FacetWrite APIs: creating nodes, edges, appending body text, and writing suggestions are allowed product operations. Replace, overwrite, and delete operations still require the existing approval path.
 - `web_search` is verified separately as a AgentBackend built-in tool, not as a FacetWrite local bridge.
 - Local and Docker acceptance targets remain `/health`, backend auth, runtime config, provider `agent-backend` generation, repeated no-fallback runs, built-in ToolUse, Skills/MCP/Memory/subagents, and FacetWrite bridge ToolUse. Docker-only sandbox facilities are tested separately.
+- After changing Agent Runtime config, Python bridge code, or FacetWrite generation/runtime code, restart the local Runtime and Node API before judging UI behavior. The local Python Gateway and `tsx server/index.ts` do not reliably reload these connection contracts in place.
 
 ## AI Dashboard
 The AI Dashboard is primarily a runtime/control-plane surface. FacetWrite-managed Memory is the one editable exception because users need to inspect and correct what the runtime may reuse.

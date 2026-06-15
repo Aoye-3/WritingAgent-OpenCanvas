@@ -192,6 +192,7 @@ function AppContent() {
           content: node.kind === "reference" ? node.content : undefined
         })),
         workflow: canvasState.canvasWorkflow ? {
+          mode: canvasState.canvasWorkflow.mode,
           stage: canvasState.canvasWorkflow.stage,
           roles: workflowContext?.roles ?? []
         } : undefined,

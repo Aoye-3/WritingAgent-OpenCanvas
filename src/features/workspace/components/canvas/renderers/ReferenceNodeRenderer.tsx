@@ -12,5 +12,5 @@ type ReferenceNodeRendererProps = {
 };
 
 export function ReferenceNodeRenderer(props: ReferenceNodeRendererProps) {
-  return <EditableTextNode {...props} />;
+  return <EditableTextNode {...props} linksEnabled />;
 }

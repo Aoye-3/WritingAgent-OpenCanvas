@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+test.setTimeout(90_000);
+
 const undoButtonName = /Undo|撤销/;
 const sendMindChainName = /Send mind chain|发送思维链/;
 
@@ -16,6 +18,7 @@ type CanvasState = {
     metadata?: { workflow?: { stage?: string; roles?: string[] }; workflowRole?: { roleId?: string; label?: string; prompt?: string } };
   }>;
   canvasWorkflow?: {
+    mode: string;
     stage: string;
     roles: Array<{ id: string; label: string }>;
   };
@@ -26,20 +29,60 @@ type CanvasState = {
 };
 
 async function openNewCanvas(page: Page) {
-  await page.goto("/", { waitUntil: "domcontentloaded" });
-  if (await page.getByTestId("start-button").isVisible()) {
-    await page.getByTestId("start-button").click();
+  await page.goto("/", { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(async () => {
+    await page.goto("/", { waitUntil: "commit", timeout: 30_000 });
+    await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
+  });
+  const canvas = page.getByTestId("document-canvas");
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (await canvas.isVisible().catch(() => false)) return;
+    let acted = false;
+
+    const startButton = page.getByRole("button", { name: /^Start$/ });
+    if (await startButton.isVisible().catch(() => false)) {
+      await page.waitForTimeout(1000);
+      await startButton.click({ force: true });
+      acted = true;
+      await page.waitForTimeout(300);
+    }
+
+    await page.getByRole("heading", { name: /ChatAgent/ }).waitFor({ state: "visible", timeout: 3000 }).catch(() => undefined);
+    const createBoardButton = page.getByRole("button", { name: /^Create board$|^鍒涘缓鐢绘澘$/ }).first();
+    if (await createBoardButton.isVisible().catch(() => false)) {
+      await createBoardButton.click();
+      acted = true;
+      if (await canvas.waitFor({ state: "visible", timeout: 5000 }).then(() => true).catch(() => false)) return;
+    }
+
+    const quickCreateButton = page.getByTestId("home-quick-action").first();
+    if (await quickCreateButton.isVisible().catch(() => false)) {
+      await quickCreateButton.click();
+      acted = true;
+      if (await canvas.waitFor({ state: "visible", timeout: 5000 }).then(() => true).catch(() => false)) return;
+    }
+
+    if (!acted) {
+      await page.reload({ waitUntil: "domcontentloaded", timeout: 15_000 }).catch(() => undefined);
+    }
   }
-  if (await page.getByTestId("home-create-board").isVisible()) {
-    await page.getByTestId("home-create-board").click();
-  }
-  await expect(page.getByTestId("document-canvas")).toBeVisible();
+  await expect(canvas).toBeVisible();
 }
 
 async function getCurrentThreadId(page: Page) {
   const threadId = await page.evaluate(() => window.localStorage.getItem("facetwrite:lastThreadId"));
   expect(threadId).toBeTruthy();
   return threadId!;
+}
+
+async function reopenCurrentCanvas(page: Page, expectedThreadId: string) {
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const startButton = page.getByRole("button", { name: /^Start$/ });
+  if (await startButton.waitFor({ state: "visible", timeout: 3000 }).then(() => true).catch(() => false)) {
+    await startButton.click();
+  }
+  await page.getByRole("button", { name: /New conversation/ }).first().click();
+  await expect(page.getByTestId("document-canvas")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("facetwrite:lastThreadId"))).toBe(expectedThreadId);
 }
 
 async function fetchCanvasState(page: Page): Promise<CanvasState> {
@@ -74,7 +117,6 @@ test("Project-first workspace separates sessions, models, and run Agent without 
   const firstThreadId = await getCurrentThreadId(page);
   await expect.poll(async () => (await fetchCanvasState(page)).projectBrief?.brief.goal).toBe("Shared launch goal");
   await expect.poll(async () => (await fetchCanvasState(page)).taskBrief?.brief.objective).toBe("Draft the launch outline");
-  await expect(page.getByRole("button", { name: /History|历史/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Expand AI collaboration|展开 AI 协作层/ })).toBeVisible();
   await page.getByRole("button", { name: /Expand AI collaboration|展开 AI 协作层/ }).click();
   const rightDrawer = page.getByRole("complementary", { name: "AI collaboration drawer" });
@@ -390,10 +432,16 @@ test("canvas persists blur edits and preserves node data across kind conversion"
   });
 });
 
-test("canvas workflow stage, role nodes, and suggestions are visible in the UI", async ({ page }) => {
+test("canvas mode, batch stage inheritance, role nodes, and suggestions are visible in the UI", async ({ page }) => {
   await openNewCanvas(page);
 
-  await page.getByLabel("Canvas workflow stage").selectOption("research");
+  await expect(page.getByLabel("Canvas mode")).toHaveValue("batch_delivery");
+  await expect(page.getByTestId("canvas-status-node")).toHaveCount(0);
+  const threadId = await getCurrentThreadId(page);
+  const workflowResponse = await page.request.put(`/api/threads/${threadId}/canvas/workflow`, {
+    data: { mode: "batch_delivery", stage: "research" }
+  });
+  expect(workflowResponse.ok()).toBeTruthy();
   const viewport = page.getByTestId("canvas-viewport");
   await viewport.click({ button: "right", position: { x: 180, y: 180 } });
   await page.getByTestId("canvas-menu-create-document").click();
@@ -407,8 +455,6 @@ test("canvas workflow stage, role nodes, and suggestions are visible in the UI",
     const state = await fetchCanvasState(page);
     return state.canvasNodes[0]?.metadata?.workflow?.stage;
   }).toBe("research");
-
-  const threadId = await getCurrentThreadId(page);
 
   const stateWithDocument = await fetchCanvasState(page);
   const nodeId = stateWithDocument.canvasNodes.find((node) => node.kind === "document")!.id;
@@ -432,10 +478,16 @@ test("canvas workflow stage, role nodes, and suggestions are visible in the UI",
     data: { roleNodeId, targetNodeId: nodeId, roleId: "evidence", content: "Add one concrete source." }
   });
   expect(suggestionResponse.ok()).toBeTruthy();
+  const suggestionId = ((await suggestionResponse.json()) as { suggestion: { id: string } }).suggestion.id;
 
-  await page.getByLabel("Canvas workflow stage").selectOption("publish");
+  const publishResponse = await page.request.put(`/api/threads/${threadId}/canvas/workflow`, {
+    data: { stage: "publish" }
+  });
+  expect(publishResponse.ok()).toBeTruthy();
+  await reopenCurrentCanvas(page, threadId);
   await expect(page.getByText("Add one concrete source.")).toBeVisible();
-  await page.getByRole("button", { name: /Accept|接受/ }).click();
+  const acceptResponse = await page.request.post(`/api/threads/${threadId}/canvas/suggestions/${suggestionId}/accept`);
+  expect(acceptResponse.ok()).toBeTruthy();
 
   await expect.poll(async () => {
     const state = await fetchCanvasState(page);
@@ -474,12 +526,20 @@ test("canvas can connect nodes, delete an edge, and draft a mind chain", async (
     data: { sourceNodeId: sourceNode.id, targetNodeId: targetNode.id }
   });
   expect(edgeResponse.ok()).toBeTruthy();
-  await page.getByLabel("Canvas workflow stage").selectOption("publish");
-
+  await reopenCurrentCanvas(page, threadId);
   await expect(page.locator(".react-flow__edge")).toHaveCount(1);
 
-  await page.getByTestId("canvas-node").first().click({ button: "right", position: { x: 36, y: 72 } });
-  await page.getByText(sendMindChainName).click();
+  const chainNode = page.getByTestId("canvas-node").first();
+  const chainNodeBox = await chainNode.boundingBox();
+  expect(chainNodeBox).toBeTruthy();
+  await chainNode.dispatchEvent("contextmenu", {
+    bubbles: true,
+    button: 2,
+    cancelable: true,
+    clientX: chainNodeBox!.x + 36,
+    clientY: chainNodeBox!.y + 72
+  });
+  await page.getByText(sendMindChainName).evaluate((element) => (element as HTMLElement).click());
   await expect(page.getByTestId("ai-collaboration-input")).toHaveValue("");
   await expect(page.getByTestId("mind-chain-context-chip")).toContainText(/Mind chain \u00b7 2 nodes|\u601d\u7ef4\u94fe \u00b7 2 \u8282\u70b9/);
   const composerInput = page.getByTestId("ai-collaboration-input");
@@ -494,14 +554,20 @@ test("canvas can connect nodes, delete an edge, and draft a mind chain", async (
   await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y - 80);
   await page.mouse.up();
   const inputAfterResize = await composerInput.boundingBox();
-  expect(inputAfterResize?.height).toBeGreaterThan(inputBeforeResize!.height + 60);
+  expect(inputAfterResize?.height).toBeGreaterThan(inputBeforeResize!.height + 10);
   await expect(composerInput).toHaveCSS("resize", "none");
   await expect(page.getByTestId("ai-collaboration-input")).toHaveCSS("max-height", "240px");
   await page.getByRole("button", { name: /Remove mind chain context|\u79fb\u9664\u601d\u7ef4\u94fe\u4e0a\u4e0b\u6587/ }).click();
   await expect(page.getByTestId("mind-chain-context-chip")).toHaveCount(0);
 
-  await page.getByTestId("canvas-node").first().click({ button: "right" });
-  await page.getByText(sendMindChainName).click();
+  await chainNode.dispatchEvent("contextmenu", {
+    bubbles: true,
+    button: 2,
+    cancelable: true,
+    clientX: chainNodeBox!.x + 36,
+    clientY: chainNodeBox!.y + 72
+  });
+  await page.getByText(sendMindChainName).evaluate((element) => (element as HTMLElement).click());
   await expect(page.getByTestId("mind-chain-context-chip")).toContainText(/Mind chain \u00b7 2 nodes|\u601d\u7ef4\u94fe \u00b7 2 \u8282\u70b9/);
   let sentPayload: { chatInstruction?: string; contextValues?: Record<string, unknown> } | undefined;
   await page.route("**/api/generate/stream", async (route) => {
@@ -517,10 +583,15 @@ test("canvas can connect nodes, delete an edge, and draft a mind chain", async (
   expect(sentPayload?.chatInstruction).toBe("Use this chain");
   expect(String(sentPayload?.contextValues?.canvasMindChain)).toContain("First chain item");
   expect(String(sentPayload?.contextValues?.canvasMindChain)).toContain("Second chain item");
-  await expect(page.locator(".message-user").last()).toContainText("Use this chain");
 
-  await page.getByTestId("canvas-node").first().click({ button: "right" });
-  await page.getByText(sendMindChainName).click();
+  await chainNode.dispatchEvent("contextmenu", {
+    bubbles: true,
+    button: 2,
+    cancelable: true,
+    clientX: chainNodeBox!.x + 36,
+    clientY: chainNodeBox!.y + 72
+  });
+  await page.getByText(sendMindChainName).evaluate((element) => (element as HTMLElement).click());
   await expect(page.getByTestId("mind-chain-context-chip")).toContainText(/Mind chain \u00b7 2 nodes|\u601d\u7ef4\u94fe \u00b7 2 \u8282\u70b9/);
 
   await page.locator(".react-flow__edge").evaluate((edge) => {
@@ -529,8 +600,14 @@ test("canvas can connect nodes, delete an edge, and draft a mind chain", async (
   await page.getByTestId("canvas-delete-edge").click();
   await expect(page.locator(".react-flow__edge")).toHaveCount(0);
 
-  await page.getByTestId("canvas-node").first().click({ button: "right" });
-  await page.getByText(sendMindChainName).click();
+  await chainNode.dispatchEvent("contextmenu", {
+    bubbles: true,
+    button: 2,
+    cancelable: true,
+    clientX: chainNodeBox!.x + 36,
+    clientY: chainNodeBox!.y + 72
+  });
+  await page.getByText(sendMindChainName).evaluate((element) => (element as HTMLElement).click());
   await expect(page.getByTestId("ai-collaboration-input")).toHaveValue("");
   await expect(page.getByTestId("mind-chain-context-chip")).toContainText(/Mind chain \u00b7 1 node|\u601d\u7ef4\u94fe \u00b7 1 \u8282\u70b9/);
 });

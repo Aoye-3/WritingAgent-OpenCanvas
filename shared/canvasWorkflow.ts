@@ -1,4 +1,5 @@
 export type CanvasWorkflowStage = "inspiration" | "research" | "structure" | "writing" | "polish" | "publish";
+export type CanvasWorkflowMode = "batch_delivery";
 export type CanvasWorkflowSuggestionStatus = "pending" | "accepted" | "ignored";
 
 export type CanvasWorkflowRole = {
@@ -8,6 +9,7 @@ export type CanvasWorkflowRole = {
 };
 
 export type CanvasWorkflowState = {
+  mode: CanvasWorkflowMode;
   stage: CanvasWorkflowStage;
   stages: CanvasWorkflowStage[];
   roles: CanvasWorkflowRole[];
@@ -72,6 +74,7 @@ export type CanvasWorkflowContext = {
 };
 
 export const canvasWorkflowStages: CanvasWorkflowStage[] = ["inspiration", "research", "structure", "writing", "polish", "publish"];
+export const canvasWorkflowModes: CanvasWorkflowMode[] = ["batch_delivery"];
 
 export const defaultCanvasWorkflowRoles: CanvasWorkflowRole[] = [
   { id: "structure", label: "Structure", prompt: "Review structure, sequence, and argument flow." },
@@ -83,6 +86,7 @@ export const defaultCanvasWorkflowRoles: CanvasWorkflowRole[] = [
 
 export function defaultCanvasWorkflow(): CanvasWorkflowState {
   return {
+    mode: "batch_delivery",
     stage: "inspiration",
     stages: [...canvasWorkflowStages],
     roles: defaultCanvasWorkflowRoles.map((role) => ({ ...role }))
@@ -165,6 +169,7 @@ export function buildCanvasWorkflowContext(input: {
   stage?: CanvasWorkflowStage;
   roleIds?: string[];
 }): CanvasWorkflowContext {
+  const mode = input.workflow.mode;
   const stage = input.stage ?? input.workflow.stage;
   const roleIds = input.roleIds ?? [];
   const chain = input.chainNodeIds ? new Set(input.chainNodeIds) : undefined;
@@ -173,7 +178,7 @@ export function buildCanvasWorkflowContext(input: {
     if (node.kind === "role") return false;
     if (chain && !chain.has(node.id)) return false;
     const metadata = readWorkflowMetadata(node.metadata);
-    if (metadata.stage !== stage) return false;
+    if (mode === "batch_delivery" && metadata.stage !== stage) return false;
     return true;
   });
   const targetNodeIds = nodes.map((node) => node.id);
@@ -234,6 +239,10 @@ export function findConnectedWorkflowRoles(input: {
 
 export function isCanvasWorkflowStage(value: unknown): value is CanvasWorkflowStage {
   return typeof value === "string" && canvasWorkflowStages.includes(value as CanvasWorkflowStage);
+}
+
+export function isCanvasWorkflowMode(value: unknown): value is CanvasWorkflowMode {
+  return typeof value === "string" && canvasWorkflowModes.includes(value as CanvasWorkflowMode);
 }
 
 function cleanRoleText(value: unknown) {
