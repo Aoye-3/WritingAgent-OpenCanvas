@@ -21,7 +21,7 @@ export function deriveAssistantRunTraceState(input: {
 }
 
 export function AssistantRunTrace({ events = [], onFocusNode }: AssistantRunTraceProps) {
-  const { locale } = useI18n();
+  const { t } = useI18n();
   const [userExpanded, setUserExpanded] = useState<boolean | undefined>();
   const orderedEvents = useMemo(
     () => [...events].sort((left, right) => left.sequence - right.sequence),
@@ -31,8 +31,7 @@ export function AssistantRunTrace({ events = [], onFocusNode }: AssistantRunTrac
   if (!orderedEvents.length) return null;
 
   const latest = orderedEvents.at(-1);
-  const title = locale === "zh" ? "运行轨迹" : "Run trace";
-  const countLabel = locale === "zh" ? `${orderedEvents.length} 步` : `${orderedEvents.length} steps`;
+  const countLabel = t("workspace.runTraceSteps", { count: orderedEvents.length });
 
   return (
     <section className="assistant-run-trace" data-expanded={state.expanded}>
@@ -43,7 +42,7 @@ export function AssistantRunTrace({ events = [], onFocusNode }: AssistantRunTrac
         onClick={() => setUserExpanded((value) => !(value ?? state.expanded))}
       >
         <span className={state.failed ? "status-dot failed" : state.running ? "status-dot running" : "status-dot"} aria-hidden="true" />
-        <strong>{title}</strong>
+        <strong>{t("workspace.runTrace")}</strong>
         <small>{latest?.title || countLabel}</small>
         <b aria-hidden="true">{state.expanded ? "^" : "v"}</b>
       </button>
@@ -59,7 +58,7 @@ export function AssistantRunTrace({ events = [], onFocusNode }: AssistantRunTrac
                   {event.summary ? <p>{event.summary}</p> : null}
                   {nodeId && onFocusNode ? (
                     <button type="button" onClick={() => onFocusNode(nodeId)}>
-                      {locale === "zh" ? "定位节点" : "Focus node"}
+                      {t("workspace.focusNode")}
                     </button>
                   ) : null}
                 </div>

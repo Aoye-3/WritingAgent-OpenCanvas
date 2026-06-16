@@ -1,11 +1,11 @@
 import { createContext, useContext, useMemo, useState } from "react";
-import { translations } from "./translations";
-import type { Locale, TranslationKey } from "./types";
+import { translations, type TranslationKey, type TranslationParams } from "./translations";
+import type { Locale } from "./types";
 
 type I18nContextValue = {
   locale: Locale;
   setLocale: (locale: Locale) => void;
-  t: (key: TranslationKey) => string;
+  t: (key: TranslationKey, params?: TranslationParams) => string;
 };
 
 const I18nContext = createContext<I18nContextValue | null>(null);
@@ -27,11 +27,18 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     return {
       locale,
       setLocale,
-      t: (key) => translations[locale][key]
+      t: (key, params) => formatTranslation(translations[locale][key], params)
     };
   }, [locale]);
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+function formatTranslation(value: string, params?: TranslationParams) {
+  if (!params) return value;
+  return value.replace(/\{(\w+)\}/g, (match, key) => (
+    Object.hasOwn(params, key) ? String(params[key]) : match
+  ));
 }
 
 export function useI18n() {

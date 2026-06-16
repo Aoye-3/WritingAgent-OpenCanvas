@@ -1,20 +1,20 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import type { AppView } from "../../app/App";
 import { AppSidebar } from "../../shared/AppSidebar";
 import { AddIcon, ArrowRightIcon, DocumentIcon, MoreIcon, SearchIcon, SendIcon } from "../../shared/icons";
 import { Button, IconButton, ModalDialog, Panel, TextField } from "../../shared/ui";
-import type { AgentCard, StoredThread } from "../agents/types";
+import type { AgentCard, ProjectSummary } from "../agents/types";
 import { useI18n } from "../i18n/I18nProvider";
 
 type HomeViewProps = {
   activeView: AppView;
   agentCards: AgentCard[];
-  recentThreads: StoredThread[];
+  projects: ProjectSummary[];
   onOpenSettings: () => void;
   onOpenAgent: (agentCard: AgentCard) => void;
-  onOpenThread: (thread: StoredThread) => void;
+  onOpenThread: (project: ProjectSummary) => void;
   onNavigate: (view: AppView) => void;
-  onDeleteThread: (thread: StoredThread) => void;
+  onDeleteThread: (projectId: string) => void;
   onTogglePinnedThread: (threadId: string) => void;
   pinnedThreadIds: string[];
   onRenameThread: (threadId: string, title: string) => Promise<void>;
@@ -86,7 +86,7 @@ const homeCopy = {
 export function HomeView({
   activeView,
   agentCards,
-  recentThreads,
+  projects,
   onOpenSettings,
   onOpenAgent,
   onOpenThread,
@@ -100,9 +100,10 @@ export function HomeView({
   const copy = homeCopy[locale];
   const [homePrompt, setHomePrompt] = useState("");
   const [openMenuThreadId, setOpenMenuThreadId] = useState("");
-  const [renameThread, setRenameThread] = useState<StoredThread | null>(null);
+  const [renameProject, setRenameProject] = useState<ProjectSummary | null>(null);
 
   const primaryAgent = agentCards[0];
+  const recentProjects = useMemo(() => sortRecentProjects(projects, pinnedThreadIds), [pinnedThreadIds, projects]);
 
   const quickActions = [
     { label: copy.create, hint: copy.createHint, agent: primaryAgent },
@@ -153,7 +154,7 @@ export function HomeView({
               <button type="button" onClick={() => onNavigate("projects")}>{copy.viewAll}</button>
             </div>
             <div className="home-project-list">
-              {(recentThreads.length > 0 ? recentThreads.slice(0, 6) : fallbackProjects(locale)).map((item) => renderProjectRow(item, { agentCards, copy, locale, onDeleteThread, onOpenThread, onRename: setRenameThread, onTogglePinnedThread, openMenuThreadId, pinnedThreadIds, setOpenMenuThreadId }))}
+              {(recentProjects.length > 0 ? recentProjects.slice(0, 6) : fallbackProjects(locale)).map((item) => renderProjectRow(item, { agentCards, copy, locale, onDeleteThread, onOpenThread, onRename: setRenameProject, onTogglePinnedThread, openMenuThreadId, pinnedThreadIds, setOpenMenuThreadId }))}
             </div>
           </section>
 
@@ -169,14 +170,14 @@ export function HomeView({
         </Panel>
       </section>
 
-      {renameThread ? (
+      {renameProject ? (
         <RenameThreadDialog
-          initialTitle={renameThread.title}
+          initialTitle={renameProject.title}
           locale={locale}
-          onClose={() => setRenameThread(null)}
+          onClose={() => setRenameProject(null)}
           onRename={async (title) => {
-            await onRenameThread(renameThread.id, title);
-            setRenameThread(null);
+            await onRenameThread(renameProject.id, title);
+            setRenameProject(null);
           }}
         />
       ) : null}
@@ -185,14 +186,14 @@ export function HomeView({
 }
 
 function renderProjectRow(
-  item: StoredThread | ReturnType<typeof fallbackProjects>[number],
+  item: ProjectSummary | ReturnType<typeof fallbackProjects>[number],
   context: {
     agentCards: AgentCard[];
     copy: (typeof homeCopy)["en" | "zh"];
     locale: "en" | "zh";
-    onDeleteThread: (thread: StoredThread) => void;
-    onOpenThread: (thread: StoredThread) => void;
-    onRename: (thread: StoredThread) => void;
+    onDeleteThread: (projectId: string) => void;
+    onOpenThread: (project: ProjectSummary) => void;
+    onRename: (project: ProjectSummary) => void;
     onTogglePinnedThread: (threadId: string) => void;
     openMenuThreadId: string;
     pinnedThreadIds: string[];
@@ -200,38 +201,55 @@ function renderProjectRow(
   }
 ) {
   const { copy, locale, onDeleteThread, onOpenThread, onRename, onTogglePinnedThread, openMenuThreadId, pinnedThreadIds, setOpenMenuThreadId } = context;
-  const isThread = "id" in item;
-  const thread = isThread ? item : undefined;
-  const agentTitle = isThread ? (locale === "zh" ? "项目会话" : "Project conversation") : item.title;
-  const projectTitle = isThread ? item.title || agentTitle : item.title;
-  const updatedAt = isThread ? new Date(item.updatedAt).toLocaleString() : item.updatedAt;
-  const assets = isThread ? (locale === "zh" ? "1 个节点" : "1 node") : item.assets;
+  const isProject = "id" in item;
+  const project = isProject ? item : undefined;
+  const agentTitle = isProject ? (locale === "zh" ? "项目会话" : "Project conversation") : item.title;
+  const projectTitle = isProject ? item.title || agentTitle : item.title;
+  const updatedAt = isProject ? new Date(item.updatedAt).toLocaleString() : item.updatedAt;
+  const assets = isProject ? formatProjectAssets(item.assetCount, locale) : item.assets;
 
   return (
-    <article className="home-project-row" key={isThread ? item.id : item.title}>
-      <button className="home-project-open" type="button" onClick={() => thread && onOpenThread(thread)}>
+    <article className="home-project-row" key={isProject ? item.id : item.title}>
+      <button className="home-project-open" type="button" onClick={() => project && onOpenThread(project)}>
         <DocumentIcon aria-hidden="true" />
         <span>{projectTitle}</span>
       </button>
-      {isThread ? <small className="home-project-agent">{agentTitle}</small> : null}
+      {isProject ? <small className="home-project-agent">{agentTitle}</small> : null}
       <small>{assets}</small>
       <time>{updatedAt}</time>
-      {thread ? (
+      {project ? (
         <div className="project-more-wrap">
-          <IconButton className="project-more-button" type="button" aria-label={copy.projectActions} onClick={() => setOpenMenuThreadId((current) => current === thread.id ? "" : thread.id)}>
+          <IconButton className="project-more-button" type="button" aria-label={copy.projectActions} onClick={() => setOpenMenuThreadId((current) => current === project.id ? "" : project.id)}>
             <MoreIcon aria-hidden="true" />
           </IconButton>
-          {openMenuThreadId === thread.id ? (
+          {openMenuThreadId === project.id ? (
             <div className="project-more-menu">
-              <button type="button" onClick={() => { onTogglePinnedThread(thread.id); setOpenMenuThreadId(""); }}>{pinnedThreadIds.includes(thread.id) ? copy.unpin : copy.pin}</button>
-              <button type="button" onClick={() => { onRename(thread); setOpenMenuThreadId(""); }}>{copy.rename}</button>
-              <button type="button" onClick={() => { onDeleteThread(thread); setOpenMenuThreadId(""); }}>{copy.moveToTrash}</button>
+              <button type="button" onClick={() => { onTogglePinnedThread(project.id); setOpenMenuThreadId(""); }}>{pinnedThreadIds.includes(project.id) ? copy.unpin : copy.pin}</button>
+              <button type="button" onClick={() => { onRename(project); setOpenMenuThreadId(""); }}>{copy.rename}</button>
+              <button type="button" onClick={() => { onDeleteThread(project.id); setOpenMenuThreadId(""); }}>{copy.moveToTrash}</button>
             </div>
           ) : null}
         </div>
       ) : null}
     </article>
   );
+}
+
+function sortRecentProjects(projects: ProjectSummary[], pinnedProjectIds: string[]) {
+  const rank = new Map(pinnedProjectIds.map((id, index) => [id, index]));
+  return [...projects].sort((left, right) => {
+    const leftRank = rank.get(left.id);
+    const rightRank = rank.get(right.id);
+    if (leftRank !== undefined && rightRank !== undefined) return leftRank - rightRank;
+    if (leftRank !== undefined) return -1;
+    if (rightRank !== undefined) return 1;
+    return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
+  });
+}
+
+function formatProjectAssets(count: number, locale: "en" | "zh") {
+  if (locale === "zh") return `${count} 个资产`;
+  return `${count} ${count === 1 ? "asset" : "assets"}`;
 }
 
 function RenameThreadDialog({ initialTitle, locale, onClose, onRename }: { initialTitle: string; locale: "en" | "zh"; onClose: () => void; onRename: (title: string) => Promise<void> }) {

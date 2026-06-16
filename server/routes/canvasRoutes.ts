@@ -190,6 +190,25 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
     }
   });
 
+  app.patch("/api/threads/:threadId/canvas/node-positions", (request, response) => {
+    try {
+      const updates = Array.isArray(request.body?.updates) ? request.body.updates : undefined;
+      if (!updates) throw new Error("Canvas node position updates are required");
+      const nodes = canvasService.updateNodePositions(projectIdForThread(request.params.threadId), updates);
+      if (!nodes) {
+        sendError(response, 404, "not_found", "Canvas node not found");
+        return;
+      }
+      sendOk(response, { nodes });
+    } catch (error) {
+      if (/not found/i.test(errorMessage(error, ""))) {
+        sendError(response, 404, "not_found", "Canvas node not found");
+        return;
+      }
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to update canvas node positions"));
+    }
+  });
+
   app.patch("/api/threads/:threadId/canvas/nodes/:nodeId", (request, response) => {
     try {
       const node = canvasService.updateNode(projectIdForThread(request.params.threadId), request.params.nodeId, request.body ?? {});

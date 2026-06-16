@@ -1,7 +1,7 @@
-import type { ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 
-export function SourceMarkdownText({ linksEnabled = true, text }: { linksEnabled?: boolean; text: string }) {
-  const blocks = toBlocks(text);
+export const SourceMarkdownText = memo(function SourceMarkdownText({ linksEnabled = true, text }: { linksEnabled?: boolean; text: string }) {
+  const blocks = useMemo(() => toBlocks(text), [text]);
   return (
     <div className="canvas-source-markdown">
       {blocks.map((block, index) => {
@@ -42,7 +42,7 @@ export function SourceMarkdownText({ linksEnabled = true, text }: { linksEnabled
       })}
     </div>
   );
-}
+});
 
 type SourceLine = { text: string; offset: number; paragraph: number };
 type SourceCell = SourceLine;

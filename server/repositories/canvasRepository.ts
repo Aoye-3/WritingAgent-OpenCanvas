@@ -5,6 +5,7 @@ import type {
   CanvasNode,
   CanvasNodeInput,
   CanvasNodePatch,
+  CanvasNodePositionUpdate,
   CanvasObject,
   CanvasObjectInput,
   CanvasObjectPatch,
@@ -210,6 +211,32 @@ export class CanvasRepository {
       .run(next.kind, next.title, next.content, next.x, next.y, next.width, next.height, JSON.stringify(next.metadata), next.includeInProjectContext ? 1 : 0, now, nodeId, projectId);
     this.deps.touchProject(projectId, now);
     return next;
+  }
+
+  updateCanvasNodePositions(projectId: string, updates: CanvasNodePositionUpdate[]) {
+    validateId(projectId, "projectId");
+    const existingById = new Map(this.listCanvasNodes(projectId).map((node) => [node.id, node]));
+    const nextNodes = updates.map((update) => {
+      validateId(update.nodeId, "nodeId");
+      const existing = existingById.get(update.nodeId);
+      if (!existing) throw new Error("Canvas node not found");
+      return {
+        ...existing,
+        x: readFiniteNumber(update.x, existing.x),
+        y: readFiniteNumber(update.y, existing.y),
+        updatedAt: nowIso()
+      };
+    });
+    if (nextNodes.length === 0) return [];
+    const updatedAt = nowIso();
+    const statement = this.db.prepare(`UPDATE canvas_nodes SET x = ?, y = ?, updated_at = ? WHERE id = ? AND project_id = ?`);
+    this.deps.withTransaction(() => {
+      for (const node of nextNodes) {
+        statement.run(node.x, node.y, updatedAt, node.id, projectId);
+      }
+    });
+    this.deps.touchProject(projectId, updatedAt);
+    return nextNodes.map((node) => ({ ...node, updatedAt }));
   }
 
   deleteCanvasNode(projectId: string, nodeId: string) {

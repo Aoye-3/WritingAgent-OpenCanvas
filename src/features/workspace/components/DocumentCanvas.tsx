@@ -16,13 +16,14 @@ import {
   type OnSelectionChangeParams
 } from "@xyflow/react";
 import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowMode, CanvasWorkflowStage, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../agents/types";
-import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../../canvas/canvasClient";
+import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasNodePositionUpdate, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../../canvas/canvasClient";
 import { useI18n } from "../../i18n/I18nProvider";
 import { ResetIcon, ZoomInIcon, ZoomOutIcon } from "../../../shared/icons";
 import { CanvasCurveEdge } from "./canvas/CanvasCurveEdge";
 import { CanvasNodeFrame } from "./canvas/CanvasNodeFrame";
 import { CanvasContextMenu, CanvasSelectedNodeWorkflow, CanvasSelectionBar, type CanvasMenuState } from "./canvas/CanvasChrome";
 import { MAX_ZOOM, MIN_ZOOM, canvasNodeKinds, kindLabels, workflowModeLabels } from "./canvas/constants";
+import { collectDraggedNodePositionPatches } from "./canvas/dragPersistence";
 import { buildCanvasFlowNodes } from "./canvas/flowMapping";
 import { formatMindChainContext, type CanvasMindChainContext } from "../../../../shared/canvasMindChain";
 import type { CanvasFlowNode } from "./canvas/types";
@@ -63,6 +64,7 @@ type DocumentCanvasProps = {
   onSelectNode: (nodeId?: string) => void;
   onUndo: () => Promise<void>;
   onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
+  onUpdateNodePositions: (updates: CanvasNodePositionUpdate[]) => Promise<unknown>;
   onRequestRangeRewrite: (draft: CanvasRangeRewriteDraft) => Promise<CanvasWriteRequest>;
   onApproveWriteRequest: (requestId: string) => Promise<{ request: CanvasWriteRequest; node?: CanvasNode }>;
   onRejectWriteRequest: (requestId: string) => Promise<unknown>;
@@ -80,6 +82,8 @@ const canvasNodeTypes = {
 const canvasEdgeTypes = {
   canvasCurve: CanvasCurveEdge
 };
+
+const canvasProOptions = { hideAttribution: true };
 
 export function DocumentCanvas(props: DocumentCanvasProps) {
   return (
@@ -117,6 +121,7 @@ function DocumentCanvasInner({
   onSelectNode,
   onUndo,
   onUpdateNode,
+  onUpdateNodePositions,
   onRequestRangeRewrite,
   onApproveWriteRequest,
   onRejectWriteRequest,
@@ -126,10 +131,12 @@ function DocumentCanvasInner({
   onUpdateWorkflow,
   onToolChange
 }: DocumentCanvasProps) {
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
   const reduceMotion = useReducedMotion();
   const reactFlow = useReactFlow<CanvasFlowNode>();
   const viewport = useViewport();
+  const reactFlowRef = useRef(reactFlow);
+  reactFlowRef.current = reactFlow;
   const [flowNodes, setFlowNodes] = useState<CanvasFlowNode[]>([]);
   const [menu, setMenu] = useState<CanvasMenuState | null>(null);
   const [resizingNodeId, setResizingNodeId] = useState<string | null>(null);
@@ -144,7 +151,48 @@ function DocumentCanvasInner({
   const resizingNodeIdRef = useRef<string | null>(null);
   const lastCanvasPointRef = useRef<{ x: number; y: number } | null>(null);
   const internalClipboardRef = useRef<CanvasClipboardPayload | null>(null);
-  const focusedNodeRef = useRef<string | undefined>(undefined);
+  const actionRef = useRef({
+    onAcceptSuggestion,
+    onApproveWriteRequest,
+    onConvertSuggestionToNode,
+    onCreateEdge,
+    onCreateNode,
+    onCreateObject,
+    onDeleteEdge,
+    onDeleteNode,
+    onDeleteObject,
+    onIgnoreSuggestion,
+    onPaste,
+    onConvertText,
+    onRejectWriteRequest,
+    onRequestRangeRewrite,
+    onSelectNode,
+    onUpdateNode,
+    onUpdateNodePositions,
+    onUpdateObject,
+    onUpdateWorkflow
+  });
+  actionRef.current = {
+    onAcceptSuggestion,
+    onApproveWriteRequest,
+    onConvertSuggestionToNode,
+    onCreateEdge,
+    onCreateNode,
+    onCreateObject,
+    onDeleteEdge,
+    onDeleteNode,
+    onDeleteObject,
+    onIgnoreSuggestion,
+    onPaste,
+    onConvertText,
+    onRejectWriteRequest,
+    onRequestRangeRewrite,
+    onSelectNode,
+    onUpdateNode,
+    onUpdateNodePositions,
+    onUpdateObject,
+    onUpdateWorkflow
+  };
   const floatingTransition = reduceMotion ? { duration: 0 } : { type: "spring" as const, stiffness: 300, damping: 30 };
   const selectedNode = useMemo(() => nodes.find((node) => node.id === selectedNodeId), [nodes, selectedNodeId]);
   const flowEdges = useMemo<Edge[]>(() => edges.map((edge) => ({
@@ -164,81 +212,90 @@ function DocumentCanvasInner({
   }, []);
   const clearCreationPreview = useCallback(() => setCreationPreviewPoint(null), []);
   const requestNodeMenu = useCallback((nodeId: string, screen: { x: number; y: number }) => {
-    const point = reactFlow.screenToFlowPosition(screen);
+    const point = reactFlowRef.current.screenToFlowPosition(screen);
     setMenu({ screenX: screen.x, screenY: screen.y, canvasX: point.x, canvasY: point.y, nodeId });
     setSelectedEdgeId(undefined);
-    onSelectNode(nodeId);
-  }, [onSelectNode, reactFlow]);
+    actionRef.current.onSelectNode(nodeId);
+  }, []);
+
+  const flowCallbacks = useMemo(() => ({
+    onAcceptSuggestion: (suggestionId: string) => actionRef.current.onAcceptSuggestion(suggestionId),
+    onApproveWriteRequest: (requestId: string) => actionRef.current.onApproveWriteRequest(requestId),
+    onConvertSuggestionToNode: (suggestionId: string, kind?: CanvasNodeKind) => actionRef.current.onConvertSuggestionToNode(suggestionId, kind),
+    onCreationPreviewBlocked: clearCreationPreview,
+    onDeleteNode: (nodeId: string) => actionRef.current.onDeleteNode(nodeId),
+    onIgnoreSuggestion: (suggestionId: string) => actionRef.current.onIgnoreSuggestion(suggestionId),
+    onRejectWriteRequest: (requestId: string) => actionRef.current.onRejectWriteRequest(requestId),
+    onRequestNodeMenu: requestNodeMenu,
+    onRequestRangeRewrite: (draft: CanvasRangeRewriteDraft) => actionRef.current.onRequestRangeRewrite(draft),
+    onResizeStateChange: handleResizeStateChange,
+    onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => actionRef.current.onUpdateNode(nodeId, patch)
+  }), [clearCreationPreview, handleResizeStateChange, requestNodeMenu]);
 
   useEffect(() => {
-    setFlowNodes((current) => buildCanvasFlowNodes({
-      nodes,
-      currentNodes: current,
-      selectedNodeId,
-      resizingNodeId,
-      locale,
-      workflow,
-      suggestions,
-      writeRequests,
-      agentCardId,
-      modelOverrides,
-      callbacks: {
-        onAcceptSuggestion,
-        onConvertSuggestionToNode,
-        onDeleteNode,
-        onIgnoreSuggestion,
-        onCreationPreviewBlocked: clearCreationPreview,
-        onRequestNodeMenu: requestNodeMenu,
-        onResizeStateChange: handleResizeStateChange,
-        onUpdateNode,
-        onRequestRangeRewrite,
-        onApproveWriteRequest,
-        onRejectWriteRequest
-      }
-    }));
-  }, [agentCardId, clearCreationPreview, handleResizeStateChange, locale, modelOverrides, nodes, onAcceptSuggestion, onApproveWriteRequest, onConvertSuggestionToNode, onDeleteNode, onIgnoreSuggestion, onRejectWriteRequest, onRequestRangeRewrite, onUpdateNode, requestNodeMenu, resizingNodeId, selectedNodeId, suggestions, workflow, writeRequests]);
-
-  useEffect(() => {
-    if (!selectedNode || focusedNodeRef.current === selectedNode.id) return;
-    focusedNodeRef.current = selectedNode.id;
-    void reactFlow.setCenter(
-      selectedNode.x + selectedNode.width / 2,
-      selectedNode.y + selectedNode.height / 2,
-      { duration: 260, zoom: Math.max(viewport.zoom, 0.65) }
-    );
-  }, [reactFlow, selectedNode, viewport.zoom]);
+    setFlowNodes((current) => {
+      const next = buildCanvasFlowNodes({
+        nodes,
+        currentNodes: current,
+        selectedNodeId,
+        selectedNodeIds,
+        resizingNodeId,
+        locale,
+        workflow,
+        suggestions,
+        writeRequests,
+        agentCardId,
+        modelOverrides,
+        callbacks: flowCallbacks
+      });
+      return sameFlowNodeArray(current, next) ? current : next;
+    });
+  }, [agentCardId, flowCallbacks, locale, modelOverrides, nodes, resizingNodeId, selectedNodeId, selectedNodeIds, suggestions, workflow, writeRequests]);
 
   const createNode = async (kind: CanvasNodeKind) => {
     if (!menu) return;
     if (kind === "plan") return;
     setMenu(null);
-    await onCreateNode(createCanvasNodeDraft(kind, { x: menu.canvasX, y: menu.canvasY }, locale));
+    await actionRef.current.onCreateNode(createCanvasNodeDraft(kind, { x: menu.canvasX, y: menu.canvasY }, locale));
   };
 
   const onNodesChange = useCallback((changes: NodeChange<CanvasFlowNode>[]) => {
     const activeResizeNodeId = resizingNodeIdRef.current;
-    const allowedChanges = activeResizeNodeId
-      ? changes.filter((change) => !(change.type === "position" && change.id === activeResizeNodeId))
-      : changes;
+    const allowedChanges = changes.filter((change) => {
+      if (change.type !== "position" && change.type !== "select") return false;
+      return !(activeResizeNodeId && change.id === activeResizeNodeId);
+    });
     if (allowedChanges.length === 0) return;
-    setFlowNodes((current) => applyNodeChanges(allowedChanges, current));
+    setFlowNodes((current) => {
+      const next = applyNodeChanges(allowedChanges, current);
+      return sameFlowNodeViewArray(current, next) ? current : next;
+    });
   }, []);
 
   const onNodeDragStop = useCallback((_event: ReactMouseEvent | globalThis.MouseEvent, node: CanvasFlowNode) => {
     if (resizingNodeIdRef.current === node.id) return;
-    void onUpdateNode(node.id, {
-      x: Math.round(node.position.x),
-      y: Math.round(node.position.y)
+    const patches = collectDraggedNodePositionPatches({
+      draggedNodeId: node.id,
+      selectedNodeIds,
+      flowNodes: reactFlowRef.current.getNodes()
     });
-  }, [onUpdateNode]);
+    if (patches.length === 1) {
+      const [{ nodeId, patch }] = patches;
+      void actionRef.current.onUpdateNode(nodeId, patch);
+      return;
+    }
+    if (patches.length > 1) {
+      void actionRef.current.onUpdateNodePositions(patches.map(({ nodeId, patch }) => ({ nodeId, x: patch.x, y: patch.y })));
+    }
+  }, [selectedNodeIds]);
 
   const openMenu = useCallback((event: ReactMouseEvent | globalThis.MouseEvent) => {
     event.preventDefault();
-    const point = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    const point = reactFlowRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY });
     setMenu({ screenX: event.clientX, screenY: event.clientY, canvasX: point.x, canvasY: point.y });
     setSelectedEdgeId(undefined);
-    onSelectNode(undefined);
-  }, [onSelectNode, reactFlow]);
+    actionRef.current.onSelectNode(undefined);
+  }, []);
 
   const openNodeMenu = useCallback((event: ReactMouseEvent | globalThis.MouseEvent, node: CanvasFlowNode) => {
     event.preventDefault();
@@ -250,23 +307,27 @@ function DocumentCanvasInner({
 
   const handleSelectionChange = useCallback((params: OnSelectionChangeParams<CanvasFlowNode>) => {
     const nextEdgeId = params.edges[0]?.id;
-    setSelectedNodeIds(params.nodes.map((node) => node.id));
-    if (params.nodes.length > 0 || nextEdgeId) setSelectedObjectIds([]);
-    setSelectedEdgeId(nextEdgeId);
-    onSelectNode(nextEdgeId ? undefined : params.nodes[0]?.id);
-  }, [onSelectNode]);
+    const nextNodeIds = params.nodes.map((node) => node.id).sort();
+    setSelectedNodeIds((current) => sameStringArray(current, nextNodeIds) ? current : nextNodeIds);
+    if (params.nodes.length > 0 || nextEdgeId) setSelectedObjectIds((current) => current.length === 0 ? current : []);
+    setSelectedEdgeId((current) => current === nextEdgeId ? current : nextEdgeId);
+    const nextSelectedNodeId = nextEdgeId ? undefined : params.nodes[0]?.id;
+    if ((params.nodes.length > 0 || nextEdgeId) && selectedNodeId !== nextSelectedNodeId) {
+      actionRef.current.onSelectNode(nextSelectedNodeId);
+    }
+  }, [selectedNodeId]);
 
   useEffect(() => {
     const handleDelete = (event: KeyboardEvent) => {
       if (event.key !== "Delete" && event.key !== "Backspace") return;
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || (event.target instanceof HTMLElement && event.target.isContentEditable)) return;
-      for (const nodeId of selectedNodeIds) void onDeleteNode(nodeId);
-      for (const objectId of selectedObjectIds) void onDeleteObject(objectId);
-      if (selectedEdgeId) void onDeleteEdge(selectedEdgeId);
+      for (const nodeId of selectedNodeIds) void actionRef.current.onDeleteNode(nodeId);
+      for (const objectId of selectedObjectIds) void actionRef.current.onDeleteObject(objectId);
+      if (selectedEdgeId) void actionRef.current.onDeleteEdge(selectedEdgeId);
     };
     window.addEventListener("keydown", handleDelete);
     return () => window.removeEventListener("keydown", handleDelete);
-  }, [onDeleteEdge, onDeleteNode, onDeleteObject, selectedEdgeId, selectedNodeIds, selectedObjectIds]);
+  }, [selectedEdgeId, selectedNodeIds, selectedObjectIds]);
 
   useEffect(() => {
     const isEditable = (target: EventTarget | null) => target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable);
@@ -294,13 +355,13 @@ function DocumentCanvasInner({
       const text = event.clipboardData?.getData("text/plain") ?? "";
       if (!payload && !text) return;
       event.preventDefault();
-      const center = lastCanvasPointRef.current ?? reactFlow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+      const center = lastCanvasPointRef.current ?? reactFlowRef.current.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
       if (payload?.version === 1) {
-        void onPaste(payload, center);
+        void actionRef.current.onPaste(payload, center);
         return;
       }
       const textDraft = createCanvasObjectDraft("text", pointToCenteredOrigin(center, getCanvasCreationSize("text")));
-      void onCreateObject({ kind: "text", geometry: textDraft.geometry as { x: number; y: number; width: number; height: number }, data: { text, fontSize: 16, color: "#1f2937" } }).then((created) => {
+      void actionRef.current.onCreateObject({ kind: "text", geometry: textDraft.geometry as { x: number; y: number; width: number; height: number }, data: { text, fontSize: 16, color: "#1f2937" } }).then((created) => {
         const object = created as CanvasObject;
         setSelectedObjectIds([object.id]);
         setEditNewTextId(object.id);
@@ -312,7 +373,7 @@ function DocumentCanvasInner({
       window.removeEventListener("copy", copy);
       window.removeEventListener("paste", paste);
     };
-  }, [edges, nodes, objects, onCreateObject, onPaste, reactFlow, selectedNodeIds, selectedObjectIds]);
+  }, [edges, nodes, objects, selectedNodeIds, selectedObjectIds]);
 
   const resetViewport = () => {
     void reactFlow.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 160 });
@@ -320,8 +381,8 @@ function DocumentCanvasInner({
 
   const handleConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target || connection.source === connection.target) return;
-    void onCreateEdge({ sourceNodeId: connection.source, targetNodeId: connection.target });
-  }, [onCreateEdge]);
+    void actionRef.current.onCreateEdge({ sourceNodeId: connection.source, targetNodeId: connection.target });
+  }, []);
 
   const sendMindChain = (nodeId: string) => {
     const context = formatMindChainContext(nodeId, nodes, edges, locale);
@@ -331,7 +392,7 @@ function DocumentCanvasInner({
 
   const deleteSelectedEdge = async () => {
     if (!selectedEdgeId) return;
-    await onDeleteEdge(selectedEdgeId);
+    await actionRef.current.onDeleteEdge(selectedEdgeId);
     setSelectedEdgeId(undefined);
   };
 
@@ -341,7 +402,7 @@ function DocumentCanvasInner({
     const roundedOrigin = { x: Math.round(origin.x), y: Math.round(origin.y) };
     setCreationPreviewPoint(null);
     if (activeTool === "shape" || activeTool === "table" || activeTool === "text") {
-      void onCreateObject(createCanvasObjectDraft(activeTool, roundedOrigin, shapeKind)).then((created) => {
+      void actionRef.current.onCreateObject(createCanvasObjectDraft(activeTool, roundedOrigin, shapeKind)).then((created) => {
         if (activeTool === "text") {
           const object = created as CanvasObject;
           setSelectedObjectIds([object.id]);
@@ -351,7 +412,7 @@ function DocumentCanvasInner({
       });
       return;
     }
-    void onCreateNode(createCanvasNodeDraft(activeTool, roundedOrigin, locale)).then(() => onToolChange(completeCanvasToolAction(activeTool)));
+    void actionRef.current.onCreateNode(createCanvasNodeDraft(activeTool, roundedOrigin, locale)).then(() => onToolChange(completeCanvasToolAction(activeTool)));
   };
 
   const handleCanvasPointerDownCapture = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -372,7 +433,7 @@ function DocumentCanvasInner({
       setArrowStart(null);
       window.removeEventListener("pointerup", finish);
       if (Math.hypot(end.x - start.x, end.y - start.y) < 12) return;
-      await onCreateObject({ kind: "arrow", geometry: { startX: start.x, startY: start.y, endX: end.x, endY: end.y }, data: {} });
+      await actionRef.current.onCreateObject({ kind: "arrow", geometry: { startX: start.x, startY: start.y, endX: end.x, endY: end.y }, data: {} });
       onToolChange("select");
     };
     window.addEventListener("pointerup", finish, { once: true });
@@ -425,7 +486,7 @@ function DocumentCanvasInner({
               className="canvas-stage-select canvas-mode-select"
               aria-label="Canvas mode"
               value={workflow.mode}
-              onChange={(event) => void onUpdateWorkflow({ mode: event.target.value as CanvasWorkflowMode })}
+              onChange={(event) => void actionRef.current.onUpdateWorkflow({ mode: event.target.value as CanvasWorkflowMode })}
             >
               {Object.entries(workflowModeLabels).map(([mode, labels]) => <option key={mode} value={mode}>{labels[locale]}</option>)}
             </select>
@@ -439,17 +500,16 @@ function DocumentCanvasInner({
           </button>
           <button className="button button-secondary button-small" type="button" onClick={resetViewport}>
             <ResetIcon aria-hidden="true" size={16} />
-            {locale === "zh" ? "重置" : "Reset"}
+            {t("workspace.resetCanvas")}
           </button>
           <button className="button button-secondary button-small" type="button" disabled={!canUndo} onClick={() => void onUndo()}>
-            {locale === "zh" ? "撤销" : "Undo"}
+            {t("workspace.undoCanvas")}
           </button>
         </motion.div>
         <ReactFlow<CanvasFlowNode>
           className={`canvas-flow${isPreviewCreationTool(activeTool) ? " is-creating" : ""}`}
           colorMode="light"
           deleteKeyCode={null}
-          fitView={nodes.length > 0}
           maxZoom={MAX_ZOOM}
           minZoom={MIN_ZOOM}
           nodeTypes={canvasNodeTypes}
@@ -460,9 +520,9 @@ function DocumentCanvasInner({
           onEdgeClick={(_event, edge) => {
             closeMenu();
             setSelectedEdgeId(edge.id);
-            onSelectNode(undefined);
+            actionRef.current.onSelectNode(undefined);
           }}
-          onEdgeDoubleClick={(_event, edge) => void onDeleteEdge(edge.id)}
+          onEdgeDoubleClick={(_event, edge) => void actionRef.current.onDeleteEdge(edge.id)}
           nodesDraggable={!resizingNodeId && activeTool === "select"}
           onMoveStart={closeMenu}
           onNodeDragStart={closeMenu}
@@ -473,14 +533,14 @@ function DocumentCanvasInner({
           onPaneClick={() => {
             closeMenu();
             setSelectedObjectIds([]);
-            onSelectNode(undefined);
+            actionRef.current.onSelectNode(undefined);
           }}
           onPaneContextMenu={openMenu}
           onSelectionChange={handleSelectionChange}
           panActivationKeyCode="Space"
           panOnDrag={activeTool === "pan"}
           panOnScroll
-          proOptions={{ hideAttribution: true }}
+          proOptions={canvasProOptions}
           selectionOnDrag={!resizingNodeId && activeTool === "select"}
           selectionMode={SelectionMode.Partial}
         >
@@ -489,17 +549,17 @@ function DocumentCanvasInner({
           objects={objects}
           selectedObjectIds={selectedObjectIds}
           transform={`translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`}
-          onDeleteObject={(objectId) => void onDeleteObject(objectId)}
+          onDeleteObject={(objectId) => void actionRef.current.onDeleteObject(objectId)}
           onCreationPreviewBlocked={clearCreationPreview}
           onSelectObject={(objectId, additive) => {
             setSelectedObjectIds((current) => additive ? current.includes(objectId) ? current.filter((id) => id !== objectId) : [...current, objectId] : [objectId]);
             setSelectedEdgeId(undefined);
-            onSelectNode(undefined);
+            actionRef.current.onSelectNode(undefined);
           }}
-          onUpdateObject={(objectId, geometry) => void onUpdateObject(objectId, { geometry })}
-          onUpdateData={(objectId, data) => void onUpdateObject(objectId, { data })}
+          onUpdateObject={(objectId, geometry) => void actionRef.current.onUpdateObject(objectId, { geometry })}
+          onUpdateData={(objectId, data) => void actionRef.current.onUpdateObject(objectId, { data })}
           onConvertText={(objectId, kind) => {
-            void onConvertText(objectId, kind);
+            void actionRef.current.onConvertText(objectId, kind);
           }}
           requestedEditingTextId={editNewTextId}
           zoom={viewport.zoom}
@@ -520,8 +580,8 @@ function DocumentCanvasInner({
               initial={reduceMotion ? false : { opacity: 0, y: 8, scale: 0.98 }}
               transition={floatingTransition}
             >
-              <strong>{locale === "zh" ? "右键新建节点" : "Right-click to create a node"}</strong>
-              <span>{locale === "zh" ? "也可以从底部工具栏放置文档、便签、形状或 Agent 工具。" : "Use the dock to place documents, notes, shapes, or the Agent tool."}</span>
+              <strong>{t("workspace.rightClickCreateNode")}</strong>
+              <span>{t("workspace.createNodeHint")}</span>
             </motion.div>
           ) : null}
         </AnimatePresence>
@@ -530,7 +590,7 @@ function DocumentCanvasInner({
           <CanvasContextMenu
             createItems={canvasNodeKinds.map((kind) => ({ kind, label: kindLabels[kind]?.[locale] ?? kind }))}
             menu={menu}
-            sendMindChainLabel={locale === "zh" ? "发送思维链" : "Send mind chain"}
+            sendMindChainLabel={t("workspace.sendMindChain")}
             onCreateNode={(kind) => void createNode(kind)}
             onSendMindChain={sendMindChain}
           />
@@ -553,8 +613,8 @@ function DocumentCanvasInner({
       </div>
 
       <CanvasSelectionBar
-        deleteEdgeLabel={locale === "zh" ? "删除连线" : "Delete edge"}
-        hint={locale === "zh" ? "点击选中 · 拖拽空白框选 · 空格 + 拖拽移动画布 · Ctrl + 滚轮缩放" : "Click to select · Drag blank space to marquee select · Space + drag to pan · Ctrl + wheel to zoom"}
+        deleteEdgeLabel={t("workspace.deleteEdge")}
+        hint={t("workspace.canvasHint")}
         locale={locale}
         selectedEdgeId={selectedEdgeId}
         selectedNode={selectedNode}
@@ -569,6 +629,29 @@ function DocumentCanvasInner({
 
 function isBlankCanvasPoint(clientX: number, clientY: number) {
   return Boolean(document.elementFromPoint(clientX, clientY)?.closest(".react-flow__pane"));
+}
+
+function sameStringArray(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function sameFlowNodeArray(left: CanvasFlowNode[], right: CanvasFlowNode[]) {
+  return left.length === right.length && left.every((node, index) => node === right[index]);
+}
+
+function sameFlowNodeViewArray(left: CanvasFlowNode[], right: CanvasFlowNode[]) {
+  return left.length === right.length && left.every((node, index) => {
+    const next = right[index];
+    return node.id === next.id
+      && node.selected === next.selected
+      && node.dragging === next.dragging
+      && node.position.x === next.position.x
+      && node.position.y === next.position.y
+      && node.width === next.width
+      && node.height === next.height
+      && node.style?.width === next.style?.width
+      && node.style?.height === next.style?.height;
+  });
 }
 
 function isPointOverCanvasContent(point: { x: number; y: number }, nodes: CanvasNode[], objects: CanvasObject[]) {

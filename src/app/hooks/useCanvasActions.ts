@@ -15,6 +15,7 @@ import {
   rejectCanvasWriteRequest,
   requestCanvasRangeRewrite,
   updateCanvasNode,
+  updateCanvasNodePositions,
   updateCanvasObject,
   updateCanvasNodeWorkflow,
   updateCanvasWorkflow,
@@ -23,6 +24,7 @@ import {
   type CanvasNodeDraft,
   type CanvasNodeWorkflowPatch,
   type CanvasNodePatch,
+  type CanvasNodePositionUpdate,
   type CanvasObjectDraft,
   type CanvasObjectPatch,
   type CanvasWorkflowPatch,
@@ -101,6 +103,22 @@ export function useCanvasActions({
     }
     await onRefreshProjectSurfaces();
     return node;
+  };
+
+  const handleUpdateCanvasNodePositions = async (updates: CanvasNodePositionUpdate[], options: HistoryOptions = {}) => {
+    if (updates.length === 0) return [];
+    const threadId = await ensureThreadId();
+    const previousById = new Map(canvasNodes.map((node) => [node.id, node]));
+    const nodes = await updateCanvasNodePositions(threadId, updates);
+    const updatedById = new Map(nodes.map((node) => [node.id, node]));
+    setCanvasNodes((current) => current.map((item) => updatedById.get(item.id) ?? item));
+    const inverse = updates.flatMap((update) => {
+      const previous = previousById.get(update.nodeId);
+      return previous && previous.kind !== "plan" ? [{ nodeId: update.nodeId, x: previous.x, y: previous.y }] : [];
+    });
+    if (inverse.length > 0 && options.recordHistory !== false) pushHistory({ kind: "updateNodes", patches: inverse });
+    await onRefreshProjectSurfaces();
+    return nodes;
   };
 
   const handleDeleteCanvasNode = async (nodeId: string, options: HistoryOptions = {}) => {
@@ -271,6 +289,8 @@ export function useCanvasActions({
       }
     } else if (entry.kind === "updateNode") {
       await handleUpdateCanvasNode(entry.nodeId, entry.patch, { recordHistory: false });
+    } else if (entry.kind === "updateNodes") {
+      await handleUpdateCanvasNodePositions(entry.patches, { recordHistory: false });
     } else if (entry.kind === "deleteEdge") {
       await handleDeleteCanvasEdge(entry.edgeId, { recordHistory: false });
     } else if (entry.kind === "restoreEdge") {
@@ -351,6 +371,7 @@ export function useCanvasActions({
     handleUpdateCanvasNodeWorkflow,
     handleUpdateCanvasWorkflow,
     handleUpdateCanvasNode,
+    handleUpdateCanvasNodePositions,
     handleUpdateCanvasObject,
     handleConvertCanvasText,
     handleUploadCanvasAsset,

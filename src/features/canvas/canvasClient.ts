@@ -17,6 +17,11 @@ export type CanvasNodeDraft = {
 };
 
 export type CanvasNodePatch = Partial<CanvasNodeDraft>;
+export type CanvasNodePositionUpdate = {
+  nodeId: string;
+  x: number;
+  y: number;
+};
 
 export type CanvasWorkflowPatch = {
   mode?: CanvasWorkflowMode;
@@ -89,6 +94,11 @@ export async function createCanvasEdge(threadId: string, draft: CanvasEdgeDraft)
 export async function updateCanvasNode(threadId: string, nodeId: string, patch: CanvasNodePatch): Promise<CanvasNode> {
   const payload = await apiPatch<{ node: CanvasNode }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/nodes/${encodeURIComponent(nodeId)}`, patch);
   return payload.node;
+}
+
+export async function updateCanvasNodePositions(threadId: string, updates: CanvasNodePositionUpdate[]): Promise<CanvasNode[]> {
+  const payload = await apiPatch<{ nodes: CanvasNode[] }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/node-positions`, { updates });
+  return payload.nodes;
 }
 
 export async function updateCanvasWorkflow(threadId: string, patch: CanvasWorkflowPatch): Promise<CanvasWorkflow> {

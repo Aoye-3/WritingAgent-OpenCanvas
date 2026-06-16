@@ -79,6 +79,44 @@ test("Canvas flow mapping keeps unselected nodes draggable in select mode", () =
   assert.equal(flowNodes[0].draggable, true);
 });
 
+test("Canvas flow mapping preserves multi-selected node state", () => {
+  const nodes = [
+    canvasNode("node_1", 10),
+    canvasNode("node_2", 220),
+    canvasNode("node_3", 430)
+  ];
+
+  const flowNodes = buildCanvasFlowNodes({
+    nodes,
+    currentNodes: [],
+    selectedNodeId: "node_1",
+    selectedNodeIds: ["node_1", "node_2"],
+    resizingNodeId: null,
+    locale: "en",
+    suggestions: [],
+    callbacks
+  });
+
+  assert.deepEqual(flowNodes.map((node) => node.selected), [true, true, false]);
+});
+
+function canvasNode(id: string, x: number) {
+  return {
+    id,
+    threadId: "thread_1",
+    kind: "document" as const,
+    title: "Draft",
+    content: "Body",
+    x,
+    y: 20,
+    width: 300,
+    height: 180,
+    metadata: {},
+    createdAt: "",
+    updatedAt: ""
+  };
+}
+
 test("Canvas flow mapping attaches only suggestions owned by the mapped node", () => {
   const nodes = [
     {

@@ -75,7 +75,7 @@ function AppContent() {
   const { locale } = useI18n();
   const { view, setView } = useAppNavigation("start");
   const { agentCards, updateAgentCard } = useAgentCards(fallbackAgentCards);
-  const { handleBatchHardDelete, handleBatchMoveToTrash, handleRenameThread, handleTogglePinnedThread, pinnedThreadIds, projects, recentThreads, refreshProjectSurfaces, refreshProjects, refreshRecentThreads, trashProjects } = useProjects();
+  const { handleBatchHardDelete, handleBatchMoveToTrash, handleRenameThread, handleTogglePinnedThread, pinnedThreadIds, projects, refreshProjectSurfaces, refreshProjects, refreshRecentThreads, trashProjects } = useProjects();
   const [activeAgent, setActiveAgent] = useState<AgentCard>(fallbackAgentCards[0]);
   const [projectBrief, setProjectBrief] = useState<ProjectBrief>({});
   const [taskBrief, setTaskBrief] = useState<TaskBrief>({});
@@ -455,7 +455,7 @@ function AppContent() {
       <HomeView
         activeView={view}
         agentCards={agentCards}
-        recentThreads={recentThreads}
+        projects={projects}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenAgent={openWorkspace}
         onOpenThread={openRecentThread}
@@ -578,6 +578,7 @@ function AppContent() {
         onSelectCanvasNode={canvasState.setSelectedCanvasNodeId}
         onToolStateChange={setToolState}
         onUpdateCanvasNode={canvasState.handleUpdateCanvasNode}
+        onUpdateCanvasNodePositions={canvasState.handleUpdateCanvasNodePositions}
         onUpdateCanvasObject={canvasState.handleUpdateCanvasObject}
         onUploadCanvasAsset={canvasState.handleUploadCanvasAsset}
         onUpdateCanvasNodeWorkflow={canvasState.handleUpdateCanvasNodeWorkflow}

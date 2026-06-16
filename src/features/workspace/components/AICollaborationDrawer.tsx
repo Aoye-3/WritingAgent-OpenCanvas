@@ -126,7 +126,7 @@ export function AICollaborationDrawer({
   onFocusPlanArtifact,
   toolState
 }: AICollaborationDrawerProps) {
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
   const reduceMotion = useReducedMotion();
   const [input, setInput] = useState("");
   const supportsThinking = modelSettings?.providerId === "deepseek";
@@ -195,7 +195,7 @@ export function AICollaborationDrawer({
         await rejectPendingIfSuperseded();
       }
       resetWriteDraft();
-      setWriteStatus(locale === "zh" ? "已写入 Canvas" : "Written to Canvas");
+      setWriteStatus(t("workspace.writtenToCanvas"));
     } finally {
       setWriteBusy(false);
     }
@@ -208,7 +208,7 @@ export function AICollaborationDrawer({
         await rejectPendingIfSuperseded();
       }
       resetWriteDraft();
-      setWriteStatus(locale === "zh" ? "已取消写入" : "Write canceled");
+      setWriteStatus(t("workspace.writeCanceled"));
     } finally {
       setWriteBusy(false);
     }
@@ -346,7 +346,7 @@ export function AICollaborationDrawer({
         initial={reduceMotion ? false : { opacity: 0.84 }}
         layout
         transition={drawerTransition}
-        aria-label="AI collaboration drawer collapsed"
+        aria-label={t("workspace.expandAi")}
       >
         <motion.button
           animate={{ opacity: 1, x: 0 }}
@@ -355,7 +355,7 @@ export function AICollaborationDrawer({
           transition={drawerTransition}
           type="button"
           onClick={onToggleCollapsed}
-          aria-label={locale === "zh" ? "展开 AI 协作层" : "Expand AI collaboration"}
+          aria-label={t("workspace.expandAi")}
         >
           <span>AI</span>
           <small>{messages.length}</small>
@@ -366,31 +366,31 @@ export function AICollaborationDrawer({
   }
 
   return (
-    <motion.aside className="ai-drawer" aria-label="AI collaboration drawer" layout transition={drawerTransition}>
+    <motion.aside className="ai-drawer" aria-label={t("workspace.expandAi")} layout transition={drawerTransition}>
       <div
-        aria-label={locale === "zh" ? "调整 AI 协作层宽度" : "Resize AI collaboration drawer"}
+        aria-label={t("workspace.resizeAiDrawer")}
         aria-orientation="vertical"
         className="ai-drawer-resize-handle"
         onPointerDown={onResizeStart}
         role="separator"
         tabIndex={0}
-        title={locale === "zh" ? "向左拖动扩大 AI 协作层" : "Drag left to expand AI collaboration"}
+        title={t("workspace.resizeAiDrawerTitle")}
       />
       <div className="conversation-compact-header" data-testid="conversation-compact-header">
-        <strong>{projectThreads.find((thread) => thread.id === currentThreadId)?.title ?? (locale === "zh" ? "新对话" : "New conversation")}</strong>
+        <strong>{projectThreads.find((thread) => thread.id === currentThreadId)?.title ?? t("workspace.newConversation")}</strong>
           <div className="conversation-header-actions">
             <button className="icon-button conversation-icon-action" type="button" disabled={sessionBusy} onClick={() => {
               void onResetContext().then(() => setContextResetNotice(true));
-            }} aria-label={locale === "zh" ? "清除上下文" : "Clear context"} title={locale === "zh" ? "保留历史，但从此处重新开始上下文" : "Keep history, but start model context from here"}>
+            }} aria-label={t("workspace.clearContext")} title={t("workspace.contextResetTitle")}>
               <HistoryIcon aria-hidden="true" size={17} />
             </button>
-          <button className="icon-button conversation-icon-action" type="button" disabled={sessionBusy} onClick={() => { void onCreateConversation(); }} aria-label={locale === "zh" ? "新建" : "New"} title={locale === "zh" ? "新建对话" : "New conversation"}>
+          <button className="icon-button conversation-icon-action" type="button" disabled={sessionBusy} onClick={() => { void onCreateConversation(); }} aria-label={t("workspace.newConversationAction")} title={t("workspace.newConversation")}>
             <AddIcon aria-hidden="true" size={17} />
           </button>
-          <button className="icon-button conversation-icon-action" type="button" aria-expanded={historyOpen} onClick={() => setHistoryOpen((value) => !value)} aria-label={locale === "zh" ? "历史" : "History"} title={locale === "zh" ? "历史对话" : "Conversation history"}>
+          <button className="icon-button conversation-icon-action" type="button" aria-expanded={historyOpen} onClick={() => setHistoryOpen((value) => !value)} aria-label={t("workspace.history")} title={t("workspace.conversationHistory")}>
             <HistoryIcon aria-hidden="true" size={17} />
           </button>
-          <button className="icon-button conversation-icon-action" type="button" onClick={onToggleCollapsed} aria-label={locale === "zh" ? "收起右侧栏" : "Collapse right drawer"}>
+          <button className="icon-button conversation-icon-action" type="button" onClick={onToggleCollapsed} aria-label={t("workspace.collapseRightDrawer")}>
             <ChevronRightIcon aria-hidden="true" size={18} />
           </button>
         </div>
@@ -404,7 +404,7 @@ export function AICollaborationDrawer({
           exit={{ opacity: 0, y: -6, scale: 0.98 }}
           initial={reduceMotion ? false : { opacity: 0, y: -6, scale: 0.98 }}
           transition={drawerTransition}
-          aria-label={locale === "zh" ? "当前项目历史对话" : "Current Project conversation history"}
+          aria-label={t("workspace.projectConversationHistory")}
         >
           {projectThreads.map((thread) => (
             <button className={thread.id === currentThreadId ? "is-active" : ""} key={thread.id} type="button"
@@ -416,7 +416,7 @@ export function AICollaborationDrawer({
               <strong>{thread.title}</strong><time>{new Date(thread.updatedAt).toLocaleString()}</time>
             </button>
           ))}
-          {projectThreads.length === 0 ? <p>{locale === "zh" ? "暂无历史对话" : "No conversation history yet."}</p> : null}
+          {projectThreads.length === 0 ? <p>{t("workspace.noConversationHistory")}</p> : null}
         </motion.div>
       ) : null}
       </AnimatePresence>
@@ -424,10 +424,10 @@ export function AICollaborationDrawer({
       {sessionError ? <p className="session-error" role="alert">{sessionError}</p> : null}
 
       <div className="drawer-message-list" aria-live="polite" ref={messageListRef}>
-        {contextResetNotice ? <div className="context-reset-divider">{locale === "zh" ? "上下文已从此处重新开始" : "Context starts again from here"}</div> : null}
+        {contextResetNotice ? <div className="context-reset-divider">{t("workspace.contextStartsAgain")}</div> : null}
         {messages.length === 0 ? (
           <div className="empty-chat-state">
-            {locale === "zh" ? "在这里追问、要求改写，或让 Agent 解释本次生成。" : "Ask follow-ups, request rewrites, or have the agent explain the current draft."}
+            {t("workspace.emptyChat")}
           </div>
         ) : null}
         {timeline.map((entry) => {
@@ -460,7 +460,7 @@ export function AICollaborationDrawer({
                 {message.role === "assistant" && message.isStreaming && !message.text.trim() ? (
                   <>
                     <AssistantRunTrace events={message.timeline} onFocusNode={onFocusPlanArtifact} />
-                    <StreamingStatus label={streamingStatusLabel(message, locale)} />
+                    <StreamingStatus label={streamingStatusLabel(message, t("workspace.preparingResponse"))} />
                   </>
                 ) : message.role === "assistant" ? (
                   <div className="assistant-selectable-text" onMouseUp={(event) => captureSelection(event, message)}>
@@ -469,16 +469,16 @@ export function AICollaborationDrawer({
                     {message.isStreaming ? <span className="typing-caret" aria-hidden="true" /> : null}
                   </div>
                 ) : <p>{message.text}</p>}
-                {message.usedMock ? <span className="message-meta">{locale === "zh" ? "Mock 兜底" : "Mock fallback"}</span> : null}
+                {message.usedMock ? <span className="message-meta">{t("workspace.mockFallback")}</span> : null}
               </div>
             </article>
           );
         })}
         {pendingWriteSuggestion ? (
           <div className="canvas-write-suggestion-tail">
-            <span>{locale === "zh" ? "是否将这些要点生成到画板？" : "Create Canvas nodes for these points?"}</span>
-            <button type="button" onClick={() => void acceptCanvasWriteSuggestion(currentThreadId, pendingWriteSuggestion.id).then(onPlansChanged)}>{locale === "zh" ? "生成节点" : "Create nodes"}</button>
-            <button type="button" onClick={() => void dismissCanvasWriteSuggestion(currentThreadId, pendingWriteSuggestion.id).then(onPlansChanged)}>{locale === "zh" ? "不用" : "No thanks"}</button>
+            <span>{t("workspace.createCanvasNodesQuestion")}</span>
+            <button type="button" onClick={() => void acceptCanvasWriteSuggestion(currentThreadId, pendingWriteSuggestion.id).then(onPlansChanged)}>{t("workspace.createNodes")}</button>
+            <button type="button" onClick={() => void dismissCanvasWriteSuggestion(currentThreadId, pendingWriteSuggestion.id).then(onPlansChanged)}>{t("workspace.noThanks")}</button>
           </div>
         ) : null}
         {hasWriteProposal ? (
@@ -504,14 +504,14 @@ export function AICollaborationDrawer({
           onMouseDown={(event) => event.preventDefault()}
           onClick={addAnnotation}
         >
-          {locale === "zh" ? "批注" : "Annotate"}
+          {t("workspace.annotate")}
         </button>
       ) : null}
 
       <form className={pendingClarificationPlan ? "drawer-chat-composer drawer-chat-composer-clarification" : "drawer-chat-composer"} onSubmit={submit}>
         <div className="composer-agent-row" data-testid="composer-agent-row">
           <AgentIcon aria-hidden="true" size={16} />
-          <select className="composer-agent-select" aria-label={locale === "zh" ? "本次执行 Agent" : "Agent for this message"}
+          <select className="composer-agent-select" aria-label={t("workspace.agentForMessage")}
             value={activeAgent.id} onChange={(event) => onSelectAgent(event.target.value)}>
             {agentCards.map((agent) => <option key={agent.id} value={agent.id}>{agent.title[locale]}</option>)}
           </select>
@@ -527,9 +527,9 @@ export function AICollaborationDrawer({
         ) : null}
         {mindChainContext ? (
           <div className="mind-chain-context-chip" data-testid="mind-chain-context-chip">
-            <span>{locale === "zh" ? `思维链 · ${mindChainContext.nodeCount} 节点` : `Mind chain · ${mindChainContext.nodeCount} ${mindChainContext.nodeCount === 1 ? "node" : "nodes"}`}</span>
+            <span>{t("workspace.mindChainContext", { count: mindChainContext.nodeCount })}</span>
             <button
-              aria-label={locale === "zh" ? "移除思维链上下文" : "Remove mind chain context"}
+              aria-label={t("workspace.removeMindChain")}
               onClick={onRemoveMindChainContext}
               type="button"
             >
@@ -538,23 +538,23 @@ export function AICollaborationDrawer({
           </div>
         ) : null}
         <div
-          aria-label={locale === "zh" ? "调整输入框高度" : "Resize message input"}
+          aria-label={t("workspace.resizeMessageInput")}
           aria-orientation="horizontal"
           className="composer-resize-handle"
           data-testid="composer-resize-handle"
           hidden={Boolean(pendingClarificationPlan)}
           onPointerDown={startComposerResize}
           role="separator"
-          title={locale === "zh" ? "上下拖动调整输入框高度" : "Drag vertically to resize the message input"}
+          title={t("workspace.resizeMessageInputTitle")}
         >
           <span aria-hidden="true" />
         </div>
         <textarea
-          aria-label="AI collaboration message"
+          aria-label={t("workspace.aiMessage")}
           data-testid="ai-collaboration-input"
           disabled={Boolean(pendingClarificationPlan)}
           hidden={Boolean(pendingClarificationPlan)}
-          placeholder={locale === "zh" ? "让 AI 协作修改当前草稿..." : "Ask AI to collaborate on this draft..."}
+          placeholder={t("workspace.askAiPlaceholder")}
           rows={3}
           style={{ height: composerHeight }}
           value={input}
@@ -563,13 +563,13 @@ export function AICollaborationDrawer({
         <div className="composer-tool-row" hidden={Boolean(pendingClarificationPlan)}>
           <ToolUseIconBar allowedTools={allowedTools} toolState={toolState} onToolStateChange={onToolStateChange} />
           <select
-            aria-label={locale === "zh" ? "会话模型" : "Conversation model"}
+            aria-label={t("workspace.conversationModel")}
             className="composer-model-select"
             disabled={modelSelectionDisabled}
             value={selectedModelConfigId ?? ""}
             onChange={(event) => { void onSelectModel(event.target.value); }}
           >
-            <option value="">{locale === "zh" ? "选择模型" : "Select model"}</option>
+            <option value="">{t("workspace.selectModel")}</option>
             {modelGroups(locale).map((group) => {
               const models = configuredModels.filter((model) => model.capabilityGroup === group.id);
               return models.length ? <optgroup key={group.id} label={group.label}>
@@ -577,14 +577,14 @@ export function AICollaborationDrawer({
               </optgroup> : null;
             })}
           </select>
-          <button className="tool-icon-button plan-command-button" type="button" onClick={() => setInput((value) => value.startsWith("/plan") ? value : `/plan ${value}`)} title="Create a task plan">Plan</button>
+          <button className="tool-icon-button plan-command-button" type="button" onClick={() => setInput((value) => value.startsWith("/plan") ? value : `/plan ${value}`)} title={t("workspace.createTaskPlan")}>Plan</button>
           {supportsThinking ? (
-            <div className="composer-think-controls" aria-label="Think mode">
+            <div className="composer-think-controls" aria-label={t("workspace.thinkMode")}>
               <button
                 aria-pressed={thinkEnabled}
                 className={thinkEnabled ? "tool-icon-button is-active" : "tool-icon-button"}
                 onClick={() => setThinkEnabled((value) => !value)}
-                title={thinkEnabled ? "Think mode on for this message" : "Think mode off for this message"}
+                title={thinkEnabled ? t("workspace.thinkModeOn") : t("workspace.thinkModeOff")}
                 type="button"
               >
                 T
@@ -592,19 +592,19 @@ export function AICollaborationDrawer({
               </button>
               {thinkEnabled ? (
                 <select
-                  aria-label="Reasoning effort"
+                  aria-label={t("workspace.reasoningEffort")}
                   className="composer-effort-select"
                   value={reasoningEffort ?? "high"}
                   onChange={(event) => setReasoningEffort(event.target.value as NonNullable<GenerateRequest["modelOverrides"]>["reasoningEffort"])}
                 >
-                  <option value="high">High</option>
-                  <option value="max">Max</option>
+                  <option value="high">{t("workspace.high")}</option>
+                  <option value="max">{t("workspace.max")}</option>
                 </select>
               ) : null}
             </div>
           ) : null}
           <button className={isSending ? "button button-primary chat-send chat-send-icon is-stopping" : "button button-primary chat-send chat-send-icon"} type={isSending ? "button" : "submit"} disabled={writeBusy} onClick={isSending ? onStopSending : undefined}
-            aria-label={locale === "zh" ? "发送" : "Send"} title={isSending ? (locale === "zh" ? "发送中" : "Sending") : (locale === "zh" ? "发送" : "Send")}>
+            aria-label={t("workspace.send")} title={isSending ? t("workspace.sending") : t("workspace.send")}>
             {isSending ? <StopIcon aria-hidden="true" size={18} /> : <SendIcon aria-hidden="true" size={18} />}
           </button>
         </div>
@@ -622,8 +622,8 @@ function StreamingStatus({ label }: { label: string }) {
   );
 }
 
-function streamingStatusLabel(message: CollaborationMessage, locale: "en" | "zh") {
-  return message.statusLabel || (locale === "zh" ? "正在准备响应" : "Preparing response");
+function streamingStatusLabel(message: CollaborationMessage, fallback: string) {
+  return message.statusLabel || fallback;
 }
 
 function isWriteConfirmation(text: string) {
@@ -631,7 +631,7 @@ function isWriteConfirmation(text: string) {
 }
 
 function ToolUseIconBar({ allowedTools, toolState, onToolStateChange }: Pick<AICollaborationDrawerProps, "allowedTools" | "toolState" | "onToolStateChange">) {
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
   const visibleTools = visibleComposerTools(allowedTools);
   const toggle = (tool: string) => {
     const key = tool as ToolKey;
@@ -639,7 +639,7 @@ function ToolUseIconBar({ allowedTools, toolState, onToolStateChange }: Pick<AIC
   };
 
   return (
-    <div className="composer-tool-icons" aria-label="ToolUse">
+    <div className="composer-tool-icons" aria-label={t("workspace.toolUseCommandBar")}>
       {visibleTools.map((tool) => {
         const active = Boolean(toolState?.[tool as ToolKey]);
         const meta = toolMeta[tool] ?? { en: tool, zh: tool, hint: tool };

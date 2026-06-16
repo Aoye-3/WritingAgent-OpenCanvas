@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveModelSettings } from "./promptRunBuilder.js";
+import { resolveModelSettings, resolveResponseLocale } from "./promptRunBuilder.js";
 
 test("model settings require an explicitly resolved Model Config", async () => {
   await assert.rejects(() => resolveModelSettings(undefined), /select an enabled project model/i);
@@ -59,4 +59,20 @@ test("model settings ignore legacy Agent-owned model identity and use conversati
   assert.equal(resolved.maxToolCalls, 0);
   assert.equal(resolved.thinkingMode, "enabled");
   assert.equal(resolved.reasoningEffort, "high");
+});
+
+test("response locale follows the user's instruction language before UI locale", () => {
+  assert.equal(resolveResponseLocale({
+    locale: "en",
+    chatInstruction: "帮我总结一下这份资料"
+  }), "zh");
+
+  assert.equal(resolveResponseLocale({
+    locale: "zh",
+    chatInstruction: "Summarize this document for a product manager."
+  }), "en");
+
+  assert.equal(resolveResponseLocale({
+    locale: "zh"
+  }), "zh");
 });
