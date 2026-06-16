@@ -1,5 +1,6 @@
 import type { AppView } from "../app/App";
 import { useI18n } from "../features/i18n/I18nProvider";
+import type { TranslationKey } from "../features/i18n/translations";
 import { AgentIcon, BookIcon, BrandIcon, CanvasNodesIcon, DocumentIcon, HomeIcon, ModelConfigIcon, RuntimeIcon } from "./icons";
 import { Button } from "./ui";
 
@@ -10,42 +11,21 @@ type AppSidebarProps = {
   className?: string;
 };
 
-const labelsEn = {
-  home: "Home",
-  projects: "Projects",
-  agentSettings: "Agent settings",
-  canvasNodeSettings: "Canvas nodes",
-  modelConfig: "Model config",
-  aiDashboard: "AI Dashboard",
-  knowledgeSettings: "Knowledge settings"
-};
-
-const labelsZh: typeof labelsEn = {
-  home: "首页",
-  projects: "项目",
-  agentSettings: "Agent 设置",
-  canvasNodeSettings: "Canvas 节点",
-  modelConfig: "模型配置",
-  aiDashboard: "AI 仪表盘",
-  knowledgeSettings: "知识库设置"
-};
-
-const navItems: Array<{ view: AppView; icon: typeof HomeIcon; labelKey: keyof typeof labelsEn }> = [
-  { view: "home", icon: HomeIcon, labelKey: "home" },
-  { view: "projects", icon: DocumentIcon, labelKey: "projects" },
-  { view: "agentSettings", icon: AgentIcon, labelKey: "agentSettings" },
-  { view: "canvasNodeSettings", icon: CanvasNodesIcon, labelKey: "canvasNodeSettings" },
-  { view: "modelConfig", icon: ModelConfigIcon, labelKey: "modelConfig" },
-  { view: "aiDashboard", icon: RuntimeIcon, labelKey: "aiDashboard" },
-  { view: "knowledgeSettings", icon: BookIcon, labelKey: "knowledgeSettings" }
+const navItems: Array<{ view: AppView; icon: typeof HomeIcon; labelKey: TranslationKey }> = [
+  { view: "home", icon: HomeIcon, labelKey: "sidebar.home" },
+  { view: "projects", icon: DocumentIcon, labelKey: "sidebar.projects" },
+  { view: "agentSettings", icon: AgentIcon, labelKey: "sidebar.agentSettings" },
+  { view: "canvasNodeSettings", icon: CanvasNodesIcon, labelKey: "sidebar.canvasNodeSettings" },
+  { view: "modelConfig", icon: ModelConfigIcon, labelKey: "sidebar.modelConfig" },
+  { view: "aiDashboard", icon: RuntimeIcon, labelKey: "sidebar.aiDashboard" },
+  { view: "knowledgeSettings", icon: BookIcon, labelKey: "sidebar.knowledgeSettings" }
 ];
 
 export function AppSidebar({ activeView, onNavigate, onOpenSettings, className }: AppSidebarProps) {
-  const { locale, setLocale } = useI18n();
-  const labels = locale === "zh" ? labelsZh : labelsEn;
+  const { locale, setLocale, t } = useI18n();
 
   return (
-    <aside className={className ? `home-sidebar ${className}` : "home-sidebar"} aria-label="App navigation">
+    <aside className={className ? `home-sidebar ${className}` : "home-sidebar"} aria-label={t("topbar.appNavigation")}>
       <div className="home-sidebar-brand">
         <span className="brand-mark" aria-hidden="true"><BrandIcon /></span>
         <span className="brand-lockup">
@@ -65,21 +45,21 @@ export function AppSidebar({ activeView, onNavigate, onOpenSettings, className }
               onClick={() => onNavigate(item.view)}
             >
               <Icon />
-              <span>{labels[item.labelKey]}</span>
+              <span>{t(item.labelKey)}</span>
             </button>
           );
         })}
       </nav>
 
       <div className="home-sidebar-footer">
-        <Button className="home-side-pill" size="sm" type="button" variant="secondary">{locale === "zh" ? "本地应用模式" : "Local app mode"}</Button>
+        <Button className="home-side-pill" size="sm" type="button" variant="secondary">{t("topbar.localAppMode")}</Button>
         {onOpenSettings ? (
           <Button className="home-side-pill" size="sm" type="button" variant="secondary" onClick={onOpenSettings}>
-            {locale === "zh" ? "项目设置" : "Project settings"}
+            {t("app.projectSettings")}
           </Button>
         ) : null}
         <Button className="home-side-pill" size="sm" type="button" variant="secondary" onClick={() => setLocale(locale === "en" ? "zh" : "en")}>
-          {locale === "zh" ? "Switch to English" : "切换中文"}
+          {locale === "zh" ? t("topbar.switchToEnglish") : t("topbar.switchToChinese")}
         </Button>
       </div>
     </aside>

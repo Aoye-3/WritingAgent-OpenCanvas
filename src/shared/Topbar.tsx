@@ -24,7 +24,7 @@ export function Topbar({
 
   return (
     <header className={`topbar ${activeView === "home" ? "topbar-home" : "topbar-workspace"}`}>
-      <button className="brand-button" type="button" onClick={onGoHome} aria-label="Go to task cards">
+      <button className="brand-button" type="button" onClick={onGoHome} aria-label={t("topbar.goToTaskCards")}>
         <span className="brand-mark" aria-hidden="true">
           <BrandIcon />
         </span>
@@ -39,16 +39,21 @@ export function Topbar({
       ) : (
         <label className="search-field topbar-context-field">
           <SearchIcon />
-          <input type="text" value={contextLabel} aria-label="Current workspace" readOnly />
+          <input type="text" value={contextLabel} aria-label={t("topbar.currentWorkspace")} readOnly />
         </label>
       )}
 
-      <nav className="topbar-actions" aria-label="Workspace actions">
+      <nav className="topbar-actions" aria-label={t("topbar.workspaceActions")}>
         <Button className="project-settings-button" variant="secondary" type="button" onClick={onOpenSettings}>
           <span>{t("app.projectSettings")}</span>
           <SettingsIcon aria-hidden="true" />
         </Button>
-        <button className="language-switch" type="button" onClick={() => setLocale(nextLocale)} aria-label={locale === "zh" ? "Switch to English" : "切换中文"}>
+        <button
+          className="language-switch"
+          type="button"
+          onClick={() => setLocale(nextLocale)}
+          aria-label={locale === "zh" ? t("topbar.switchToEnglish") : t("topbar.switchToChinese")}
+        >
           <span className={locale === "en" ? "selected" : ""}>EN</span>
           <span className={locale === "zh" ? "selected" : ""}>中文</span>
         </button>

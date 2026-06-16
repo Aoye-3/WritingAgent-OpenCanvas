@@ -21,6 +21,7 @@ type BuildCanvasFlowNodesInput = {
   nodes: CanvasNode[];
   currentNodes: Pick<CanvasFlowNode, "id" | "position" | "style" | "dragging">[];
   selectedNodeId?: string;
+  selectedNodeIds?: string[];
   resizingNodeId: string | null;
   locale: CanvasLocale;
   workflow?: CanvasWorkflow;
@@ -35,6 +36,7 @@ export function buildCanvasFlowNodes({
   nodes,
   currentNodes,
   selectedNodeId,
+  selectedNodeIds = [],
   resizingNodeId,
   locale,
   workflow,
@@ -45,6 +47,7 @@ export function buildCanvasFlowNodes({
   callbacks
 }: BuildCanvasFlowNodesInput): CanvasFlowNode[] {
   const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+  const selectedNodeSet = new Set(selectedNodeIds);
   return nodes.map((node) => {
     const current = currentById.get(node.id);
     const nodeSuggestions = suggestions.filter((suggestion) => suggestion.nodeId === node.id);
@@ -56,7 +59,7 @@ export function buildCanvasFlowNodes({
       type: "canvasNode",
       draggable: !resizingNodeId,
       position: preserveLiveGeometry && current ? current.position : { x: node.x, y: node.y },
-      selected: node.id === selectedNodeId,
+      selected: selectedNodeSet.has(node.id) || node.id === selectedNodeId,
       style: { width: preserveLiveGeometry ? liveWidth : node.width, height: preserveLiveGeometry ? liveHeight : node.height },
       width: preserveLiveGeometry ? liveWidth : node.width,
       height: preserveLiveGeometry ? liveHeight : node.height,

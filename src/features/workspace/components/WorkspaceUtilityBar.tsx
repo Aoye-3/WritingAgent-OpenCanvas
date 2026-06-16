@@ -17,33 +17,34 @@ import {
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { iconProps } from "../../../shared/icons";
 import { useI18n } from "../../i18n/I18nProvider";
+import type { TranslationKey } from "../../i18n/translations";
 import type { CanvasTool } from "./canvas/toolState";
 
 type BoardTool = {
   icon: LucideIcon;
   id: CanvasTool;
-  label: { en: string; zh: string };
+  labelKey: TranslationKey;
 };
 
 const primaryTools: BoardTool[] = [
-  { id: "select", icon: MousePointer2, label: { en: "Select", zh: "选择" } },
-  { id: "pan", icon: Hand, label: { en: "Pan", zh: "拖动画布" } }
+  { id: "select", icon: MousePointer2, labelKey: "boardTool.select" },
+  { id: "pan", icon: Hand, labelKey: "boardTool.pan" }
 ];
 
 const nodeTools: BoardTool[] = [
-  { id: "reference", icon: BookOpen, label: { en: "Reference", zh: "引用" } },
-  { id: "document", icon: FileText, label: { en: "Document", zh: "文档" } },
-  { id: "note", icon: StickyNote, label: { en: "Note", zh: "便签" } },
-  { id: "role", icon: UserRoundCog, label: { en: "Role", zh: "角色节点" } }
+  { id: "reference", icon: BookOpen, labelKey: "boardTool.reference" },
+  { id: "document", icon: FileText, labelKey: "boardTool.document" },
+  { id: "note", icon: StickyNote, labelKey: "boardTool.note" },
+  { id: "role", icon: UserRoundCog, labelKey: "boardTool.role" }
 ];
 
 const otherTools: BoardTool[] = [
-  { id: "text", icon: Type, label: { en: "Text", zh: "自由文本" } },
-  { id: "arrow", icon: ArrowUpRight, label: { en: "Arrow", zh: "箭头" } },
-  { id: "shape", icon: Square, label: { en: "Shape", zh: "形状" } },
-  { id: "table", icon: Table2, label: { en: "Table", zh: "表格" } },
-  { id: "asset", icon: Image, label: { en: "Asset", zh: "资源" } },
-  { id: "agent", icon: Sparkles, label: { en: "Agent tool", zh: "Agent 工具" } }
+  { id: "text", icon: Type, labelKey: "boardTool.text" },
+  { id: "arrow", icon: ArrowUpRight, labelKey: "boardTool.arrow" },
+  { id: "shape", icon: Square, labelKey: "boardTool.shape" },
+  { id: "table", icon: Table2, labelKey: "boardTool.table" },
+  { id: "asset", icon: Image, labelKey: "boardTool.asset" },
+  { id: "agent", icon: Sparkles, labelKey: "boardTool.agent" }
 ];
 
 export function WorkspaceUtilityBar({
@@ -55,7 +56,7 @@ export function WorkspaceUtilityBar({
   onToolChange: (tool: CanvasTool) => void;
   promptPreview: string;
 }) {
-  const { locale } = useI18n();
+  const { t } = useI18n();
   const reduceMotion = useReducedMotion();
   const hasPrompt = promptPreview.trim().length > 0;
   const dockTransition = reduceMotion ? { duration: 0 } : { type: "spring" as const, stiffness: 360, damping: 32 };
@@ -66,25 +67,25 @@ export function WorkspaceUtilityBar({
       className="board-tool-dock"
       initial={reduceMotion ? false : { opacity: 0, y: 12, scale: 0.98 }}
       transition={dockTransition}
-      aria-label={locale === "zh" ? "画板工具栏" : "Board toolbar"}
+      aria-label={t("workspace.boardToolbar")}
     >
       <motion.div className="board-tool-group" layout transition={dockTransition}>
-        {primaryTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} locale={locale} onClick={onToolChange} />)}
+        {primaryTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} onClick={onToolChange} />)}
       </motion.div>
       <div className="board-tool-divider" aria-hidden="true" />
       <motion.div className="board-tool-group" data-testid="board-node-tools" layout transition={dockTransition}>
-        {nodeTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} locale={locale} onClick={onToolChange} />)}
+        {nodeTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} onClick={onToolChange} />)}
       </motion.div>
       <div className="board-tool-divider" aria-hidden="true" />
       <motion.div className="board-tool-group" data-testid="board-other-tools" layout transition={dockTransition}>
-        {otherTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} locale={locale} onClick={onToolChange} />)}
+        {otherTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} onClick={onToolChange} />)}
       </motion.div>
       <div className="board-tool-divider" aria-hidden="true" />
       <motion.button
         className="board-tool-button board-tool-add"
         type="button"
-        title={locale === "zh" ? "后续增加工具" : "Add tools later"}
-        aria-label={locale === "zh" ? "后续增加工具" : "Add tools later"}
+        title={t("workspace.addToolsLater")}
+        aria-label={t("workspace.addToolsLater")}
         whileTap={reduceMotion ? undefined : { scale: 0.96 }}
       >
         <Plus {...iconProps} size={18} aria-hidden="true" />
@@ -98,7 +99,7 @@ export function WorkspaceUtilityBar({
             initial={reduceMotion ? false : { opacity: 0, width: 0 }}
             transition={dockTransition}
           >
-            {locale === "zh" ? "Prompt 已生成" : "Prompt ready"}
+            {t("workspace.promptReady")}
           </motion.span>
         ) : null}
       </AnimatePresence>
@@ -106,9 +107,10 @@ export function WorkspaceUtilityBar({
   );
 }
 
-function BoardToolButton({ active, locale, onClick, tool }: { active?: boolean; locale: "en" | "zh"; onClick: (tool: CanvasTool) => void; tool: BoardTool }) {
+function BoardToolButton({ active, onClick, tool }: { active?: boolean; onClick: (tool: CanvasTool) => void; tool: BoardTool }) {
+  const { t } = useI18n();
   const Icon = tool.icon;
-  const label = tool.label[locale];
+  const label = t(tool.labelKey);
   return (
     <motion.button
       className={`board-tool-button${active ? " is-active" : ""}`}

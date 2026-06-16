@@ -23,6 +23,7 @@ import { CanvasCurveEdge } from "./canvas/CanvasCurveEdge";
 import { CanvasNodeFrame } from "./canvas/CanvasNodeFrame";
 import { CanvasContextMenu, CanvasSelectedNodeWorkflow, CanvasSelectionBar, type CanvasMenuState } from "./canvas/CanvasChrome";
 import { MAX_ZOOM, MIN_ZOOM, canvasNodeKinds, kindLabels, workflowModeLabels } from "./canvas/constants";
+import { collectDraggedNodePositionPatches } from "./canvas/dragPersistence";
 import { buildCanvasFlowNodes } from "./canvas/flowMapping";
 import { formatMindChainContext, type CanvasMindChainContext } from "../../../../shared/canvasMindChain";
 import type { CanvasFlowNode } from "./canvas/types";
@@ -126,7 +127,7 @@ function DocumentCanvasInner({
   onUpdateWorkflow,
   onToolChange
 }: DocumentCanvasProps) {
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
   const reduceMotion = useReducedMotion();
   const reactFlow = useReactFlow<CanvasFlowNode>();
   const viewport = useViewport();
@@ -144,7 +145,6 @@ function DocumentCanvasInner({
   const resizingNodeIdRef = useRef<string | null>(null);
   const lastCanvasPointRef = useRef<{ x: number; y: number } | null>(null);
   const internalClipboardRef = useRef<CanvasClipboardPayload | null>(null);
-  const focusedNodeRef = useRef<string | undefined>(undefined);
   const floatingTransition = reduceMotion ? { duration: 0 } : { type: "spring" as const, stiffness: 300, damping: 30 };
   const selectedNode = useMemo(() => nodes.find((node) => node.id === selectedNodeId), [nodes, selectedNodeId]);
   const flowEdges = useMemo<Edge[]>(() => edges.map((edge) => ({
@@ -175,6 +175,7 @@ function DocumentCanvasInner({
       nodes,
       currentNodes: current,
       selectedNodeId,
+      selectedNodeIds,
       resizingNodeId,
       locale,
       workflow,
@@ -196,17 +197,7 @@ function DocumentCanvasInner({
         onRejectWriteRequest
       }
     }));
-  }, [agentCardId, clearCreationPreview, handleResizeStateChange, locale, modelOverrides, nodes, onAcceptSuggestion, onApproveWriteRequest, onConvertSuggestionToNode, onDeleteNode, onIgnoreSuggestion, onRejectWriteRequest, onRequestRangeRewrite, onUpdateNode, requestNodeMenu, resizingNodeId, selectedNodeId, suggestions, workflow, writeRequests]);
-
-  useEffect(() => {
-    if (!selectedNode || focusedNodeRef.current === selectedNode.id) return;
-    focusedNodeRef.current = selectedNode.id;
-    void reactFlow.setCenter(
-      selectedNode.x + selectedNode.width / 2,
-      selectedNode.y + selectedNode.height / 2,
-      { duration: 260, zoom: Math.max(viewport.zoom, 0.65) }
-    );
-  }, [reactFlow, selectedNode, viewport.zoom]);
+  }, [agentCardId, clearCreationPreview, handleResizeStateChange, locale, modelOverrides, nodes, onAcceptSuggestion, onApproveWriteRequest, onConvertSuggestionToNode, onDeleteNode, onIgnoreSuggestion, onRejectWriteRequest, onRequestRangeRewrite, onUpdateNode, requestNodeMenu, resizingNodeId, selectedNodeId, selectedNodeIds, suggestions, workflow, writeRequests]);
 
   const createNode = async (kind: CanvasNodeKind) => {
     if (!menu) return;
@@ -226,11 +217,15 @@ function DocumentCanvasInner({
 
   const onNodeDragStop = useCallback((_event: ReactMouseEvent | globalThis.MouseEvent, node: CanvasFlowNode) => {
     if (resizingNodeIdRef.current === node.id) return;
-    void onUpdateNode(node.id, {
-      x: Math.round(node.position.x),
-      y: Math.round(node.position.y)
+    const patches = collectDraggedNodePositionPatches({
+      draggedNodeId: node.id,
+      selectedNodeIds,
+      flowNodes: reactFlow.getNodes()
     });
-  }, [onUpdateNode]);
+    for (const { nodeId, patch } of patches) {
+      void onUpdateNode(nodeId, patch);
+    }
+  }, [onUpdateNode, reactFlow, selectedNodeIds]);
 
   const openMenu = useCallback((event: ReactMouseEvent | globalThis.MouseEvent) => {
     event.preventDefault();
@@ -439,10 +434,10 @@ function DocumentCanvasInner({
           </button>
           <button className="button button-secondary button-small" type="button" onClick={resetViewport}>
             <ResetIcon aria-hidden="true" size={16} />
-            {locale === "zh" ? "重置" : "Reset"}
+            {t("workspace.resetCanvas")}
           </button>
           <button className="button button-secondary button-small" type="button" disabled={!canUndo} onClick={() => void onUndo()}>
-            {locale === "zh" ? "撤销" : "Undo"}
+            {t("workspace.undoCanvas")}
           </button>
         </motion.div>
         <ReactFlow<CanvasFlowNode>
@@ -520,8 +515,8 @@ function DocumentCanvasInner({
               initial={reduceMotion ? false : { opacity: 0, y: 8, scale: 0.98 }}
               transition={floatingTransition}
             >
-              <strong>{locale === "zh" ? "右键新建节点" : "Right-click to create a node"}</strong>
-              <span>{locale === "zh" ? "也可以从底部工具栏放置文档、便签、形状或 Agent 工具。" : "Use the dock to place documents, notes, shapes, or the Agent tool."}</span>
+              <strong>{t("workspace.rightClickCreateNode")}</strong>
+              <span>{t("workspace.createNodeHint")}</span>
             </motion.div>
           ) : null}
         </AnimatePresence>
@@ -530,7 +525,7 @@ function DocumentCanvasInner({
           <CanvasContextMenu
             createItems={canvasNodeKinds.map((kind) => ({ kind, label: kindLabels[kind]?.[locale] ?? kind }))}
             menu={menu}
-            sendMindChainLabel={locale === "zh" ? "发送思维链" : "Send mind chain"}
+            sendMindChainLabel={t("workspace.sendMindChain")}
             onCreateNode={(kind) => void createNode(kind)}
             onSendMindChain={sendMindChain}
           />
@@ -553,8 +548,8 @@ function DocumentCanvasInner({
       </div>
 
       <CanvasSelectionBar
-        deleteEdgeLabel={locale === "zh" ? "删除连线" : "Delete edge"}
-        hint={locale === "zh" ? "点击选中 · 拖拽空白框选 · 空格 + 拖拽移动画布 · Ctrl + 滚轮缩放" : "Click to select · Drag blank space to marquee select · Space + drag to pan · Ctrl + wheel to zoom"}
+        deleteEdgeLabel={t("workspace.deleteEdge")}
+        hint={t("workspace.canvasHint")}
         locale={locale}
         selectedEdgeId={selectedEdgeId}
         selectedNode={selectedNode}
