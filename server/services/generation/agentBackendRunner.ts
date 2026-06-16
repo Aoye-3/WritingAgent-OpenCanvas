@@ -19,6 +19,7 @@ export type AgentBackendRunnerInput = {
   facetwriteMemoryContent?: string;
   onToolEvent?: (event: ToolEventRecord) => void;
   onToken?: (token: string) => void;
+  onReasoningToken?: (token: string) => void;
   onStatus?: (status: StreamStatus) => void;
 };
 
@@ -49,6 +50,7 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     chatInstruction: input.payload.chatInstruction ?? input.payload.freeTextPrompt,
     onToolEvent: input.onToolEvent,
     onToken: input.onToken,
+    onReasoningToken: input.onReasoningToken,
     onStatus: input.onStatus
   });
 

@@ -18,6 +18,7 @@ export type AgentRuntimeRunInput = {
   facetwriteMemoryContent?: string;
   onToolEvent?: (event: ToolEventRecord) => void;
   onToken?: (token: string) => void;
+  onReasoningToken?: (token: string) => void;
   onStatus?: (status: StreamStatus) => void;
 };
 

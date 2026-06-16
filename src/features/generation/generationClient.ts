@@ -9,6 +9,7 @@ export async function generateTextStream(
   payload: GenerateRequest,
   handlers: {
     onToken?: (token: string) => void;
+    onReasoningToken?: (token: string) => void;
     onStatus?: (status: StreamStatus) => void;
     onToolEvent?: (event: unknown) => void;
     onTimelineEvent?: (event: RunTimelineEvent) => void;
@@ -42,6 +43,8 @@ export async function generateTextStream(
       if (!parsed) continue;
       if (parsed.event === "token") {
         handlers.onToken?.(String((parsed.data as { text?: unknown }).text ?? ""));
+      } else if (parsed.event === "reasoning_token") {
+        handlers.onReasoningToken?.(String((parsed.data as { text?: unknown }).text ?? ""));
       } else if (parsed.event === "status") {
         handlers.onStatus?.(parsed.data as StreamStatus);
       } else if (parsed.event === "tool_event") {

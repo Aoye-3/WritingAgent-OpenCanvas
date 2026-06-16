@@ -30,6 +30,7 @@ export type StreamStatus = {
 
 export type AgentRunStreamCallbacks = {
   onToken?: (token: string) => void;
+  onReasoningToken?: (token: string) => void;
   onStatus?: (status: StreamStatus) => void;
 };
 
@@ -138,14 +139,18 @@ export async function runAgentCompletionStream(input: AgentRunInput & AgentRunSt
       tools,
       stream: true
     }));
-    const assistant = await readAssistantStream(response, (token) => {
-      input.onStatus?.({ phase: "writing", label: streamLabels.writing });
-      input.onToken?.(token);
+    const assistant = await readAssistantStream(response, {
+      onToken: (token) => {
+        input.onStatus?.({ phase: "writing", label: streamLabels.writing });
+        input.onToken?.(token);
+      },
+      onReasoningToken: input.onReasoningToken
     });
     usage = assistant.usage ?? usage;
     const message: ChatMessage = {
       role: "assistant",
       content: assistant.content || null,
+      ...(assistant.reasoningContent ? { reasoning_content: assistant.reasoningContent } : {}),
       ...(assistant.toolCalls.length ? { tool_calls: assistant.toolCalls } : {})
     };
 
@@ -205,9 +210,13 @@ export async function runAgentCompletionStream(input: AgentRunInput & AgentRunSt
 
 async function readAssistantStream(
   chunks: AsyncIterable<ChatCompletionStreamChunk>,
-  onToken: (token: string) => void
+  callbacks: {
+    onToken: (token: string) => void;
+    onReasoningToken?: (token: string) => void;
+  }
 ) {
   const content: string[] = [];
+  const reasoningContent: string[] = [];
   const toolCalls = new Map<number, ChatToolCall>();
   let finishReason: string | null | undefined;
   let usage: unknown;
@@ -222,7 +231,12 @@ async function readAssistantStream(
 
     if (typeof delta.content === "string" && delta.content.length > 0) {
       content.push(delta.content);
-      onToken(delta.content);
+      callbacks.onToken(delta.content);
+    }
+
+    if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) {
+      reasoningContent.push(delta.reasoning_content);
+      callbacks.onReasoningToken?.(delta.reasoning_content);
     }
 
     for (const part of delta.tool_calls ?? []) {
@@ -245,6 +259,7 @@ async function readAssistantStream(
 
   return {
     content: content.join(""),
+    reasoningContent: reasoningContent.join(""),
     finishReason,
     usage,
     toolCalls: [...toolCalls.entries()]

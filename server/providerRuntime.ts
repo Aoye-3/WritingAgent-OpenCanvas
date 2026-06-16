@@ -274,14 +274,26 @@ export function normalizeToolChoice(mode: ConversationModelRuntimeSettings["tool
 export function createOpenAIChatClient(settings: { apiKey: string; baseURL: string }): ChatClient {
   return {
     async createChatCompletion(request) {
-      const { baseURLOverride, ...wireRequest } = request;
+      const { baseURLOverride, ...wireRequest } = toOpenAIWireRequest(request);
       const client = new OpenAI({ apiKey: settings.apiKey, baseURL: baseURLOverride ?? settings.baseURL });
       return client.chat.completions.create(wireRequest as never) as Promise<ChatCompletionResponse>;
     },
     createChatCompletionStream(request) {
-      const { baseURLOverride, ...wireRequest } = request;
+      const { baseURLOverride, ...wireRequest } = toOpenAIWireRequest(request);
       const client = new OpenAI({ apiKey: settings.apiKey, baseURL: baseURLOverride ?? settings.baseURL });
       return client.chat.completions.create({ ...wireRequest, stream: true } as never) as unknown as AsyncIterable<ChatCompletionStreamChunk>;
+    }
+  };
+}
+
+function toOpenAIWireRequest(request: ChatCompletionRequest) {
+  const { thinking, ...wireRequest } = request;
+  if (!thinking) return wireRequest;
+  return {
+    ...wireRequest,
+    ...(thinking.reasoning_effort ? { reasoning_effort: thinking.reasoning_effort } : {}),
+    extra_body: {
+      thinking: { type: thinking.type }
     }
   };
 }

@@ -30,6 +30,8 @@ type WriteDraft = {
   text: string;
 };
 
+type ThinkingChoice = "disabled" | "high" | "max";
+
 export type ConversationModelControls = {
   providerId?: string;
   thinkingMode?: NonNullable<GenerateRequest["modelOverrides"]>["thinkingMode"];
@@ -130,8 +132,7 @@ export function AICollaborationDrawer({
   const reduceMotion = useReducedMotion();
   const [input, setInput] = useState("");
   const supportsThinking = modelSettings?.providerId === "deepseek";
-  const [thinkEnabled, setThinkEnabled] = useState(modelSettings?.thinkingMode === "enabled");
-  const [reasoningEffort, setReasoningEffort] = useState<NonNullable<GenerateRequest["modelOverrides"]>["reasoningEffort"]>(modelSettings?.reasoningEffort ?? "high");
+  const [thinkingChoice, setThinkingChoice] = useState<ThinkingChoice>(modelSettingsToThinkingChoice(modelSettings));
   const [annotations, setAnnotations] = useState<MessageAnnotation[]>([]);
   const [writeDraft, setWriteDraft] = useState<WriteDraft | null>(null);
   const [selectionAction, setSelectionAction] = useState<SelectionAction | null>(null);
@@ -153,8 +154,7 @@ export function AICollaborationDrawer({
   const pendingClarificationPlan = plans.find((plan) => plan.status === "awaiting_user" && plan.clarification?.status === "pending");
 
   useEffect(() => {
-    setThinkEnabled(modelSettings?.thinkingMode === "enabled");
-    setReasoningEffort(modelSettings?.reasoningEffort ?? "high");
+    setThinkingChoice(modelSettingsToThinkingChoice(modelSettings));
   }, [modelSettings?.providerId, modelSettings?.thinkingMode, modelSettings?.reasoningEffort]);
 
   useEffect(() => {
@@ -238,10 +238,7 @@ export function AICollaborationDrawer({
       await onPlansChanged();
     }
     try {
-      await onSend(text, supportsThinking ? {
-        thinkingMode: thinkEnabled ? "enabled" : "disabled",
-        reasoningEffort
-      } : undefined, {
+      await onSend(text, supportsThinking ? thinkingOverridesFromChoice(thinkingChoice) : undefined, {
         ...(mindChainContext ? { canvasMindChain: mindChainContext.text } : {}),
         ...(awaitingPlan ? { awaitingPlan: { id: awaitingPlan.id, answer: text } } : {}),
         ...(revisePlan ? { awaitingPlan: { id: revisePlan.id, revise: true } } : {})
@@ -452,7 +449,8 @@ export function AICollaborationDrawer({
           const messageAnnotations = annotations.filter((annotation) => annotation.messageId === message.id);
           const isPendingAssistant = message.role === "assistant" && message.isStreaming && !message.text.trim();
           const hasRunTrace = message.role === "assistant" && Boolean(message.timeline?.length);
-          const usesThinkingStatus = isPendingAssistant && !hasRunTrace;
+          const hasReasoningText = message.role === "assistant" && Boolean(message.reasoningText?.trim());
+          const usesThinkingStatus = isPendingAssistant && !hasRunTrace && !hasReasoningText;
           return (
             <article className={`message message-${message.role}${message.isStreaming ? " message-streaming" : ""}${usesThinkingStatus ? " message-thinking" : ""}`} key={message.id}>
               <div className="message-avatar" aria-hidden="true">{message.role === "user" ? "U" : "F"}</div>
@@ -460,11 +458,13 @@ export function AICollaborationDrawer({
                 {message.role === "assistant" && message.isStreaming && !message.text.trim() ? (
                   <>
                     <AssistantRunTrace events={message.timeline} onFocusNode={onFocusPlanArtifact} />
+                    <ReasoningStreamPanel message={message} />
                     <StreamingStatus label={streamingStatusLabel(message, t("workspace.preparingResponse"))} />
                   </>
                 ) : message.role === "assistant" ? (
                   <div className="assistant-selectable-text" onMouseUp={(event) => captureSelection(event, message)}>
                     <AssistantRunTrace events={message.timeline} onFocusNode={onFocusPlanArtifact} />
+                    <ReasoningStreamPanel message={message} />
                     <MarkdownText text={message.text} highlights={messageAnnotations.map((annotation) => annotation.text)} />
                     {message.isStreaming ? <span className="typing-caret" aria-hidden="true" /> : null}
                   </div>
@@ -580,27 +580,17 @@ export function AICollaborationDrawer({
           <button className="tool-icon-button plan-command-button" type="button" onClick={() => setInput((value) => value.startsWith("/plan") ? value : `/plan ${value}`)} title={t("workspace.createTaskPlan")}>Plan</button>
           {supportsThinking ? (
             <div className="composer-think-controls" aria-label={t("workspace.thinkMode")}>
-              <button
-                aria-pressed={thinkEnabled}
-                className={thinkEnabled ? "tool-icon-button is-active" : "tool-icon-button"}
-                onClick={() => setThinkEnabled((value) => !value)}
-                title={thinkEnabled ? t("workspace.thinkModeOn") : t("workspace.thinkModeOff")}
-                type="button"
+              <span className="tool-icon-button composer-think-indicator" aria-hidden="true">T</span>
+              <select
+                aria-label={t("workspace.reasoningEffort")}
+                className="composer-effort-select"
+                value={thinkingChoice}
+                onChange={(event) => setThinkingChoice(event.target.value as ThinkingChoice)}
               >
-                T
-                {thinkEnabled ? <i aria-hidden="true" /> : null}
-              </button>
-              {thinkEnabled ? (
-                <select
-                  aria-label={t("workspace.reasoningEffort")}
-                  className="composer-effort-select"
-                  value={reasoningEffort ?? "high"}
-                  onChange={(event) => setReasoningEffort(event.target.value as NonNullable<GenerateRequest["modelOverrides"]>["reasoningEffort"])}
-                >
-                  <option value="high">{t("workspace.high")}</option>
-                  <option value="max">{t("workspace.max")}</option>
-                </select>
-              ) : null}
+                <option value="disabled">{t("workspace.disabled")}</option>
+                <option value="high">{t("workspace.high")}</option>
+                <option value="max">{t("workspace.max")}</option>
+              </select>
             </div>
           ) : null}
           <button className={isSending ? "button button-primary chat-send chat-send-icon is-stopping" : "button button-primary chat-send chat-send-icon"} type={isSending ? "button" : "submit"} disabled={writeBusy} onClick={isSending ? onStopSending : undefined}
@@ -622,12 +612,37 @@ function StreamingStatus({ label }: { label: string }) {
   );
 }
 
+function ReasoningStreamPanel({ message }: { message: CollaborationMessage }) {
+  const { t } = useI18n();
+  const text = message.reasoningText?.trim();
+  if (!text) return null;
+  return (
+    <details className="reasoning-stream-panel" open={Boolean(message.isReasoningStreaming)}>
+      <summary>
+        <span>{t("workspace.thinking")}</span>
+        {message.isReasoningStreaming ? <i aria-hidden="true" /> : null}
+      </summary>
+      <pre>{message.reasoningText}</pre>
+    </details>
+  );
+}
+
 function streamingStatusLabel(message: CollaborationMessage, fallback: string) {
   return message.statusLabel || fallback;
 }
 
 function isWriteConfirmation(text: string) {
   return /^(?:是|好|生成节点|yes|\u5199\u5165|\u5199\u5165\u5168\u90e8|\u76f4\u63a5\u5199\u5165|\u786e\u8ba4\u5199\u5165|\u786e\u8ba4|\u4fdd\u5b58|\u4fdd\u5b58\u5230\u753b\u677f|\u52a0\u5165\u753b\u677f|\u4fdd\u5b58\u5230\s*canvas|\u52a0\u5165\s*canvas|save\s+to\s+canvas|write\s+this|write\s+it|write|write\s+all)$/i.test(text.trim());
+}
+
+function modelSettingsToThinkingChoice(modelSettings?: ConversationModelControls): ThinkingChoice {
+  if (modelSettings?.providerId !== "deepseek" || modelSettings.thinkingMode !== "enabled") return "disabled";
+  return modelSettings.reasoningEffort === "max" || modelSettings.reasoningEffort === "xhigh" ? "max" : "high";
+}
+
+function thinkingOverridesFromChoice(choice: ThinkingChoice): GenerateRequest["modelOverrides"] {
+  if (choice === "disabled") return { thinkingMode: "disabled" };
+  return { thinkingMode: "enabled", reasoningEffort: choice };
 }
 
 function ToolUseIconBar({ allowedTools, toolState, onToolStateChange }: Pick<AICollaborationDrawerProps, "allowedTools" | "toolState" | "onToolStateChange">) {

@@ -22,7 +22,8 @@ import { PlanOrchestrator } from "../planOrchestrator.js";
 import { resolveCanvasAction } from "./canvasActionPolicy.js";
 import { resolvePlanRequestPolicy } from "./planRequestPolicy.js";
 import { resolveOrchestrationPolicy } from "./orchestrationPolicy.js";
-import { commitCanvasDelivery, planCanvasDelivery } from "../canvasDeliveryPlanner.js";
+import { commitCanvasDelivery, planCanvasDelivery, type CanvasDeliveryPlan } from "../canvasDeliveryPlanner.js";
+import { stableDeliveryId } from "../canvasDelivery.js";
 import { resolveCanvasDeliveryContent, type CanvasDeliveryContract } from "./canvasDeliveryContent.js";
 import { isDirectCanvasDeliveryIntent } from "./canvasDeliveryIntent.js";
 import { isCanvasWorkflowMode, type CanvasWorkflowMode } from "../../../shared/canvasWorkflow.js";
@@ -41,6 +42,7 @@ export type GenerationService = {
     payload: GenerateRequest,
     callbacks?: {
       onToken?: (token: string) => void;
+      onReasoningToken?: (token: string) => void;
       onStatus?: (status: StreamStatus) => void;
       onToolEvent?: (event: ToolEventRecord) => void;
       onTimelineEvent?: (event: RunTimelineEvent) => void;
@@ -196,6 +198,7 @@ export function createGenerationService(
     payload: GenerateRequest,
     callbacks: {
       onToken?: (token: string) => void;
+      onReasoningToken?: (token: string) => void;
       onStatus?: (status: StreamStatus) => void;
       onToolEvent?: (event: ToolEventRecord) => void;
       onTimelineEvent?: (event: RunTimelineEvent) => void;
@@ -212,6 +215,8 @@ export function createGenerationService(
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
     const timeline = createRunTimelineBuilder({ threadId, locale: payload.locale });
     const timelineEvents: RunTimelineEvent[] = [];
+    const deliveryId = stableCanvasDeliveryId(threadId, payload, storage);
+    const publicReasoning = createPublicReasoningEmitter(payload.locale, callbacks.onReasoningToken);
     const emitTimeline = (event: RunTimelineEvent) => {
       timelineEvents.push(event);
       callbacks.onTimelineEvent?.(event);
@@ -219,6 +224,7 @@ export function createGenerationService(
     const observeToolEvent = (event: ToolEventRecord) => {
       planOrchestrator.observe(threadId, event);
       callbacks.onToolEvent?.(event);
+      publicReasoning.fromToolEvent(event);
       emitTimeline(timelineEventFromToolEvent(event) ?? toolEventToTimelineEvent(timeline, event));
     };
     for (const event of canvasActionEvents(payload)) {
@@ -231,7 +237,19 @@ export function createGenerationService(
     }
 
     callbacks.onStatus?.({ phase: "thinking", label: streamLabels.thinking });
+    publicReasoning.emit("prepare", payload.locale === "zh" ? "正在准备上下文、工具和运行环境。" : "Preparing context, tools, and runtime.");
     emitTimeline(timeline.event("phase_started", "running", payload.locale === "zh" ? "准备执行" : "Preparing run", payload.locale === "zh" ? "正在准备上下文、工具和运行环境。" : "Preparing context, tools, and runtime."));
+    const progressiveDeliveryEvents = beginProgressiveCanvasDelivery({
+      payload,
+      threadId,
+      projectId: selection.projectId,
+      storage,
+      deliveryId
+    });
+    for (const event of progressiveDeliveryEvents) {
+      runtimeEvents.push(event);
+      observeToolEvent(event);
+    }
 
     try {
       planOrchestrator.prepare(threadId, payload);
@@ -246,6 +264,7 @@ export function createGenerationService(
         prompt: context.prompt,
         onToolEvent: observeToolEvent,
         onToken: textGate.push,
+        onReasoningToken: callbacks.onReasoningToken,
         onStatus: callbacks.onStatus
       }, executionRuntime);
 
@@ -265,12 +284,14 @@ export function createGenerationService(
         } else {
           textGate.flush();
           callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
+          publicReasoning.emit("finalize", payload.locale === "zh" ? "正在整理最终回答，并校准 Canvas 节点内容。" : "Organizing the final answer and reconciling Canvas nodes.");
           const baseEvents = [...runtimeEvents, ...(normalized.events ?? [])];
           const finalized = finalizeCanvasDelivery({
             payload,
             threadId,
             projectId: selection.projectId,
             storage,
+            deliveryId,
             text: normalized.text,
             events: baseEvents,
             timeline,
@@ -541,6 +562,7 @@ function finalizeCanvasDelivery(input: {
   threadId: string;
   projectId: string;
   storage: SQLiteStorageRepository;
+  deliveryId?: string;
   text: string;
   events: ToolEventRecord[];
   timeline?: ReturnType<typeof createRunTimelineBuilder>;
@@ -562,7 +584,7 @@ function finalizeCanvasDelivery(input: {
     events: input.events
   });
   const delivery = planCanvasDelivery({
-    deliveryId: stableCanvasDeliveryId(input.threadId, input.payload, input.storage),
+    deliveryId: input.deliveryId ?? stableCanvasDeliveryId(input.threadId, input.payload, input.storage),
     projectId: input.projectId,
     instruction,
     locale: input.payload.locale,
@@ -585,8 +607,141 @@ function finalizeCanvasDelivery(input: {
   return { text: content.assistantText || input.text, timelineEvents: localTimelineEvents };
 }
 
+function beginProgressiveCanvasDelivery(input: {
+  payload: GenerateRequest;
+  threadId: string;
+  projectId: string;
+  storage: SQLiteStorageRepository;
+  deliveryId: string;
+}): ToolEventRecord[] {
+  const instruction = input.payload.chatInstruction ?? input.payload.freeTextPrompt ?? "";
+  if (!isDirectCanvasDeliveryIntent(instruction)) return [];
+  if (readCanvasWorkflowMode(input.payload.contextValues) !== "batch_delivery") return [];
+  const summaryTitle = input.payload.locale === "zh" ? "摘要分区" : "Summary";
+  const bodyTitle = input.payload.locale === "zh" ? "正文" : "Body";
+  const outlineContent = input.payload.locale === "zh" ? "# 摘要分区\n正在准备 Canvas 交付..." : "# Summary\nPreparing Canvas delivery...";
+  const bodyContent = input.payload.locale === "zh" ? "# 正文\n正在生成内容..." : "# Body\nGenerating content...";
+  const plan: CanvasDeliveryPlan = {
+    required: true,
+    moduleId: "document_batch",
+    nodes: [
+      {
+        id: stableDeliveryId("node", input.deliveryId, 1),
+        kind: "document",
+        title: summaryTitle,
+        content: outlineContent,
+        x: 560,
+        y: 120,
+        width: 520,
+        height: 260,
+        metadata: { deliveryId: input.deliveryId, phase: "outline", progressive: true, status: "placeholder" }
+      },
+      {
+        id: stableDeliveryId("node", input.deliveryId, 2),
+        kind: "document",
+        title: bodyTitle,
+        content: bodyContent,
+        x: 1280,
+        y: 120,
+        width: 640,
+        height: 520,
+        metadata: { deliveryId: input.deliveryId, phase: "body", progressive: true, status: "placeholder" }
+      }
+    ],
+    edges: [{
+      id: stableDeliveryId("edge", input.deliveryId, 1),
+      sourceNodeId: stableDeliveryId("node", input.deliveryId, 1),
+      targetNodeId: stableDeliveryId("node", input.deliveryId, 2),
+      label: "next"
+    }]
+  };
+  const committed = commitCanvasDelivery(input.storage, input.projectId, plan);
+  return [
+    canvasDeliveryEvent("canvas_delivery_outline_started", input.deliveryId, input.payload.locale),
+    ...committed.map((item, index) => canvasDeliveryEvent(
+      index === 0 ? "canvas_delivery_outline_committed" : "canvas_delivery_body_started",
+      input.deliveryId,
+      input.payload.locale,
+      item
+    ))
+  ];
+}
+
+function canvasDeliveryEvent(
+  eventType: string,
+  deliveryId: string,
+  locale: GenerateRequest["locale"],
+  item?: { nodeId: string; title: string }
+): ToolEventRecord {
+  return {
+    eventType: eventType as ToolEventRecord["eventType"],
+    payload: {
+      eventType,
+      tool: "canvas_delivery",
+      deliveryId,
+      status: /started$/.test(eventType) ? "running" : "committed",
+      summary: locale === "zh" ? "Canvas 渐进交付已更新。" : "Progressive Canvas delivery updated.",
+      ...(item ? { nodeId: item.nodeId, title: item.title } : {})
+    }
+  };
+}
+
 function readCanvasWorkflowMode(contextValues: GenerateRequest["contextValues"]): CanvasWorkflowMode {
   const canvas = record(contextValues?.canvas);
   const workflow = record(canvas.workflow);
   return isCanvasWorkflowMode(workflow.mode) ? workflow.mode : "batch_delivery";
+}
+
+function createPublicReasoningEmitter(locale: GenerateRequest["locale"], onReasoningToken?: (token: string) => void) {
+  const emitted = new Set<string>();
+  const emit = (key: string, text: string) => {
+    if (!onReasoningToken || emitted.has(key)) return;
+    emitted.add(key);
+    onReasoningToken(`${text}\n`);
+  };
+  return {
+    emit,
+    fromToolEvent(event: ToolEventRecord) {
+      if (/^canvas_delivery_outline_started$/.test(event.eventType)) {
+        emit("canvas:outline:start", locale === "zh" ? "检测到明确 Canvas 交付请求，先搭建摘要和正文节点。" : "Detected an explicit Canvas delivery request, so I am creating outline and body placeholders first.");
+        return;
+      }
+      if (/^canvas_delivery_outline_committed$/.test(event.eventType)) {
+        emit("canvas:outline:commit", locale === "zh" ? "摘要节点已就位，后续会用最终内容校准。" : "The outline node is in place and will be reconciled with the final content.");
+        return;
+      }
+      if (/^canvas_delivery_body_started$/.test(event.eventType)) {
+        emit("canvas:body:start", locale === "zh" ? "正文节点已就位，等待完整答案后写入分节内容。" : "The body node is in place and will receive section content after the answer stabilizes.");
+        return;
+      }
+      const payload = record(event.payload);
+      const toolName = readString(payload.toolName) || readString(payload.tool);
+      if (!toolName) return;
+      const phase = /failed$/.test(event.eventType)
+        ? "failed"
+        : /completed$/.test(event.eventType)
+          ? "completed"
+          : /started$|requested$/.test(event.eventType)
+            ? "started"
+            : "";
+      if (!phase) return;
+      const label = publicToolLabel(toolName, locale);
+      if (phase === "started") {
+        emit(`tool:${toolName}:started`, locale === "zh" ? `正在使用 ${label} 收集中间依据。` : `Using ${label} to gather supporting information.`);
+      } else if (phase === "completed") {
+        emit(`tool:${toolName}:completed`, locale === "zh" ? `${label} 已返回结果，正在筛选可用于回答和 Canvas 的信息。` : `${label} returned results; selecting what is useful for the answer and Canvas.`);
+      } else if (phase === "failed") {
+        emit(`tool:${toolName}:failed`, locale === "zh" ? `${label} 有部分失败，继续使用可用结果推进。` : `${label} had a partial failure; continuing with available results.`);
+      }
+    }
+  };
+}
+
+function publicToolLabel(toolName: string, locale: GenerateRequest["locale"]) {
+  if (toolName === "web_search") return locale === "zh" ? "网页搜索" : "web search";
+  if (toolName === "web_fetch") return locale === "zh" ? "网页读取" : "web fetch";
+  if (toolName === "knowledge_base") return locale === "zh" ? "知识库" : "knowledge base";
+  if (toolName === "canvas_write") return locale === "zh" ? "Canvas 写入" : "Canvas write";
+  if (toolName === "canvas_delivery") return locale === "zh" ? "Canvas 交付" : "Canvas delivery";
+  return toolName.replace(/[_-]+/g, " ");
 }

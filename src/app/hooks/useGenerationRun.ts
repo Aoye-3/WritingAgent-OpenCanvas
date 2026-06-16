@@ -57,6 +57,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const operationIdRef = useRef(0);
   const chatAbortControllerRef = useRef<AbortController | null>(null);
   const activeChatMessageIdRef = useRef<string | null>(null);
+  const blockedReasoningMessageIdsRef = useRef<Set<string>>(new Set());
   const liveToolEventStateRef = useRef(createLiveToolEventState());
   const liveStateRefreshRef = useRef<Promise<void> | null>(null);
 
@@ -64,6 +65,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     chatAbortControllerRef.current?.abort();
     chatAbortControllerRef.current = null;
     activeChatMessageIdRef.current = null;
+    blockedReasoningMessageIdsRef.current = new Set();
     liveToolEventStateRef.current = createLiveToolEventState();
     liveStateRefreshRef.current = null;
     operationIdRef.current += 1;
@@ -82,6 +84,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     chatAbortControllerRef.current?.abort();
     chatAbortControllerRef.current = null;
     activeChatMessageIdRef.current = null;
+    blockedReasoningMessageIdsRef.current = new Set();
     liveToolEventStateRef.current = createLiveToolEventState();
     liveStateRefreshRef.current = null;
     operationIdRef.current += 1;
@@ -103,6 +106,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       flushStreamingText(`message:${messageId}`);
       updateStreamingMessage(messageId, {
         isStreaming: false,
+        isReasoningStreaming: false,
         status: "stopped",
         statusLabel: undefined
       });
@@ -178,6 +182,23 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const updateStreamingMessage = (messageId: string, patch: Partial<CollaborationMessage>) => {
     setCollaborationMessages((current) => current.map((message) => (
       message.id === messageId ? { ...message, ...patch } : message
+    )));
+  };
+
+  const appendReasoningToken = (messageId: string, token: string) => {
+    if (!token || blockedReasoningMessageIdsRef.current.has(messageId)) return;
+    if (looksUnsafeForReasoningStream(token)) {
+      blockedReasoningMessageIdsRef.current.add(messageId);
+      updateStreamingMessage(messageId, {
+        reasoningText: reasoningBlockedMessage(options.locale),
+        isReasoningStreaming: false
+      });
+      return;
+    }
+    setCollaborationMessages((messages) => messages.map((message) => (
+      message.id === messageId
+        ? { ...message, reasoningText: `${message.reasoningText ?? ""}${token}`, isReasoningStreaming: true }
+        : message
     )));
   };
 
@@ -310,6 +331,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
               streamedText += token;
               enqueueStreamingText("editable", token);
             },
+            onReasoningToken: () => undefined,
             onToolEvent: (event) => appendToolEvent(event, threadId, operationId),
             onTimelineEvent: appendTimelineEvent
           })
@@ -341,6 +363,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     const userMessageId = crypto.randomUUID();
     const assistantMessageId = crypto.randomUUID();
     activeChatMessageIdRef.current = assistantMessageId;
+    blockedReasoningMessageIdsRef.current.delete(assistantMessageId);
     const startedAt = new Date().toISOString();
     let streamedText = "";
     setCollaborationMessages((current) => [
@@ -358,6 +381,8 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         text: "",
         usedMock: false,
         timeline: [],
+        reasoningText: "",
+        isReasoningStreaming: true,
         isStreaming: true,
         status: "thinking",
         createdAt: startedAt
@@ -397,6 +422,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
           streamedText += token;
           enqueueStreamingText(`message:${assistantMessageId}`, token);
         },
+        onReasoningToken: (token) => appendReasoningToken(assistantMessageId, token),
         onToolEvent: (event) => appendToolEvent(event, threadId, operationId),
         onTimelineEvent: appendTimelineEvent
       }, { signal: abortController.signal });
@@ -406,6 +432,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       await syncFinalTypewriterText(`message:${assistantMessageId}`, streamedText, result.text);
       updateStreamingMessage(assistantMessageId, {
         isStreaming: false,
+        isReasoningStreaming: false,
         status: "finalizing",
         statusLabel: undefined
       });
@@ -425,6 +452,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
           ...(streamedText.trim() ? {} : { text: options.locale === "zh" ? "已停止" : "Stopped" }),
           usedMock: false,
           isStreaming: false,
+          isReasoningStreaming: false,
           status: "stopped",
           statusLabel: undefined
         });
@@ -436,6 +464,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         text: `Request failed: ${message}`,
         usedMock: false,
         isStreaming: false,
+        isReasoningStreaming: false,
         status: "error",
         statusLabel: undefined
       });
@@ -511,6 +540,16 @@ function recoverableGenerationError(message: string, locale: Locale) {
       : "The Plan state was not updated correctly, so execution paused. Retry the current step or revise the Plan.";
   }
   return message;
+}
+
+function looksUnsafeForReasoningStream(text: string) {
+  return /#\s*AgentCard|#\s*Loaded Skills|#\s*Current User Instruction|#\s*Output Contract|FacetWrite runtime context|authorization|cookie|password|secret|api.?key|token|headers?|tool_call_id|contextValues|facetwrite_(?:canvas|diagram)_delivery/i.test(text);
+}
+
+function reasoningBlockedMessage(locale: Locale) {
+  return locale === "zh"
+    ? "Thinking hidden because internal runtime data was detected."
+    : "Thinking hidden because internal runtime data was detected.";
 }
 
 function attachTimelineToLatestAssistant<T extends CollaborationMessage>(messages: T[], events: RunTimelineEvent[]) {

@@ -349,7 +349,7 @@ test("direct Canvas delivery fails without creating nodes when AgentBackend retu
   assert.ok(events.some((event) => event.eventType === "agent_backend_runtime_failed" && event.payload.fallback === "none"));
 });
 
-test("streaming direct Canvas delivery fails without creating nodes when AgentBackend returns no content", async () => {
+test("streaming direct Canvas delivery keeps progressive placeholders when AgentBackend returns no content", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const tokens: string[] = [];
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
@@ -380,9 +380,66 @@ test("streaming direct Canvas delivery fails without creating nodes when AgentBa
   );
 
   assert.equal(tokens.join(""), "");
-  assert.equal(canvasNodes.length, 0);
+  assert.equal(canvasNodes.length, 2);
+  assert.ok(canvasNodes.some((node) => node.metadata && (node.metadata as { phase?: string }).phase === "outline"));
+  assert.ok(canvasNodes.some((node) => node.metadata && (node.metadata as { phase?: string }).phase === "body"));
   assert.equal(records.length, 0);
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_outline_committed"));
   assert.ok(events.some((event) => event.eventType === "agent_backend_runtime_failed" && event.payload.fallback === "none"));
+});
+
+test("streaming direct Canvas delivery progressively creates placeholders and finalizes stable nodes", async () => {
+  const { storage, canvasNodes, canvasEdges } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const reasoningTokens: string[] = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: [
+          "# MacBook Comparison",
+          "M3 improves CPU and GPU performance.",
+          "",
+          "# Buying Advice",
+          "Choose M3 for longer support.",
+          "",
+          "## Sources",
+          "- [Apple](https://example.com/apple)"
+        ].join("\n"),
+        finishReason: "agent_backend_completed",
+        events: [{
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "web_search",
+            sources: [{ title: "Apple", url: "https://example.com/apple" }]
+          }
+        }]
+      })
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Compare MacBook generations and organize the relevant information in Canvas.",
+    toolState: { web_search: true }
+  }, {
+    onReasoningToken: (token) => reasoningTokens.push(token),
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
+
+  assert.equal(result.usedMock, false);
+  assert.equal(result.text.includes("Creating outline"), false);
+  assert.ok(reasoningTokens.join("").includes("Preparing context"));
+  assert.ok(reasoningTokens.join("").includes("creating outline and body placeholders"));
+  assert.ok(reasoningTokens.join("").includes("reconciling Canvas nodes"));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_outline_committed"));
+  assert.ok(canvasNodes.length >= 3);
+  assert.ok(canvasEdges.length >= 2);
+  assert.ok(canvasNodes.some((node) => node.title === "MacBook Comparison" && String(node.content).includes("M3 improves")));
+  assert.ok(canvasNodes.some((node) => node.kind === "reference" && String(node.content).includes("https://example.com/apple")));
 });
 
 test("generation facade falls back to mock without calling provider when AgentBackend fails", async () => {

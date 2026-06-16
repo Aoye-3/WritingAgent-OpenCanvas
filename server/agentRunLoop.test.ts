@@ -161,6 +161,51 @@ test("streams provider assistant tokens before final result", async () => {
   assert.ok(statuses.includes("finalizing"));
 });
 
+test("streams DeepSeek reasoning tokens separately from assistant content", async () => {
+  const tokens: string[] = [];
+  const reasoningTokens: string[] = [];
+  const client: ChatClient = {
+    async createChatCompletion() {
+      throw new Error("non-streaming path should not be used");
+    },
+    async *createChatCompletionStream() {
+      yield { choices: [{ delta: { reasoning_content: "Think " } }] };
+      yield { choices: [{ delta: { reasoning_content: "first." } }] };
+      yield { choices: [{ delta: { content: "Final" } }] };
+      yield { choices: [{ finish_reason: "stop", delta: {} }] };
+    }
+  };
+
+  const result = await runAgentCompletionStream({
+    client,
+    providerId: "deepseek",
+    modelSettings: {
+      providerId: "deepseek",
+      model: "deepseek-v4-flash",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: true,
+      toolCallMode: "none",
+      maxToolCalls: 0,
+      thinkingMode: "enabled",
+      reasoningEffort: "high"
+    },
+    messages: [{ role: "user", content: "Think then answer" }],
+    allowedToolRefs: [],
+    toolState: {},
+    toolContext: {},
+    onToken: (token) => tokens.push(token),
+    onReasoningToken: (token) => reasoningTokens.push(token)
+  });
+
+  assert.equal(result.text, "Final");
+  assert.deepEqual(tokens, ["Final"]);
+  assert.deepEqual(reasoningTokens, ["Think ", "first."]);
+});
+
 test("awaits provider stream promises before iterating chunks", async () => {
   const client: ChatClient = {
     async createChatCompletion() {

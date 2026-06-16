@@ -62,6 +62,8 @@ export type CollaborationMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
+  reasoningText?: string;
+  isReasoningStreaming?: boolean;
   timeline?: RunTimelineEvent[];
   usedMock?: boolean;
   isStreaming?: boolean;

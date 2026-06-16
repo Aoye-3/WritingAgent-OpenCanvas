@@ -51,7 +51,8 @@ export function reduceLiveToolEvent(
 }
 
 export function shouldRefreshThreadStateForToolEvent(event: LiveToolEvent) {
-  return /(?:^|_)(?:canvas_mutation_committed|canvas_write_pending_approval|canvas_mutation_failed|artifact_committed|artifact_staged)$/.test(event.eventType);
+  return /(?:^|_)(?:canvas_mutation_committed|canvas_write_pending_approval|canvas_mutation_failed|artifact_committed|artifact_staged)$/.test(event.eventType)
+    || /^canvas_delivery_/.test(event.eventType);
 }
 
 function readToolName(payload: Record<string, unknown>) {
@@ -88,6 +89,9 @@ function lifecycleActivityText(eventType: string, locale: Locale) {
   }
   if (/(?:^|_)canvas_mutation_committed$/.test(eventType)) {
     return locale === "zh" ? "Canvas 节点已创建或更新" : "Canvas node created or updated";
+  }
+  if (/^canvas_delivery_/.test(eventType)) {
+    return locale === "zh" ? "Canvas 渐进交付已更新" : "Progressive Canvas delivery updated";
   }
   if (/(?:^|_)canvas_write_pending_approval$/.test(eventType)) {
     return locale === "zh" ? "Canvas 覆盖操作等待批准" : "Canvas replacement is waiting for approval";

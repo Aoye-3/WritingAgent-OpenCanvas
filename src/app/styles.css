@@ -2923,6 +2923,10 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   font-weight: 750;
 }
 
+.composer-think-indicator {
+  pointer-events: none;
+}
+
 .composer-model-select {
   min-width: 0;
   max-width: 150px;
@@ -3645,6 +3649,43 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 }
 .assistant-selectable-text {
   position: relative;
+}
+
+.reasoning-stream-panel {
+  margin: 0 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-muted);
+}
+
+.reasoning-stream-panel summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 6px 9px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.reasoning-stream-panel summary i {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  animation: streaming-pulse 1.2s ease-in-out infinite;
+}
+
+.reasoning-stream-panel pre {
+  max-height: 160px;
+  margin: 0;
+  overflow: auto;
+  padding: 0 9px 9px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 12px/1.55 var(--font-sans);
 }
 .typing-caret {
   display: inline-block;

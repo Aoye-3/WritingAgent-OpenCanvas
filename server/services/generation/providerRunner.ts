@@ -74,6 +74,7 @@ export async function runProviderGeneration(input: ProviderRunnerInput, deps: Pr
 export async function runProviderGenerationStream(
   input: ProviderRunnerInput & {
     onToken?: (token: string) => void;
+    onReasoningToken?: (token: string) => void;
     onStatus?: (status: StreamStatus) => void;
   },
   deps: ProviderRunnerDeps = {}
@@ -108,6 +109,7 @@ export async function runProviderGenerationStream(
     },
     onToolEvent: input.onToolEvent,
     onToken: input.onToken,
+    onReasoningToken: input.onReasoningToken,
     onStatus: input.onStatus
   });
 

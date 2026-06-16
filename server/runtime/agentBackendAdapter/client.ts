@@ -30,6 +30,7 @@ export type AgentBackendRunInput = {
   config?: AgentBackendRuntimeConfig;
   onToolEvent?: (event: ToolEventRecord) => void;
   onToken?: (token: string) => void;
+  onReasoningToken?: (token: string) => void;
   onStatus?: (status: StreamStatus) => void;
 };
 
@@ -91,6 +92,7 @@ export async function runAgentBackendAgent(input: AgentBackendRunInput): Promise
   return readAgentBackendStream(response.body, {
     onToolEvent: input.onToolEvent,
     onToken: input.onToken,
+    onReasoningToken: input.onReasoningToken,
     onStatus: input.onStatus
   });
 }
@@ -211,6 +213,7 @@ async function readAgentBackendStream(
   callbacks: {
     onToolEvent?: (event: ToolEventRecord) => void;
     onToken?: (token: string) => void;
+    onReasoningToken?: (token: string) => void;
     onStatus?: (status: StreamStatus) => void;
   } = {}
 ): Promise<AgentBackendRunResult> {
@@ -252,6 +255,10 @@ async function readAgentBackendStream(
   function handleEvents(parsedEvents: ReturnType<typeof parseSseChunk>) {
     for (const parsed of parsedEvents) {
       const messageId = extractMessageId(parsed.event, parsed.data);
+      const reasoningText = extractReasoningText(parsed.event, parsed.data);
+      if (reasoningText) {
+        callbacks.onReasoningToken?.(reasoningText);
+      }
       const text = extractText(parsed.event, parsed.data);
       if (text) {
         if (messageId) {
@@ -305,6 +312,12 @@ function extractText(event: string, data: unknown): string | undefined {
   return undefined;
 }
 
+function extractReasoningText(event: string, data: unknown): string | undefined {
+  if (event !== "messages" && event !== "messages-tuple") return undefined;
+  const message = Array.isArray(data) ? data[0] : data;
+  return reasoningTextFromMessageLike(message);
+}
+
 function extractFinalValuesText(data: unknown): string | undefined {
   if (!isRecord(data) || !Array.isArray(data.messages)) return undefined;
   for (let index = data.messages.length - 1; index >= 0; index -= 1) {
@@ -347,6 +360,14 @@ function textFromUnknown(value: unknown): string | undefined {
   }
   if (typeof value.text === "string") return value.text;
   if (typeof value.delta === "string") return value.delta;
+  return undefined;
+}
+
+function reasoningTextFromMessageLike(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.reasoning_content === "string") return value.reasoning_content;
+  const additional = value.additional_kwargs;
+  if (isRecord(additional) && typeof additional.reasoning_content === "string") return additional.reasoning_content;
   return undefined;
 }
 

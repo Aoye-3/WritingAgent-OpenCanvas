@@ -57,6 +57,17 @@ test("workspace uses independent dual-layer Briefs and moves model selection int
   assert.match(collaborationSource, /catch \{\s*setInput\(text\)/);
 });
 
+test("composer exposes a three-state DeepSeek thinking selector", async () => {
+  const collaborationSource = await readFile("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
+
+  assert.match(collaborationSource, /type ThinkingChoice = "disabled" \| "high" \| "max"/);
+  assert.match(collaborationSource, /<option value="disabled">/);
+  assert.match(collaborationSource, /<option value="high">/);
+  assert.match(collaborationSource, /<option value="max">/);
+  assert.match(collaborationSource, /thinkingOverridesFromChoice/);
+  assert.doesNotMatch(collaborationSource, /setThinkEnabled/);
+});
+
 test("Agent cards no longer own structured input field definitions", async () => {
   const serverTypes = await readFile("server/agents/types.ts", "utf8");
   const frontendTypes = await readFile("src/features/agents/types.ts", "utf8");
