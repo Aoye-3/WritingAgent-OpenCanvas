@@ -1,5 +1,5 @@
 import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../agents/types";
-import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../../canvas/canvasClient";
+import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasNodePositionUpdate, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../../canvas/canvasClient";
 import { DocumentCanvas } from "./DocumentCanvas";
 import type { CanvasTool } from "./canvas/toolState";
 import type { CanvasClipboardPayload } from "../../../../shared/canvasClipboard";
@@ -34,6 +34,7 @@ type WorkspaceMainCanvasProps = {
   onSelectNode: (nodeId?: string) => void;
   onUndo: () => Promise<void>;
   onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
+  onUpdateNodePositions: (updates: CanvasNodePositionUpdate[]) => Promise<unknown>;
   onRequestRangeRewrite: (draft: CanvasRangeRewriteDraft) => Promise<CanvasWriteRequest>;
   onApproveWriteRequest: (requestId: string) => Promise<{ request: CanvasWriteRequest; node?: CanvasNode }>;
   onRejectWriteRequest: (requestId: string) => Promise<unknown>;
@@ -76,6 +77,7 @@ export function WorkspaceMainCanvas(props: WorkspaceMainCanvasProps) {
         onSelectNode={props.onSelectNode}
         onUndo={props.onUndo}
         onUpdateNode={props.onUpdateNode}
+        onUpdateNodePositions={props.onUpdateNodePositions}
         onRequestRangeRewrite={props.onRequestRangeRewrite}
         onApproveWriteRequest={props.onApproveWriteRequest}
         onRejectWriteRequest={props.onRejectWriteRequest}

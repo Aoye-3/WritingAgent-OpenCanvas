@@ -193,6 +193,56 @@ test("updates canvas node kind without losing content or geometry", async () => 
   assert.equal(updated?.height, 200);
 });
 
+test("updates multiple canvas node positions without changing content or size", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;
+  await storage.ensureThread(threadId, "blog-post");
+  const first = storage.createCanvasNode(threadId, {
+    kind: "document",
+    title: "First",
+    content: "Keep first",
+    x: 10,
+    y: 20,
+    width: 300,
+    height: 200
+  });
+  const second = storage.createCanvasNode(threadId, {
+    kind: "reference",
+    title: "Second",
+    content: "Keep second",
+    x: 30,
+    y: 40,
+    width: 320,
+    height: 220
+  });
+
+  const updated = storage.updateCanvasNodePositions(threadId, [
+    { nodeId: first.id, x: 100.4, y: 200.6 },
+    { nodeId: second.id, x: -20.2, y: 80.8 }
+  ]);
+
+  assert.deepEqual(updated.map((node) => ({ id: node.id, x: node.x, y: node.y })), [
+    { id: first.id, x: 100.4, y: 200.6 },
+    { id: second.id, x: -20.2, y: 80.8 }
+  ]);
+  assert.deepEqual(updated.map((node) => ({ title: node.title, content: node.content, width: node.width, height: node.height })), [
+    { title: "First", content: "Keep first", width: 300, height: 200 },
+    { title: "Second", content: "Keep second", width: 320, height: 220 }
+  ]);
+});
+
+test("rejects batch position updates when any canvas node is missing", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;
+  await storage.ensureThread(threadId, "blog-post");
+  const node = storage.createCanvasNode(threadId, { kind: "document", title: "Only", content: "Text" });
+
+  assert.throws(() => storage.updateCanvasNodePositions(threadId, [
+    { nodeId: node.id, x: 10, y: 20 },
+    { nodeId: "node_missing", x: 30, y: 40 }
+  ]), /Canvas node not found/i);
+});
+
 test("saves canvas settings with default undo depth", async () => {
   const storage = await createStorage();
 

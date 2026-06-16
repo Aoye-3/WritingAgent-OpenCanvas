@@ -1,6 +1,6 @@
 import type { SQLiteStorageRepository } from "../storage.js";
 import type { CanvasWorkflowMode } from "../../shared/canvasWorkflow.js";
-import { splitCanvasText, stableDeliveryId } from "./canvasDelivery.js";
+import { stableDeliveryId } from "./canvasDelivery.js";
 import type { CanvasDeliveryContent, DiagramDeliveryContent, DiagramDeliveryShape } from "./generation/canvasDeliveryContent.js";
 import { formatSourceLinks } from "./generation/sourceLinks.js";
 import { isDiagramCanvasDeliveryIntent, isDirectCanvasDeliveryIntent } from "./generation/canvasDeliveryIntent.js";
@@ -169,38 +169,45 @@ function outlineNodes(input: CanvasDeliveryInput) {
 }
 
 function bodyNodes(input: CanvasDeliveryInput) {
-  const pages = splitCanvasText(input.content.bodyMarkdown.trim(), 1200);
-  return pages.map((content, pageIndex) => node(input, {
-    index: 2 + pageIndex,
+  const sections = directDeliverySections(input.content.bodyMarkdown.trim(), input.locale === "zh" ? "正文" : "Body");
+  return sections.map((section, sectionIndex) => node(input, {
+    index: 2 + sectionIndex,
     phase: "body",
     kind: "document",
-    title: pages.length > 1
-      ? `${input.locale === "zh" ? "正文" : "Body"} ${pageIndex + 1}/${pages.length}`
-      : input.locale === "zh" ? "正文" : "Body",
-    content,
-    x: DELIVERY_LAYOUT.startX + DELIVERY_LAYOUT.columnGap + pageIndex * DELIVERY_LAYOUT.columnGap,
-    y: DELIVERY_LAYOUT.startY + pageIndex * DELIVERY_LAYOUT.bodyStaggerY,
-    pageIndex,
-    pageCount: pages.length
+    title: section.title,
+    content: section.content,
+    x: DELIVERY_LAYOUT.startX + DELIVERY_LAYOUT.columnGap + sectionIndex * DELIVERY_LAYOUT.columnGap,
+    y: DELIVERY_LAYOUT.startY + sectionIndex * DELIVERY_LAYOUT.bodyStaggerY,
+    pageIndex: sectionIndex,
+    pageCount: sections.length
   }));
 }
 
 function sourceNodes(input: CanvasDeliveryInput) {
   if (!input.content.sources.length) return [];
   const content = `# ${input.locale === "zh" ? "来源" : "Sources"}\n${formatSourceLinks(input.content.sources)}`;
-  const bodyPageCount = splitCanvasText(input.content.bodyMarkdown.trim(), 1200).length;
-  const index = 2 + bodyPageCount;
+  const bodySectionCount = directDeliverySections(input.content.bodyMarkdown.trim(), input.locale === "zh" ? "正文" : "Body").length;
+  const index = 2 + bodySectionCount;
   return [node(input, {
     index,
     phase: "sources",
     kind: "reference",
     title: input.locale === "zh" ? "来源" : "Sources",
     content,
-    x: DELIVERY_LAYOUT.startX + DELIVERY_LAYOUT.columnGap * (bodyPageCount + 1),
+    x: DELIVERY_LAYOUT.startX + DELIVERY_LAYOUT.columnGap * (bodySectionCount + 1),
     y: DELIVERY_LAYOUT.startY,
     pageIndex: 0,
     pageCount: 1
   })];
+}
+
+function directDeliverySections(content: string, fallbackTitle: string) {
+  if (!content) return [];
+  const blocks = content.split(/(?=^#\s+)/m).map((block) => block.trim()).filter(Boolean);
+  return blocks.map((block, index) => ({
+    title: titleFromMarkdown(block, blocks.length === 1 ? fallbackTitle : `${fallbackTitle} ${index + 1}`),
+    content: block
+  }));
 }
 
 function node(input: CanvasDeliveryInput, value: {
@@ -357,5 +364,5 @@ function emptyPlan(): CanvasDeliveryPlan {
 }
 
 function titleFromMarkdown(content: string, fallback: string) {
-  return content.match(/^#{1,3}\s+(.+)$/m)?.[1]?.trim() || fallback;
+  return content.match(/^#{1,6}\s+(.+)$/m)?.[1]?.trim() || fallback;
 }

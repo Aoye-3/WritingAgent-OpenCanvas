@@ -32,11 +32,13 @@ export type CanvasHistoryNodePatch = Partial<{
   height: number;
   metadata: unknown;
 }>;
+export type CanvasHistoryNodePositionPatch = { nodeId: string; x: number; y: number };
 
 export type CanvasHistoryEntry =
   | { kind: "deleteNode"; nodeId: string }
   | { kind: "restoreNode"; node: CanvasHistoryNode; edges: CanvasHistoryEdge[] }
   | { kind: "updateNode"; nodeId: string; patch: CanvasHistoryNodePatch }
+  | { kind: "updateNodes"; patches: CanvasHistoryNodePositionPatch[] }
   | { kind: "deleteEdge"; edgeId: string }
   | { kind: "restoreEdge"; edge: CanvasHistoryEdge }
   | { kind: "deleteObject"; objectId: string }

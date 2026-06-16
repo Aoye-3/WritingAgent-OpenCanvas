@@ -284,6 +284,12 @@ export type CanvasNodePatch = Partial<Omit<CanvasNodeInput, "kind">> & {
   kind?: CanvasNodeKind;
 };
 
+export type CanvasNodePositionUpdate = {
+  nodeId: string;
+  x: number;
+  y: number;
+};
+
 export type CanvasWriteRequestInput = {
   operation: CanvasWriteOperation;
   targetNodeId?: string;

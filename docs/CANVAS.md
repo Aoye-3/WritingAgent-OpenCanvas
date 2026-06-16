@@ -37,7 +37,8 @@ Current frontend responsibilities:
 - Format explicit user-sent mind chains through the shared pure helper in `shared/canvasMindChain.ts`.
 - Render node bodies through the kind-based renderer boundary in `components/canvas/renderers/`.
 - Support viewport pan, wheel pan, Ctrl-wheel zoom, reset, selection, context-menu creation, node dragging, edge-based node resizing, title editing, content editing, and deletion.
-- Persist node position after drag stop through `PATCH /api/threads/:threadId/canvas/nodes/:nodeId`.
+- Persist single-node position after drag stop through `PATCH /api/threads/:threadId/canvas/nodes/:nodeId`.
+- Persist multi-selected node positions after drag stop through `PATCH /api/threads/:threadId/canvas/node-positions` so a group move performs one backend write and one project-surface refresh.
 - Persist node size after resize stop through the same PATCH endpoint.
 - Persist title/content only on blur, not on every keystroke.
 
@@ -138,7 +139,7 @@ The backend direct-delivery planner persists those dimensions in the created nod
 ## Node Markdown Rendering
 Canvas content nodes render Markdown in read-only mode. Editing still uses the raw Markdown textarea so users can revise the source text directly.
 
-`SourceMarkdownText` is the Canvas node renderer for selectable Markdown text. It supports compact headings, ordered and unordered lists, inline emphasis, inline code, Markdown links, and simple GitHub-style pipe tables. Each rendered text span keeps source-offset metadata so document range rewrite and inline formatting can still map a browser selection back to the original node content.
+`SourceMarkdownText` is the Canvas node renderer for selectable Markdown text. It supports compact headings, ordered and unordered lists, inline emphasis, inline code, Markdown links, and simple GitHub-style pipe tables. Each rendered text span keeps source-offset metadata so document range rewrite and inline formatting can still map a browser selection back to the original node content. Parsed Markdown blocks are memoized by source text so selection and drag re-renders do not repeatedly parse unchanged node content.
 
 Reference and note nodes use the same read-only Markdown renderer through `EditableTextNode`, so a source list such as `- [Apple](https://example.com)` is displayed as a clickable title rather than raw `[title](url)` syntax. Table rendering is horizontally scrollable inside the node instead of expanding or clipping the card.
 
@@ -236,7 +237,7 @@ Agent context uses Workflow filters before the runtime sees Canvas data. The def
 Deleting a node removes attached edges. Deleting an edge does not modify either node.
 
 ## Undo
-Canvas keeps a session-local undo stack for user Canvas operations: create, delete, edit, drag, resize, kind conversion, edge create, and edge delete. The stack is not persisted across page refresh.
+Canvas keeps a session-local undo stack for user Canvas operations: create, delete, edit, drag, resize, kind conversion, edge create, and edge delete. Multi-node drags are recorded as one grouped position inverse so undo restores the whole moved selection together. The stack is not persisted across page refresh.
 
 The default stack depth is 20 operations. Users can change it in Project Settings through the Canvas undo cache setting. The persisted setting is read from `/api/settings/canvas`.
 
@@ -301,7 +302,7 @@ Before claiming Canvas work is complete, verify:
 - Lightweight frontend tests cover API client errors, Canvas action state transitions, and React Flow mapping without starting a dev server.
 - Canvas renders in the workspace.
 - Background right-click menu creates `document`, `note`, `reference`, and `role` nodes.
-- Node drag persists `x/y`.
+- Node drag persists `x/y`; multi-selected node drag uses the batch position endpoint and remains undoable as one operation.
 - Node resize uses draggable edges, not point handles, and persists `x/y/width/height`.
 - Title/content edit persists after blur.
 - Node kind conversion preserves title, content, position, and size.
@@ -325,6 +326,6 @@ Conversation text is never automatically treated as a Canvas Artifact, and assis
 
 `kind:"plan"` nodes are server-controlled read-only projections of `PlanRun`. Users may move, resize, fold, or delete a projection, but ordinary Canvas creation/edit/copy/undo paths cannot create or change its content. Deleting a projection does not cancel the Plan; the projection endpoint can recreate it.
 Plan nodes are server-controlled read-only projections. They are created when a Plan becomes approval-ready and refreshed after step, Artifact, pause, failure, and completion changes. Deleting a Plan node deletes only the projection.
-Long Agent deliveries use stable delivery IDs. Structured text is split at headings, list items, and paragraph boundaries into readable document nodes, then connected with ordered `continues` edges. Retrying a delivery reuses existing nodes and edges.
+Direct Agent Canvas deliveries use stable delivery IDs. Structured text keeps the outline as its own summary node, then splits body nodes only at top-level Markdown H1 headings (`# Heading`). Nested H2-H6 headings remain inside the current body node, a body section remains one node even when it is long, and body text without H1 headings remains one body node. Retrying a delivery reuses existing ordered nodes and edges. Plan artifacts and ordinary Canvas write suggestions still use their own pagination behavior and may create `continues` edges.
 
 Ordinary conversation never writes automatically. A response with at least three top-level points may display a lightweight persisted suggestion; only user acceptance commits its nodes.

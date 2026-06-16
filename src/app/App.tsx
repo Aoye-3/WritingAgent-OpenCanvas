@@ -578,6 +578,7 @@ function AppContent() {
         onSelectCanvasNode={canvasState.setSelectedCanvasNodeId}
         onToolStateChange={setToolState}
         onUpdateCanvasNode={canvasState.handleUpdateCanvasNode}
+        onUpdateCanvasNodePositions={canvasState.handleUpdateCanvasNodePositions}
         onUpdateCanvasObject={canvasState.handleUpdateCanvasObject}
         onUploadCanvasAsset={canvasState.handleUploadCanvasAsset}
         onUpdateCanvasNodeWorkflow={canvasState.handleUpdateCanvasNodeWorkflow}

@@ -2,6 +2,7 @@ import type {
   CanvasEdgeInput,
   CanvasNodeInput,
   CanvasNodePatch,
+  CanvasNodePositionUpdate,
   CanvasObjectInput,
   CanvasObjectPatch,
   CanvasNodeWorkflowPatch,
@@ -70,6 +71,10 @@ export function createCanvasDomainService(storage: SQLiteStorageRepository) {
         throw new Error("Plan node content is read-only");
       }
       return storage.updateCanvasNode(projectId, nodeId, patch);
+    },
+
+    updateNodePositions(projectId: string, updates: CanvasNodePositionUpdate[]) {
+      return storage.updateCanvasNodePositions(projectId, updates);
     },
 
     deleteNode(projectId: string, nodeId: string) {

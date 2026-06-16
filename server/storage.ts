@@ -17,6 +17,7 @@ import type {
   CanvasEdgeInput,
   CanvasNodeInput,
   CanvasNodePatch,
+  CanvasNodePositionUpdate,
   CanvasObjectInput,
   CanvasObjectPatch,
   CanvasNodeWorkflowPatch,
@@ -40,6 +41,7 @@ export type {
   CanvasNodeInput,
   CanvasNodeKind,
   CanvasNodePatch,
+  CanvasNodePositionUpdate,
   CanvasObject,
   CanvasObjectInput,
   CanvasObjectKind,
@@ -457,6 +459,10 @@ export class SQLiteStorageRepository {
 
   updateCanvasNode(threadId: string, nodeId: string, patch: CanvasNodePatch) {
     return this.canvas.updateCanvasNode(threadId, nodeId, patch);
+  }
+
+  updateCanvasNodePositions(threadId: string, updates: CanvasNodePositionUpdate[]) {
+    return this.canvas.updateCanvasNodePositions(threadId, updates);
   }
 
   deleteCanvasNode(threadId: string, nodeId: string) {

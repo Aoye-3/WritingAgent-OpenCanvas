@@ -3,7 +3,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
 import { Topbar } from "../../shared/Topbar";
 import type { AgentCard, BriefSaveStatus, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, ProjectBrief, StoredOutputVersion, StoredThread, TaskBrief } from "../agents/types";
-import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../canvas/canvasClient";
+import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasNodePositionUpdate, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../generation/types";
 import { useI18n } from "../i18n/I18nProvider";
 import { AgentInputDrawer } from "./components/AgentInputDrawer";
@@ -78,6 +78,7 @@ type WorkspaceViewProps = {
   onSelectCanvasNode: (nodeId?: string) => void;
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
   onUpdateCanvasNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
+  onUpdateCanvasNodePositions: (updates: CanvasNodePositionUpdate[]) => Promise<unknown>;
   onUpdateCanvasObject: (objectId: string, patch: CanvasObjectPatch) => Promise<unknown>;
   onUploadCanvasAsset: (input: { fileName: string; fileBase64: string }) => Promise<unknown>;
   onUpdateCanvasNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflow["stage"]; roles?: string[] }) => Promise<unknown>;
@@ -155,6 +156,7 @@ export function WorkspaceView({
   onRetryProjectBrief,
   onRetryTaskBrief,
   onUpdateCanvasNode,
+  onUpdateCanvasNodePositions,
   onUpdateCanvasObject,
   onUploadCanvasAsset,
   onUpdateCanvasNodeWorkflow,
@@ -311,6 +313,7 @@ export function WorkspaceView({
           onSelectNode={onSelectCanvasNode}
           onUndo={onUndoCanvas}
           onUpdateNode={onUpdateCanvasNode}
+          onUpdateNodePositions={onUpdateCanvasNodePositions}
           onRequestRangeRewrite={onRequestCanvasRangeRewrite}
           onApproveWriteRequest={onApproveCanvasWriteRequest}
           onRejectWriteRequest={onRejectCanvasWriteRequest}

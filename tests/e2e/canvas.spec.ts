@@ -389,6 +389,42 @@ test("canvas deletes a selected node from the corner action", async ({ page }) =
   await expect(page.getByTestId("canvas-node")).toHaveCount(0);
 });
 
+test("canvas keeps multi-selected nodes visible after dragging one node", async ({ page }) => {
+  const runtimeErrors: string[] = [];
+  page.on("pageerror", (error) => runtimeErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") runtimeErrors.push(message.text());
+  });
+  await openNewCanvas(page);
+
+  const viewport = page.getByTestId("canvas-viewport");
+  await viewport.click({ button: "right", position: { x: 180, y: 180 } });
+  await page.getByTestId("canvas-menu-create-note").click();
+  await expect(page.getByTestId("canvas-node")).toHaveCount(1);
+  await viewport.click({ button: "right", position: { x: 700, y: 260 } });
+  await page.getByTestId("canvas-menu-create-document").click();
+  await expect(page.getByTestId("canvas-node")).toHaveCount(2);
+
+  const viewportBox = await viewport.boundingBox();
+  expect(viewportBox).toBeTruthy();
+  await page.mouse.move(viewportBox!.x + 120, viewportBox!.y + 120);
+  await page.mouse.down();
+  await page.mouse.move(viewportBox!.x + 1120, viewportBox!.y + 560, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.locator(".canvas-node.is-selected")).toHaveCount(2);
+
+  const firstNodeBox = await page.getByTestId("canvas-node").first().boundingBox();
+  expect(firstNodeBox).toBeTruthy();
+  await page.mouse.move(firstNodeBox!.x + 80, firstNodeBox!.y + 48);
+  await page.mouse.down();
+  await page.mouse.move(firstNodeBox!.x + 180, firstNodeBox!.y + 120, { steps: 8 });
+  await page.mouse.up();
+
+  await expect(page.getByTestId("document-canvas")).toBeVisible();
+  await expect(page.getByTestId("canvas-node")).toHaveCount(2);
+  expect(runtimeErrors).toEqual([]);
+});
+
 test("canvas persists blur edits and preserves node data across kind conversion", async ({ page }) => {
   await openNewCanvas(page);
 
