@@ -5,8 +5,9 @@ import type { CanvasNode, CanvasWriteRequest } from "../../../../agents/types";
 import type { CanvasNodePatch, CanvasRangeRewriteDraft } from "../../../../canvas/canvasClient";
 import { applyMarkdownFormat } from "../../../../../../shared/canvasRangeEdit";
 import { SourceMarkdownText } from "./SourceMarkdownText";
-import type { CanvasLocale } from "../types";
+import type { CanvasLocale, CanvasTextSelection } from "../types";
 import { getAutoNodeHeight, hasManualCanvasSize } from "../nodeLayout";
+import { readSourceTextSelection, readTextareaTextSelection } from "./sourceSelection";
 
 type SelectionState = { start: number; end: number; text: string; rect: DOMRect };
 
@@ -21,11 +22,13 @@ type CollaborativeDocumentNodeProps = {
   onApproveWriteRequest: (requestId: string) => Promise<{ request: CanvasWriteRequest; node?: CanvasNode }>;
   onRejectWriteRequest: (requestId: string) => Promise<unknown>;
   onRequestRangeRewrite: (draft: CanvasRangeRewriteDraft) => Promise<CanvasWriteRequest>;
+  onTextSelectionChange: (selection?: CanvasTextSelection) => void;
   onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
 };
 
 export function CollaborativeDocumentNode(props: CollaborativeDocumentNodeProps) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [title, setTitle] = useState(props.node.title);
   const [content, setContent] = useState(props.node.content);
   const [editing, setEditing] = useState<"title" | "content" | null>(null);
@@ -52,18 +55,32 @@ export function CollaborativeDocumentNode(props: CollaborativeDocumentNodeProps)
 
   const readSelection = () => {
     if (!props.isSelected || editing || request) return;
-    const active = window.getSelection();
-    if (!active || active.isCollapsed || active.rangeCount === 0) return setSelection(null);
-    const range = active.getRangeAt(0);
-    if (!bodyRef.current?.contains(range.commonAncestorContainer)) return setSelection(null);
-    const start = sourcePoint(range.startContainer, range.startOffset);
-    const end = sourcePoint(range.endContainer, range.endOffset);
-    if (!start || !end || start.token !== end.token || start.paragraph !== end.paragraph) return setSelection(null);
-    const rangeStart = Math.min(start.offset, end.offset);
-    const rangeEnd = Math.max(start.offset, end.offset);
-    if (rangeEnd <= rangeStart) return setSelection(null);
-    setSelection({ start: rangeStart, end: rangeEnd, text: props.node.content.slice(rangeStart, rangeEnd), rect: range.getBoundingClientRect() });
+    const selected = readSourceTextSelection(bodyRef.current, props.node.content);
+    if (!selected || !selected.sameToken || !selected.sameParagraph) return setSelection(null);
+    setSelection({ start: selected.rangeStart, end: selected.rangeEnd, text: selected.text, rect: selected.rect });
     setError("");
+  };
+
+  const readSplitSelection = () => {
+    if (!props.isSelected || request) return;
+    const selected = editing === "content"
+      ? readTextareaTextSelection(textareaRef.current, content)
+      : readSourceTextSelection(bodyRef.current, props.node.content);
+    if (!selected) {
+      props.onTextSelectionChange(undefined);
+      return;
+    }
+    props.onTextSelectionChange({
+      nodeId: props.node.id,
+      rangeStart: selected.rangeStart,
+      rangeEnd: selected.rangeEnd,
+      text: selected.text,
+    });
+  };
+
+  const readSelections = () => {
+    readSelection();
+    readSplitSelection();
   };
 
   const applyFormat = async (format: "bold" | "italic" | "link") => {
@@ -126,6 +143,9 @@ export function CollaborativeDocumentNode(props: CollaborativeDocumentNodeProps)
 
       {editing === "content" ? <textarea
         autoFocus className="canvas-node-content nodrag nowheel" data-testid="canvas-node-content" value={content}
+        ref={textareaRef}
+        onContextMenuCapture={readSplitSelection}
+        onMouseUp={readSplitSelection}
         onChange={(event) => setContent(event.currentTarget.value)}
         onKeyDown={(event) => { if (event.key === "Escape") event.currentTarget.blur(); }}
         onBlur={() => { if (content !== props.node.content) void props.onUpdateNode(props.node.id, { content }); setEditing(null); }}
@@ -137,7 +157,8 @@ export function CollaborativeDocumentNode(props: CollaborativeDocumentNodeProps)
           if (!props.isSelected || request) return;
           setEditing("content");
         }}
-        onMouseUp={props.isSelected ? readSelection : undefined}
+        onContextMenuCapture={readSplitSelection}
+        onMouseUp={props.isSelected ? readSelections : undefined}
       >
         {request?.operation === "replace_range" ? <div className="canvas-range-proposal-shell">
           <ProposalActions locale={props.locale} onApprove={() => void approve()} onReject={() => void reject()} />
@@ -192,15 +213,6 @@ function ProposalActions({ locale, onApprove, onReject }: { locale: CanvasLocale
     <button type="button" onClick={onReject}>{locale === "zh" ? "撤销" : "Cancel"}</button>
     <button className="is-primary" type="button" onClick={onApprove}>{locale === "zh" ? "接受" : "Accept"}</button>
   </div>;
-}
-
-function sourcePoint(node: Node, localOffset: number) {
-  const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node as HTMLElement;
-  const span = element?.closest<HTMLElement>("[data-source-start][data-source-token]");
-  if (!span) return null;
-  const sourceStart = Number(span.dataset.sourceStart);
-  const offset = node.nodeType === Node.TEXT_NODE ? localOffset : Math.min(localOffset, span.textContent?.length ?? 0);
-  return { offset: sourceStart + offset, paragraph: span.dataset.sourceParagraph, token: span.dataset.sourceToken };
 }
 
 function clearSelection() {

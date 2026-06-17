@@ -1,7 +1,7 @@
 import type { CanvasNode, CanvasWriteRequest } from "../../../../agents/types";
 import type { CanvasNodePatch, CanvasRangeRewriteDraft } from "../../../../canvas/canvasClient";
 import { isKnownCanvasKind, readDiagramMetadata } from "../nodeLayout";
-import type { CanvasLocale } from "../types";
+import type { CanvasLocale, CanvasTextSelection } from "../types";
 import { DocumentNodeRenderer } from "./DocumentNodeRenderer";
 import { FallbackNodeRenderer } from "./FallbackNodeRenderer";
 import { NoteNodeRenderer } from "./NoteNodeRenderer";
@@ -22,6 +22,7 @@ type CanvasNodeRendererProps = {
   onApproveWriteRequest: (requestId: string) => Promise<{ request: CanvasWriteRequest; node?: CanvasNode }>;
   onRejectWriteRequest: (requestId: string) => Promise<unknown>;
   onRequestRangeRewrite: (draft: CanvasRangeRewriteDraft) => Promise<CanvasWriteRequest>;
+  onTextSelectionChange: (selection?: CanvasTextSelection) => void;
 };
 
 export function CanvasNodeRenderer(props: CanvasNodeRendererProps) {

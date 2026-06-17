@@ -34,6 +34,8 @@ import { CanvasAssetInput, CanvasToolOverlays } from "./canvas/CanvasToolOverlay
 import { CanvasCreationPreview } from "./canvas/CanvasCreationPreview";
 import { createCanvasNodeDraft, getCanvasCreationSize, isPreviewCreationTool, pointToCenteredOrigin } from "./canvas/canvasCreation";
 import { CANVAS_CLIPBOARD_MIME, createCanvasClipboardPayload, type CanvasClipboardPayload, type ClipboardNodeDraft } from "../../../../shared/canvasClipboard";
+import { createSplitCanvasNodeDraft, isSplittableCanvasNodeKind } from "../../../app/hooks/canvasActions/split";
+import type { CanvasTextSelection } from "./canvas/types";
 
 type DocumentCanvasProps = {
   activeTool: CanvasTool;
@@ -143,6 +145,7 @@ function DocumentCanvasInner({
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | undefined>();
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [textSelection, setTextSelection] = useState<CanvasTextSelection | undefined>();
   const [shapeKind, setShapeKind] = useState<CanvasShapeId>("rectangle");
   const [recentShapeIds, setRecentShapeIds] = useState<string[]>(["rectangle", "circle", "diamond"]);
   const [creationPreviewPoint, setCreationPreviewPoint] = useState<{ x: number; y: number } | null>(null);
@@ -151,6 +154,7 @@ function DocumentCanvasInner({
   const resizingNodeIdRef = useRef<string | null>(null);
   const lastCanvasPointRef = useRef<{ x: number; y: number } | null>(null);
   const internalClipboardRef = useRef<CanvasClipboardPayload | null>(null);
+  const textSelectionRef = useRef<CanvasTextSelection | undefined>(undefined);
   const actionRef = useRef({
     onAcceptSuggestion,
     onApproveWriteRequest,
@@ -211,9 +215,15 @@ function DocumentCanvasInner({
     setResizingNodeId(nodeId ?? null);
   }, []);
   const clearCreationPreview = useCallback(() => setCreationPreviewPoint(null), []);
+  const handleTextSelectionChange = useCallback((selection?: CanvasTextSelection) => {
+    textSelectionRef.current = selection;
+    setTextSelection(selection);
+  }, []);
   const requestNodeMenu = useCallback((nodeId: string, screen: { x: number; y: number }) => {
     const point = reactFlowRef.current.screenToFlowPosition(screen);
-    setMenu({ screenX: screen.x, screenY: screen.y, canvasX: point.x, canvasY: point.y, nodeId });
+    const currentSelection = textSelectionRef.current;
+    const menuSelection = currentSelection?.nodeId === nodeId && currentSelection.text.trim() ? currentSelection : undefined;
+    setMenu({ screenX: screen.x, screenY: screen.y, canvasX: point.x, canvasY: point.y, nodeId, textSelection: menuSelection });
     setSelectedEdgeId(undefined);
     actionRef.current.onSelectNode(nodeId);
   }, []);
@@ -228,9 +238,10 @@ function DocumentCanvasInner({
     onRejectWriteRequest: (requestId: string) => actionRef.current.onRejectWriteRequest(requestId),
     onRequestNodeMenu: requestNodeMenu,
     onRequestRangeRewrite: (draft: CanvasRangeRewriteDraft) => actionRef.current.onRequestRangeRewrite(draft),
+    onTextSelectionChange: handleTextSelectionChange,
     onResizeStateChange: handleResizeStateChange,
     onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => actionRef.current.onUpdateNode(nodeId, patch)
-  }), [clearCreationPreview, handleResizeStateChange, requestNodeMenu]);
+  }), [clearCreationPreview, handleResizeStateChange, handleTextSelectionChange, requestNodeMenu]);
 
   useEffect(() => {
     setFlowNodes((current) => {
@@ -257,6 +268,16 @@ function DocumentCanvasInner({
     if (kind === "plan") return;
     setMenu(null);
     await actionRef.current.onCreateNode(createCanvasNodeDraft(kind, { x: menu.canvasX, y: menu.canvasY }, locale));
+  };
+
+  const splitSelectionToNode = async (nodeId: string) => {
+    const selection = menu?.textSelection ?? textSelection;
+    const source = nodes.find((node) => node.id === nodeId);
+    if (!source || !selection || selection.nodeId !== source.id || !isSplittableCanvasNodeKind(source.kind)) return;
+    setMenu(null);
+    handleTextSelectionChange(undefined);
+    window.getSelection()?.removeAllRanges();
+    await actionRef.current.onCreateNode(createSplitCanvasNodeDraft(source, selection));
   };
 
   const onNodesChange = useCallback((changes: NodeChange<CanvasFlowNode>[]) => {
@@ -532,6 +553,7 @@ function DocumentCanvasInner({
           onNodesChange={onNodesChange}
           onPaneClick={() => {
             closeMenu();
+            handleTextSelectionChange(undefined);
             setSelectedObjectIds([]);
             actionRef.current.onSelectNode(undefined);
           }}
@@ -591,8 +613,10 @@ function DocumentCanvasInner({
             createItems={canvasNodeKinds.map((kind) => ({ kind, label: kindLabels[kind]?.[locale] ?? kind }))}
             menu={menu}
             sendMindChainLabel={t("workspace.sendMindChain")}
+            splitSelectionLabel={locale === "zh" ? "拆分为节点" : "Split selection to node"}
             onCreateNode={(kind) => void createNode(kind)}
             onSendMindChain={sendMindChain}
+            onSplitSelection={(nodeId) => void splitSelectionToNode(nodeId)}
           />
         ) : null}
         <CanvasToolOverlays

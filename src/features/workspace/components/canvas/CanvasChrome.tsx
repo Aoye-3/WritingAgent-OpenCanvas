@@ -1,9 +1,9 @@
 import type { CSSProperties } from "react";
 import type { CanvasNode, CanvasNodeKind, CanvasWorkflow, CanvasWorkflowStage } from "../../../agents/types";
 import { kindLabels, workflowStageLabels } from "./constants";
-import type { CanvasLocale } from "./types";
+import type { CanvasLocale, CanvasTextSelection } from "./types";
 
-export type CanvasMenuState = { screenX: number; screenY: number; canvasX: number; canvasY: number; nodeId?: string };
+export type CanvasMenuState = { screenX: number; screenY: number; canvasX: number; canvasY: number; nodeId?: string; textSelection?: CanvasTextSelection };
 
 export function CanvasStatusNode({ label, stageLabel }: { label: string; stageLabel: string }) {
   return (
@@ -18,20 +18,27 @@ export function CanvasContextMenu({
   createItems,
   menu,
   sendMindChainLabel,
+  splitSelectionLabel,
   onCreateNode,
-  onSendMindChain
+  onSendMindChain,
+  onSplitSelection
 }: {
   createItems: Array<{ kind: CanvasNodeKind; label: string }>;
   menu: CanvasMenuState;
   sendMindChainLabel: string;
+  splitSelectionLabel: string;
   onCreateNode: (kind: CanvasNodeKind) => void;
   onSendMindChain: (nodeId: string) => void;
+  onSplitSelection: (nodeId: string) => void;
 }) {
   const style: CSSProperties = { left: menu.screenX, top: menu.screenY };
   return (
     <div className="canvas-menu" data-testid="canvas-menu" style={style}>
       {menu.nodeId ? (
         <button type="button" onClick={() => onSendMindChain(menu.nodeId!)}>{sendMindChainLabel}</button>
+      ) : null}
+      {menu.nodeId && menu.textSelection ? (
+        <button type="button" data-testid="canvas-menu-split-selection" onClick={() => onSplitSelection(menu.nodeId!)}>{splitSelectionLabel}</button>
       ) : null}
       {!menu.nodeId ? createItems.map((item) => (
         <button key={item.kind} type="button" data-testid={`canvas-menu-create-${item.kind}`} onClick={() => onCreateNode(item.kind)}>{item.label}</button>
