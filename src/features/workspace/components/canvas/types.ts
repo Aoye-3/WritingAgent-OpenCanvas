@@ -4,6 +4,13 @@ import type { CanvasNodePatch, CanvasRangeRewriteDraft } from "../../../canvas/c
 
 export type CanvasLocale = "en" | "zh";
 
+export type CanvasTextSelection = {
+  nodeId: string;
+  rangeStart: number;
+  rangeEnd: number;
+  text: string;
+};
+
 export type CanvasFlowNodeData = {
   isResizing: boolean;
   locale: CanvasLocale;
@@ -18,6 +25,7 @@ export type CanvasFlowNodeData = {
   onIgnoreSuggestion: (suggestionId: string) => Promise<void>;
   onCreationPreviewBlocked: () => void;
   onRequestNodeMenu: (nodeId: string, screen: { x: number; y: number }) => void;
+  onTextSelectionChange: (selection?: CanvasTextSelection) => void;
   onResizeStateChange: (nodeId?: string) => void;
   onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
   onRequestRangeRewrite: (draft: CanvasRangeRewriteDraft) => Promise<CanvasWriteRequest>;

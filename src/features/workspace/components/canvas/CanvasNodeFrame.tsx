@@ -96,6 +96,7 @@ export function CanvasNodeFrame({ data, selected }: NodeProps<CanvasFlowNode>) {
         onApproveWriteRequest={data.onApproveWriteRequest}
         onRejectWriteRequest={data.onRejectWriteRequest}
         onRequestRangeRewrite={data.onRequestRangeRewrite}
+        onTextSelectionChange={data.onTextSelectionChange}
         onUpdateNode={onUpdateNode}
       />
       <CanvasNodeSuggestions

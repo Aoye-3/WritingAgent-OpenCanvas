@@ -1,6 +1,6 @@
 import type { CanvasNode, CanvasWriteRequest } from "../../../../agents/types";
 import type { CanvasNodePatch, CanvasRangeRewriteDraft } from "../../../../canvas/canvasClient";
-import type { CanvasLocale } from "../types";
+import type { CanvasLocale, CanvasTextSelection } from "../types";
 import { CollaborativeDocumentNode } from "./CollaborativeDocumentNode";
 
 type DocumentNodeRendererProps = {
@@ -15,6 +15,7 @@ type DocumentNodeRendererProps = {
   onApproveWriteRequest: (requestId: string) => Promise<{ request: CanvasWriteRequest; node?: CanvasNode }>;
   onRejectWriteRequest: (requestId: string) => Promise<unknown>;
   onRequestRangeRewrite: (draft: CanvasRangeRewriteDraft) => Promise<CanvasWriteRequest>;
+  onTextSelectionChange: (selection?: CanvasTextSelection) => void;
 };
 
 export function DocumentNodeRenderer(props: DocumentNodeRendererProps) {

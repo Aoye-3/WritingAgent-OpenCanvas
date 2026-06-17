@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { CanvasNode } from "../../../../agents/types";
 import type { CanvasNodePatch } from "../../../../canvas/canvasClient";
 import { getAutoNodeHeight, hasManualCanvasSize } from "../nodeLayout";
-import type { CanvasLocale } from "../types";
+import type { CanvasLocale, CanvasTextSelection } from "../types";
 import { SourceMarkdownText } from "./SourceMarkdownText";
+import { readSourceTextSelection, readTextareaTextSelection } from "./sourceSelection";
 
 type EditableTextNodeProps = {
   isSelected: boolean;
@@ -12,9 +13,11 @@ type EditableTextNodeProps = {
   locale: CanvasLocale;
   node: CanvasNode;
   onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
+  onTextSelectionChange: (selection?: CanvasTextSelection) => void;
 };
 
-export function EditableTextNode({ isSelected, isResizing, linksEnabled = false, locale, node, onUpdateNode }: EditableTextNodeProps) {
+export function EditableTextNode({ isSelected, isResizing, linksEnabled = false, locale, node, onTextSelectionChange, onUpdateNode }: EditableTextNodeProps) {
+  const bodyRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [title, setTitle] = useState(node.title);
   const [content, setContent] = useState(node.content);
@@ -35,6 +38,23 @@ export function EditableTextNode({ isSelected, isResizing, linksEnabled = false,
       void onUpdateNode(node.id, { height: nextHeight });
     }
   }, [content, isResizing, node.content, node.height, node.id, node.kind, node.metadata, onUpdateNode]);
+
+  const readSplitSelection = () => {
+    if (!isSelected) return;
+    const selected = editing === "content"
+      ? readTextareaTextSelection(textareaRef.current, content)
+      : readSourceTextSelection(bodyRef.current, node.content);
+    if (!selected) {
+      onTextSelectionChange(undefined);
+      return;
+    }
+    onTextSelectionChange({
+      nodeId: node.id,
+      rangeStart: selected.rangeStart,
+      rangeEnd: selected.rangeEnd,
+      text: selected.text,
+    });
+  };
 
   return (
     <div className="canvas-text-node-body">
@@ -57,13 +77,22 @@ export function EditableTextNode({ isSelected, isResizing, linksEnabled = false,
         ref={textareaRef}
         value={content}
         placeholder={locale === "zh" ? "在这里编辑节点内容..." : "Edit node content..."}
+        onContextMenuCapture={readSplitSelection}
+        onMouseUp={readSplitSelection}
         onBlur={() => {
           if (content !== node.content) void onUpdateNode(node.id, { content });
           setEditing(null);
         }}
         onKeyDown={(event) => { if (event.key === "Escape") event.currentTarget.blur(); }}
         onChange={(event) => setContent(event.currentTarget.value)}
-      /> : <div className="canvas-node-content canvas-node-readonly" data-testid="canvas-node-content" onClick={() => { if (isSelected) setEditing("content"); }}>
+      /> : <div
+        className="canvas-node-content canvas-node-readonly"
+        data-testid="canvas-node-content"
+        ref={bodyRef}
+        onClick={() => { if (isSelected) setEditing("content"); }}
+        onContextMenuCapture={readSplitSelection}
+        onMouseUp={readSplitSelection}
+      >
         {content ? <SourceMarkdownText linksEnabled={linksEnabled} text={content} /> : (locale === "zh" ? "再次点击编辑内容" : "Click again to edit content")}
       </div>}
     </div>

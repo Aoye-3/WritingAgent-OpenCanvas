@@ -1,7 +1,7 @@
 import type { CanvasNode, CanvasNodeKind, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../../agents/types";
 import type { CanvasNodePatch, CanvasRangeRewriteDraft } from "../../../canvas/canvasClient";
 import { readDimension } from "./nodeLayout";
-import type { CanvasFlowNode, CanvasLocale } from "./types";
+import type { CanvasFlowNode, CanvasLocale, CanvasTextSelection } from "./types";
 
 type CanvasFlowCallbacks = {
   onAcceptSuggestion: (suggestionId: string) => Promise<void>;
@@ -10,6 +10,7 @@ type CanvasFlowCallbacks = {
   onIgnoreSuggestion: (suggestionId: string) => Promise<void>;
   onCreationPreviewBlocked: () => void;
   onRequestNodeMenu: (nodeId: string, screen: { x: number; y: number }) => void;
+  onTextSelectionChange: (selection?: CanvasTextSelection) => void;
   onResizeStateChange: (nodeId?: string) => void;
   onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
   onRequestRangeRewrite: (draft: CanvasRangeRewriteDraft) => Promise<CanvasWriteRequest>;
@@ -114,6 +115,7 @@ function isSameFlowNode(current: CanvasFlowNode, next: CanvasFlowNode) {
     && current.data.onRejectWriteRequest === next.data.onRejectWriteRequest
     && current.data.onRequestNodeMenu === next.data.onRequestNodeMenu
     && current.data.onRequestRangeRewrite === next.data.onRequestRangeRewrite
+    && current.data.onTextSelectionChange === next.data.onTextSelectionChange
     && current.data.onResizeStateChange === next.data.onResizeStateChange
     && current.data.onUpdateNode === next.data.onUpdateNode;
 }

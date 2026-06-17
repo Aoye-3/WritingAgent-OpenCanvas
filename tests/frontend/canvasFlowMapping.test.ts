@@ -8,6 +8,7 @@ const callbacks = {
   onDeleteNode: async () => {},
   onIgnoreSuggestion: async () => {},
   onResizeStateChange: () => {},
+  onTextSelectionChange: () => {},
   onUpdateNode: async () => {}
 };
 
