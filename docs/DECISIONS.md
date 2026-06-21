@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-06-21: Project Skill Folders Are Managed Through The Catalog API
+
+Decision: Keep Skill folder management inside the existing Skill catalog surface. The bottom Canvas Skills panel can create, rename, delete empty project folders, move project Skills, and show details, while the right composer remains a compact per-message enable/disable selector.
+
+Reason: Users need organization and one-message Skill control without turning Agent settings into a filesystem editor. Project Skills are local workspace assets, but Agent Runtime Skills belong to the runtime package and should not be mutated from the product UI.
+
+Impact: `server/skillLoader.ts` is the only filesystem write boundary for project Skill folders. Management APIs always return a refreshed `{ skills, folders }` catalog, folder ids are restricted to lowercase letters, numbers, and dashes, `default` is protected, Runtime Skills are read-only, and Skill bodies remain private runtime context.
+
 ## 2026-06-06: Visual Board Objects Stay Separate From Semantic Nodes And Edges
 
 Decision: Store free arrows, shapes, lightweight tables, and local asset cards in `canvas_objects`, while preserving `canvas_nodes` for writing/workflow nodes and `canvas_edges` for mind-chain and Role relationships.

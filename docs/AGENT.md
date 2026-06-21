@@ -225,6 +225,8 @@ Public Skills are discovered recursively from `skills/public/**/SKILL.md` and `m
 
 The bottom Canvas Skills panel is also the project Skill folder management surface. It can create, rename, and delete empty project folders, move project Skills between folders, and show Skill details. These operations are limited to `skills/public` and use safe resolved-path checks; `default` is locked, and Agent Runtime Skills from `modules/agent-runtime/skills/public` are read-only. The right composer keeps the compact per-message selector and does not expose folder management controls.
 
+The maintained implementation contract for Skill folder management lives in `docs/SKILL_MANAGEMENT.md`. Update that document when changing catalog fields, folder mutation rules, or per-message Skill override behavior.
+
 Transient enable/disable choices are intentionally not saved back to Agent settings, Project state, or Thread defaults. The frontend may show enabled and disabled Skill chips near the composer, but it sends only Skill refs. Skill content is loaded server-side from the public Skill roots and remains private runtime context.
 
 When transient Skills are successfully loaded for a streaming run, the backend emits one safe Run Trace `decision` timeline event naming the Skill ids. The event payload is limited to `{ source:"composer", skillRefs:[...] }`; it must not include Skill file bodies, prompts, user messages, tool arguments, or internal context.
