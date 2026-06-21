@@ -239,6 +239,9 @@ export function createGenerationService(
     callbacks.onStatus?.({ phase: "thinking", label: streamLabels.thinking });
     publicReasoning.emit("prepare", payload.locale === "zh" ? "正在准备上下文、工具和运行环境。" : "Preparing context, tools, and runtime.");
     emitTimeline(timeline.event("phase_started", "running", payload.locale === "zh" ? "准备执行" : "Preparing run", payload.locale === "zh" ? "正在准备上下文、工具和运行环境。" : "Preparing context, tools, and runtime."));
+    if (context.transientSkillNames.length) {
+      emitTimeline(skillUsageTimelineEvent(timeline, payload.locale, context.transientSkillNames));
+    }
     const progressiveDeliveryEvents = beginProgressiveCanvasDelivery({
       payload,
       threadId,
@@ -555,6 +558,21 @@ function withRuntimeContext(payload: GenerateRequest, canvasDeliveryContract?: C
       canvasDeliveryContract
     }
   };
+}
+
+function skillUsageTimelineEvent(
+  timeline: ReturnType<typeof createRunTimelineBuilder>,
+  locale: GenerateRequest["locale"],
+  skillNames: string[]
+): RunTimelineEvent {
+  const refs = Array.from(new Set(skillNames));
+  return timeline.event(
+    "decision",
+    "running",
+    locale === "zh" ? "使用技能" : "Using skills",
+    locale === "zh" ? `使用技能：${refs.join(", ")}` : `Using skills: ${refs.join(", ")}`,
+    { source: "composer", skillRefs: refs }
+  );
 }
 
 function finalizeCanvasDelivery(input: {

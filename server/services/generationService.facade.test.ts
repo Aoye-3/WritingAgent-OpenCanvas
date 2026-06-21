@@ -767,6 +767,46 @@ test("generation facade injects Knowledge References into AgentBackend messages"
   assert.ok((records[0] as { events: Array<{ eventType: string; payload: { resultCount?: number } }> }).events.some((event) => event.eventType === "knowledge_search_completed" && event.payload.resultCount === 1));
 });
 
+test("streaming generation applies transient skills without saving them to Agent settings", async () => {
+  const { storage } = fakeStorage();
+  const config = runtimeConfig();
+  let observedPrompt = "";
+  const timelineEvents: Array<{ title: string; summary: string; payload?: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(config), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        observedPrompt = input.prompt;
+        return {
+          text: "Transient skill response",
+          finishReason: "stop",
+          events: []
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "chat-agent",
+    chatInstruction: "帮我总结一下",
+    transientSkillRefs: ["summary"]
+  }, {
+    onTimelineEvent: (event) => timelineEvents.push(event)
+  });
+
+  assert.equal(result.provider, "agent-backend");
+  assert.match(observedPrompt, /# Loaded Skills/);
+  assert.match(observedPrompt, /## summary/);
+  assert.deepEqual(config.settings.prompt.skillRefs, []);
+  const skillEvent = timelineEvents.find((event) => event.payload?.source === "composer");
+  assert.equal(skillEvent?.title, "使用技能");
+  assert.equal(skillEvent?.summary, "使用技能：summary");
+  assert.deepEqual(skillEvent?.payload, { source: "composer", skillRefs: ["summary"] });
+});
+
 test("generation facade skips knowledge search when disabled by settings or tool state", async () => {
   for (const setup of [
     { knowledgeEnabled: false, toolEnabled: true },

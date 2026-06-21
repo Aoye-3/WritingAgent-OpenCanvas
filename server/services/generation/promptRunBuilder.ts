@@ -42,6 +42,7 @@ export type GenerationRunContext = {
   messages: ChatMessage[];
   effectiveToolState: ToolState;
   knowledgeEvents: ToolEventRecord[];
+  transientSkillNames: string[];
   canvasDeliveryContract?: CanvasDeliveryContract;
 };
 
@@ -64,7 +65,12 @@ export async function buildGenerationRunContext(
   const planSkillRef = planPolicy.phase === "planning"
     ? (payload.contextValues?.awaitingPlan ? "writing-plans" : "brainstorming")
     : undefined;
-  const skills = await loadSkillsByRefs([...agentCard.skillRefs, ...(planSkillRef ? [planSkillRef] : [])]);
+  const transientSkillRefs = payload.transientSkillRefs ?? [];
+  const skills = await loadSkillsByRefs([...agentCard.skillRefs, ...transientSkillRefs, ...(planSkillRef ? [planSkillRef] : [])]);
+  const requestedTransientSkills = new Set(transientSkillRefs);
+  const transientSkillNames = skills
+    .filter((skill) => requestedTransientSkills.has(skill.name) || requestedTransientSkills.has(skill.relativePath))
+    .map((skill) => skill.name);
   const canvasDeliveryContract = canvasDeliveryContractForPayload(payload);
   const prompt = buildAgentPrompt({
     agentCard,
@@ -108,6 +114,7 @@ export async function buildGenerationRunContext(
     messages,
     effectiveToolState,
     knowledgeEvents: knowledge.events,
+    transientSkillNames,
     canvasDeliveryContract
   };
 }

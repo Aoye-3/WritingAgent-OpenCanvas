@@ -2905,26 +2905,109 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   flex-wrap: wrap;
 }
 
-.composer-think-controls {
+.composer-control-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-left: auto;
+  gap: 8px;
+  min-width: 0;
 }
 
-.composer-effort-select {
+.composer-agent-section {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.composer-thinking-section {
+  flex: 0 0 auto;
+}
+
+.thinking-mode-control {
+  position: relative;
+}
+
+.thinking-mode-button {
   min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid var(--color-border);
   border-radius: 999px;
   background: var(--color-surface);
-  color: var(--color-text);
+  color: var(--color-text-muted);
   padding: 0 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.thinking-mode-button:hover,
+.thinking-mode-button.is-active {
+  border-color: #9bbcff;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.thinking-mode-button span {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.thinking-mode-button span svg {
+  display: block;
+  stroke: currentColor;
+}
+
+.thinking-mode-button:hover span,
+.thinking-mode-button.is-active span {
+  background: var(--color-primary);
+  color: var(--color-surface);
+}
+
+.thinking-mode-button strong {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.thinking-mode-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  min-width: 112px;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+}
+
+.thinking-mode-menu button {
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  padding: 0 8px;
+  text-align: left;
   font-size: 12px;
   font-weight: 750;
 }
 
-.composer-think-indicator {
-  pointer-events: none;
+.thinking-mode-menu button:hover,
+.thinking-mode-menu button.is-active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
 }
 
 .composer-model-select {
@@ -2975,6 +3058,125 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   border: 2px solid var(--color-surface);
   border-radius: 999px;
   background: var(--color-primary);
+}
+
+.composer-skill-picker {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.composer-skill-picker .tool-icon-button {
+  width: auto;
+  min-width: 32px;
+  grid-auto-flow: column;
+  gap: 5px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.composer-skill-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  width: min(360px, calc(100vw - 32px));
+  max-height: 340px;
+  overflow-y: auto;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+}
+
+.composer-skill-menu > strong {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.composer-skill-menu > p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.composer-skill-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-subtle);
+}
+
+.composer-skill-row span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.composer-skill-row strong,
+.composer-skill-row em,
+.composer-skill-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-skill-row strong {
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.composer-skill-row em,
+.composer-skill-row small {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.composer-skill-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.composer-skill-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  gap: 6px;
+  padding: 4px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.composer-skill-chip button {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: currentColor;
+  padding: 0;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.composer-skill-chip button:hover {
+  background: rgba(37, 99, 235, 0.12);
 }
 
 .version-history {
@@ -5718,11 +5920,17 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   padding: 8px 10px 10px;
 }
 
-.view-workspace .composer-agent-row {
+.view-workspace .composer-control-row {
   min-height: 32px;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+}
+
+.view-workspace .composer-agent-section {
+  min-width: 0;
+  min-height: 32px;
+  flex: 1 1 auto;
   padding: 0 8px;
   border: 1px solid var(--color-border);
   border-radius: 9px;
@@ -5730,7 +5938,7 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   color: var(--color-text-muted);
 }
 
-.view-workspace .composer-agent-row .composer-agent-select {
+.view-workspace .composer-agent-section .composer-agent-select {
   flex: 1;
   max-width: none;
   min-height: 28px;
@@ -5738,6 +5946,10 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   background: transparent;
   padding: 0 2px;
   font-weight: 750;
+}
+
+.view-workspace .composer-thinking-section {
+  flex: 0 0 auto;
 }
 
 .view-workspace .composer-resize-handle { height: 8px; margin-bottom: -3px; }
@@ -5770,38 +5982,47 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   border-color: transparent;
 }
 
+.view-workspace .composer-skill-picker .tool-icon-button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
 .view-workspace .composer-model-select {
-  flex: 1 1 72px;
-  max-width: none;
-  min-width: 72px;
+  flex: 0 1 108px;
+  max-width: 112px;
+  min-width: 84px;
   min-height: 28px;
-  padding: 0 6px;
+  overflow: hidden;
+  padding: 0 7px;
+  border-color: var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface-subtle);
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .view-workspace .plan-command-button {
-  flex: 0 0 auto;
-  width: auto;
-  min-width: 36px;
-  padding: 0 7px;
-  font-size: 11px;
+  flex: 0 0 28px;
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
 }
 
-.view-workspace .composer-think-controls {
-  flex: 0 0 auto;
-  gap: 3px;
-  margin-left: 0;
+.view-workspace .thinking-mode-button {
+  min-height: 32px;
+  padding: 0 9px;
 }
 
-.view-workspace .composer-effort-select {
-  max-width: 64px;
-  min-height: 28px;
-  padding: 0 6px;
-  font-size: 11px;
+.view-workspace .thinking-mode-menu {
+  bottom: calc(100% + 7px);
 }
 
 .view-workspace .chat-send-icon {
   flex: 0 0 34px;
+  margin-left: auto;
   width: 34px;
   height: 34px;
   min-width: 34px;

@@ -22,6 +22,7 @@ export type GenerateRequest = {
     thinkingMode?: "enabled" | "disabled";
     reasoningEffort?: "high" | "max" | "low" | "medium" | "xhigh";
   };
+  transientSkillRefs?: string[];
   selectedCanvasNodeId?: string;
   planPhase?: "intake" | "revise" | "execution";
   planId?: string;
@@ -79,6 +80,7 @@ export function parseGenerateRequest(value: unknown): GenerateRequest {
     systemPrompt: readString(body.systemPrompt),
     providerId: readProviderId(body.providerId),
     modelOverrides: readModelOverrides(body.modelOverrides),
+    transientSkillRefs: readStringList(body.transientSkillRefs),
     selectedCanvasNodeId: readString(body.selectedCanvasNodeId)
     ,planPhase: body.planPhase === "intake" || body.planPhase === "revise" || body.planPhase === "execution" ? body.planPhase : undefined
     ,planId: readString(body.planId)
@@ -116,6 +118,15 @@ function readPlanGeneration(value: unknown): GenerateRequest["planGeneration"] {
 
 function readString(value: unknown) {
   return typeof value === "string" ? value : undefined;
+}
+
+function readStringList(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  const refs = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return refs.length ? Array.from(new Set(refs)) : undefined;
 }
 
 function readProviderId(value: unknown): ProviderId | undefined {

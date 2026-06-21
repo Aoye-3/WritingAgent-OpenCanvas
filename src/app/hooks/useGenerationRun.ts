@@ -390,13 +390,15 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     ]);
     try {
       const threadId = await options.ensureThreadId();
+      const transientSkillRefs = readTransientSkillRefs(requestContext?.transientSkillRefs);
+      const requestContextValues = omitTransientSkillRefs(requestContext);
       const payload: GenerateRequest = {
         mode: "chat",
         agentCardId: options.activeAgent.id,
         projectId: options.currentProjectId,
         threadId,
         locale: options.locale,
-        contextValues: { ...options.getContextValues(), ...requestContext },
+        contextValues: { ...options.getContextValues(), ...requestContextValues },
         chatInstruction: text,
         planPhase: requestContext?.approvedPlan ? "execution" : requestContext?.awaitingPlan ? "revise" : isPlanInstruction(text) ? "intake" : undefined,
         planId: typeof (requestContext?.planExecution as { planId?: unknown } | undefined)?.planId === "string"
@@ -411,6 +413,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
           kind: requestContext?.approvedPlan ? "execution" : isPlanInstruction(text) || Boolean(requestContext?.awaitingPlan) ? "planning" : "chat"
         }),
         modelOverrides,
+        transientSkillRefs,
         selectedCanvasNodeId: options.selectedCanvasNodeId
       };
       const result = await generateTextStream(payload, {
@@ -521,6 +524,21 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
 
 function isPlanInstruction(text: string) {
   return /^\s*\/plan\b/i.test(text) || /^\s*continue approved plan\b/i.test(text);
+}
+
+function readTransientSkillRefs(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  const refs = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return refs.length ? Array.from(new Set(refs)) : undefined;
+}
+
+function omitTransientSkillRefs(requestContext?: Record<string, unknown>) {
+  if (!requestContext) return undefined;
+  const { transientSkillRefs: _transientSkillRefs, ...rest } = requestContext;
+  return rest;
 }
 
 function isAbortError(error: unknown) {
