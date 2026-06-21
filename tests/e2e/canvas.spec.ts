@@ -225,6 +225,24 @@ test("floating toolbar creates visual objects and opens selection Agent actions"
   await expect(page.getByTestId("canvas-agent-tool-menu")).toBeVisible();
 });
 
+test("Agent tool menu stays above the floating toolbar and can be dismissed", async ({ page }) => {
+  await openNewCanvas(page);
+
+  await page.getByRole("button", { name: "Agent tool" }).click();
+  const agentMenu = page.getByTestId("canvas-agent-tool-menu");
+  await expect(agentMenu).toBeVisible();
+  await expect(agentMenu.getByRole("button")).toHaveCount(4);
+
+  const menuBox = await agentMenu.boundingBox();
+  const dockBox = await page.locator(".board-tool-dock").boundingBox();
+  expect(menuBox).toBeTruthy();
+  expect(dockBox).toBeTruthy();
+  expect(menuBox!.y + menuBox!.height).toBeLessThan(dockBox!.y);
+
+  await page.keyboard.press("Escape");
+  await expect(agentMenu).toHaveCount(0);
+});
+
 test("floating toolbar separates node tools with distinct icons", async ({ page }) => {
   await openNewCanvas(page);
 
@@ -238,6 +256,59 @@ test("floating toolbar separates node tools with distinct icons", async ({ page 
 
   const nodeIconClasses = await nodeTools.locator("svg").evaluateAll((icons) => icons.map((icon) => icon.getAttribute("class")));
   expect(new Set(nodeIconClasses).size).toBe(4);
+});
+
+test("skill folder picker manages folders and sends skill overrides", async ({ page }) => {
+  const folderId = `research-e2e-${Date.now()}`;
+
+  try {
+    await openNewCanvas(page);
+    await page.getByRole("button", { name: "Skills" }).click();
+    const picker = page.getByTestId("toolbar-skill-picker");
+    await expect(picker).toBeVisible();
+    await expect(picker.getByTestId("skill-folder-manager")).toBeVisible();
+    await expect(picker).toContainText("Default skills");
+    await expect(picker).toContainText("summary");
+
+    await picker.getByLabel("New folder").fill(folderId);
+    await picker.getByRole("button", { name: "Create" }).click();
+    const testFolderButton = picker.locator(".skill-manager-folder-list button").filter({ hasText: "Research E2e" });
+    await expect(testFolderButton).toBeVisible();
+
+    await picker.getByRole("button", { name: /Default skills/ }).click();
+    await picker.locator(".skill-manager-skill").filter({ hasText: "summary" }).click();
+    await picker.getByLabel("Move to folder").selectOption(folderId);
+    await testFolderButton.click();
+    await expect(picker.locator(".skill-manager-skill").filter({ hasText: "summary" })).toBeVisible();
+
+    const catalogAfterMove = await page.request.get("/api/skills/catalog");
+    const movedCatalog = await catalogAfterMove.json() as { skills: Array<{ name: string; folderId: string }> };
+    expect(movedCatalog.skills.find((skill) => skill.name === "summary")?.folderId).toBe(folderId);
+
+    await picker.getByRole("button", { name: /Agent Runtime/ }).click();
+    const runtimeList = picker.locator(".skill-manager-skill-list");
+    await runtimeList.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await expect(picker.locator(".skill-manager-skill").filter({ hasText: "web-design-guidelines" })).toBeVisible();
+    await picker.getByLabel("Enable brainstorming").check();
+
+    let sentPayload: { transientSkillRefs?: string[]; disabledSkillRefs?: string[]; chatInstruction?: string } | undefined;
+    await page.route("**/api/generate/stream", async (route) => {
+      sentPayload = route.request().postDataJSON() as typeof sentPayload;
+      await route.fulfill({
+        contentType: "text/event-stream",
+        body: `event: final\ndata: ${JSON.stringify({ text: "Done", prompt: "", provider: "mock", usedMock: false, threadId: await getCurrentThreadId(page) })}\n\n`
+      });
+    });
+
+    await page.getByTestId("ai-collaboration-input").fill("Use these skills once");
+    await page.getByRole("button", { name: /Send|\u53d1\u9001/ }).click();
+
+    expect(sentPayload?.chatInstruction).toBe("Use these skills once");
+    expect(sentPayload?.transientSkillRefs).toEqual(["brainstorming"]);
+  } finally {
+    await page.request.patch("/api/skills/summary/folder", { data: { folderId: "default" } }).catch(() => undefined);
+    await page.request.delete(`/api/skills/folders/${folderId}`).catch(() => undefined);
+  }
 });
 
 test("reference tool previews centered placement and returns to select", async ({ page }) => {

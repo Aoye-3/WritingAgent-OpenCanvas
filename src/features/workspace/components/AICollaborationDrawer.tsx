@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, LightbulbIcon, ModelConfigIcon, SearchIcon, SendIcon, StopIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
-import type { AgentCard, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, SkillCatalogItem, StoredThread } from "../../agents/types";
+import type { AgentCard, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
 import { useI18n } from "../../i18n/I18nProvider";
 import { AnnotationChipRow, CanvasWriteProposalPanel, type MessageAnnotation } from "./CanvasWriteProposalPanel";
@@ -11,10 +11,11 @@ import { AssistantRunTrace } from "./AssistantRunTrace";
 import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain";
 import { PlanTaskBoard } from "./PlanTaskBoard";
 import { PlanClarificationCard } from "./PlanClarificationCard";
-import { acceptCanvasWriteSuggestion, answerPlan, dismissCanvasWriteSuggestion, fetchSkillCatalog, pausePlan } from "../../agents/agentClient";
+import { acceptCanvasWriteSuggestion, answerPlan, dismissCanvasWriteSuggestion, pausePlan } from "../../agents/agentClient";
 import { visibleComposerTools } from "../planUiPolicy";
 import { buildPlanTimeline } from "../planTimeline";
 import type { ConfiguredModelApiSummary } from "../../settings/types";
+import { SkillFolderPicker } from "./SkillFolderPicker";
 
 type ToolKey = NonNullable<GenerateRequest["toolState"]> extends Partial<Record<infer Key, boolean>> ? Key : never;
 
@@ -53,6 +54,11 @@ type AICollaborationDrawerProps = {
   currentThreadId: string;
   sessionBusy: boolean;
   sessionError: string;
+  disabledSkillRefs: string[];
+  enabledSkillRefs: string[];
+  skillCatalog: SkillCatalogItem[];
+  skillFolders: SkillFolderItem[];
+  skillCatalogStatus: "idle" | "loading" | "ready" | "error";
   isSending: boolean;
   modelSelectionDisabled: boolean;
   configuredModels: ConfiguredModelApiSummary[];
@@ -72,6 +78,13 @@ type AICollaborationDrawerProps = {
   onSelectAgent: (agentCardId: string) => void;
   onSelectModel: (configuredModelApiId: string) => Promise<void>;
   onSelectThread: (threadId: string) => Promise<void>;
+  onRequestSkillCatalog: () => void;
+  onCreateSkillFolder: (folderId: string) => Promise<void>;
+  onDeleteSkillFolder: (folderId: string) => Promise<void>;
+  onMoveSkillToFolder: (skill: SkillCatalogItem, folderId: string) => Promise<void>;
+  onRenameSkillFolder: (folderId: string, nextFolderId: string) => Promise<void>;
+  onSkillOverridesConsumed: () => void;
+  onToggleSkill: (skill: SkillCatalogItem, enabled: boolean) => void;
   onToggleCollapsed: () => void;
   onToolStateChange: (toolState: GenerateRequest["toolState"]) => void;
   onPlansChanged: () => Promise<void>;
@@ -103,6 +116,11 @@ export function AICollaborationDrawer({
   currentThreadId,
   sessionBusy,
   sessionError,
+  disabledSkillRefs,
+  enabledSkillRefs,
+  skillCatalog,
+  skillFolders,
+  skillCatalogStatus,
   isSending,
   modelSelectionDisabled,
   configuredModels,
@@ -122,6 +140,9 @@ export function AICollaborationDrawer({
   onSelectAgent,
   onSelectModel,
   onSelectThread,
+  onRequestSkillCatalog,
+  onSkillOverridesConsumed,
+  onToggleSkill,
   onToggleCollapsed,
   onToolStateChange,
   onPlansChanged,
@@ -142,9 +163,6 @@ export function AICollaborationDrawer({
   const [composerHeight, setComposerHeight] = useState(72);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
-  const [skillCatalog, setSkillCatalog] = useState<SkillCatalogItem[]>([]);
-  const [skillCatalogStatus, setSkillCatalogStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [selectedSkillRefs, setSelectedSkillRefs] = useState<string[]>([]);
   const [contextResetNotice, setContextResetNotice] = useState(false);
   const [clarificationBusy, setClarificationBusy] = useState(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -179,24 +197,8 @@ export function AICollaborationDrawer({
   useEffect(() => setContextResetNotice(false), [currentThreadId]);
 
   useEffect(() => {
-    if (!skillPickerOpen || skillCatalogStatus !== "idle") return;
-    let active = true;
-    setSkillCatalogStatus("loading");
-    fetchSkillCatalog()
-      .then((skills) => {
-        if (!active) return;
-        setSkillCatalog(skills);
-        setSkillCatalogStatus("ready");
-      })
-      .catch(() => {
-        if (!active) return;
-        setSkillCatalog([]);
-        setSkillCatalogStatus("error");
-      });
-    return () => {
-      active = false;
-    };
-  }, [skillCatalogStatus, skillPickerOpen]);
+    if (skillPickerOpen) onRequestSkillCatalog();
+  }, [onRequestSkillCatalog, skillPickerOpen]);
 
   const resetWriteDraft = () => {
     setAnnotations([]);
@@ -271,10 +273,11 @@ export function AICollaborationDrawer({
         ...(mindChainContext ? { canvasMindChain: mindChainContext.text } : {}),
         ...(awaitingPlan ? { awaitingPlan: { id: awaitingPlan.id, answer: text } } : {}),
         ...(revisePlan ? { awaitingPlan: { id: revisePlan.id, revise: true } } : {}),
-        ...(selectedSkillRefs.length ? { transientSkillRefs: selectedSkillRefs } : {})
+        ...(enabledSkillRefs.length ? { transientSkillRefs: enabledSkillRefs } : {}),
+        ...(disabledSkillRefs.length ? { disabledSkillRefs } : {})
       });
       if (sendResult) {
-        setSelectedSkillRefs([]);
+        onSkillOverridesConsumed();
         setSkillPickerOpen(false);
       }
       if (mindChainContext) onMindChainContextConsumed();
@@ -563,14 +566,26 @@ export function AICollaborationDrawer({
           ) : null}
         </div>
         <AnnotationChipRow annotations={annotations} compact onRemoveAnnotation={removeAnnotation} />
-        {selectedSkillRefs.length ? (
+        {enabledSkillRefs.length || disabledSkillRefs.length ? (
           <div className="composer-skill-chips" aria-label={skillText(locale, "selectedSkills")}>
-            {selectedSkillRefs.map((skillRef) => (
-              <span className="composer-skill-chip" key={skillRef}>
+            {enabledSkillRefs.map((skillRef) => (
+              <span className="composer-skill-chip" key={`enabled:${skillRef}`}>
                 {skillRef}
                 <button
                   aria-label={skillText(locale, "removeSkill", skillRef)}
-                  onClick={() => setSelectedSkillRefs((refs) => refs.filter((item) => item !== skillRef))}
+                  onClick={() => onToggleSkill(findSkill(skillCatalog, skillRef), false)}
+                  type="button"
+                >
+                  x
+                </button>
+              </span>
+            ))}
+            {disabledSkillRefs.map((skillRef) => (
+              <span className="composer-skill-chip is-disabled" key={`disabled:${skillRef}`}>
+                {skillText(locale, "disabledSkill", skillRef)}
+                <button
+                  aria-label={skillText(locale, "restoreSkill", skillRef)}
+                  onClick={() => onToggleSkill(findSkill(skillCatalog, skillRef), true)}
                   type="button"
                 >
                   x
@@ -628,7 +643,7 @@ export function AICollaborationDrawer({
             <button
               aria-expanded={skillPickerOpen}
               aria-label={skillText(locale, "skills")}
-              className={selectedSkillRefs.length ? "tool-icon-button is-active" : "tool-icon-button"}
+              className={enabledSkillRefs.length || disabledSkillRefs.length ? "tool-icon-button is-active" : "tool-icon-button"}
               onClick={() => setSkillPickerOpen((value) => !value)}
               title={skillText(locale, "skills")}
               type="button"
@@ -636,16 +651,19 @@ export function AICollaborationDrawer({
               <AddIcon aria-hidden="true" size={15} />
             </button>
             {skillPickerOpen ? (
-              <SkillPickerMenu
-                locale={locale}
-                selectedSkillRefs={selectedSkillRefs}
-                skills={skillCatalog}
-                status={skillCatalogStatus}
-                onToggle={(skillId, checked) => setSelectedSkillRefs((refs) => {
-                  const next = checked ? [...refs, skillId] : refs.filter((item) => item !== skillId);
-                  return Array.from(new Set(next));
-                })}
-              />
+              <div className="composer-skill-menu" role="menu">
+                <strong>{skillText(locale, "skills")}</strong>
+                <SkillFolderPicker
+                  activeSkillRefs={activeAgent.skillRefs}
+                  disabledSkillRefs={disabledSkillRefs}
+                  enabledSkillRefs={enabledSkillRefs}
+                  folders={skillFolders}
+                  locale={locale}
+                  skills={skillCatalog}
+                  status={skillCatalogStatus}
+                  onToggleSkill={onToggleSkill}
+                />
+              </div>
             ) : null}
           </div>
           <select
@@ -741,44 +759,6 @@ function ThinkingModeButton({
   );
 }
 
-function SkillPickerMenu({
-  locale,
-  selectedSkillRefs,
-  skills,
-  status,
-  onToggle
-}: {
-  locale: "en" | "zh";
-  selectedSkillRefs: string[];
-  skills: SkillCatalogItem[];
-  status: "idle" | "loading" | "ready" | "error";
-  onToggle: (skillId: string, checked: boolean) => void;
-}) {
-  const selected = new Set(selectedSkillRefs);
-  return (
-    <div className="composer-skill-menu" role="menu">
-      <strong>{skillText(locale, "skills")}</strong>
-      {status === "loading" || status === "idle" ? <p>{skillText(locale, "loadingSkills")}</p> : null}
-      {status === "error" ? <p>{skillText(locale, "skillLoadFailed")}</p> : null}
-      {status === "ready" && skills.length === 0 ? <p>{skillText(locale, "noSkills")}</p> : null}
-      {skills.map((skill) => (
-        <label className="composer-skill-row" key={skill.id}>
-          <span>
-            <strong>{skill.name}</strong>
-            <em>{skill.description}</em>
-            {skill.allowedTools.length ? <small>{skill.allowedTools.join(", ")}</small> : null}
-          </span>
-          <input
-            checked={selected.has(skill.id)}
-            onChange={(event) => onToggle(skill.id, event.target.checked)}
-            type="checkbox"
-          />
-        </label>
-      ))}
-    </div>
-  );
-}
-
 function ReasoningStreamPanel({ message }: { message: CollaborationMessage }) {
   const { t } = useI18n();
   const text = message.reasoningText?.trim();
@@ -859,8 +839,26 @@ function modelGroups(locale: "en" | "zh") {
   ] as const;
 }
 
-function skillText(locale: "en" | "zh", key: "skills" | "loadingSkills" | "skillLoadFailed" | "noSkills" | "selectedSkills" | "removeSkill", value?: string) {
+function findSkill(skills: SkillCatalogItem[], skillRef: string): SkillCatalogItem {
+  return skills.find((skill) => skill.id === skillRef || skill.name === skillRef || skill.relativePath === skillRef) ?? {
+    id: skillRef,
+    name: skillRef,
+    description: "",
+    allowedTools: [],
+    folderId: "default",
+    folderName: "Default skills",
+    folderPath: "default",
+    relativePath: skillRef,
+    source: "project",
+    manageable: true,
+    status: "available"
+  };
+}
+
+function skillText(locale: "en" | "zh", key: "disabledSkill" | "loadingSkills" | "noSkills" | "removeSkill" | "restoreSkill" | "selectedSkills" | "skillLoadFailed" | "skills", value?: string) {
   if (key === "removeSkill") return locale === "zh" ? `\u79fb\u9664\u6280\u80fd ${value ?? ""}` : `Remove skill ${value ?? ""}`;
+  if (key === "restoreSkill") return locale === "zh" ? `\u6062\u590d\u6280\u80fd ${value ?? ""}` : `Restore skill ${value ?? ""}`;
+  if (key === "disabledSkill") return locale === "zh" ? `\u5df2\u7981\u7528 ${value ?? ""}` : `Disabled ${value ?? ""}`;
   const copy = {
     en: {
       skills: "Skills",

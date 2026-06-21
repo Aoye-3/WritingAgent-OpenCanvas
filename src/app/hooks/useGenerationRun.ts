@@ -390,8 +390,9 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     ]);
     try {
       const threadId = await options.ensureThreadId();
-      const transientSkillRefs = readTransientSkillRefs(requestContext?.transientSkillRefs);
-      const requestContextValues = omitTransientSkillRefs(requestContext);
+      const transientSkillRefs = readSkillRefs(requestContext?.transientSkillRefs);
+      const disabledSkillRefs = readSkillRefs(requestContext?.disabledSkillRefs);
+      const requestContextValues = omitSkillOverrideRefs(requestContext);
       const payload: GenerateRequest = {
         mode: "chat",
         agentCardId: options.activeAgent.id,
@@ -414,6 +415,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         }),
         modelOverrides,
         transientSkillRefs,
+        disabledSkillRefs,
         selectedCanvasNodeId: options.selectedCanvasNodeId
       };
       const result = await generateTextStream(payload, {
@@ -526,7 +528,7 @@ function isPlanInstruction(text: string) {
   return /^\s*\/plan\b/i.test(text) || /^\s*continue approved plan\b/i.test(text);
 }
 
-function readTransientSkillRefs(value: unknown) {
+function readSkillRefs(value: unknown) {
   if (!Array.isArray(value)) return undefined;
   const refs = value
     .filter((item): item is string => typeof item === "string")
@@ -535,9 +537,9 @@ function readTransientSkillRefs(value: unknown) {
   return refs.length ? Array.from(new Set(refs)) : undefined;
 }
 
-function omitTransientSkillRefs(requestContext?: Record<string, unknown>) {
+function omitSkillOverrideRefs(requestContext?: Record<string, unknown>) {
   if (!requestContext) return undefined;
-  const { transientSkillRefs: _transientSkillRefs, ...rest } = requestContext;
+  const { transientSkillRefs: _transientSkillRefs, disabledSkillRefs: _disabledSkillRefs, ...rest } = requestContext;
   return rest;
 }
 

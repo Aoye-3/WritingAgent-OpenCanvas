@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
 import { Topbar } from "../../shared/Topbar";
-import type { AgentCard, BriefSaveStatus, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, ProjectBrief, StoredOutputVersion, StoredThread, TaskBrief } from "../agents/types";
+import type { AgentCard, BriefSaveStatus, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, ProjectBrief, SkillCatalogItem, SkillFolderItem, StoredOutputVersion, StoredThread, TaskBrief } from "../agents/types";
 import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasNodePositionUpdate, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../generation/types";
 import { useI18n } from "../i18n/I18nProvider";
@@ -15,6 +15,8 @@ import type { CanvasTool } from "./components/canvas/toolState";
 import type { CanvasClipboardPayload } from "../../../shared/canvasClipboard";
 import type { CanvasMindChainContext } from "../../../shared/canvasMindChain";
 import type { AgentBackendRuntimeStatus, ConfiguredModelApiSummary } from "../settings/types";
+import { createSkillFolder, deleteSkillFolder, fetchSkillCatalogState, moveSkillToFolder, renameSkillFolder } from "../agents/agentClient";
+import { isSkillRefSelected } from "./components/SkillFolderPicker";
 
 const RIGHT_DRAWER_MIN_WIDTH = 360;
 const RIGHT_DRAWER_MAX_WIDTH = 720;
@@ -176,6 +178,11 @@ export function WorkspaceView({
   const [composerDraft, setComposerDraft] = useState("");
   const [mindChainContext, setMindChainContext] = useState<CanvasMindChainContext | null>(null);
   const [activeCanvasTool, setActiveCanvasTool] = useState<CanvasTool>("select");
+  const [skillCatalog, setSkillCatalog] = useState<SkillCatalogItem[]>([]);
+  const [skillFolders, setSkillFolders] = useState<SkillFolderItem[]>([]);
+  const [skillCatalogStatus, setSkillCatalogStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [enabledSkillRefs, setEnabledSkillRefs] = useState<string[]>([]);
+  const [disabledSkillRefs, setDisabledSkillRefs] = useState<string[]>([]);
   const focusedPlanProjectionRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
@@ -206,6 +213,66 @@ export function WorkspaceView({
   const workspaceChromeStyle = {
     "--ai-drawer-width": `${rightDrawerWidth}px`
   } as CSSProperties;
+
+  const requestSkillCatalog = useCallback(() => {
+    if (skillCatalogStatus === "loading" || skillCatalogStatus === "ready") return;
+    setSkillCatalogStatus("loading");
+    fetchSkillCatalogState()
+      .then((catalog) => {
+        setSkillCatalog(catalog.skills);
+        setSkillFolders(catalog.folders);
+        setSkillCatalogStatus("ready");
+      })
+      .catch(() => {
+        setSkillCatalog([]);
+        setSkillFolders([]);
+        setSkillCatalogStatus("error");
+      });
+  }, [skillCatalogStatus]);
+
+  const applySkillCatalogState = useCallback((catalog: { skills: SkillCatalogItem[]; folders: SkillFolderItem[] }) => {
+    setSkillCatalog(catalog.skills);
+    setSkillFolders(catalog.folders);
+    setSkillCatalogStatus("ready");
+  }, []);
+
+  const handleCreateSkillFolder = useCallback(async (folderId: string) => {
+    applySkillCatalogState(await createSkillFolder(folderId));
+  }, [applySkillCatalogState]);
+
+  const handleRenameSkillFolder = useCallback(async (folderId: string, nextFolderId: string) => {
+    applySkillCatalogState(await renameSkillFolder(folderId, nextFolderId));
+  }, [applySkillCatalogState]);
+
+  const handleDeleteSkillFolder = useCallback(async (folderId: string) => {
+    applySkillCatalogState(await deleteSkillFolder(folderId));
+  }, [applySkillCatalogState]);
+
+  const handleMoveSkillToFolder = useCallback(async (skill: SkillCatalogItem, folderId: string) => {
+    applySkillCatalogState(await moveSkillToFolder(skill.name, folderId));
+  }, [applySkillCatalogState]);
+
+  const clearSkillOverrides = useCallback(() => {
+    setEnabledSkillRefs([]);
+    setDisabledSkillRefs([]);
+  }, []);
+
+  useEffect(() => {
+    clearSkillOverrides();
+  }, [activeAgent.id, clearSkillOverrides, currentThreadId]);
+
+  const toggleMessageSkill = useCallback((skill: SkillCatalogItem, enabled: boolean) => {
+    const skillRef = skill.id;
+    const defaultSkill = isSkillRefSelected(skill, activeAgent.skillRefs);
+    if (defaultSkill) {
+      setDisabledSkillRefs((current) => enabled ? removeRef(current, skillRef) : addRef(current, skillRef));
+      setEnabledSkillRefs((current) => removeRef(current, skillRef));
+    } else {
+      setEnabledSkillRefs((current) => enabled ? addRef(current, skillRef) : removeRef(current, skillRef));
+      setDisabledSkillRefs((current) => removeRef(current, skillRef));
+    }
+    setRightCollapsed(false);
+  }, [activeAgent.skillRefs]);
 
   const startRightDrawerResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -341,6 +408,11 @@ export function WorkspaceView({
           currentThreadId={currentThreadId}
           sessionBusy={sessionBusy}
           sessionError={sessionError}
+          disabledSkillRefs={disabledSkillRefs}
+          enabledSkillRefs={enabledSkillRefs}
+          skillCatalog={skillCatalog}
+          skillFolders={skillFolders}
+          skillCatalogStatus={skillCatalogStatus}
           configuredModels={configuredModels}
           selectedModelConfigId={selectedModelConfigId}
           modelSettings={{
@@ -357,6 +429,13 @@ export function WorkspaceView({
           onSelectAgent={onSelectAgent}
           onSelectModel={onSelectModel}
           onSelectThread={onSelectThread}
+          onRequestSkillCatalog={requestSkillCatalog}
+          onCreateSkillFolder={handleCreateSkillFolder}
+          onDeleteSkillFolder={handleDeleteSkillFolder}
+          onMoveSkillToFolder={handleMoveSkillToFolder}
+          onRenameSkillFolder={handleRenameSkillFolder}
+          onSkillOverridesConsumed={clearSkillOverrides}
+          onToggleSkill={toggleMessageSkill}
           onInputDraftConsumed={() => setComposerDraft("")}
           onMindChainContextConsumed={() => setMindChainContext(null)}
           onRemoveMindChainContext={() => setMindChainContext(null)}
@@ -369,7 +448,32 @@ export function WorkspaceView({
         />
       </WorkspaceLayout>
 
-      <WorkspaceUtilityBar activeTool={activeCanvasTool} onToolChange={setActiveCanvasTool} promptPreview={generation?.prompt ?? promptPreview} />
+      <WorkspaceUtilityBar
+        activeSkillRefs={activeAgent.skillRefs}
+        activeTool={activeCanvasTool}
+        disabledSkillRefs={disabledSkillRefs}
+        enabledSkillRefs={enabledSkillRefs}
+        locale={locale}
+        promptPreview={generation?.prompt ?? promptPreview}
+        skillCatalog={skillCatalog}
+        skillFolders={skillFolders}
+        skillCatalogStatus={skillCatalogStatus}
+        onCreateSkillFolder={handleCreateSkillFolder}
+        onDeleteSkillFolder={handleDeleteSkillFolder}
+        onMoveSkillToFolder={handleMoveSkillToFolder}
+        onRequestSkillCatalog={requestSkillCatalog}
+        onRenameSkillFolder={handleRenameSkillFolder}
+        onToggleSkill={toggleMessageSkill}
+        onToolChange={setActiveCanvasTool}
+      />
     </section>
   );
+}
+
+function addRef(refs: string[], ref: string) {
+  return refs.includes(ref) ? refs : [...refs, ref];
+}
+
+function removeRef(refs: string[], ref: string) {
+  return refs.filter((item) => item !== ref);
 }

@@ -17,6 +17,7 @@ export type GenerateRequest = {
     reasoningEffort?: "high" | "max" | "low" | "medium" | "xhigh";
   };
   transientSkillRefs?: string[];
+  disabledSkillRefs?: string[];
   selectedCanvasNodeId?: string;
   planPhase?: "intake" | "revise" | "execution";
   planId?: string;
