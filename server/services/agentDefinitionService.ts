@@ -20,6 +20,12 @@ export type SkillCatalogItem = {
   name: string;
   description: string;
   allowedTools: string[];
+  folderId: string;
+  folderName: string;
+  folderPath: string;
+  relativePath: string;
+  source: "project" | "agent-runtime";
+  manageable: boolean;
   status: "available";
 };
 
@@ -46,6 +52,12 @@ export async function getSkillCatalog(): Promise<SkillCatalogItem[]> {
     name: skill.name,
     description: skill.description,
     allowedTools: skill.allowedTools,
+    folderId: skill.folderId,
+    folderName: skill.folderName,
+    folderPath: skill.folderPath,
+    relativePath: skill.relativePath,
+    source: skill.source,
+    manageable: skill.manageable,
     status: "available"
   }));
 }
@@ -72,7 +84,7 @@ export function normalizeAgentSettings(
 
 export async function buildAgentRuntimeConfig(card: AgentCard, settings: AgentSettings): Promise<AgentRuntimeConfig> {
   const availableSkills = await getSkillCatalog();
-  const availableSkillIds = new Set(availableSkills.map((skill) => skill.id));
+  const availableSkillIds = new Set(availableSkills.flatMap((skill) => [skill.id, skill.name, skill.relativePath]));
   const missingToolRefs = card.toolRefs.filter((tool) => !getToolDefinition(tool));
   const availableTools = allowedToolDefinitions(card.toolRefs).map(toPublicToolDefinition);
   const allowedToolNames = new Set(availableTools.map((tool) => tool.name));

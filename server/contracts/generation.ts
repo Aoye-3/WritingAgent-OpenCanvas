@@ -23,6 +23,7 @@ export type GenerateRequest = {
     reasoningEffort?: "high" | "max" | "low" | "medium" | "xhigh";
   };
   transientSkillRefs?: string[];
+  disabledSkillRefs?: string[];
   selectedCanvasNodeId?: string;
   planPhase?: "intake" | "revise" | "execution";
   planId?: string;
@@ -81,6 +82,7 @@ export function parseGenerateRequest(value: unknown): GenerateRequest {
     providerId: readProviderId(body.providerId),
     modelOverrides: readModelOverrides(body.modelOverrides),
     transientSkillRefs: readStringList(body.transientSkillRefs),
+    disabledSkillRefs: readStringList(body.disabledSkillRefs),
     selectedCanvasNodeId: readString(body.selectedCanvasNodeId)
     ,planPhase: body.planPhase === "intake" || body.planPhase === "revise" || body.planPhase === "execution" ? body.planPhase : undefined
     ,planId: readString(body.planId)

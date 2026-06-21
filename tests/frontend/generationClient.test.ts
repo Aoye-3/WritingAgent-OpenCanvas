@@ -60,3 +60,31 @@ test("streaming generation client sends transient skill refs in the request payl
     globalThis.fetch = previousFetch;
   }
 });
+
+test("streaming generation client sends disabled skill refs in the request payload", async () => {
+  let observedBody = "";
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => {
+    observedBody = String(init?.body ?? "");
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(
+          'event: final\ndata: {"text":"Done","prompt":"","provider":"agent-backend","usedMock":false,"threadId":"thread_1"}\n\n'
+        ));
+        controller.close();
+      }
+    }), { status: 200 });
+  };
+  try {
+    await generateTextStream({
+      mode: "chat",
+      locale: "en",
+      chatInstruction: "Hi",
+      disabledSkillRefs: ["summary"]
+    });
+
+    assert.deepEqual(JSON.parse(observedBody).disabledSkillRefs, ["summary"]);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});

@@ -2,12 +2,36 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-test("composer skill picker uses the public skill catalog and transient request context", () => {
+test("workspace skill picker uses folder catalog and per-message overrides", () => {
+  const workspace = readFileSync("src/features/workspace/WorkspaceView.tsx", "utf8");
   const source = readFileSync("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
+  const toolbar = readFileSync("src/features/workspace/components/WorkspaceUtilityBar.tsx", "utf8");
+  const picker = readFileSync("src/features/workspace/components/SkillFolderPicker.tsx", "utf8");
+  const generationRun = readFileSync("src/app/hooks/useGenerationRun.ts", "utf8");
+  const client = readFileSync("src/features/agents/agentClient.ts", "utf8");
 
-  assert.match(source, /fetchSkillCatalog/);
-  assert.match(source, /selectedSkillRefs/);
+  assert.match(workspace, /fetchSkillCatalog/);
+  assert.match(workspace, /enabledSkillRefs/);
+  assert.match(workspace, /disabledSkillRefs/);
+  assert.match(workspace, /clearSkillOverrides/);
+  assert.match(toolbar, /toolbar-skill-picker/);
+  assert.match(toolbar, /SkillFolderPicker/);
+  assert.match(toolbar, /onCreateSkillFolder/);
+  assert.match(source, /SkillFolderPicker/);
   assert.match(source, /transientSkillRefs/);
-  assert.match(source, /setSelectedSkillRefs\(\[\]\)/);
-  assert.match(source, /SkillPickerMenu/);
+  assert.match(source, /disabledSkillRefs/);
+  assert.match(generationRun, /disabledSkillRefs = readSkillRefs/);
+  assert.match(generationRun, /disabledSkillRefs,/);
+  assert.match(generationRun, /omitSkillOverrideRefs/);
+  assert.match(client, /createSkillFolder/);
+  assert.match(client, /renameSkillFolder/);
+  assert.match(client, /deleteSkillFolder/);
+  assert.match(client, /moveSkillToFolder/);
+  assert.match(picker, /skill-folder-manager/);
+  assert.match(picker, /skill-manager-folders/);
+  assert.match(picker, /skill-manager-list/);
+  assert.match(picker, /skill-manager-detail/);
+  assert.match(picker, /readOnlyReason/);
+  assert.match(picker, /folderId === "default"/);
+  assert.match(picker, /folderName/);
 });

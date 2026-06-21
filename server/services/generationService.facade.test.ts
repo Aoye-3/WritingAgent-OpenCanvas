@@ -807,6 +807,44 @@ test("streaming generation applies transient skills without saving them to Agent
   assert.deepEqual(skillEvent?.payload, { source: "composer", skillRefs: ["summary"] });
 });
 
+test("streaming generation can disable Agent default skills for one request", async () => {
+  const { storage } = fakeStorage();
+  const config = runtimeConfig();
+  config.agentCard = { ...config.agentCard, skillRefs: ["summary"] };
+  config.settings = {
+    ...config.settings,
+    prompt: {
+      ...config.settings.prompt,
+      skillRefs: ["summary"]
+    }
+  };
+  let observedPrompt = "";
+  const service = createGenerationService(storage, fakeAgentRuntime(config), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        observedPrompt = input.prompt;
+        return {
+          text: "Default skill disabled response",
+          finishReason: "stop",
+          events: []
+        };
+      }
+    }
+  });
+
+  await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Answer normally",
+    disabledSkillRefs: ["summary"]
+  });
+
+  assert.doesNotMatch(observedPrompt, /## summary/);
+});
+
 test("generation facade skips knowledge search when disabled by settings or tool state", async () => {
   for (const setup of [
     { knowledgeEnabled: false, toolEnabled: true },

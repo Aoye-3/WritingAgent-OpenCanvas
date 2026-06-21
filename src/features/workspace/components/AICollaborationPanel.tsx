@@ -1,5 +1,5 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
-import type { AgentCard, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, StoredThread } from "../../agents/types";
+import type { AgentCard, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
 import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain";
 import { AICollaborationDrawer, type ConversationModelControls } from "./AICollaborationDrawer";
@@ -22,6 +22,11 @@ type AICollaborationPanelProps = {
   currentThreadId: string;
   sessionBusy: boolean;
   sessionError: string;
+  disabledSkillRefs: string[];
+  enabledSkillRefs: string[];
+  skillCatalog: SkillCatalogItem[];
+  skillFolders: SkillFolderItem[];
+  skillCatalogStatus: "idle" | "loading" | "ready" | "error";
   configuredModels: ConfiguredModelApiSummary[];
   selectedModelConfigId?: string | null;
   modelSettings?: ConversationModelControls;
@@ -36,6 +41,13 @@ type AICollaborationPanelProps = {
   onSelectAgent: (agentCardId: string) => void;
   onSelectModel: (configuredModelApiId: string) => Promise<void>;
   onSelectThread: (threadId: string) => Promise<void>;
+  onRequestSkillCatalog: () => void;
+  onCreateSkillFolder: (folderId: string) => Promise<void>;
+  onDeleteSkillFolder: (folderId: string) => Promise<void>;
+  onMoveSkillToFolder: (skill: SkillCatalogItem, folderId: string) => Promise<void>;
+  onRenameSkillFolder: (folderId: string, nextFolderId: string) => Promise<void>;
+  onSkillOverridesConsumed: () => void;
+  onToggleSkill: (skill: SkillCatalogItem, enabled: boolean) => void;
   onInputDraftConsumed: () => void;
   onMindChainContextConsumed: () => void;
   onRemoveMindChainContext: () => void;

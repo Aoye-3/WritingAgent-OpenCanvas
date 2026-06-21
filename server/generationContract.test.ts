@@ -21,3 +21,13 @@ test("parseGenerateRequest omits transient skill refs when none are valid", () =
 
   assert.equal(request.transientSkillRefs, undefined);
 });
+
+test("parseGenerateRequest normalizes disabled skill refs", () => {
+  const request = parseGenerateRequest({
+    mode: "chat",
+    locale: "en",
+    disabledSkillRefs: [" summary ", "summary", "", null, "default/summary"]
+  });
+
+  assert.deepEqual(request.disabledSkillRefs, ["summary", "default/summary"]);
+});

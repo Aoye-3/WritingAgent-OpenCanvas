@@ -219,9 +219,13 @@ Plan phases force-load `modules/agent-runtime/skills/public/brainstorming` or `w
 
 ## Per-Message Skill Selection
 
-Agent settings remain the durable profile-level Skill source. The right collaboration composer can also attach public Skills to one message through `transientSkillRefs`. Runtime prompt construction merges Agent default Skills, composer-selected transient Skills, and any server-forced Plan Skill for the current run only.
+Agent settings remain the durable profile-level Skill source. The right collaboration composer and bottom Canvas toolbar can also override public Skills for one message through `transientSkillRefs` and `disabledSkillRefs`. Runtime prompt construction merges Agent default Skills, composer-selected transient Skills, removes user-disabled defaults for this run, and then adds any server-forced Plan Skill. Plan-forced Skills cannot be disabled by the UI.
 
-Transient Skills are intentionally not saved back to Agent settings, Project state, or Thread defaults. The frontend may show selected Skill chips near the composer, but it sends only Skill ids. Skill content is loaded server-side from the public Skill roots and remains private runtime context.
+Public Skills are discovered recursively from `skills/public/**/SKILL.md` and `modules/agent-runtime/skills/public/**/SKILL.md`. Project default Skills live under `skills/public/default/<skill>/SKILL.md`; the API reports that folder as `default` and the UI labels it "Default skills" / "默认技能". Legacy one-level project Skills are temporarily categorized as `default`. New folders such as `skills/public/research/...` become new UI groups without frontend category code.
+
+The bottom Canvas Skills panel is also the project Skill folder management surface. It can create, rename, and delete empty project folders, move project Skills between folders, and show Skill details. These operations are limited to `skills/public` and use safe resolved-path checks; `default` is locked, and Agent Runtime Skills from `modules/agent-runtime/skills/public` are read-only. The right composer keeps the compact per-message selector and does not expose folder management controls.
+
+Transient enable/disable choices are intentionally not saved back to Agent settings, Project state, or Thread defaults. The frontend may show enabled and disabled Skill chips near the composer, but it sends only Skill refs. Skill content is loaded server-side from the public Skill roots and remains private runtime context.
 
 When transient Skills are successfully loaded for a streaming run, the backend emits one safe Run Trace `decision` timeline event naming the Skill ids. The event payload is limited to `{ source:"composer", skillRefs:[...] }`; it must not include Skill file bodies, prompts, user messages, tool arguments, or internal context.
 

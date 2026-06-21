@@ -66,7 +66,12 @@ export async function buildGenerationRunContext(
     ? (payload.contextValues?.awaitingPlan ? "writing-plans" : "brainstorming")
     : undefined;
   const transientSkillRefs = payload.transientSkillRefs ?? [];
-  const skills = await loadSkillsByRefs([...agentCard.skillRefs, ...transientSkillRefs, ...(planSkillRef ? [planSkillRef] : [])]);
+  const disabledSkillRefs = new Set(payload.disabledSkillRefs ?? []);
+  const loadedSkills = await loadSkillsByRefs([...agentCard.skillRefs, ...transientSkillRefs, ...(planSkillRef ? [planSkillRef] : [])]);
+  const skills = loadedSkills.filter((skill) => {
+    if (planSkillRef && (skill.name === planSkillRef || skill.relativePath === planSkillRef)) return true;
+    return !disabledSkillRefs.has(skill.name) && !disabledSkillRefs.has(skill.relativePath);
+  });
   const requestedTransientSkills = new Set(transientSkillRefs);
   const transientSkillNames = skills
     .filter((skill) => requestedTransientSkills.has(skill.name) || requestedTransientSkills.has(skill.relativePath))

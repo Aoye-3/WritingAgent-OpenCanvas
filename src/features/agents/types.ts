@@ -99,7 +99,22 @@ export type SkillCatalogItem = {
   name: string;
   description: string;
   allowedTools: string[];
+  folderId: string;
+  folderName: string;
+  folderPath: string;
+  relativePath: string;
+  source: "project" | "agent-runtime";
+  manageable: boolean;
   status: "available";
+};
+
+export type SkillFolderItem = {
+  folderId: string;
+  folderName: string;
+  folderPath: string;
+  source: "project" | "agent-runtime";
+  manageable: boolean;
+  skillCount: number;
 };
 
 export type ToolPolicy = {

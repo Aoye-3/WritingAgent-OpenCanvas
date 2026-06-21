@@ -5,6 +5,7 @@ import type {
   ProjectBrief,
   ProjectSummary,
   SkillCatalogItem,
+  SkillFolderItem,
   StoredThread,
   ThreadCreateResponse,
   ThreadStateResponse,
@@ -128,8 +129,30 @@ export async function fetchToolCatalog(): Promise<ToolCatalogItem[]> {
 }
 
 export async function fetchSkillCatalog(): Promise<SkillCatalogItem[]> {
-  const payload = await apiGet<{ skills: SkillCatalogItem[] }>("/api/skills/catalog");
+  const payload = await apiGet<{ skills: SkillCatalogItem[]; folders?: SkillFolderItem[] }>("/api/skills/catalog");
   return payload.skills;
+}
+
+export async function fetchSkillCatalogState(): Promise<{ skills: SkillCatalogItem[]; folders: SkillFolderItem[] }> {
+  const payload = await apiGet<{ skills: SkillCatalogItem[]; folders?: SkillFolderItem[] }>("/api/skills/catalog");
+  return { skills: payload.skills, folders: payload.folders ?? [] };
+}
+
+export async function createSkillFolder(folderId: string): Promise<{ skills: SkillCatalogItem[]; folders: SkillFolderItem[] }> {
+  const payload = await apiPost<{ skills: SkillCatalogItem[]; folders: SkillFolderItem[] }>("/api/skills/folders", { folderId });
+  return payload;
+}
+
+export async function renameSkillFolder(currentFolderId: string, folderId: string): Promise<{ skills: SkillCatalogItem[]; folders: SkillFolderItem[] }> {
+  return apiPatch<{ skills: SkillCatalogItem[]; folders: SkillFolderItem[] }>(`/api/skills/folders/${encodeURIComponent(currentFolderId)}`, { folderId });
+}
+
+export async function deleteSkillFolder(folderId: string): Promise<{ skills: SkillCatalogItem[]; folders: SkillFolderItem[] }> {
+  return apiDelete<{ skills: SkillCatalogItem[]; folders: SkillFolderItem[] }>(`/api/skills/folders/${encodeURIComponent(folderId)}`);
+}
+
+export async function moveSkillToFolder(skillRef: string, folderId: string): Promise<{ skills: SkillCatalogItem[]; folders: SkillFolderItem[] }> {
+  return apiPatch<{ skills: SkillCatalogItem[]; folders: SkillFolderItem[] }>(`/api/skills/${encodeURIComponent(skillRef)}/folder`, { folderId });
 }
 
 export async function saveAgentSettings(agentCardId: string, settings: AgentSettings): Promise<{ settings: AgentSettings; agentCard: AgentCard }> {

@@ -555,6 +555,7 @@ function DocumentCanvasInner({
             closeMenu();
             handleTextSelectionChange(undefined);
             setSelectedObjectIds([]);
+            if (activeTool === "agent") onToolChange("select");
             actionRef.current.onSelectNode(undefined);
           }}
           onPaneContextMenu={openMenu}

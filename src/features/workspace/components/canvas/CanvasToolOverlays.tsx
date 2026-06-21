@@ -40,6 +40,15 @@ export function CanvasToolOverlays(props: {
   onSendToChat: (text: string) => void;
   onToolChange: (tool: CanvasTool) => void;
 }) {
+  useEffect(() => {
+    if (props.activeTool !== "agent") return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") props.onToolChange("select");
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [props.activeTool, props.onToolChange]);
+
   if (props.activeTool === "shape") {
     return <ShapeLibraryPanel locale={props.locale} recentShapeIds={props.recentShapeIds} onClose={() => props.onToolChange("select")} onSelectShape={props.onSelectShape} />;
   }
