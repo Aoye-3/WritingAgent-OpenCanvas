@@ -68,7 +68,21 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `GET /api/tools/catalog`
   - Returns `{ tools }` from the Tool catalog.
 - `GET /api/skills/catalog`
-  - Returns `{ skills }` from local public skill discovery. The catalog is a selection surface only; it does not expose skill file bodies, private prompts, messages, or runtime context.
+  - Returns `{ skills, folders }` from local public Skill discovery. The catalog is a selection and management surface only; it does not expose Skill file bodies, private prompts, messages, or runtime context.
+  - Each Skill includes `id`, `name`, `description`, `allowedTools`, `folderId`, `folderName`, `folderPath`, `relativePath`, `source`, `manageable`, and `status`.
+  - Each folder includes `folderId`, `folderName`, `folderPath`, `source`, `manageable`, and `skillCount`.
+- `POST /api/skills/folders`
+  - Body: `{ folderId: string }`.
+  - Creates a project Skill folder under `skills/public/<folderId>` and returns a refreshed `{ skills, folders }` catalog.
+- `PATCH /api/skills/folders/:folderId`
+  - Body: `{ folderId: string }`.
+  - Renames a manageable project Skill folder by moving the directory and returns a refreshed catalog.
+- `DELETE /api/skills/folders/:folderId`
+  - Deletes an empty manageable project Skill folder and returns a refreshed catalog.
+- `PATCH /api/skills/:skillRef/folder`
+  - Body: `{ folderId: string }`.
+  - Moves a manageable project Skill into another project folder and returns a refreshed catalog.
+  - Folder ids must use lowercase letters, numbers, and dashes. The protected `default` folder cannot be renamed or deleted. Runtime Skills from `modules/agent-runtime/skills/public` are read-only.
 
 ## Knowledge
 - `GET /api/knowledge/bases`
@@ -114,6 +128,7 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - Body is parsed by `parseGenerateRequest`.
   - `contextValues`, when present, represents explicit transient workspace state such as draft or Canvas node data. Project Brief and Current Task Brief are loaded from storage by Thread identity and are not accepted from the generation request.
   - `transientSkillRefs`, when present, is a per-request string array of public Skill ids selected from `/api/skills/catalog`. The backend trims, deduplicates, and ignores invalid entries. These Skills apply only to the current generation request and are not written to Agent settings.
+  - `disabledSkillRefs`, when present, is a per-request string array of Agent/default Skill ids to disable for only this request. Server-forced Plan Skills are added after this exclusion and cannot be disabled by the UI.
   - `modelOverrides`, when present, is a per-run override for runtime-safe model controls such as `thinkingMode` and `reasoningEffort`. It does not mutate saved Agent settings.
   - Model identity is resolved from the Thread's selected `configuredModelApiId`; Agents do not own model selection.
   - Runs generation, records the result, and returns generation metadata and output.

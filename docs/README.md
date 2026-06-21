@@ -8,6 +8,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 - `ARCHITECTURE.md`: frontend, backend, internal Agent Runtime module, storage, and boundary rules.
 - `CANVAS.md`: Canvas V2 frontend architecture, React Flow mapping, node geometry, resize behavior, and write-safety boundary.
 - `AGENT.md`: AgentCard, Agent settings, Agent Runtime mapping, Tool catalog, and ToolUse safety.
+- `SKILL_MANAGEMENT.md`: Skill catalog shape, folder management API, per-message enable/disable behavior, and safety rules.
 - `API.md`: HTTP API contracts, runtime environment variables, and response shape.
 - `AGENT_RUNTIME_RUNBOOK.md`: Docker Desktop/local and Linux Docker Compose runtime acceptance, dependencies, ports, env, smoke checks, and troubleshooting.
 - `APP_SHELL_RUNBOOK.md`: Windows Electron development shell startup, ports, ownership, shutdown, HMR, and troubleshooting.
@@ -24,6 +25,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 - API changes update `API.md`.
 - Database or storage changes update `DATABASE.md`.
 - Agent, ToolUse, Skill, MCP, or Agent Runtime changes update `AGENT.md`.
+- Skill folder management, Skill catalog, or per-message Skill selection changes update `SKILL_MANAGEMENT.md`.
 - Security, auth, secret, approval, or side-effect changes update `SECURITY.md`.
 - Important design tradeoffs update `DECISIONS.md`.
 - Application-shell lifecycle changes update `APP_SHELL_RUNBOOK.md`.
