@@ -1,0 +1,16 @@
+{
+  "capabilityGroup": "science-db",
+  "upstream": {
+    "repo": "K-Dense-AI/scientific-agent-skills",
+    "path": "skills/paper-lookup",
+    "commit": "209390194c85b3466259853417eeac81ea4f0976",
+    "url": "https://github.com/K-Dense-AI/scientific-agent-skills/tree/209390194c85b3466259853417eeac81ea4f0976/skills/paper-lookup"
+  },
+  "license": "MIT",
+  "requiresEnv": [],
+  "runtimeTools": [],
+  "originalAllowedTools": [],
+  "executionMode": "sandbox",
+  "riskLevel": "medium",
+  "importedAt": "2026-06-21T17:55:36.074Z"
+}

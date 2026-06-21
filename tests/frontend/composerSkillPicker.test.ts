@@ -34,4 +34,9 @@ test("workspace skill picker uses folder catalog and per-message overrides", () 
   assert.match(picker, /readOnlyReason/);
   assert.match(picker, /folderId === "default"/);
   assert.match(picker, /folderName/);
+  assert.match(picker, /arrayValues\(skill\.allowedTools\)/);
+  assert.match(picker, /arrayValues\(selectedSkill\.runtimeTools\)/);
+  assert.match(picker, /arrayValues\(selectedSkill\.requiresEnv\)/);
+  assert.doesNotMatch(picker, /selectedSkill\.runtimeTools\.length/);
+  assert.doesNotMatch(picker, /selectedSkill\.requiresEnv\.length/);
 });

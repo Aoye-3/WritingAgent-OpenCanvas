@@ -43,6 +43,19 @@ type SkillCatalogItem = {
   name: string;
   description: string;
   allowedTools: string[];
+  capabilityGroup?: string;
+  upstream?: {
+    repo: string;
+    path: string;
+    commit?: string;
+    url?: string;
+  };
+  license?: string;
+  requiresEnv: string[];
+  runtimeTools: string[];
+  originalAllowedTools: string[];
+  executionMode: "instruction" | "sandbox";
+  riskLevel: "low" | "medium" | "high";
   folderId: string;
   folderName: string;
   folderPath: string;
@@ -63,6 +76,8 @@ type SkillFolderItem = {
 ```
 
 `id` currently equals the Skill `name`. Consumers should accept `id`, `name`, or `relativePath` when matching user selections because persisted Agent settings may contain older refs.
+
+Imported third-party Skills may include `facetwrite.skill.json` next to `SKILL.md`. The loader reads this sidecar for security and provenance metadata while still keeping the Skill body private. `allowedTools` remains the FacetWrite bridge-tool hint set. Upstream tool names such as `Read`, `Write`, `Edit`, `Bash`, or `WebFetch` must be recorded separately as `originalAllowedTools` and mapped to `runtimeTools` for Agent Runtime sandbox execution; they are not FacetWrite ToolRefs.
 
 ## Management API
 
@@ -140,6 +155,17 @@ Skill file bodies are private runtime context. Catalog and management responses 
 Runtime Skills are read-only in this UI. If users later need to customize a Runtime Skill, add an explicit "copy to project Skills" flow rather than writing into `modules/agent-runtime`.
 
 Because Skill instructions can change model behavior, folder management should stay limited to classification and directory movement. Editing Skill content should require its own validation, preview, and test path.
+
+## Scientific Agent Skills Import
+
+The first Scientific Agent Skills import is intentionally universal and project-local:
+
+- Import source: `K-Dense-AI/scientific-agent-skills`, recorded in `skills/public/scientific-agent-skills.import.json`.
+- Imported folders: `science-db`, `analysis-viz`, `writing-review`, `diagram-assets`, and `document-ingestion`.
+- Execution policy: imported executable instructions are marked `executionMode:"sandbox"` and may run only through Agent Runtime sandbox tools listed in `runtimeTools`.
+- Scope boundary: standalone biology, chemistry, medicine, materials, and other concrete domain package Skills are not part of the first round. `database-lookup` is the exception: it is imported with its complete upstream `references/` directory so one database lookup skill can route to the documented public endpoints while remaining under the sandbox execution policy.
+
+Use `scripts/import-scientific-agent-skills.mjs` to refresh this curated subset. The script writes only under `skills/public` and normalizes upstream `SKILL.md` frontmatter into the project Skill format.
 
 ## Verification
 

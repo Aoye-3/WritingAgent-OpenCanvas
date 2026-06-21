@@ -20,6 +20,19 @@ export type SkillCatalogItem = {
   name: string;
   description: string;
   allowedTools: string[];
+  capabilityGroup?: string;
+  upstream?: {
+    repo: string;
+    path: string;
+    commit?: string;
+    url?: string;
+  };
+  license?: string;
+  requiresEnv: string[];
+  runtimeTools: string[];
+  originalAllowedTools: string[];
+  executionMode: "instruction" | "sandbox";
+  riskLevel: "low" | "medium" | "high";
   folderId: string;
   folderName: string;
   folderPath: string;
@@ -52,6 +65,14 @@ export async function getSkillCatalog(): Promise<SkillCatalogItem[]> {
     name: skill.name,
     description: skill.description,
     allowedTools: skill.allowedTools,
+    capabilityGroup: skill.metadata.capabilityGroup,
+    upstream: skill.metadata.upstream,
+    license: skill.metadata.license,
+    requiresEnv: skill.metadata.requiresEnv,
+    runtimeTools: skill.metadata.runtimeTools,
+    originalAllowedTools: skill.metadata.originalAllowedTools,
+    executionMode: skill.metadata.executionMode,
+    riskLevel: skill.metadata.riskLevel,
     folderId: skill.folderId,
     folderName: skill.folderName,
     folderPath: skill.folderPath,

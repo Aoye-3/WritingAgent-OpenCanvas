@@ -99,6 +99,19 @@ export type SkillCatalogItem = {
   name: string;
   description: string;
   allowedTools: string[];
+  capabilityGroup?: string;
+  upstream?: {
+    repo: string;
+    path: string;
+    commit?: string;
+    url?: string;
+  };
+  license?: string;
+  requiresEnv: string[];
+  runtimeTools: string[];
+  originalAllowedTools: string[];
+  executionMode: "instruction" | "sandbox";
+  riskLevel: ToolRiskLevel;
   folderId: string;
   folderName: string;
   folderPath: string;

@@ -1,0 +1,233 @@
+{
+  "upstream": {
+    "repo": "K-Dense-AI/scientific-agent-skills",
+    "ref": "main",
+    "commit": "209390194c85b3466259853417eeac81ea4f0976"
+  },
+  "importedAt": "2026-06-21T17:55:36.074Z",
+  "policy": {
+    "scope": "universal-first-round",
+    "executionMode": "sandbox",
+    "note": "The database-lookup skill is imported with its complete upstream references. Other standalone domain-specific skills remain intentionally excluded from this import."
+  },
+  "skills": [
+    {
+      "name": "database-lookup",
+      "group": "science-db",
+      "relativePath": "science-db/database-lookup",
+      "riskLevel": "medium",
+      "runtimeTools": [
+        "read_file",
+        "bash"
+      ],
+      "requiresEnv": [],
+      "originalAllowedTools": [
+        "Read",
+        "Bash"
+      ],
+      "upstreamPath": "skills/database-lookup",
+      "referencePolicy": "complete-upstream-references",
+      "referenceCount": 79
+    },
+    {
+      "name": "paper-lookup",
+      "group": "science-db",
+      "relativePath": "science-db/paper-lookup",
+      "riskLevel": "medium",
+      "runtimeTools": [],
+      "requiresEnv": [],
+      "originalAllowedTools": [],
+      "upstreamPath": "skills/paper-lookup"
+    },
+    {
+      "name": "exploratory-data-analysis",
+      "group": "analysis-viz",
+      "relativePath": "analysis-viz/exploratory-data-analysis",
+      "riskLevel": "medium",
+      "runtimeTools": [],
+      "requiresEnv": [],
+      "originalAllowedTools": [],
+      "upstreamPath": "skills/exploratory-data-analysis"
+    },
+    {
+      "name": "matplotlib",
+      "group": "analysis-viz",
+      "relativePath": "analysis-viz/matplotlib",
+      "riskLevel": "medium",
+      "runtimeTools": [
+        "read_file",
+        "write_file",
+        "bash"
+      ],
+      "requiresEnv": [],
+      "originalAllowedTools": [
+        "Read",
+        "Write",
+        "Bash"
+      ],
+      "upstreamPath": "skills/matplotlib"
+    },
+    {
+      "name": "literature-review",
+      "group": "writing-review",
+      "relativePath": "writing-review/literature-review",
+      "riskLevel": "medium",
+      "runtimeTools": [
+        "read_file",
+        "write_file",
+        "str_replace",
+        "bash"
+      ],
+      "requiresEnv": [
+        "OPENROUTER_API_KEY"
+      ],
+      "originalAllowedTools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "upstreamPath": "skills/literature-review"
+    },
+    {
+      "name": "peer-review",
+      "group": "writing-review",
+      "relativePath": "writing-review/peer-review",
+      "riskLevel": "low",
+      "runtimeTools": [
+        "read_file",
+        "write_file",
+        "str_replace",
+        "bash"
+      ],
+      "requiresEnv": [
+        "OPENROUTER_API_KEY"
+      ],
+      "originalAllowedTools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "upstreamPath": "skills/peer-review"
+    },
+    {
+      "name": "citation-management",
+      "group": "writing-review",
+      "relativePath": "writing-review/citation-management",
+      "riskLevel": "low",
+      "runtimeTools": [
+        "read_file",
+        "write_file",
+        "str_replace",
+        "bash"
+      ],
+      "requiresEnv": [
+        "OPENROUTER_API_KEY",
+        "NCBI_EMAIL",
+        "NCBI_API_KEY"
+      ],
+      "originalAllowedTools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "upstreamPath": "skills/citation-management"
+    },
+    {
+      "name": "markdown-mermaid-writing",
+      "group": "diagram-assets",
+      "relativePath": "diagram-assets/markdown-mermaid-writing",
+      "riskLevel": "low",
+      "runtimeTools": [
+        "read_file",
+        "write_file",
+        "str_replace",
+        "bash"
+      ],
+      "requiresEnv": [],
+      "originalAllowedTools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "upstreamPath": "skills/markdown-mermaid-writing"
+    },
+    {
+      "name": "infographics",
+      "group": "diagram-assets",
+      "relativePath": "diagram-assets/infographics",
+      "riskLevel": "medium",
+      "runtimeTools": [
+        "read_file",
+        "write_file",
+        "str_replace",
+        "bash"
+      ],
+      "requiresEnv": [
+        "OPENROUTER_API_KEY"
+      ],
+      "originalAllowedTools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "upstreamPath": "skills/infographics"
+    },
+    {
+      "name": "generate-image",
+      "group": "diagram-assets",
+      "relativePath": "diagram-assets/generate-image",
+      "riskLevel": "medium",
+      "runtimeTools": [],
+      "requiresEnv": [],
+      "originalAllowedTools": [],
+      "upstreamPath": "skills/generate-image"
+    },
+    {
+      "name": "markitdown",
+      "group": "document-ingestion",
+      "relativePath": "document-ingestion/markitdown",
+      "riskLevel": "medium",
+      "runtimeTools": [
+        "read_file",
+        "write_file",
+        "str_replace",
+        "bash"
+      ],
+      "requiresEnv": [
+        "OPENROUTER_API_KEY"
+      ],
+      "originalAllowedTools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "upstreamPath": "skills/markitdown"
+    },
+    {
+      "name": "pdf",
+      "group": "document-ingestion",
+      "relativePath": "document-ingestion/pdf",
+      "riskLevel": "medium",
+      "runtimeTools": [],
+      "requiresEnv": [],
+      "originalAllowedTools": [],
+      "upstreamPath": "skills/pdf"
+    },
+    {
+      "name": "docx",
+      "group": "document-ingestion",
+      "relativePath": "document-ingestion/docx",
+      "riskLevel": "medium",
+      "runtimeTools": [],
+      "requiresEnv": [],
+      "originalAllowedTools": [],
+      "upstreamPath": "skills/docx"
+    }
+  ]
+}

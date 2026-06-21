@@ -104,7 +104,7 @@ export function SkillFolderPicker({
                         ? checked ? copy(locale, "defaultEnabled") : copy(locale, "disabled")
                         : checked ? copy(locale, "enabled") : copy(locale, "available")}
                     </small>
-                    {skill.allowedTools.length ? <b>{skill.allowedTools.join(", ")}</b> : null}
+                    {arrayValues(skill.allowedTools).length ? <b>{arrayValues(skill.allowedTools).join(", ")}</b> : null}
                   </span>
                   <input
                     aria-label={`${checked ? copy(locale, "disable") : copy(locale, "enable")} ${skill.name}`}
@@ -310,7 +310,25 @@ function SkillFolderManager({
               <dt>{copy(locale, "path")}</dt>
               <dd>{selectedSkill.relativePath}</dd>
               <dt>{copy(locale, "tools")}</dt>
-              <dd>{selectedSkill.allowedTools.length ? selectedSkill.allowedTools.join(", ") : copy(locale, "none")}</dd>
+              <dd>{arrayValues(selectedSkill.allowedTools).length ? arrayValues(selectedSkill.allowedTools).join(", ") : copy(locale, "none")}</dd>
+              <dt>{copy(locale, "execution")}</dt>
+              <dd>{selectedSkill.executionMode === "sandbox" ? copy(locale, "sandbox") : copy(locale, "instruction")}</dd>
+              <dt>{copy(locale, "risk")}</dt>
+              <dd>{riskLabel(locale, selectedSkill.riskLevel)}</dd>
+              <dt>{copy(locale, "runtimeTools")}</dt>
+              <dd>{arrayValues(selectedSkill.runtimeTools).length ? arrayValues(selectedSkill.runtimeTools).join(", ") : copy(locale, "none")}</dd>
+              {arrayValues(selectedSkill.requiresEnv).length ? (
+                <>
+                  <dt>{copy(locale, "requiresEnv")}</dt>
+                  <dd>{arrayValues(selectedSkill.requiresEnv).join(", ")}</dd>
+                </>
+              ) : null}
+              {selectedSkill.upstream ? (
+                <>
+                  <dt>{copy(locale, "upstream")}</dt>
+                  <dd>{selectedSkill.upstream.repo}/{selectedSkill.upstream.path}</dd>
+                </>
+              ) : null}
             </dl>
             <label className="skill-manager-move">
               <span>{copy(locale, "moveTo")}</span>
@@ -346,23 +364,25 @@ function groupSkills(skills: SkillCatalogItem[], folders: SkillFolderItem[]) {
     groups.set(folder.folderId, { ...folder, skills: [] });
   }
   for (const skill of skills) {
-    const group = groups.get(skill.folderId) ?? {
-      folderId: skill.folderId,
-      folderName: skill.folderName,
-      folderPath: skill.folderPath,
-      source: skill.source,
-      manageable: skill.manageable && skill.folderId !== "default",
+    const folderId = skill.folderId || "default";
+    const folderName = skill.folderName || folderId;
+    const group = groups.get(folderId) ?? {
+      folderId,
+      folderName,
+      folderPath: skill.folderPath || folderId,
+      source: skill.source || "project",
+      manageable: Boolean(skill.manageable) && folderId !== "default",
       skillCount: 0,
       skills: []
     };
     group.skills.push(skill);
     group.skillCount = group.skills.length;
-    groups.set(skill.folderId, group);
+    groups.set(folderId, group);
   }
   return Array.from(groups.values()).sort((left, right) => {
     if (left.folderId === "default") return -1;
     if (right.folderId === "default") return 1;
-    return left.folderName.localeCompare(right.folderName);
+    return (left.folderName || left.folderId).localeCompare(right.folderName || right.folderId);
   });
 }
 
@@ -371,7 +391,19 @@ function folderLabel(locale: "en" | "zh", folderId: string, folderName: string) 
   return folderName;
 }
 
-function copy(locale: "en" | "zh", key: "available" | "create" | "defaultEnabled" | "delete" | "details" | "disable" | "disabled" | "empty" | "emptyFolder" | "enable" | "enabled" | "error" | "folder" | "folders" | "loading" | "locked" | "moveTo" | "newFolder" | "none" | "operationFailed" | "path" | "projectSkill" | "readOnly" | "readOnlyReason" | "rename" | "renameFolder" | "runtimeSkill" | "selectSkill" | "skills" | "source" | "tools") {
+function riskLabel(locale: "en" | "zh", risk: SkillCatalogItem["riskLevel"]) {
+  const labels = {
+    en: { low: "Low", medium: "Medium", high: "High" },
+    zh: { low: "\u4f4e", medium: "\u4e2d", high: "\u9ad8" }
+  } as const;
+  return labels[locale][risk ?? "low"];
+}
+
+function arrayValues(value: string[] | undefined) {
+  return Array.isArray(value) ? value : [];
+}
+
+function copy(locale: "en" | "zh", key: "available" | "create" | "defaultEnabled" | "delete" | "details" | "disable" | "disabled" | "empty" | "emptyFolder" | "enable" | "enabled" | "error" | "execution" | "folder" | "folders" | "instruction" | "loading" | "locked" | "moveTo" | "newFolder" | "none" | "operationFailed" | "path" | "projectSkill" | "readOnly" | "readOnlyReason" | "rename" | "renameFolder" | "requiresEnv" | "risk" | "runtimeSkill" | "runtimeTools" | "sandbox" | "selectSkill" | "skills" | "source" | "tools" | "upstream") {
   const values = {
     en: {
       available: "Available for this message",
@@ -385,8 +417,10 @@ function copy(locale: "en" | "zh", key: "available" | "create" | "defaultEnabled
       emptyFolder: "No skills in this folder",
       enable: "Enable",
       enabled: "Enabled for this message",
+      execution: "Execution",
       folder: "Folder",
       folders: "Folders",
+      instruction: "Instruction only",
       error: "Unable to load skills",
       loading: "Loading skills...",
       locked: "Locked",
@@ -400,11 +434,16 @@ function copy(locale: "en" | "zh", key: "available" | "create" | "defaultEnabled
       readOnlyReason: "Agent Runtime skills are read-only. Move or edit project skills only.",
       rename: "Rename",
       renameFolder: "Rename folder",
+      requiresEnv: "Required env",
+      risk: "Risk",
       runtimeSkill: "Runtime skill",
+      runtimeTools: "Runtime tools",
+      sandbox: "Runtime sandbox",
       selectSkill: "Select a skill to view details",
       skills: "Skills",
       source: "Source",
-      tools: "Allowed tools"
+      tools: "Allowed tools",
+      upstream: "Upstream"
     },
     zh: {
       available: "\u53ef\u7528\u4e8e\u672c\u6b21\u6d88\u606f",
@@ -418,8 +457,10 @@ function copy(locale: "en" | "zh", key: "available" | "create" | "defaultEnabled
       emptyFolder: "\u8be5\u6587\u4ef6\u5939\u6682\u65e0\u6280\u80fd",
       enable: "\u542f\u7528",
       enabled: "\u672c\u6b21\u542f\u7528",
+      execution: "\u6267\u884c\u6a21\u5f0f",
       folder: "\u6587\u4ef6\u5939",
       folders: "\u6587\u4ef6\u5939",
+      instruction: "\u4ec5\u6307\u4ee4",
       error: "\u65e0\u6cd5\u52a0\u8f7d\u6280\u80fd\u5217\u8868",
       loading: "\u6b63\u5728\u52a0\u8f7d\u6280\u80fd...",
       locked: "\u9501\u5b9a",
@@ -433,11 +474,16 @@ function copy(locale: "en" | "zh", key: "available" | "create" | "defaultEnabled
       readOnlyReason: "Agent Runtime \u6280\u80fd\u4e3a\u53ea\u8bfb\uff0c\u53ea\u80fd\u79fb\u52a8\u9879\u76ee\u6280\u80fd\u3002",
       rename: "\u91cd\u547d\u540d",
       renameFolder: "\u91cd\u547d\u540d\u6587\u4ef6\u5939",
+      requiresEnv: "\u9700\u8981\u73af\u5883\u53d8\u91cf",
+      risk: "\u98ce\u9669",
       runtimeSkill: "\u8fd0\u884c\u65f6\u6280\u80fd",
+      runtimeTools: "\u8fd0\u884c\u65f6\u5de5\u5177",
+      sandbox: "\u8fd0\u884c\u65f6\u6c99\u7bb1",
       selectSkill: "\u9009\u62e9\u4e00\u4e2a\u6280\u80fd\u67e5\u770b\u8be6\u60c5",
       skills: "\u6280\u80fd",
       source: "\u6765\u6e90",
-      tools: "\u5141\u8bb8\u5de5\u5177"
+      tools: "\u5141\u8bb8\u5de5\u5177",
+      upstream: "\u4e0a\u6e38"
     }
   } as const;
   return values[locale][key];

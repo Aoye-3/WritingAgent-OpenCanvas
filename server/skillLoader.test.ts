@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   createProjectSkillFolder,
@@ -92,8 +92,65 @@ test("project skills can move folders while runtime skills stay read-only", asyn
   await assert.rejects(() => moveProjectSkillToFolder("brainstorming", "skill-manager-target"));
 });
 
-async function writeTestSkill(folderId: string, skillId: string) {
+test("project skills load normalized inline frontmatter and sandbox sidecar metadata", async () => {
+  await writeTestSkill(
+    "skill-manager-source",
+    "skill-manager-temp",
+    `--- name: skill-manager-temp description: Inline scientific skill allowed-tools: Read Bash license: MIT ---\n\n# Inline\n`,
+    {
+      capabilityGroup: "analysis-viz",
+      upstream: { repo: "K-Dense-AI/scientific-agent-skills", path: "skills/example", commit: "abc123" },
+      license: "MIT",
+      requiresEnv: ["OPENROUTER_API_KEY"],
+      runtimeTools: ["read_file", "bash"],
+      originalAllowedTools: ["Read", "Bash"],
+      executionMode: "sandbox",
+      riskLevel: "medium"
+    }
+  );
+
+  const skills = await loadPublicSkills();
+  const loaded = skills.find((skill) => skill.name === "skill-manager-temp");
+
+  assert.ok(loaded);
+  assert.equal(loaded.description, "Inline scientific skill");
+  assert.deepEqual(loaded.allowedTools, ["Read", "Bash"]);
+  assert.equal(loaded.metadata.capabilityGroup, "analysis-viz");
+  assert.equal(loaded.metadata.executionMode, "sandbox");
+  assert.equal(loaded.metadata.riskLevel, "medium");
+  assert.equal(loaded.metadata.upstream?.repo, "K-Dense-AI/scientific-agent-skills");
+  assert.deepEqual(loaded.metadata.requiresEnv, ["OPENROUTER_API_KEY"]);
+  assert.deepEqual(loaded.metadata.runtimeTools, ["read_file", "bash"]);
+});
+
+test("scientific universal import is grouped and keeps complete database lookup references", async () => {
+  const skills = await loadPublicSkills();
+  const databaseLookup = skills.find((skill) => skill.name === "database-lookup");
+
+  assert.ok(databaseLookup);
+  assert.equal(databaseLookup.relativePath, "science-db/database-lookup");
+  assert.equal(databaseLookup.folderId, "science-db");
+  assert.equal(databaseLookup.metadata.executionMode, "sandbox");
+  assert.equal(databaseLookup.metadata.upstream?.repo, "K-Dense-AI/scientific-agent-skills");
+  assert.deepEqual(databaseLookup.metadata.runtimeTools, ["read_file", "bash"]);
+  assert.equal(await fileExists(path.join(projectSkillsRoot, "science-db", "database-lookup", "references", "retrieval-contract.md")), true);
+  assert.equal(await fileExists(path.join(projectSkillsRoot, "science-db", "database-lookup", "references", "pubchem.md")), true);
+});
+
+async function writeTestSkill(folderId: string, skillId: string, skillBody?: string, sidecar?: Record<string, unknown>) {
   const folder = path.join(projectSkillsRoot, folderId, skillId);
   await mkdir(folder, { recursive: true });
-  await writeFile(path.join(folder, "SKILL.md"), `---\nname: ${skillId}\ndescription: Temporary test skill.\n---\n\n# Test skill\n`);
+  await writeFile(path.join(folder, "SKILL.md"), skillBody ?? `---\nname: ${skillId}\ndescription: Temporary test skill.\n---\n\n# Test skill\n`);
+  if (sidecar) {
+    await writeFile(path.join(folder, "facetwrite.skill.json"), JSON.stringify(sidecar, null, 2));
+  }
+}
+
+async function fileExists(filePath: string) {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }

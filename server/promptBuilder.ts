@@ -130,7 +130,10 @@ function formatSkill(skill: Skill) {
   return compactLines([
     `## ${skill.name}`,
     skill.description,
-    skill.allowedTools.length ? `Allowed tools: ${skill.allowedTools.join(", ")}` : "",
+    skill.allowedTools.length ? `Allowed FacetWrite tools: ${skill.allowedTools.join(", ")}` : "",
+    skill.metadata.executionMode === "sandbox" ? "Execution mode: Agent Runtime sandbox only." : "",
+    skill.metadata.runtimeTools.length ? `Runtime sandbox tools: ${skill.metadata.runtimeTools.join(", ")}` : "",
+    skill.metadata.requiresEnv.length ? `Required environment variables: ${skill.metadata.requiresEnv.join(", ")}` : "",
     skill.content
   ]);
 }
