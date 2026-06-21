@@ -68,7 +68,7 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `GET /api/tools/catalog`
   - Returns `{ tools }` from the Tool catalog.
 - `GET /api/skills/catalog`
-  - Returns `{ skills }` from local skill discovery.
+  - Returns `{ skills }` from local public skill discovery. The catalog is a selection surface only; it does not expose skill file bodies, private prompts, messages, or runtime context.
 
 ## Knowledge
 - `GET /api/knowledge/bases`
@@ -113,6 +113,7 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
 - `POST /api/generate`
   - Body is parsed by `parseGenerateRequest`.
   - `contextValues`, when present, represents explicit transient workspace state such as draft or Canvas node data. Project Brief and Current Task Brief are loaded from storage by Thread identity and are not accepted from the generation request.
+  - `transientSkillRefs`, when present, is a per-request string array of public Skill ids selected from `/api/skills/catalog`. The backend trims, deduplicates, and ignores invalid entries. These Skills apply only to the current generation request and are not written to Agent settings.
   - `modelOverrides`, when present, is a per-run override for runtime-safe model controls such as `thinkingMode` and `reasoningEffort`. It does not mutate saved Agent settings.
   - Model identity is resolved from the Thread's selected `configuredModelApiId`; Agents do not own model selection.
   - Runs generation, records the result, and returns generation metadata and output.
@@ -123,8 +124,9 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - When Agent knowledge is enabled and `knowledge_base` is active, generation searches selected Knowledge Bases before model execution. Retrieved references are injected into runtime context and recorded as `knowledge_search_completed` tool events.
 - `POST /api/generate/stream`
   - SSE endpoint.
-  - Emits `status`, `tool_event`, `token`, `final`, and `error` events.
+  - Emits `status`, `tool_event`, `timeline_event`, `token`, `final`, and `error` events.
   - `status` payloads include `{ phase, label }`, where phase is `thinking`, `searching`, `writing`, or `finalizing`. These events are for transient UI state and are not persisted as messages.
+  - `timeline_event` payloads are safe, user-visible Run Trace summaries attached to the current assistant message. Composer-selected transient Skill usage is represented as a `decision` event with a summary such as `Using skills: frontend-design, writing-plans` and a sanitized payload shaped as `{ source:"composer", skillRefs:[...] }`.
   - `token` events are emitted as progressive, user-visible assistant text segments after the backend safety gate has enough text to rule out obvious internal prompt, ToolUse, or reasoning leaks. Segments are intentionally small UI chunks so the right AI collaboration drawer can render a visible typewriter effect even when an upstream provider or runtime flushes a large block at once.
   - `error` payloads include `code` and `message`.
   - Agent Runtime custom subagent events from the current adapter are emitted as `tool_event` records with `eventType` prefixed by `AgentBackend_`.

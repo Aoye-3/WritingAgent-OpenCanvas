@@ -439,6 +439,14 @@ Tertiary/icon button:
 - Must include `aria-label`.
 - Hit target at least `44x44px`.
 
+Workspace composer exception:
+
+- The right AI collaboration composer may use compact `28-34px` icon buttons because it sits inside a narrow resizable drawer.
+- Icon-only composer buttons still require `aria-label` and `title`.
+- The send button remains the primary action and must stay right-aligned with a stable fixed size.
+- Secondary actions such as Skill selection and Plan insertion should be icon-only when drawer width is tight; selected Skills are shown as chips above the textarea instead of occupying bottom-row text width.
+- DeepSeek Thinking mode belongs in the composer top control row as a lightbulb icon plus current mode text. Its menu contains `Disabled`, `High`, and `Max`. The bottom tool row must not contain a separate Thinking control.
+
 ### 6.2 Cards
 
 Use cards only for:
@@ -885,6 +893,7 @@ Important experimental cue:
   - output preview.
 - Reserve space for floating elements.
 - Avoid layout shift during loading and validation.
+- Right composer bottom-row controls must not overlap at narrow drawer widths. Keep the row ordered as tools, Skill, compact model select, Plan, and send; use `margin-left:auto` or equivalent spacing so the send button stays attached to the right edge.
 
 ### 15.2 Component Guardrails
 

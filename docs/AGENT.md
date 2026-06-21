@@ -217,6 +217,14 @@ DeepSeek prefix completion remains a separate response mode: only the final assi
 
 Plan phases force-load `modules/agent-runtime/skills/public/brainstorming` or `writing-plans`. Skills guide content only. Intake exposes `plan_clarification_submit`, revision exposes `plan_revision_submit`, and approved execution exposes `artifact_stage`; broad `plan_update` is not exposed to models. Product services own lifecycle status, retries, pause/resume, and completion.
 
+## Per-Message Skill Selection
+
+Agent settings remain the durable profile-level Skill source. The right collaboration composer can also attach public Skills to one message through `transientSkillRefs`. Runtime prompt construction merges Agent default Skills, composer-selected transient Skills, and any server-forced Plan Skill for the current run only.
+
+Transient Skills are intentionally not saved back to Agent settings, Project state, or Thread defaults. The frontend may show selected Skill chips near the composer, but it sends only Skill ids. Skill content is loaded server-side from the public Skill roots and remains private runtime context.
+
+When transient Skills are successfully loaded for a streaming run, the backend emits one safe Run Trace `decision` timeline event naming the Skill ids. The event payload is limited to `{ source:"composer", skillRefs:[...] }`; it must not include Skill file bodies, prompts, user messages, tool arguments, or internal context.
+
 ## Canvas Action Orchestration
 
 Explicit single-node Canvas create/append instructions are recognized before generation and carried as a structured `canvasAction`. Agent Runtime forces `canvas_write` once for those tool-managed actions; the server-recognized operation is authoritative over model arguments. The internal Bridge resolves the real Project from the Thread, commits low-risk create/append operations directly, and returns a real `nodeId`. Replace and other destructive operations remain pending for approval. An Agent response is not evidence of success without a structured committed event.
