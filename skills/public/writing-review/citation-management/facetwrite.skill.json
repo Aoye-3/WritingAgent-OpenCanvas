@@ -1,0 +1,30 @@
+{
+  "capabilityGroup": "writing-review",
+  "upstream": {
+    "repo": "K-Dense-AI/scientific-agent-skills",
+    "path": "skills/citation-management",
+    "commit": "209390194c85b3466259853417eeac81ea4f0976",
+    "url": "https://github.com/K-Dense-AI/scientific-agent-skills/tree/209390194c85b3466259853417eeac81ea4f0976/skills/citation-management"
+  },
+  "license": "MIT License",
+  "requiresEnv": [
+    "OPENROUTER_API_KEY",
+    "NCBI_EMAIL",
+    "NCBI_API_KEY"
+  ],
+  "runtimeTools": [
+    "read_file",
+    "write_file",
+    "str_replace",
+    "bash"
+  ],
+  "originalAllowedTools": [
+    "Read",
+    "Write",
+    "Edit",
+    "Bash"
+  ],
+  "executionMode": "sandbox",
+  "riskLevel": "low",
+  "importedAt": "2026-06-21T17:15:00.481Z"
+}

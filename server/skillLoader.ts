@@ -2,6 +2,25 @@ import { mkdir, readdir, readFile, rename, rmdir } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
 
+export type SkillRiskLevel = "low" | "medium" | "high";
+export type SkillExecutionMode = "instruction" | "sandbox";
+
+export type SkillSecurityMetadata = {
+  capabilityGroup?: string;
+  upstream?: {
+    repo: string;
+    path: string;
+    commit?: string;
+    url?: string;
+  };
+  license?: string;
+  requiresEnv: string[];
+  runtimeTools: string[];
+  originalAllowedTools: string[];
+  executionMode: SkillExecutionMode;
+  riskLevel: SkillRiskLevel;
+};
+
 export type Skill = {
   name: string;
   description: string;
@@ -13,6 +32,7 @@ export type Skill = {
   folderPath: string;
   source: SkillsRoot["source"];
   manageable: boolean;
+  metadata: SkillSecurityMetadata;
 };
 
 export type SkillFolder = {
@@ -28,6 +48,7 @@ type Frontmatter = {
   name?: string;
   description?: string;
   "allowed-tools"?: string[];
+  license?: string;
 };
 
 type SkillsRoot = {
@@ -173,6 +194,7 @@ async function readSkill(root: SkillsRoot, relativePath: string): Promise<Skill 
     const parsed = parseSkillMarkdown(raw);
     if (!parsed.frontmatter.name || !parsed.frontmatter.description) return null;
     const folder = resolveSkillFolderMetadata(relativePath, root.source);
+    const metadata = await readSkillMetadata(root, relativePath, parsed.frontmatter);
 
     return {
       name: parsed.frontmatter.name,
@@ -184,11 +206,68 @@ async function readSkill(root: SkillsRoot, relativePath: string): Promise<Skill 
       folderName: folder.folderName,
       folderPath: folder.folderPath,
       source: root.source,
-      manageable: root.source === "project"
+      manageable: root.source === "project",
+      metadata
     };
   } catch {
     return null;
   }
+}
+
+async function readSkillMetadata(root: SkillsRoot, relativePath: string, frontmatter: Frontmatter): Promise<SkillSecurityMetadata> {
+  const sidecar = await readSkillSidecar(root, relativePath);
+  return {
+    capabilityGroup: readOptionalString(sidecar.capabilityGroup),
+    upstream: readUpstream(sidecar.upstream),
+    license: readOptionalString(sidecar.license) ?? frontmatter.license,
+    requiresEnv: readStringArray(sidecar.requiresEnv),
+    runtimeTools: readStringArray(sidecar.runtimeTools),
+    originalAllowedTools: readStringArray(sidecar.originalAllowedTools),
+    executionMode: readExecutionMode(sidecar.executionMode),
+    riskLevel: readRiskLevel(sidecar.riskLevel)
+  };
+}
+
+async function readSkillSidecar(root: SkillsRoot, relativePath: string): Promise<Record<string, unknown>> {
+  try {
+    const raw = await readFile(path.join(root.path, relativePath, "facetwrite.skill.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function readUpstream(value: unknown): SkillSecurityMetadata["upstream"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const repo = readOptionalString(record.repo);
+  const upstreamPath = readOptionalString(record.path);
+  if (!repo || !upstreamPath) return undefined;
+  return {
+    repo,
+    path: upstreamPath,
+    commit: readOptionalString(record.commit),
+    url: readOptionalString(record.url)
+  };
+}
+
+function readExecutionMode(value: unknown): SkillExecutionMode {
+  return value === "sandbox" ? "sandbox" : "instruction";
+}
+
+function readRiskLevel(value: unknown): SkillRiskLevel {
+  return value === "high" || value === "medium" ? value : "low";
+}
+
+function readOptionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
+    : [];
 }
 
 export function resolveSkillFolderMetadata(relativePath: string, source: SkillsRoot["source"]) {
@@ -273,14 +352,18 @@ function isValidFolderId(folderId: string) {
 }
 
 function parseSkillMarkdown(raw: string): { frontmatter: Frontmatter; body: string } {
-  const match = raw.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n([\s\S]*)$/);
+  const match = raw.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n([\s\S]*)$/)
+    ?? raw.match(/^---\s+([\s\S]*?)\s+---\s*([\s\S]*)$/);
   if (!match) return { frontmatter: {}, body: raw };
   return { frontmatter: parseFrontmatter(match[1]), body: match[2] };
 }
 
 function parseFrontmatter(source: string): Frontmatter {
   const metadata: Frontmatter = {};
-  const lines = source.split(/\r?\n/);
+  const normalizedSource = source.includes("\n")
+    ? source
+    : source.replace(/\s+(description|allowed-tools|license|required_environment_variables|metadata|compatibility):/g, "\n$1:");
+  const lines = normalizedSource.split(/\r?\n/);
   let arrayKey: keyof Frontmatter | null = null;
 
   for (const line of lines) {
@@ -302,9 +385,9 @@ function parseFrontmatter(source: string): Frontmatter {
     const key = trimmed.slice(0, colon).trim() as keyof Frontmatter;
     const value = trimmed.slice(colon + 1).trim();
     if (key === "allowed-tools") {
-      metadata[key] = value ? value.split(",").map((item) => item.trim()).filter(Boolean) : [];
+      metadata[key] = value ? value.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean) : [];
       arrayKey = key;
-    } else if (key === "name" || key === "description") {
+    } else if (key === "name" || key === "description" || key === "license") {
       metadata[key] = stripQuotes(value);
     }
   }

@@ -1,0 +1,16 @@
+{
+  "capabilityGroup": "document-ingestion",
+  "upstream": {
+    "repo": "K-Dense-AI/scientific-agent-skills",
+    "path": "skills/pdf",
+    "commit": "209390194c85b3466259853417eeac81ea4f0976",
+    "url": "https://github.com/K-Dense-AI/scientific-agent-skills/tree/209390194c85b3466259853417eeac81ea4f0976/skills/pdf"
+  },
+  "license": "Proprietary. LICENSE.txt has complete terms",
+  "requiresEnv": [],
+  "runtimeTools": [],
+  "originalAllowedTools": [],
+  "executionMode": "sandbox",
+  "riskLevel": "medium",
+  "importedAt": "2026-06-21T17:15:00.481Z"
+}

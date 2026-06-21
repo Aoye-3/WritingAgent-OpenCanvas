@@ -69,7 +69,8 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - Returns `{ tools }` from the Tool catalog.
 - `GET /api/skills/catalog`
   - Returns `{ skills, folders }` from local public Skill discovery. The catalog is a selection and management surface only; it does not expose Skill file bodies, private prompts, messages, or runtime context.
-  - Each Skill includes `id`, `name`, `description`, `allowedTools`, `folderId`, `folderName`, `folderPath`, `relativePath`, `source`, `manageable`, and `status`.
+  - Each Skill includes `id`, `name`, `description`, `allowedTools`, `capabilityGroup`, `upstream`, `license`, `requiresEnv`, `runtimeTools`, `originalAllowedTools`, `executionMode`, `riskLevel`, `folderId`, `folderName`, `folderPath`, `relativePath`, `source`, `manageable`, and `status`.
+  - `allowedTools` contains FacetWrite bridge-tool refs only. Third-party tool names are exposed as `originalAllowedTools` and mapped to Agent Runtime sandbox tool names in `runtimeTools`; they are not directly executable by the FacetWrite backend.
   - Each folder includes `folderId`, `folderName`, `folderPath`, `source`, `manageable`, and `skillCount`.
 - `POST /api/skills/folders`
   - Body: `{ folderId: string }`.
