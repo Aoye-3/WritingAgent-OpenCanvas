@@ -31,6 +31,18 @@ def web_search(query: str) -> str:
 
 
 @tool
+def web_fetch(url: str) -> str:
+    """Fetch a web page."""
+    return url
+
+
+@tool
+def read_file(path: str) -> str:
+    """Read a file."""
+    return path
+
+
+@tool
 def artifact_stage(planId: str, artifacts: list) -> str:
     """Commit step artifacts to Canvas."""
     return planId
@@ -43,7 +55,9 @@ def canvas_write(operation: str, content: str) -> str:
 
 
 def request(*, phase: str, stage: str | None = None, messages=None, canvas_action=None, phase_attempt_id=None,
-            allowed_tool_refs=None, tool_state=None):
+            allowed_tool_refs=None, tool_state=None, evidence_tool_limit=None, evidence_tools=None,
+            progressive_enabled=None, model_call_limit=None, recursion_limit=None, synthesis_reserve_steps=None,
+            force_synthesis_after_evidence=None):
     runtime = SimpleNamespace(context={
         "facetwrite_plan_phase": phase,
         "facetwrite_plan_stage": stage,
@@ -51,9 +65,16 @@ def request(*, phase: str, stage: str | None = None, messages=None, canvas_actio
         "facetwrite_canvas_action": canvas_action,
         "facetwrite_allowed_tool_refs": allowed_tool_refs,
         "facetwrite_tool_state": tool_state,
+        "facetwrite_evidence_tool_limit": evidence_tool_limit,
+        "facetwrite_evidence_tools": evidence_tools,
+        "facetwrite_progressive_canvas_delivery_enabled": progressive_enabled,
+        "facetwrite_model_call_limit": model_call_limit,
+        "facetwrite_recursion_limit": recursion_limit,
+        "facetwrite_synthesis_reserve_steps": synthesis_reserve_steps,
+        "facetwrite_force_synthesis_after_evidence": force_synthesis_after_evidence,
     })
     initial_messages = messages or [HumanMessage(content="Plan this task")]
-    initial_tools = [plan_update, plan_clarification_submit, plan_revision_submit, web_search, artifact_stage, canvas_write]
+    initial_tools = [plan_update, plan_clarification_submit, plan_revision_submit, web_search, web_fetch, read_file, artifact_stage, canvas_write]
 
     def build(current_messages, current_tools, current_tool_choice=None):
         return SimpleNamespace(
@@ -102,6 +123,87 @@ def test_filters_chat_tools_using_allowed_refs_and_disabled_state():
     )
 
     assert [tool.name for tool in captured["request"].tools] == ["canvas_write"]
+
+
+def test_filters_evidence_tools_after_total_budget_reached():
+    middleware = PlanToolChoiceMiddleware()
+    captured = {}
+    messages = [
+        HumanMessage(content="Review agent literature"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+        ToolMessage(content="result 2", name="web_fetch", tool_call_id="call_2"),
+        ToolMessage(content="result 3", name="read_file", tool_call_id="call_3"),
+    ]
+
+    middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            allowed_tool_refs=["web_search", "web_fetch", "read_file", "canvas_write"],
+            tool_state={"web_search": True, "web_fetch": True, "read_file": True, "canvas_write": True},
+            evidence_tool_limit=3,
+            evidence_tools=["web_search", "web_fetch", "read_file"],
+        ),
+        lambda model_request: captured.setdefault("request", model_request),
+    )
+
+    assert [tool.name for tool in captured["request"].tools] == ["canvas_write"]
+
+
+def test_forces_final_answer_after_evidence_budget_reached():
+    middleware = PlanToolChoiceMiddleware()
+    captured = {}
+    messages = [
+        HumanMessage(content="Review agent literature"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+        ToolMessage(content="result 2", name="web_fetch", tool_call_id="call_2"),
+    ]
+
+    middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            allowed_tool_refs=["web_search", "web_fetch", "read_file", "canvas_write"],
+            tool_state={"web_search": True, "web_fetch": True, "read_file": True, "canvas_write": True},
+            evidence_tool_limit=2,
+            evidence_tools=["web_search", "web_fetch", "read_file"],
+            progressive_enabled=True,
+            force_synthesis_after_evidence=True,
+        ),
+        lambda model_request: captured.setdefault("request", model_request),
+    )
+
+    assert captured["request"].tools == []
+    assert "stop calling tools now" in captured["request"].messages[-1].content
+
+
+def test_forces_final_answer_near_model_call_budget():
+    middleware = PlanToolChoiceMiddleware()
+    captured = {}
+    messages = [
+        HumanMessage(content="Audit this project"),
+        AIMessage(content="", tool_calls=[{"name": "web_search", "args": {"query": "x"}, "id": "call_1"}]),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+        AIMessage(content="", tool_calls=[{"name": "read_file", "args": {"path": "a"}, "id": "call_2"}]),
+        ToolMessage(content="result 2", name="read_file", tool_call_id="call_2"),
+    ]
+
+    middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            allowed_tool_refs=["web_search", "read_file", "canvas_write"],
+            tool_state={"web_search": True, "read_file": True, "canvas_write": True},
+            evidence_tool_limit=10,
+            evidence_tools=["web_search", "read_file"],
+            progressive_enabled=True,
+            model_call_limit=3,
+        ),
+        lambda model_request: captured.setdefault("request", model_request),
+    )
+
+    assert captured["request"].tools == []
+    assert "model budget nearly exhausted" in captured["request"].messages[-1].content
 
 
 def test_plan_submission_failure_stops_before_another_model_call():

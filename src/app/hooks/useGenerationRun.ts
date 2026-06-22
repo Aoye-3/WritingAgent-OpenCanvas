@@ -392,6 +392,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       const threadId = await options.ensureThreadId();
       const transientSkillRefs = readSkillRefs(requestContext?.transientSkillRefs);
       const disabledSkillRefs = readSkillRefs(requestContext?.disabledSkillRefs);
+      const runtimeBudgetProfile = readRuntimeBudgetProfile(requestContext?.runtimeBudgetProfile);
       const requestContextValues = omitSkillOverrideRefs(requestContext);
       const payload: GenerateRequest = {
         mode: "chat",
@@ -413,6 +414,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         toolState: buildRequestToolState(options.toolState, {
           kind: requestContext?.approvedPlan ? "execution" : isPlanInstruction(text) || Boolean(requestContext?.awaitingPlan) ? "planning" : "chat"
         }),
+        runtimeBudgetProfile,
         modelOverrides,
         transientSkillRefs,
         disabledSkillRefs,
@@ -539,8 +541,12 @@ function readSkillRefs(value: unknown) {
 
 function omitSkillOverrideRefs(requestContext?: Record<string, unknown>) {
   if (!requestContext) return undefined;
-  const { transientSkillRefs: _transientSkillRefs, disabledSkillRefs: _disabledSkillRefs, ...rest } = requestContext;
+  const { transientSkillRefs: _transientSkillRefs, disabledSkillRefs: _disabledSkillRefs, runtimeBudgetProfile: _runtimeBudgetProfile, ...rest } = requestContext;
   return rest;
+}
+
+function readRuntimeBudgetProfile(value: unknown): GenerateRequest["runtimeBudgetProfile"] {
+  return value === "low" || value === "medium" || value === "high" ? value : "medium";
 }
 
 function isAbortError(error: unknown) {

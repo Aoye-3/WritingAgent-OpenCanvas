@@ -48,5 +48,7 @@ test("Canvas and artifact lifecycle events request live thread-state refresh", (
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_artifact_committed", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_canvas_write_pending_approval", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_canvas_mutation_failed", payload: {} }), true);
+  assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_research_committed", payload: {} }), true);
+  assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_failed_summary_committed", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_tool_completed", payload: { toolName: "web_search" } }), false);
 });

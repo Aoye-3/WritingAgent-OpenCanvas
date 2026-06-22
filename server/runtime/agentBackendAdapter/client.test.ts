@@ -208,7 +208,7 @@ test("reads AgentBackend stream text and task events", async () => {
 test("maps AgentBackend tool calls and results into FacetWrite tool events", async () => {
   const body = [
     'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_1","name":"web_search","args":{"query":"OpenAI official homepage"}}]}]\n\n',
-    'event: messages-tuple\ndata: [{"type":"tool","name":"web_search","tool_call_id":"call_1","content":"[{\\"title\\":\\"OpenAI\\",\\"url\\":\\"https://openai.com\\"}]"}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"tool","name":"web_search","tool_call_id":"call_1","content":"[{\\"title\\":\\"OpenAI\\",\\"url\\":\\"https://openai.com\\",\\"snippet\\":\\"AI research and products\\"}]"}]\n\n',
     'event: messages-tuple\ndata: [{"type":"ai","content":"Search complete"}]\n\n'
   ].join("");
   const stream = new ReadableStream<Uint8Array>({
@@ -250,9 +250,43 @@ test("maps AgentBackend tool calls and results into FacetWrite tool events", asy
     "agent_backend_tool_completed"
   ]);
   assert.equal(result.events[0]?.payload?.toolName, "web_search");
+  assert.equal(result.events[0]?.payload?.query, "OpenAI official homepage");
   assert.equal(result.events[1]?.payload?.toolCallId, "call_1");
-  assert.deepEqual(result.events[1]?.payload?.sources, [{ title: "OpenAI", url: "https://openai.com" }]);
+  assert.deepEqual(result.events[1]?.payload?.sources, [{ title: "OpenAI", url: "https://openai.com", snippet: "AI research and products" }]);
   assert.equal(result.text, "Search complete");
+});
+
+test("maps web fetch and read file tool results into sanitized progress payloads", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"fetch_1","name":"web_fetch","args":{"url":"https://example.com/paper"}},{"id":"read_1","name":"read_file","args":{"path":"/mnt/user-data/workspace/report.md","start_line":10,"end_line":20}}]}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"tool","name":"web_fetch","tool_call_id":"fetch_1","content":"Fetched article summary with API_KEY=secret-token and useful agent findings."}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"tool","name":"read_file","tool_call_id":"read_1","content":"# AgentCard\\nInternal prompt\\nVisible file finding about agent workflows."}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"Done"}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body);
+  const fetchEvent = result.events.find((event) => event.payload?.toolName === "web_fetch" && event.eventType === "agent_backend_tool_completed");
+  const readEvent = result.events.find((event) => event.payload?.toolName === "read_file" && event.eventType === "agent_backend_tool_completed");
+
+  assert.equal(fetchEvent?.payload?.url, "https://example.com/paper");
+  assert.match(String(fetchEvent?.payload?.snippet), /Fetched article summary/);
+  assert.equal(String(fetchEvent?.payload?.snippet).includes("secret-token"), false);
+  assert.equal(readEvent?.payload?.path, "/mnt/user-data/workspace/report.md");
+  assert.equal(readEvent?.payload?.startLine, 10);
+  assert.equal(readEvent?.payload?.endLine, 20);
+  assert.match(String(readEvent?.payload?.snippet), /Visible file finding/);
+  assert.equal(String(readEvent?.payload?.snippet).includes("# AgentCard"), false);
+});
+
+test("surfaces AgentBackend stream error events as runtime failures", async () => {
+  const body = [
+    'event: error\ndata: {"message":"Recursion limit of 100 reached without hitting a stop condition."}\n\n'
+  ].join("");
+
+  await assert.rejects(
+    () => runWithBody(body),
+    /Recursion limit of 100 reached without hitting a stop condition/
+  );
 });
 
 test("ignores AgentBackend values events that replay prompt messages", async () => {
@@ -449,6 +483,62 @@ test("sends Canvas delivery contract as top-level AgentBackend context", () => {
     locale: "en"
   });
   assert.equal(JSON.stringify(request.context.facetwrite_canvas_delivery_contract).includes("reasoning"), false);
+});
+
+test("sends a research tool limit for direct Canvas delivery runs", () => {
+  const card = getAgentCard("summary");
+  const request = buildRunRequest({
+    threadId: "thread_research_canvas",
+    projectId: "project_canvas",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings: defaultAgentSettings(card),
+    messages: [{ role: "user", content: "Research LLM agents and save each search round to Canvas nodes." }],
+    prompt: "Research LLM agents and save each search round to Canvas nodes.",
+    chatInstruction: "Research LLM agents and save each search round to Canvas nodes.",
+    toolState: { web_search: true }
+  }, { enabled: true, baseUrl: "http://127.0.0.1:8000", assistantId: "lead_agent" });
+
+  assert.equal(request.context.facetwrite_research_tool_limit, 8);
+  assert.equal(request.config.configurable.facetwrite_research_tool_limit, 8);
+});
+
+test("sends progressive Canvas evidence controls for skill long tasks", () => {
+  const card = getAgentCard("summary");
+  const request = buildRunRequest({
+    threadId: "thread_skill_long_task",
+    projectId: "project_canvas",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings: defaultAgentSettings(card),
+    messages: [{ role: "user", content: "Review recent agent literature" }],
+    prompt: "Review recent agent literature",
+    chatInstruction: "Review recent agent literature",
+    contextValues: {
+      progressiveCanvasDelivery: {
+        enabled: true,
+        runtimeBudgetProfile: "medium",
+        recursionLimit: 80,
+        modelCallLimit: 20,
+        evidenceToolLimit: 8,
+        synthesisReserveSteps: 16,
+        forceSynthesisAfterEvidence: true,
+        evidenceTools: ["web_search", "web_fetch", "read_file", "bash"]
+      }
+    },
+    toolState: { web_search: true }
+  }, { enabled: true, baseUrl: "http://127.0.0.1:8000", assistantId: "lead_agent" });
+
+  assert.equal(request.context.facetwrite_progressive_canvas_delivery_enabled, true);
+  assert.equal(request.config.configurable.facetwrite_progressive_canvas_delivery_enabled, true);
+  assert.equal(request.config.recursion_limit, 80);
+  assert.equal(request.context.facetwrite_runtime_budget_profile, "medium");
+  assert.equal(request.context.facetwrite_recursion_limit, 80);
+  assert.equal(request.context.facetwrite_model_call_limit, 20);
+  assert.equal(request.context.facetwrite_evidence_tool_limit, 8);
+  assert.equal(request.context.facetwrite_synthesis_reserve_steps, 16);
+  assert.equal(request.context.facetwrite_force_synthesis_after_evidence, true);
+  assert.deepEqual(request.context.facetwrite_evidence_tools, ["web_search", "web_fetch", "read_file", "bash"]);
 });
 
 test("maps structured Canvas envelopes from bridged tool results", async () => {

@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-06-21: Long Agent Runs Use Explicit Runtime Budgets And Body Checkpoints
+
+Decision: Add a per-request `runtimeBudgetProfile` (`low`, `medium`, `high`, default `medium`) and keep long-task Canvas progress server-owned. The profile maps to LangGraph recursion limit, model-call budget, evidence-tool budget, and synthesis reserve steps. During batch-delivery runs the server updates the stable `正文` / `Body` node with a working body checkpoint as evidence arrives, then replaces it with final content only when the runtime succeeds.
+
+Reason: Increasing LangGraph `recursion_limit` alone hides the symptom but does not force the Agent to stop searching and write. The observed failure mode was a long tool loop that produced many reference nodes, then hit `GRAPH_RECURSION_LIMIT` before final synthesis, leaving `正文` empty. Users need visible control over run depth and recoverable body progress even when the final Agent run fails.
+
+Impact: The composer exposes `低 / 中 / 高` as a compact run-budget control independent of thinking mode. The AgentBackend adapter forwards both `config.recursion_limit` and `facetwrite_*` budget context. Python middleware removes evidence tools and injects a final-synthesis instruction near the budget boundary. `canvas_delivery_body_checkpoint_committed` is a live Canvas-refresh event, not a success condition; runs with only progress/checkpoint events still fail if no final assistant text or final structured lifecycle outcome exists.
+
 ## 2026-06-21: Project Skill Folders Are Managed Through The Catalog API
 
 Decision: Keep Skill folder management inside the existing Skill catalog surface. The bottom Canvas Skills panel can create, rename, delete empty project folders, move project Skills, and show details, while the right composer remains a compact per-message enable/disable selector.

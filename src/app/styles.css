@@ -2924,6 +2924,36 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   flex: 0 0 auto;
 }
 
+.runtime-budget-control {
+  flex: 0 0 auto;
+  display: inline-grid;
+  grid-template-columns: repeat(3, minmax(26px, 1fr));
+  align-items: center;
+  overflow: hidden;
+  min-height: 32px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface-subtle);
+}
+
+.runtime-budget-control button {
+  min-width: 0;
+  min-height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted);
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.runtime-budget-control button:hover,
+.runtime-budget-control button.is-active {
+  background: var(--color-primary);
+  color: var(--color-surface);
+}
+
 .thinking-mode-control {
   position: relative;
 }

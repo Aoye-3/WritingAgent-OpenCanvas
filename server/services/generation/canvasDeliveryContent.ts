@@ -315,7 +315,7 @@ function outlineFromBody(bodyMarkdown: string, locale: GenerateRequest["locale"]
     .map((match) => match[1].replace(/\*\*/g, "").trim())
     .filter(Boolean);
   const items = (headings.length ? headings : listItems).slice(0, 8);
-  const title = locale === "zh" ? "摘要分区" : "Summary";
+  const title = locale === "zh" ? "整体概述" : "Overview";
   if (items.length) return [`# ${title}`, ...items.map((item) => `- ${item}`)].join("\n");
   const summary = bodyMarkdown.replace(/\s+/g, " ").slice(0, 180);
   return [`# ${title}`, summary].filter(Boolean).join("\n\n");

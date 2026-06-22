@@ -26,6 +26,7 @@ import { commitCanvasDelivery, planCanvasDelivery, type CanvasDeliveryPlan } fro
 import { stableDeliveryId } from "../canvasDelivery.js";
 import { resolveCanvasDeliveryContent, type CanvasDeliveryContract } from "./canvasDeliveryContent.js";
 import { isDirectCanvasDeliveryIntent } from "./canvasDeliveryIntent.js";
+import { formatSourceLinks } from "./sourceLinks.js";
 import { isCanvasWorkflowMode, type CanvasWorkflowMode } from "../../../shared/canvasWorkflow.js";
 import {
   createRunTimelineBuilder,
@@ -77,6 +78,20 @@ const streamLabels = {
   thinking: "Thinking...",
   finalizing: "Finalizing..."
 } as const;
+
+const progressiveEvidenceTools = ["web_search", "web_fetch", "read_file", "bash", "grep", "glob", "ls", "knowledge_base"] as const;
+type RuntimeBudgetProfile = NonNullable<GenerateRequest["runtimeBudgetProfile"]>;
+
+const runtimeBudgetProfiles: Record<RuntimeBudgetProfile, {
+  recursionLimit: number;
+  modelCallLimit: number;
+  evidenceToolLimit: number;
+  synthesisReserveSteps: number;
+}> = {
+  low: { recursionLimit: 40, modelCallLimit: 10, evidenceToolLimit: 4, synthesisReserveSteps: 10 },
+  medium: { recursionLimit: 80, modelCallLimit: 20, evidenceToolLimit: 8, synthesisReserveSteps: 16 },
+  high: { recursionLimit: 160, modelCallLimit: 36, evidenceToolLimit: 18, synthesisReserveSteps: 24 }
+};
 
 export function createGenerationService(
   storage: SQLiteStorageRepository,
@@ -210,22 +225,74 @@ export function createGenerationService(
     payload = withPlanGeneration(payload, threadId, storage);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     payload = withRuntimeContext(payload, context.canvasDeliveryContract);
+    payload = withProgressiveCanvasDeliveryContext(payload, context);
     const agentCard = context.runtimeConfig.agentCard;
     let textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
     const timeline = createRunTimelineBuilder({ threadId, locale: payload.locale });
     const timelineEvents: RunTimelineEvent[] = [];
     const deliveryId = stableCanvasDeliveryId(threadId, payload, storage);
+    let researchDeliverySequence = 0;
+    let progressiveDeliveryStarted = false;
+    const progressiveEvidenceEntries: ProgressiveEvidenceEntry[] = [];
     const publicReasoning = createPublicReasoningEmitter(payload.locale, callbacks.onReasoningToken);
     const emitTimeline = (event: RunTimelineEvent) => {
       timelineEvents.push(event);
       callbacks.onTimelineEvent?.(event);
     };
-    const observeToolEvent = (event: ToolEventRecord) => {
+    const emitRuntimeToolEvent = (event: ToolEventRecord) => {
       planOrchestrator.observe(threadId, event);
       callbacks.onToolEvent?.(event);
       publicReasoning.fromToolEvent(event);
       emitTimeline(timelineEventFromToolEvent(event) ?? toolEventToTimelineEvent(timeline, event));
+    };
+    const ensureProgressiveDeliveryStarted = () => {
+      if (progressiveDeliveryStarted || !isProgressiveCanvasDeliveryEnabled(payload)) return;
+      progressiveDeliveryStarted = true;
+      const events = beginProgressiveCanvasDelivery({
+        payload,
+        threadId,
+        projectId: selection.projectId,
+        storage,
+        deliveryId
+      });
+      for (const event of events) {
+        runtimeEvents.push(event);
+        emitRuntimeToolEvent(event);
+      }
+    };
+    const observeToolEvent = (event: ToolEventRecord) => {
+      emitRuntimeToolEvent(event);
+      if (isProgressiveToolCompletion(event)) ensureProgressiveDeliveryStarted();
+      const researchEvents = commitProgressiveResearchDelivery({
+        payload,
+        threadId,
+        projectId: selection.projectId,
+        storage,
+        deliveryId,
+        event,
+        onEvidenceEntry: (entry) => progressiveEvidenceEntries.push(entry),
+        nextSequence: () => {
+          researchDeliverySequence += 1;
+          return researchDeliverySequence;
+        }
+      });
+      for (const researchEvent of researchEvents) {
+        runtimeEvents.push(researchEvent);
+        emitRuntimeToolEvent(researchEvent);
+      }
+      if (researchEvents.length) {
+        for (const bodyEvent of commitProgressiveBodyCheckpointDelivery({
+          payload,
+          projectId: selection.projectId,
+          storage,
+          deliveryId,
+          entries: progressiveEvidenceEntries
+        })) {
+          runtimeEvents.push(bodyEvent);
+          emitRuntimeToolEvent(bodyEvent);
+        }
+      }
     };
     for (const event of canvasActionEvents(payload)) {
       runtimeEvents.push(event);
@@ -242,17 +309,7 @@ export function createGenerationService(
     if (context.transientSkillNames.length) {
       emitTimeline(skillUsageTimelineEvent(timeline, payload.locale, context.transientSkillNames));
     }
-    const progressiveDeliveryEvents = beginProgressiveCanvasDelivery({
-      payload,
-      threadId,
-      projectId: selection.projectId,
-      storage,
-      deliveryId
-    });
-    for (const event of progressiveDeliveryEvents) {
-      runtimeEvents.push(event);
-      observeToolEvent(event);
-    }
+    if (shouldStartProgressiveCanvasDeliveryImmediately(payload, context)) ensureProgressiveDeliveryStarted();
 
     try {
       planOrchestrator.prepare(threadId, payload);
@@ -331,6 +388,20 @@ export function createGenerationService(
       }
     } catch (error) {
       planOrchestrator.fail(threadId, payload, error);
+      if (isProgressiveCanvasDeliveryEnabled(payload)) {
+        ensureProgressiveDeliveryStarted();
+        for (const failureEvent of commitProgressiveFailureDelivery({
+          payload,
+          projectId: selection.projectId,
+          storage,
+          deliveryId,
+          error,
+          entries: progressiveEvidenceEntries
+        })) {
+          runtimeEvents.push(failureEvent);
+          emitRuntimeToolEvent(failureEvent);
+        }
+      }
       const event = createRuntimeFallbackEvent("agent-backend", error, isMockFallbackEnabled(deps));
       runtimeEvents.push(event);
       observeToolEvent(event);
@@ -560,6 +631,57 @@ function withRuntimeContext(payload: GenerateRequest, canvasDeliveryContract?: C
   };
 }
 
+function withProgressiveCanvasDeliveryContext(payload: GenerateRequest, context: Awaited<ReturnType<typeof buildGenerationRunContext>>): GenerateRequest {
+  if (readCanvasWorkflowMode(payload.contextValues) !== "batch_delivery") return payload;
+  const profile = readRuntimeBudgetProfile(payload.runtimeBudgetProfile);
+  const budget = runtimeBudgetProfiles[profile];
+  return {
+    ...payload,
+    contextValues: {
+      ...payload.contextValues,
+      runtimeBudgetProfile: profile,
+      progressiveCanvasDelivery: {
+        enabled: true,
+        runtimeBudgetProfile: profile,
+        recursionLimit: budget.recursionLimit,
+        modelCallLimit: budget.modelCallLimit,
+        evidenceToolLimit: budget.evidenceToolLimit,
+        synthesisReserveSteps: budget.synthesisReserveSteps,
+        forceSynthesisAfterEvidence: true,
+        evidenceTools: [...progressiveEvidenceTools],
+        trigger: progressiveCanvasDeliveryTrigger(payload, context)
+      }
+    }
+  };
+}
+
+function readRuntimeBudgetProfile(value: GenerateRequest["runtimeBudgetProfile"] | unknown): RuntimeBudgetProfile {
+  return value === "low" || value === "high" ? value : "medium";
+}
+
+function progressiveCanvasDeliveryTrigger(payload: GenerateRequest, context: Awaited<ReturnType<typeof buildGenerationRunContext>>) {
+  const instruction = payload.chatInstruction ?? payload.freeTextPrompt ?? "";
+  if (isDirectCanvasDeliveryIntent(instruction)) return "direct_canvas_intent";
+  if (context.transientSkillNames.length > 0) return "skill_long_task";
+  if (context.modelSettings.thinkingMode === "enabled") return "thinking_long_task";
+  const policy = resolveOrchestrationPolicy(instruction);
+  if (policy.deliveryPolicy === "canvas_required") return "orchestration_canvas_required";
+  return "tool_event_long_task";
+}
+
+function isProgressiveCanvasDeliveryEnabled(payload: GenerateRequest) {
+  return record(payload.contextValues?.progressiveCanvasDelivery).enabled === true;
+}
+
+function shouldStartProgressiveCanvasDeliveryImmediately(payload: GenerateRequest, context: Awaited<ReturnType<typeof buildGenerationRunContext>>) {
+  if (!isProgressiveCanvasDeliveryEnabled(payload)) return false;
+  const instruction = payload.chatInstruction ?? payload.freeTextPrompt ?? "";
+  return isDirectCanvasDeliveryIntent(instruction)
+    || context.transientSkillNames.length > 0
+    || context.modelSettings.thinkingMode === "enabled"
+    || resolveOrchestrationPolicy(instruction).deliveryPolicy === "canvas_required";
+}
+
 function skillUsageTimelineEvent(
   timeline: ReturnType<typeof createRunTimelineBuilder>,
   locale: GenerateRequest["locale"],
@@ -612,9 +734,9 @@ function finalizeCanvasDelivery(input: {
   if (!delivery.required) return { text: content.assistantText || input.text, timelineEvents: localTimelineEvents };
 
   emit(safeDecisionTimelineEvent(timeline, input.payload.locale === "zh"
-    ? delivery.moduleId === "diagram_delivery"
-      ? "检测到明确 Canvas 图形交付请求，按可编辑图形节点提交。"
-      : "检测到明确 Canvas 交付请求，按“摘要分区 -> 正文 -> 来源”提交节点。"
+      ? delivery.moduleId === "diagram_delivery"
+        ? "检测到明确 Canvas 图形交付请求，按可编辑图形节点提交。"
+        : "检测到明确 Canvas 交付请求，按“整体概述 -> 正文 -> 来源”提交节点。"
     : delivery.moduleId === "diagram_delivery"
       ? "Detected an explicit Canvas diagram delivery request and committed editable diagram nodes."
       : "Detected an explicit Canvas delivery request and committed outline, body, and sources nodes."));
@@ -632,12 +754,11 @@ function beginProgressiveCanvasDelivery(input: {
   storage: SQLiteStorageRepository;
   deliveryId: string;
 }): ToolEventRecord[] {
-  const instruction = input.payload.chatInstruction ?? input.payload.freeTextPrompt ?? "";
-  if (!isDirectCanvasDeliveryIntent(instruction)) return [];
+  if (!isProgressiveCanvasDeliveryEnabled(input.payload)) return [];
   if (readCanvasWorkflowMode(input.payload.contextValues) !== "batch_delivery") return [];
-  const summaryTitle = input.payload.locale === "zh" ? "摘要分区" : "Summary";
+  const summaryTitle = input.payload.locale === "zh" ? "整体概述" : "Overview";
   const bodyTitle = input.payload.locale === "zh" ? "正文" : "Body";
-  const outlineContent = input.payload.locale === "zh" ? "# 摘要分区\n正在准备 Canvas 交付..." : "# Summary\nPreparing Canvas delivery...";
+  const outlineContent = input.payload.locale === "zh" ? "# 整体概述\n正在准备 Canvas 交付..." : "# Overview\nPreparing Canvas delivery...";
   const bodyContent = input.payload.locale === "zh" ? "# 正文\n正在生成内容..." : "# Body\nGenerating content...";
   const plan: CanvasDeliveryPlan = {
     required: true,
@@ -704,6 +825,266 @@ function canvasDeliveryEvent(
   };
 }
 
+function commitProgressiveResearchDelivery(input: {
+  payload: GenerateRequest;
+  threadId: string;
+  projectId: string;
+  storage: SQLiteStorageRepository;
+  deliveryId: string;
+  event: ToolEventRecord;
+  onEvidenceEntry?: (entry: ProgressiveEvidenceEntry) => void;
+  nextSequence: () => number;
+}): ToolEventRecord[] {
+  if (!isProgressiveCanvasDeliveryEnabled(input.payload)) return [];
+  if (!isProgressiveToolCompletion(input.event)) return [];
+  const payload = record(input.event.payload);
+  const toolName = readString(payload.toolName) || readString(payload.tool);
+  if (!isProgressiveEvidenceTool(toolName)) return [];
+  const sequence = input.nextSequence();
+  const entry = progressiveEvidenceEntry(input.payload.locale, toolName, payload, sequence);
+  if (!entry) return [];
+  input.onEvidenceEntry?.(entry);
+  const direct = isDirectCanvasDeliveryIntent(input.payload.chatInstruction ?? input.payload.freeTextPrompt ?? "");
+  const title = input.payload.locale === "zh"
+    ? `${direct ? "研究摘录" : "进度摘录"} ${sequence}`
+    : `${direct ? "Research note" : "Progress note"} ${sequence}`;
+  const content = researchNoteMarkdown(entry);
+  if (!content.trim()) return [];
+  const nodeId = stableDeliveryId("node", input.deliveryId, 100 + sequence);
+  const plan: CanvasDeliveryPlan = {
+    required: true,
+    moduleId: "document_batch",
+    nodes: [{
+      id: nodeId,
+      kind: "reference",
+      title,
+      content,
+      x: 560 + sequence * 240,
+      y: 720 + sequence * 80,
+      width: 560,
+      height: 300,
+      metadata: { deliveryId: input.deliveryId, phase: "research", researchIndex: sequence, toolName }
+    }],
+    edges: []
+  };
+  const [committed] = commitCanvasDelivery(input.storage, input.projectId, plan);
+  return committed ? [canvasDeliveryEvent("canvas_delivery_research_committed", input.deliveryId, input.payload.locale, committed)] : [];
+}
+
+type ProgressiveEvidenceEntry = {
+  sequence: number;
+  locale: GenerateRequest["locale"];
+  toolName: string;
+  query?: string;
+  url?: string;
+  path?: string;
+  command?: string;
+  summary?: string;
+  snippet?: string;
+  sources: Array<{ title: string; url: string; snippet?: string }>;
+};
+
+function commitProgressiveBodyCheckpointDelivery(input: {
+  payload: GenerateRequest;
+  projectId: string;
+  storage: SQLiteStorageRepository;
+  deliveryId: string;
+  entries: ProgressiveEvidenceEntry[];
+}): ToolEventRecord[] {
+  if (!isProgressiveCanvasDeliveryEnabled(input.payload) || input.entries.length === 0) return [];
+  const title = input.payload.locale === "zh" ? "正文" : "Body";
+  const content = progressiveBodyCheckpointMarkdown(input.payload.locale, input.entries);
+  const plan: CanvasDeliveryPlan = {
+    required: true,
+    moduleId: "document_batch",
+    nodes: [{
+      id: stableDeliveryId("node", input.deliveryId, 2),
+      kind: "document",
+      title,
+      content,
+      x: 960,
+      y: 240,
+      width: 620,
+      height: 520,
+      metadata: { deliveryId: input.deliveryId, phase: "body", checkpoint: true, evidenceCount: input.entries.length }
+    }],
+    edges: []
+  };
+  const [committed] = commitCanvasDelivery(input.storage, input.projectId, plan);
+  return committed ? [canvasDeliveryEvent("canvas_delivery_body_checkpoint_committed", input.deliveryId, input.payload.locale, committed)] : [];
+}
+
+function commitProgressiveFailureDelivery(input: {
+  payload: GenerateRequest;
+  projectId: string;
+  storage: SQLiteStorageRepository;
+  deliveryId: string;
+  error: unknown;
+  entries: ProgressiveEvidenceEntry[];
+}): ToolEventRecord[] {
+  if (!isProgressiveCanvasDeliveryEnabled(input.payload)) return [];
+  const title = input.payload.locale === "zh" ? "运行失败" : "Run failed";
+  const message = safeRuntimeErrorMessage(input.error);
+  const overviewTitle = input.payload.locale === "zh" ? "整体概述" : "Overview";
+  const overviewContent = [
+    `# ${overviewTitle}`,
+    "",
+    input.payload.locale === "zh"
+      ? "运行在最终综合前失败。画布中已保留可恢复的中间产物和最新正文草稿。"
+      : "The run failed before final synthesis. The Canvas keeps recoverable progress notes and the latest body draft.",
+    "",
+    `- ${input.payload.locale === "zh" ? "已保留摘录" : "Preserved notes"}: ${input.entries.length}`,
+    `- ${input.payload.locale === "zh" ? "错误" : "Error"}: ${message}`
+  ].join("\n");
+  const content = [
+    `# ${title}`,
+    "",
+    input.payload.locale === "zh"
+      ? "运行在生成最终结果前失败。已保留此前完成的 Canvas 中间产物，便于继续排查或重试。"
+      : "The run failed before producing the final result. Completed Canvas progress notes were preserved for recovery or retry.",
+    "",
+    `- ${input.payload.locale === "zh" ? "错误" : "Error"}: ${message}`
+  ].join("\n");
+  const plan: CanvasDeliveryPlan = {
+    required: true,
+    moduleId: "document_batch",
+    nodes: [
+      {
+        id: stableDeliveryId("node", input.deliveryId, 1),
+        kind: "document",
+        title: overviewTitle,
+        content: overviewContent,
+        x: 560,
+        y: 240,
+        width: 560,
+        height: 300,
+        metadata: { deliveryId: input.deliveryId, phase: "outline", status: "failed" }
+      },
+      {
+        id: stableDeliveryId("node", input.deliveryId, 900),
+        kind: "reference",
+        title,
+        content,
+        x: 560,
+        y: 1080,
+        width: 560,
+        height: 260,
+        metadata: { deliveryId: input.deliveryId, phase: "failure", status: "failed" }
+      }
+    ],
+    edges: []
+  };
+  const committed = commitCanvasDelivery(input.storage, input.projectId, plan);
+  return committed.length ? [canvasDeliveryEvent("canvas_delivery_failed_summary_committed", input.deliveryId, input.payload.locale, committed[0]!)] : [];
+}
+
+function progressiveEvidenceEntry(locale: GenerateRequest["locale"], toolName: string, payload: Record<string, unknown>, sequence: number): ProgressiveEvidenceEntry | undefined {
+  const entry: ProgressiveEvidenceEntry = {
+    sequence,
+    locale,
+    toolName,
+    query: sanitizeProgressText(readString(payload.query)),
+    url: readString(payload.url),
+    path: sanitizeProgressText(readString(payload.path)),
+    command: sanitizeProgressText(readString(payload.command)),
+    summary: sanitizeProgressText(readString(payload.summary)),
+    snippet: sanitizeProgressText(readString(payload.snippet)),
+    sources: readResearchSources(payload.sources)
+  };
+  if (!entry.query && !entry.url && !entry.path && !entry.command && !entry.summary && !entry.snippet && !entry.sources.length) return undefined;
+  return entry;
+}
+
+function researchNoteMarkdown(input: ProgressiveEvidenceEntry) {
+  const label = input.locale === "zh"
+    ? { tool: "工具", query: "查询", url: "URL", path: "路径", command: "命令", summary: "摘要", snippet: "摘录", sources: "来源", snippets: "来源摘录" }
+    : { tool: "Tool", query: "Query", url: "URL", path: "Path", command: "Command", summary: "Summary", snippet: "Snippet", sources: "Sources", snippets: "Source snippets" };
+  const lines = [
+    `# ${input.locale === "zh" ? "进度摘录" : "Progress note"}`,
+    `- ${label.tool}: ${input.toolName}`,
+    input.query ? `- ${label.query}: ${input.query}` : "",
+    input.url ? `- ${label.url}: ${input.url}` : "",
+    input.path ? `- ${label.path}: ${input.path}` : "",
+    input.command ? `- ${label.command}: ${input.command}` : "",
+    input.summary ? `- ${label.summary}: ${input.summary}` : "",
+    input.snippet ? `- ${label.snippet}: ${input.snippet}` : ""
+  ].filter(Boolean);
+  if (input.sources.length) {
+    lines.push("", `## ${label.sources}`, formatSourceLinks(input.sources));
+    const snippets = input.sources.filter((source) => source.snippet);
+    if (snippets.length) {
+      lines.push("", `## ${label.snippets}`, ...snippets.map((source) => `- ${source.title}: ${source.snippet}`));
+    }
+  }
+  return lines.join("\n");
+}
+
+function progressiveBodyCheckpointMarkdown(locale: GenerateRequest["locale"], entries: ProgressiveEvidenceEntry[]) {
+  const recent = entries.slice(-8);
+  const heading = locale === "zh" ? "正文" : "Body";
+  const status = locale === "zh" ? "工作正文草稿" : "Working body draft";
+  const findings = locale === "zh" ? "已形成的正文要点" : "Draft points";
+  const basis = locale === "zh" ? "依据" : "Basis";
+  const next = locale === "zh" ? "待最终综合" : "Pending final synthesis";
+  const lines = [
+    `# ${heading}`,
+    "",
+    `> ${status}: ${locale === "zh" ? "以下内容由服务端根据已完成工具事件自动汇总，最终成功后会被正式正文替换。" : "This section is server-built from completed tool events and will be replaced by the final body after a successful run."}`,
+    "",
+    `## ${findings}`
+  ];
+  for (const entry of recent) {
+    const point = entry.summary || entry.snippet || entry.query || entry.url || entry.path || entry.command || "";
+    if (!point) continue;
+    const source = entry.url || entry.path || entry.query || entry.command || entry.toolName;
+    lines.push(`- ${point}${source ? ` (${basis}: ${source})` : ""}`);
+  }
+  lines.push("", `## ${next}`, locale === "zh"
+    ? "- 基于上述材料压缩重复信息，形成完整结论、步骤和来源说明。"
+    : "- Compress repeated evidence into complete conclusions, steps, and source notes.");
+  return lines.join("\n");
+}
+
+function isProgressiveToolCompletion(event: ToolEventRecord) {
+  return /(?:^|_)tool_completed$/.test(event.eventType);
+}
+
+function isProgressiveEvidenceTool(toolName: string) {
+  return (progressiveEvidenceTools as readonly string[]).includes(toolName);
+}
+
+function sanitizeProgressText(value: string) {
+  return value
+    .replace(/__FACETWRITE_EVENT__[\s\S]*/g, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .map(redactSecretLikeText)
+    .filter((line) => line && !/^#\s*(?:AgentCard|Loaded Skills|Current User Instruction|Context|Output Contract)\b/i.test(line))
+    .filter((line) => !/^\[redacted credential\]$/i.test(line))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .slice(0, 500);
+}
+
+function redactSecretLikeText(value: string) {
+  return value
+    .replace(/\b[A-Za-z0-9_]*(?:api[_-]?key|authorization|token|password|secret|cookie)\s*[:=]\s*\S+/gi, "[redacted credential]")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "[redacted credential]");
+}
+
+function readResearchSources(value: unknown): Array<{ title: string; url: string; snippet?: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const source = item as Record<string, unknown>;
+    const url = readString(source.url);
+    if (!/^https?:\/\//i.test(url)) return [];
+    const title = readString(source.title) || url;
+    const snippet = sanitizeProgressText(readString(source.snippet));
+    return [{ title, url, ...(snippet ? { snippet } : {}) }];
+  }).slice(0, 10);
+}
+
 function readCanvasWorkflowMode(contextValues: GenerateRequest["contextValues"]): CanvasWorkflowMode {
   const canvas = record(contextValues?.canvas);
   const workflow = record(canvas.workflow);
@@ -730,6 +1111,10 @@ function createPublicReasoningEmitter(locale: GenerateRequest["locale"], onReaso
       }
       if (/^canvas_delivery_body_started$/.test(event.eventType)) {
         emit("canvas:body:start", locale === "zh" ? "正文节点已就位，等待完整答案后写入分节内容。" : "The body node is in place and will receive section content after the answer stabilizes.");
+        return;
+      }
+      if (/^canvas_delivery_body_checkpoint_committed$/.test(event.eventType)) {
+        emit("canvas:body:checkpoint", locale === "zh" ? "正文草稿已根据当前工具结果更新。" : "The body draft was updated from the current tool results.");
         return;
       }
       const payload = record(event.payload);

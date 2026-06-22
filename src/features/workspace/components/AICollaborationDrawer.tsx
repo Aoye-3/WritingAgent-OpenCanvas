@@ -32,6 +32,7 @@ type WriteDraft = {
 };
 
 type ThinkingChoice = "disabled" | "high" | "max";
+type RuntimeBudgetChoice = NonNullable<GenerateRequest["runtimeBudgetProfile"]>;
 
 export type ConversationModelControls = {
   providerId?: string;
@@ -154,6 +155,7 @@ export function AICollaborationDrawer({
   const [input, setInput] = useState("");
   const supportsThinking = modelSettings?.providerId === "deepseek";
   const [thinkingChoice, setThinkingChoice] = useState<ThinkingChoice>(modelSettingsToThinkingChoice(modelSettings));
+  const [runtimeBudgetChoice, setRuntimeBudgetChoice] = useState<RuntimeBudgetChoice>("medium");
   const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
   const [annotations, setAnnotations] = useState<MessageAnnotation[]>([]);
   const [writeDraft, setWriteDraft] = useState<WriteDraft | null>(null);
@@ -274,7 +276,8 @@ export function AICollaborationDrawer({
         ...(awaitingPlan ? { awaitingPlan: { id: awaitingPlan.id, answer: text } } : {}),
         ...(revisePlan ? { awaitingPlan: { id: revisePlan.id, revise: true } } : {}),
         ...(enabledSkillRefs.length ? { transientSkillRefs: enabledSkillRefs } : {}),
-        ...(disabledSkillRefs.length ? { disabledSkillRefs } : {})
+        ...(disabledSkillRefs.length ? { disabledSkillRefs } : {}),
+        runtimeBudgetProfile: runtimeBudgetChoice
       });
       if (sendResult) {
         onSkillOverridesConsumed();
@@ -564,6 +567,7 @@ export function AICollaborationDrawer({
               />
             </div>
           ) : null}
+          <RuntimeBudgetControl value={runtimeBudgetChoice} onChange={setRuntimeBudgetChoice} />
         </div>
         <AnnotationChipRow annotations={annotations} compact onRemoveAnnotation={removeAnnotation} />
         {enabledSkillRefs.length || disabledSkillRefs.length ? (
@@ -755,6 +759,38 @@ function ThinkingModeButton({
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function RuntimeBudgetControl({
+  value,
+  onChange
+}: {
+  value: RuntimeBudgetChoice;
+  onChange: (value: RuntimeBudgetChoice) => void;
+}) {
+  const { locale } = useI18n();
+  const options: Array<{ value: RuntimeBudgetChoice; label: string }> = [
+    { value: "low", label: locale === "zh" ? "\u4f4e" : "Low" },
+    { value: "medium", label: locale === "zh" ? "\u4e2d" : "Med" },
+    { value: "high", label: locale === "zh" ? "\u9ad8" : "High" }
+  ];
+  const label = locale === "zh" ? "\u8fd0\u884c\u6863\u4f4d" : "Run budget";
+  return (
+    <div className="runtime-budget-control" aria-label={label}>
+      {options.map((option) => (
+        <button
+          aria-pressed={value === option.value}
+          className={value === option.value ? "is-active" : ""}
+          key={option.value}
+          onClick={() => onChange(option.value)}
+          title={label}
+          type="button"
+        >
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 }

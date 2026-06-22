@@ -83,6 +83,7 @@ It starts from `start-opencanvas-shell.vbs`, requires Docker and port `2026` to 
 - stdio MCP cannot find `npx`: confirm Node is on PATH; the launcher prepends discovered Node/npm/npx directories.
 - Docker bridge failure: use `FACETWRITE_INTERNAL_BASE_URL=http://host.docker.internal:<api-port>`.
 - Local bridge failure: use `http://127.0.0.1:<api-port>`.
+- Long batch-delivery runs that end with `GraphRecursionError` or `Recursion limit of 100 reached` are usually tool-loop or budget-planning failures, not missing UI rendering. Inspect `modules/agent-runtime/logs/gateway-local.err.log` for the original runtime error, then confirm the stream emitted `agent_backend_tool_completed`, `canvas_delivery_research_committed`, `canvas_delivery_body_checkpoint_committed`, and on failure `canvas_delivery_failed_summary_committed` events. Progressive `研究摘录 N` / `Research note N` or `进度摘录 N` / `Progress note N` nodes and the latest `正文` / `Body` checkpoint should remain as recoverable work, but the run must still fail if no final assistant text or final structured lifecycle outcome exists.
 - Generation failures: inspect stable `model_required`, `model_not_ready`, `runtime_unavailable`, or `runtime_auth_failed` diagnostics. Do not enable Mock fallback for acceptance testing.
 - Deliberate local Mock demonstration only: set `FACETWRITE_MOCK_FALLBACK_ENABLED=true`; unset it before real Runtime verification.
 # Plan Runtime Enforcement
@@ -101,4 +102,4 @@ Clarification feedback is anchored in the composer. Intake may emit a short assi
 
 Running generations are user-stoppable from the chat composer. The frontend aborts the streaming fetch, marks the active assistant message as `stopped`, and lets AgentBackend receive the disconnect with `on_disconnect:"cancel"`. A stopped stream is not treated as a successful Plan phase and does not mutate Plan lifecycle state by itself; use the persisted Plan status and activities to decide whether the user should retry, answer a pending clarification, approve a Plan, or resume execution.
 
-After changing AgentBackend middleware, run `agent-runtime:up`; source fingerprint comparison restarts a stale healthy Gateway because Python modules are not hot-reloaded.
+After changing AgentBackend middleware, including evidence-tool budget filtering or synthesis-reserve logic, run `agent-runtime:up`; source fingerprint comparison restarts a stale healthy Gateway because Python modules are not hot-reloaded.

@@ -311,7 +311,7 @@ test("direct Canvas delivery is committed by the server planner without copying 
 
   assert.equal(result.provider, "agent-backend");
   assert.equal(canvasWriteRequests.length, 0);
-  assert.deepEqual(canvasNodes.map((node) => node.title), ["摘要分区", "正文", "来源"]);
+  assert.deepEqual(canvasNodes.map((node) => node.title), ["整体概述", "正文", "来源"]);
   assert.equal(String(canvasNodes[1]?.content).includes("新闻搜索和总结已经完成"), false);
   assert.equal(String(canvasNodes[1]?.content).includes("我已经通过网络搜索"), false);
   assert.match(String(canvasNodes[1]?.content), /科技领域/);
@@ -380,12 +380,194 @@ test("streaming direct Canvas delivery keeps progressive placeholders when Agent
   );
 
   assert.equal(tokens.join(""), "");
-  assert.equal(canvasNodes.length, 2);
+  assert.equal(canvasNodes.length, 3);
   assert.ok(canvasNodes.some((node) => node.metadata && (node.metadata as { phase?: string }).phase === "outline"));
   assert.ok(canvasNodes.some((node) => node.metadata && (node.metadata as { phase?: string }).phase === "body"));
+  assert.ok(canvasNodes.some((node) => node.metadata && (node.metadata as { phase?: string }).phase === "failure"));
   assert.equal(records.length, 0);
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_outline_committed"));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
   assert.ok(events.some((event) => event.eventType === "agent_backend_runtime_failed" && event.payload.fallback === "none"));
+});
+
+test("streaming direct Canvas delivery commits a research note after each search completion before final failure", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "web_search",
+            query: "LLM agent survey 2025",
+            sources: [{ title: "Agent Survey", url: "https://example.com/agent-survey", snippet: "A survey of LLM agents." }]
+          }
+        });
+        throw new Error("Recursion limit of 100 reached without hitting a stop condition.");
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => service.generateAndRecordStream({
+      mode: "chat",
+      locale: "zh",
+      agentCardId: "chat-agent",
+      chatInstruction: "\u9605\u8bfb\u6280\u672f\u6587\u6863\uff0c\u628a\u6bcf\u8f6e\u641c\u7d22\u548c\u67e5\u627e\u7684\u7ed3\u679c\u5b58\u5230\u753b\u5e03\uff0c\u6700\u540e\u751f\u6210\u6574\u4f53\u6982\u8ff0\u8282\u70b9",
+      toolState: { web_search: true }
+    }, {
+      onToolEvent: (event) => events.push(event as typeof events[number])
+    }),
+    /Recursion limit of 100 reached/
+  );
+
+  assert.equal(records.length, 0);
+  assert.ok(canvasNodes.some((node) => node.title === "\u7814\u7a76\u6458\u5f55 1" && String(node.content).includes("LLM agent survey 2025")));
+  assert.ok(canvasNodes.some((node) => node.title === "\u7814\u7a76\u6458\u5f55 1" && String(node.content).includes("https://example.com/agent-survey")));
+  assert.ok(canvasNodes.some((node) => node.title === "\u6b63\u6587" && String(node.content).includes("\u5de5\u4f5c\u6b63\u6587\u8349\u7a3f")));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_checkpoint_committed"));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_research_committed"));
+});
+
+test("streaming skill long task creates Canvas progress without explicit Canvas wording", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "read_file",
+            path: "/mnt/skills/public/writing-review/literature-review/SKILL.md",
+            snippet: "# Literature Review\nInternal workflow guidance"
+          }
+        });
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "bash",
+            command: "parallel-cli search completed with 10 candidate papers"
+          }
+        });
+        throw new Error("Recursion limit of 100 reached without hitting a stop condition.");
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => service.generateAndRecordStream({
+      mode: "chat",
+      locale: "zh",
+      agentCardId: "chat-agent",
+      chatInstruction: "帮我查找最近Agent相关的文献，并且做文献综述",
+      transientSkillRefs: ["database-lookup", "literature-review"],
+      modelOverrides: { thinkingMode: "enabled" },
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+      toolState: { web_search: true }
+    }, {
+      onToolEvent: (event) => events.push(event as typeof events[number])
+    }),
+    /Recursion limit of 100 reached/
+  );
+
+  assert.equal(records.length, 0);
+  assert.ok(canvasNodes.some((node) => node.title === "整体概述"));
+  assert.ok(canvasNodes.some((node) => node.title === "正文"));
+  assert.ok(canvasNodes.some((node) => node.title === "进度摘录 1" && String(node.content).includes("literature-review/SKILL.md")));
+  assert.ok(canvasNodes.some((node) => node.title === "进度摘录 2" && String(node.content).includes("parallel-cli search completed")));
+  assert.ok(canvasNodes.some((node) => node.title === "运行失败" && String(node.content).includes("Recursion limit of 100 reached")));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_outline_committed"));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_research_committed"));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_checkpoint_committed"));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
+});
+
+test("streaming generic long task creates Canvas progress from evidence tools", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "web_fetch",
+            url: "https://example.com/runtime-notes",
+            snippet: "Fetched runtime notes with useful implementation details."
+          }
+        });
+        throw new Error("Recursion limit of 100 reached without hitting a stop condition.");
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => service.generateAndRecordStream({
+      mode: "chat",
+      locale: "en",
+      agentCardId: "chat-agent",
+      chatInstruction: "Audit dependency risks and report what you find",
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+    }, {
+      onToolEvent: (event) => events.push(event as typeof events[number])
+    }),
+    /Recursion limit of 100 reached/
+  );
+
+  assert.equal(records.length, 0);
+  assert.ok(canvasNodes.some((node) => node.title === "Overview"));
+  assert.ok(canvasNodes.some((node) => node.title === "Body" && String(node.content).includes("Working body draft")));
+  assert.ok(canvasNodes.some((node) => node.title === "Progress note 1" && String(node.content).includes("https://example.com/runtime-notes")));
+  assert.ok(canvasNodes.some((node) => node.title === "Run failed" && String(node.content).includes("Recursion limit of 100 reached")));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_research_committed"));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_checkpoint_committed"));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
+});
+
+test("progressive Canvas notes sanitize unsafe tool snippets", async () => {
+  const { storage, canvasNodes } = fakeStorage();
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "read_file",
+            path: "/mnt/user-data/workspace/.env",
+            snippet: "OPENAI_API_KEY=sk-secret\n# AgentCard\nprivate prompt"
+          }
+        });
+        throw new Error("Recursion limit of 100 reached without hitting a stop condition.");
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => service.generateAndRecordStream({
+      mode: "chat",
+      locale: "en",
+      agentCardId: "chat-agent",
+      chatInstruction: "Audit the project files",
+      transientSkillRefs: ["database-lookup"],
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+    }),
+    /Recursion limit of 100 reached/
+  );
+
+  const text = canvasNodes.map((node) => String(node.content)).join("\n");
+  assert.equal(text.includes("sk-secret"), false);
+  assert.equal(text.includes("OPENAI_API_KEY"), false);
+  assert.equal(text.includes("# AgentCard"), false);
 });
 
 test("streaming direct Canvas delivery progressively creates placeholders and finalizes stable nodes", async () => {

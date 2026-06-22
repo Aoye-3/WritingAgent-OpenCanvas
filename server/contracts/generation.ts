@@ -18,6 +18,7 @@ export type GenerateRequest = {
   toolState?: ToolState;
   systemPrompt?: string;
   providerId?: ProviderId;
+  runtimeBudgetProfile?: "low" | "medium" | "high";
   modelOverrides?: {
     thinkingMode?: "enabled" | "disabled";
     reasoningEffort?: "high" | "max" | "low" | "medium" | "xhigh";
@@ -80,6 +81,7 @@ export function parseGenerateRequest(value: unknown): GenerateRequest {
     toolState: readBooleanRecord(body.toolState),
     systemPrompt: readString(body.systemPrompt),
     providerId: readProviderId(body.providerId),
+    runtimeBudgetProfile: readRuntimeBudgetProfile(body.runtimeBudgetProfile),
     modelOverrides: readModelOverrides(body.modelOverrides),
     transientSkillRefs: readStringList(body.transientSkillRefs),
     disabledSkillRefs: readStringList(body.disabledSkillRefs),
@@ -156,6 +158,10 @@ function readModelOverrides(value: unknown): GenerateRequest["modelOverrides"] {
   const reasoningEffort = effort === "high" || effort === "max" || effort === "low" || effort === "medium" || effort === "xhigh" ? effort : undefined;
   if (!thinkingMode && !reasoningEffort) return undefined;
   return { thinkingMode, reasoningEffort };
+}
+
+function readRuntimeBudgetProfile(value: unknown): GenerateRequest["runtimeBudgetProfile"] {
+  return value === "low" || value === "medium" || value === "high" ? value : undefined;
 }
 
 function readCanvasAction(value: unknown): CanvasAction | undefined {

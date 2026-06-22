@@ -159,7 +159,7 @@ function outlineNodes(input: CanvasDeliveryInput) {
     index: 1,
     phase: "outline",
     kind: "document",
-    title: titleFromMarkdown(content, input.locale === "zh" ? "摘要分区" : "Summary"),
+    title: titleFromMarkdown(content, input.locale === "zh" ? "整体概述" : "Overview"),
     content,
     x: DELIVERY_LAYOUT.startX,
     y: DELIVERY_LAYOUT.startY,

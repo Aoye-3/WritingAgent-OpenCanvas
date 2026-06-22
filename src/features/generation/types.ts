@@ -12,6 +12,7 @@ export type GenerateRequest = {
   chatInstruction?: string;
   toolState?: Partial<Record<"web_search" | "knowledge_base" | "clear_context" | "canvas_write" | "plan_update" | "plan_clarification_submit" | "plan_revision_submit" | "artifact_stage", boolean>>;
   systemPrompt?: string;
+  runtimeBudgetProfile?: "low" | "medium" | "high";
   modelOverrides?: {
     thinkingMode?: "enabled" | "disabled";
     reasoningEffort?: "high" | "max" | "low" | "medium" | "xhigh";

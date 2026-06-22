@@ -10,6 +10,7 @@ import { buildAgentBackendRuntimeMetadata } from "./taskAgentMapping.js";
 import { resolvePlanRequestPolicy } from "../../services/generation/planRequestPolicy.js";
 import { resolveCanvasAction } from "../../services/generation/canvasActionPolicy.js";
 import type { CanvasAction } from "../../services/generation/canvasActionPolicy.js";
+import { isDirectCanvasDeliveryIntent } from "../../services/generation/canvasDeliveryIntent.js";
 
 export type AgentBackendRunInput = {
   threadId: string;
@@ -62,6 +63,15 @@ type AgentBackendRunContext = {
   facetwrite_plan_id?: string;
   facetwrite_plan_step_id?: string;
   facetwrite_memory_content?: string;
+  facetwrite_research_tool_limit?: number;
+  facetwrite_progressive_canvas_delivery_enabled?: boolean;
+  facetwrite_runtime_budget_profile?: "low" | "medium" | "high";
+  facetwrite_recursion_limit?: number;
+  facetwrite_model_call_limit?: number;
+  facetwrite_evidence_tool_limit?: number;
+  facetwrite_synthesis_reserve_steps?: number;
+  facetwrite_force_synthesis_after_evidence?: boolean;
+  facetwrite_evidence_tools?: string[];
 };
 
 export async function runAgentBackendAgent(input: AgentBackendRunInput): Promise<AgentBackendRunResult> {
@@ -130,6 +140,7 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
     },
     metadata: buildAgentBackendRuntimeMetadata(input.agentCard, input.settings),
     config: {
+      ...(runtimeContext.facetwrite_recursion_limit ? { recursion_limit: runtimeContext.facetwrite_recursion_limit } : {}),
       configurable: {
         thread_id: input.threadId,
         ...runtimeContext
@@ -166,6 +177,30 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
   const planGeneration = input.contextValues?.planGeneration && isRecord(input.contextValues.planGeneration)
     ? input.contextValues.planGeneration
     : undefined;
+  const researchToolLimit = isDirectCanvasDeliveryIntent(input.chatInstruction ?? "") ? 8 : undefined;
+  const progressiveDelivery = isRecord(input.contextValues?.progressiveCanvasDelivery)
+    ? input.contextValues.progressiveCanvasDelivery
+    : undefined;
+  const progressiveCanvasDeliveryEnabled = progressiveDelivery?.enabled === true ? true : undefined;
+  const evidenceToolLimit = typeof progressiveDelivery?.evidenceToolLimit === "number" && progressiveDelivery.evidenceToolLimit > 0
+    ? Math.floor(progressiveDelivery.evidenceToolLimit)
+    : undefined;
+  const recursionLimit = typeof progressiveDelivery?.recursionLimit === "number" && progressiveDelivery.recursionLimit > 0
+    ? Math.floor(progressiveDelivery.recursionLimit)
+    : undefined;
+  const modelCallLimit = typeof progressiveDelivery?.modelCallLimit === "number" && progressiveDelivery.modelCallLimit > 0
+    ? Math.floor(progressiveDelivery.modelCallLimit)
+    : undefined;
+  const synthesisReserveSteps = typeof progressiveDelivery?.synthesisReserveSteps === "number" && progressiveDelivery.synthesisReserveSteps > 0
+    ? Math.floor(progressiveDelivery.synthesisReserveSteps)
+    : undefined;
+  const budgetProfile = progressiveDelivery?.runtimeBudgetProfile === "low" || progressiveDelivery?.runtimeBudgetProfile === "high"
+    ? progressiveDelivery.runtimeBudgetProfile
+    : progressiveDelivery?.runtimeBudgetProfile === "medium" ? "medium" : undefined;
+  const forceSynthesisAfterEvidence = progressiveDelivery?.forceSynthesisAfterEvidence === true ? true : undefined;
+  const evidenceTools = Array.isArray(progressiveDelivery?.evidenceTools)
+    ? progressiveDelivery.evidenceTools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0)
+    : undefined;
   const planId = planGeneration ? String(planGeneration.planId ?? "").trim() : "";
   const planStepId = planGeneration ? String(planGeneration.stepId ?? "").trim() : "";
   const phaseAttemptId = planGeneration ? String(planGeneration.phaseAttemptId ?? "").trim() : "";
@@ -181,7 +216,16 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
       facetwrite_plan_stage: planPolicy.stage,
       facetwrite_plan_phase_attempt_id: phaseAttemptId || undefined,
       facetwrite_plan_id: planId || undefined,
-      facetwrite_plan_step_id: planStepId || undefined
+      facetwrite_plan_step_id: planStepId || undefined,
+      facetwrite_research_tool_limit: researchToolLimit,
+      facetwrite_progressive_canvas_delivery_enabled: progressiveCanvasDeliveryEnabled,
+      facetwrite_runtime_budget_profile: budgetProfile,
+      facetwrite_recursion_limit: recursionLimit,
+      facetwrite_model_call_limit: modelCallLimit,
+      facetwrite_evidence_tool_limit: evidenceToolLimit,
+      facetwrite_synthesis_reserve_steps: synthesisReserveSteps,
+      facetwrite_force_synthesis_after_evidence: forceSynthesisAfterEvidence,
+      facetwrite_evidence_tools: evidenceTools
     };
   }
   const thinkingMode = modelSettings.thinkingMode ?? (modelSettings.providerId === "deepseek" && modelSettings.model === "deepseek-reasoner" ? "enabled" : "disabled");
@@ -198,6 +242,15 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     facetwrite_plan_phase_attempt_id: phaseAttemptId || undefined,
     facetwrite_plan_id: planId || undefined,
     facetwrite_plan_step_id: planStepId || undefined,
+    facetwrite_research_tool_limit: researchToolLimit,
+    facetwrite_progressive_canvas_delivery_enabled: progressiveCanvasDeliveryEnabled,
+    facetwrite_runtime_budget_profile: budgetProfile,
+    facetwrite_recursion_limit: recursionLimit,
+    facetwrite_model_call_limit: modelCallLimit,
+    facetwrite_evidence_tool_limit: evidenceToolLimit,
+    facetwrite_synthesis_reserve_steps: synthesisReserveSteps,
+    facetwrite_force_synthesis_after_evidence: forceSynthesisAfterEvidence,
+    facetwrite_evidence_tools: evidenceTools,
     ...(memoryContent ? { facetwrite_memory_content: memoryContent } : {})
   };
 }
@@ -222,6 +275,7 @@ async function readAgentBackendStream(
   const events: ToolEventRecord[] = [];
   const textByMessageId = new Map<string, string[]>();
   const unkeyedText: string[] = [];
+  const toolCallArgsById = new Map<string, Record<string, unknown>>();
   let lastMessageId: string | undefined;
   let finalValuesText: string | undefined;
   let usage: unknown;
@@ -254,6 +308,8 @@ async function readAgentBackendStream(
 
   function handleEvents(parsedEvents: ReturnType<typeof parseSseChunk>) {
     for (const parsed of parsedEvents) {
+      const runtimeError = extractRuntimeError(parsed.event, parsed.data);
+      if (runtimeError) throw new Error(runtimeError);
       const messageId = extractMessageId(parsed.event, parsed.data);
       const reasoningText = extractReasoningText(parsed.event, parsed.data);
       if (reasoningText) {
@@ -276,7 +332,7 @@ async function readAgentBackendStream(
         finalValuesText = extractFinalValuesText(parsed.data) ?? finalValuesText;
       }
 
-      const toolEvents = mapToolEvents(parsed.event, parsed.data);
+      const toolEvents = mapToolEvents(parsed.event, parsed.data, toolCallArgsById);
       for (const event of toolEvents) {
         events.push(event);
         callbacks.onStatus?.(statusFromToolEvent(event));
@@ -287,6 +343,14 @@ async function readAgentBackendStream(
       if (nextUsage) usage = nextUsage;
     }
   }
+}
+
+function extractRuntimeError(event: string, data: unknown): string | undefined {
+  if (event !== "error") return undefined;
+  if (typeof data === "string") return data.trim() || "AgentBackend runtime stream failed";
+  if (!isRecord(data)) return "AgentBackend runtime stream failed";
+  const message = readSourceString(data.message) || readSourceString(data.error) || readSourceString(data.detail);
+  return message || "AgentBackend runtime stream failed";
 }
 
 function extractMessageId(event: string, data: unknown) {
@@ -371,7 +435,7 @@ function reasoningTextFromMessageLike(value: unknown): string | undefined {
   return undefined;
 }
 
-function mapToolEvents(event: string, data: unknown): ToolEventRecord[] {
+function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<string, Record<string, unknown>>): ToolEventRecord[] {
   if (event === "custom" && isRecord(data)) {
     const type = typeof data.type === "string" ? data.type : typeof data.event === "string" ? data.event : undefined;
     return type && /^(?:task_|plan_|artifact_|canvas_)/.test(type) ? [{ eventType: `agent_backend_${type}`, payload: data }] : [];
@@ -383,14 +447,18 @@ function mapToolEvents(event: string, data: unknown): ToolEventRecord[] {
   if (Array.isArray(message.tool_calls)) {
     return message.tool_calls.flatMap((toolCall) => {
       if (!isRecord(toolCall)) return [];
-      const toolName = typeof toolCall.name === "string" ? toolCall.name : undefined;
+      const toolName = typeof toolCall.name === "string" ? toolCall.name : toolFunctionName(toolCall);
       if (!toolName) return [];
+      const toolCallId = typeof toolCall.id === "string" ? toolCall.id : undefined;
+      const args = toolCallArgs(toolCall);
+      if (toolCallId) toolCallArgsById.set(toolCallId, args);
       const started: ToolEventRecord = {
         eventType: "agent_backend_tool_started",
         payload: {
           type: "tool_started",
           toolName,
-          toolCallId: typeof toolCall.id === "string" ? toolCall.id : undefined
+          toolCallId,
+          ...safeToolArgs(toolName, args)
         }
       };
       return toolName === "canvas_write"
@@ -399,7 +467,7 @@ function mapToolEvents(event: string, data: unknown): ToolEventRecord[] {
             payload: {
               type: "canvas_mutation_started",
               toolName,
-              toolCallId: typeof toolCall.id === "string" ? toolCall.id : undefined
+              toolCallId
             }
           }]
         : [started];
@@ -414,18 +482,78 @@ function mapToolEvents(event: string, data: unknown): ToolEventRecord[] {
     || (typeof message.content === "string" && message.content.startsWith("Error:"));
   const toolName = typeof message.name === "string" ? message.name : "unknown";
   const sources = toolName === "web_search" ? extractWebSearchSources(message.content) : [];
+  const toolCallId = typeof message.tool_call_id === "string" ? message.tool_call_id : undefined;
+  const startedArgs = toolCallId ? toolCallArgsById.get(toolCallId) ?? {} : {};
   const terminal: ToolEventRecord = {
     eventType: failed ? "agent_backend_tool_failed" : "agent_backend_tool_completed",
     payload: {
       type: failed ? "tool_failed" : "tool_completed",
       toolName,
-      toolCallId: typeof message.tool_call_id === "string" ? message.tool_call_id : undefined,
+      toolCallId,
+      ...safeToolArgs(toolName, startedArgs),
+      ...safeToolResult(toolName, message.content),
       ...(sources.length ? { sources } : {}),
       ...(structured[0]?.payload?.reason ? { reason: structured[0].payload.reason } : {}),
       ...(structured[0]?.payload?.summary ? { summary: structured[0].payload.summary } : {})
     }
   };
   return [terminal, ...structured];
+}
+
+function toolFunctionName(toolCall: Record<string, unknown>) {
+  const fn = toolCall.function;
+  return isRecord(fn) && typeof fn.name === "string" ? fn.name : undefined;
+}
+
+function toolCallArgs(toolCall: Record<string, unknown>): Record<string, unknown> {
+  if (isRecord(toolCall.args)) return toolCall.args;
+  const fn = toolCall.function;
+  if (isRecord(fn)) {
+    if (isRecord(fn.arguments)) return fn.arguments;
+    if (typeof fn.arguments === "string") {
+      try {
+        const parsed = JSON.parse(fn.arguments) as unknown;
+        return isRecord(parsed) ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+  }
+  return {};
+}
+
+function safeToolArgs(toolName: string, args: Record<string, unknown>) {
+  if (toolName === "web_search") {
+    const query = readSourceString(args.query).slice(0, 240);
+    return query ? { query } : {};
+  }
+  if (toolName === "web_fetch") {
+    const url = readSourceString(args.url).slice(0, 500);
+    return /^https?:\/\//i.test(url) ? { url } : {};
+  }
+  if (toolName === "read_file") {
+    const path = readSourceString(args.path).slice(0, 500);
+    const startLine = readPositiveInteger(args.start_line ?? args.startLine);
+    const endLine = readPositiveInteger(args.end_line ?? args.endLine);
+    return {
+      ...(path ? { path } : {}),
+      ...(startLine ? { startLine } : {}),
+      ...(endLine ? { endLine } : {})
+    };
+  }
+  if (toolName === "bash") {
+    const command = readSourceString(args.command ?? args.cmd).slice(0, 240);
+    return command ? { command } : {};
+  }
+  return {};
+}
+
+function safeToolResult(toolName: string, content: unknown) {
+  if (!["web_fetch", "read_file", "bash", "grep", "glob", "ls"].includes(toolName)) return {};
+  if (toolName === "bash") return {};
+  const text = sanitizeSnippet(readToolContentText(content));
+  if (!text) return {};
+  return { snippet: text };
 }
 
 function extractWebSearchSources(content: unknown) {
@@ -452,7 +580,8 @@ function extractWebSearchSources(content: unknown) {
     if (!/^https?:\/\//i.test(url) || seen.has(url)) continue;
     seen.add(url);
     const title = readSourceString(item.title) || url;
-    sources.push({ title: title.slice(0, 120), url });
+    const snippet = readSourceString(item.snippet) || readSourceString(item.body) || readSourceString(item.description);
+    sources.push({ title: title.slice(0, 120), url, ...(snippet ? { snippet: snippet.slice(0, 360) } : {}) });
     if (sources.length >= 10) break;
   }
   return sources;
@@ -460,6 +589,34 @@ function extractWebSearchSources(content: unknown) {
 
 function readSourceString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function readPositiveInteger(value: unknown) {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : 0;
+  return Number.isInteger(number) && number > 0 ? number : undefined;
+}
+
+function readToolContentText(content: unknown) {
+  if (typeof content === "string") return content;
+  if (!isRecord(content)) return "";
+  return readSourceString(content.summary) || readSourceString(content.text) || readSourceString(content.content);
+}
+
+function sanitizeSnippet(value: string) {
+  const lines = value
+    .replace(/__FACETWRITE_EVENT__[\s\S]*/g, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .map(redactSecretLikeText)
+    .filter((line) => line && !/^#\s*(?:AgentCard|Loaded Skills|Current User Instruction|Context|Output Contract)\b/i.test(line))
+    .filter((line) => !/^\[redacted credential\]$/i.test(line));
+  return lines.join(" ").replace(/\s+/g, " ").slice(0, 500);
+}
+
+function redactSecretLikeText(value: string) {
+  return value
+    .replace(/\b[A-Za-z0-9_]*(?:api[_-]?key|authorization|token|password|secret|cookie)\s*[:=]\s*\S+/gi, "[redacted credential]")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "[redacted credential]");
 }
 
 function structuredToolEvents(content: unknown): ToolEventRecord[] {

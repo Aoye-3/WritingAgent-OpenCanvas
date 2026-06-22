@@ -292,6 +292,14 @@ def test_merge_run_context_overrides_preserves_facetwrite_runtime_contract():
         "facetwrite_plan_id": "plan_1",
         "facetwrite_plan_step_id": "step_1",
         "facetwrite_plan_phase_attempt_id": "intake_attempt_1",
+        "facetwrite_progressive_canvas_delivery_enabled": True,
+        "facetwrite_runtime_budget_profile": "medium",
+        "facetwrite_recursion_limit": 80,
+        "facetwrite_model_call_limit": 20,
+        "facetwrite_evidence_tool_limit": 8,
+        "facetwrite_synthesis_reserve_steps": 16,
+        "facetwrite_force_synthesis_after_evidence": True,
+        "facetwrite_evidence_tools": ["web_search", "web_fetch", "read_file"],
     }
     config = build_run_config("thread-1", None, None)
 
