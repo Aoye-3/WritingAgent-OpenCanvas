@@ -14,7 +14,10 @@ const blockedPromptPatterns = [
   /Content Exists Risk/i,
   /The configured LLM provider (?:is|rejected the request)/i,
   /LLM request failed:.*reasoning_content/i,
-  /reasoning_content.*(?:must be passed back|thinking mode)/i
+  /reasoning_content.*(?:must be passed back|thinking mode)/i,
+  /<\s*(?:\|\s*){1,2}DSML\s*(?:\|\s*){1,2}/i,
+  /\|\s*DSML\s*\|\s*toolcalls?\s*>/i,
+  /\|\s*invoke\s+name\s*=\s*["']?(?:readfile|web_fetch|web_search|bash|grep|glob|ls)/i
 ];
 
 type NormalizeInput = {

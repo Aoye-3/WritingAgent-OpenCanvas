@@ -24,3 +24,7 @@ test("progressive text gate suppresses Canvas delivery blocks from streamed assi
 test("Canvas delivery marker is treated as unsafe for ordinary streaming release", () => {
   assert.equal(looksUnsafeForStream("```facetwrite_canvas_delivery"), true);
 });
+
+test("Agent Runtime DSML tool call marker is treated as unsafe for streaming release", () => {
+  assert.equal(looksUnsafeForStream('< | | DSML | | toolcalls> < / | / DSML | / invoke name="readfile">'), true);
+});

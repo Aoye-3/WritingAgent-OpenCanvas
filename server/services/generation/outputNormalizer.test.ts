@@ -25,6 +25,19 @@ test("blocks provider reasoning_content protocol errors from visible output", ()
   assert.ok(result.events.some((event) => event.eventType === "internal_output_blocked"));
 });
 
+test("blocks leaked Agent Runtime DSML tool calls from skill runs", () => {
+  const result = normalizeAgentRunOutput({
+    text: '< | | DSML | | toolcalls> < / | / DSML | / invoke name="readfile"> < | | DSML | | parameter name="filepath" string="true">/mnt/skills/public/systematic-literature-review/SKILL.md</ / | / DSML | / parameter> < / | / DSML | / invoke> < / | / DSML | / toolcalls>',
+    locale: "zh",
+    source: "agent-backend"
+  });
+
+  assert.equal(result.text.includes("readfile"), false);
+  assert.equal(result.text.includes("SKILL.md"), false);
+  assert.match(result.text, /内部运行信息/);
+  assert.ok(result.events.some((event) => event.eventType === "internal_output_blocked"));
+});
+
 test("blocks AgentBackend provider-unavailable fallback messages", () => {
   const result = normalizeAgentRunOutput({
     text: "The configured LLM provider is temporarily unavailable after multiple retries. Please wait a moment and continue the conversation.",

@@ -351,9 +351,24 @@ export function createGenerationService(
           events: agentBackendRun.events
         });
         if (hasBlockedInternalOutput(normalized.events)) {
-          const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend returned internal runtime output"), isMockFallbackEnabled(deps));
+          const internalOutputError = new Error("AgentBackend returned internal runtime output");
+          const event = createRuntimeFallbackEvent("agent-backend", internalOutputError, isMockFallbackEnabled(deps));
           runtimeEvents.push(...(normalized.events ?? []), event);
           observeToolEvent(event);
+          if (isProgressiveCanvasDeliveryEnabled(payload)) {
+            ensureProgressiveDeliveryStarted();
+            for (const failureEvent of commitProgressiveFailureDelivery({
+              payload,
+              projectId: selection.projectId,
+              storage,
+              deliveryId,
+              error: internalOutputError,
+              entries: progressiveEvidenceEntries
+            })) {
+              runtimeEvents.push(failureEvent);
+              emitRuntimeToolEvent(failureEvent);
+            }
+          }
           textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
         } else {
           textGate.flush();

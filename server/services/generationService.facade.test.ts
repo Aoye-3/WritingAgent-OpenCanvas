@@ -593,6 +593,56 @@ test("progressive Canvas stops body drafts at budget and finalizes Body from age
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_final_committed"));
 });
 
+test("progressive Canvas blocks leaked skill DSML as final body", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const tokens: string[] = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToken?.('< | | DSML | | toolcalls> < / | / DSML | / invoke name="readfile">');
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "web_search",
+            sources: [{ title: "Agent paper", url: "https://example.com/agent-paper" }]
+          }
+        });
+        return {
+          text: '< | | DSML | | toolcalls> < / | / DSML | / invoke name="readfile"> < | | DSML | | parameter name="filepath" string="true">/mnt/skills/public/systematic-literature-review/SKILL.md</ / | / DSML | / parameter> < / | / DSML | / invoke> < / | / DSML | / toolcalls>',
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => service.generateAndRecordStream({
+      mode: "chat",
+      locale: "zh",
+      agentCardId: "chat-agent",
+      chatInstruction: "帮我查找最近Agent相关的文献，并且做文献综述",
+      transientSkillRefs: ["database-lookup", "literature-review"],
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+    }, {
+      onToken: (token) => tokens.push(token),
+      onToolEvent: (event) => events.push(event as typeof events[number])
+    }),
+    /internal runtime output/
+  );
+
+  assert.equal(records.length, 0);
+  assert.equal(tokens.join("").includes("readfile"), false);
+  assert.equal(canvasNodes.some((node) => String(node.content).includes("readfile")), false);
+  assert.equal(canvasNodes.some((node) => String(node.content).includes("SKILL.md")), false);
+  assert.ok(canvasNodes.some((node) => node.title === "正文" && String(node.content).includes("工作正文草稿")));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
+  assert.equal(events.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
+});
+
 test("progressive Canvas notes sanitize unsafe tool snippets", async () => {
   const { storage, canvasNodes } = fakeStorage();
   const service = createGenerationService(storage, fakeAgentRuntime(), {
