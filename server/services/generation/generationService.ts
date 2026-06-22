@@ -27,7 +27,13 @@ import { stableDeliveryId } from "../canvasDelivery.js";
 import { resolveCanvasDeliveryContent, type CanvasDeliveryContract } from "./canvasDeliveryContent.js";
 import { isDirectCanvasDeliveryIntent } from "./canvasDeliveryIntent.js";
 import { formatSourceLinks } from "./sourceLinks.js";
+import {
+  isCanvasEligibleTaskPolicy,
+  isProcessClarificationText,
+  resolveTaskHandlingPolicy
+} from "./taskHandlingPolicy.js";
 import { isCanvasWorkflowMode, type CanvasWorkflowMode } from "../../../shared/canvasWorkflow.js";
+import { containsInternalRuntimeProtocol } from "../../../shared/internalRuntimeProtocol.js";
 import {
   createRunTimelineBuilder,
   safeDecisionTimelineEvent,
@@ -102,6 +108,7 @@ export function createGenerationService(
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
     payload = withPlanGeneration(payload, threadId, storage);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
+    payload = withTaskHandlingPolicy(payload, context);
     payload = withRuntimeContext(payload, context.canvasDeliveryContract);
     const agentCard = context.runtimeConfig.agentCard;
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
@@ -219,6 +226,7 @@ export function createGenerationService(
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
     payload = withPlanGeneration(payload, threadId, storage);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
+    payload = withTaskHandlingPolicy(payload, context);
     payload = withRuntimeContext(payload, context.canvasDeliveryContract);
     payload = withProgressiveCanvasDeliveryContext(payload, context, storage.getProjectRuntimeSettings(selection.projectId));
     const agentCard = context.runtimeConfig.agentCard;
@@ -662,6 +670,21 @@ function stableCanvasDeliveryId(threadId: string, payload: GenerateRequest, stor
   return `delivery_${threadId}_${sequence}_${actionId}`;
 }
 
+function withTaskHandlingPolicy(payload: GenerateRequest, context: Awaited<ReturnType<typeof buildGenerationRunContext>>): GenerateRequest {
+  const taskHandlingPolicy = resolveTaskHandlingPolicy({
+    payload,
+    transientSkillCount: context.transientSkillNames.length,
+    thinkingMode: context.modelSettings.thinkingMode
+  });
+  return {
+    ...payload,
+    contextValues: {
+      ...payload.contextValues,
+      taskHandlingPolicy
+    }
+  };
+}
+
 function withRuntimeContext(payload: GenerateRequest, canvasDeliveryContract?: CanvasDeliveryContract): GenerateRequest {
   if (!canvasDeliveryContract) return payload;
   return {
@@ -675,6 +698,7 @@ function withRuntimeContext(payload: GenerateRequest, canvasDeliveryContract?: C
 
 function withProgressiveCanvasDeliveryContext(payload: GenerateRequest, context: Awaited<ReturnType<typeof buildGenerationRunContext>>, projectSettings: ProjectRuntimeSettings): GenerateRequest {
   if (readCanvasWorkflowMode(payload.contextValues) !== "batch_delivery") return payload;
+  if (!isCanvasEligibleTaskPolicy(payload.contextValues?.taskHandlingPolicy)) return payload;
   const budget = resolveRuntimeBudget(payload.runtimeBudgetProfile, projectSettings);
   return {
     ...payload,
@@ -738,7 +762,8 @@ function progressiveCanvasDeliveryTrigger(payload: GenerateRequest, context: Awa
 }
 
 function isProgressiveCanvasDeliveryEnabled(payload: GenerateRequest) {
-  return record(payload.contextValues?.progressiveCanvasDelivery).enabled === true;
+  return record(payload.contextValues?.progressiveCanvasDelivery).enabled === true
+    && isCanvasEligibleTaskPolicy(payload.contextValues?.taskHandlingPolicy);
 }
 
 function shouldStartProgressiveCanvasDeliveryImmediately(payload: GenerateRequest, context: Awaited<ReturnType<typeof buildGenerationRunContext>>) {
@@ -781,6 +806,12 @@ function finalizeCanvasDelivery(input: {
   const assistantText = input.text.trim();
   if (!assistantText) {
     throw new Error("Direct Canvas delivery completed without assistant content.");
+  }
+  if (containsInternalRuntimeProtocol(assistantText)) {
+    throw new Error("AgentBackend returned internal runtime output");
+  }
+  if (isProcessClarificationText(assistantText)) {
+    throw new Error("AgentBackend returned process clarification text instead of deliverable Canvas content");
   }
   const timeline = input.timeline ?? createRunTimelineBuilder({ threadId: input.threadId, locale: input.payload.locale });
   const localTimelineEvents: RunTimelineEvent[] = [];
@@ -830,6 +861,12 @@ function finalizeProgressiveCanvasDelivery(input: {
   if (isDirectCanvasDeliveryIntent(instruction)) return { text: input.text, events: [] as ToolEventRecord[] };
   const assistantText = input.text.trim();
   if (!assistantText) return { text: input.text, events: [] as ToolEventRecord[] };
+  if (containsInternalRuntimeProtocol(assistantText)) {
+    throw new Error("AgentBackend returned internal runtime output");
+  }
+  if (isProcessClarificationText(assistantText)) {
+    throw new Error("AgentBackend returned process clarification text instead of final deliverable content");
+  }
   const timeline = input.timeline ?? createRunTimelineBuilder({ threadId: input.payload.threadId ?? "pending", locale: input.payload.locale });
   const emit = input.emitTimeline ?? (() => undefined);
   const content = resolveCanvasDeliveryContent({
@@ -1213,7 +1250,8 @@ function isProgressiveEvidenceTool(toolName: string) {
 }
 
 function sanitizeProgressText(value: string) {
-  return value
+  if (containsInternalRuntimeProtocol(value)) return "";
+  const sanitized = value
     .replace(/__FACETWRITE_EVENT__[\s\S]*/g, "")
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -1223,6 +1261,7 @@ function sanitizeProgressText(value: string) {
     .join(" ")
     .replace(/\s+/g, " ")
     .slice(0, 500);
+  return containsInternalRuntimeProtocol(sanitized) ? "" : sanitized;
 }
 
 function redactSecretLikeText(value: string) {
@@ -1238,7 +1277,7 @@ function readResearchSources(value: unknown): Array<{ title: string; url: string
     const source = item as Record<string, unknown>;
     const url = readString(source.url);
     if (!/^https?:\/\//i.test(url)) return [];
-    const title = readString(source.title) || url;
+    const title = sanitizeProgressText(readString(source.title)) || url;
     const snippet = sanitizeProgressText(readString(source.snippet));
     return [{ title, url, ...(snippet ? { snippet } : {}) }];
   }).slice(0, 10);

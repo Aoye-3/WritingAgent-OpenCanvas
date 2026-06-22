@@ -18,3 +18,19 @@ test("removes secret and private reasoning fields from tool event payloads", () 
   assert.equal("authorization" in sanitized, false);
   assert.deepEqual(sanitized.nested, { result: "safe result" });
 });
+
+test("redacts DSML tool protocol from tool event payload strings", () => {
+  const payload = sanitizeToolEventPayload({
+    toolName: "web_search",
+    summary: '< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">',
+    sources: [{
+      title: "Paper",
+      url: "https://example.com/paper",
+      snippet: '< | | DSML | | parameter name="maxcontentlength">5000'
+    }]
+  }) as Record<string, unknown>;
+
+  assert.equal(payload.summary, "[redacted internal runtime protocol]");
+  assert.equal(JSON.stringify(payload).includes("DSML"), false);
+  assert.equal(JSON.stringify(payload).includes("webfetch"), false);
+});

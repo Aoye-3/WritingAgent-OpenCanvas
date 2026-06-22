@@ -17,6 +17,7 @@ import {
   reduceLiveToolEvent,
   shouldRefreshThreadStateForToolEvent
 } from "./toolEventPresentation";
+import { containsInternalRuntimeProtocol } from "../../../shared/internalRuntimeProtocol";
 
 type UseGenerationRunOptions = {
   activeAgent: AgentCard;
@@ -611,8 +612,9 @@ function recoverableGenerationError(message: string, locale: Locale) {
   return message;
 }
 
-function looksUnsafeForReasoningStream(text: string) {
-  return /#\s*AgentCard|#\s*Loaded Skills|#\s*Current User Instruction|#\s*Output Contract|FacetWrite runtime context|authorization|cookie|password|secret|api.?key|token|headers?|tool_call_id|contextValues|facetwrite_(?:canvas|diagram)_delivery/i.test(text);
+export function looksUnsafeForReasoningStream(text: string) {
+  return /#\s*AgentCard|#\s*Loaded Skills|#\s*Current User Instruction|#\s*Output Contract|FacetWrite runtime context|authorization|cookie|password|secret|api.?key|token|headers?|tool_call_id|contextValues|facetwrite_(?:canvas|diagram)_delivery/i.test(text)
+    || containsInternalRuntimeProtocol(text);
 }
 
 function reasoningBlockedMessage(locale: Locale) {

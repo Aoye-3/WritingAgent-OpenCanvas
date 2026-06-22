@@ -1,6 +1,7 @@
 """Force the Plan runtime to establish persisted Plan state before replying."""
 
 import json
+import re
 from collections.abc import Awaitable, Callable
 from typing import override
 
@@ -8,6 +9,16 @@ from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+
+_INTERNAL_RUNTIME_PROTOCOL_PATTERNS = (
+    re.compile(r"<\s*(?:[\/|]\s*){0,4}DSML\s*(?:[\/|]\s*){0,4}", re.IGNORECASE),
+    re.compile(r"\bDSML\b[\s\S]{0,120}\btool[_-]?calls?\b", re.IGNORECASE),
+    re.compile(r"\btool[_-]?calls?\b[\s\S]{0,120}\bDSML\b", re.IGNORECASE),
+    re.compile(r"\bDSML\b[\s\S]{0,160}\binvoke\s+name\s*=\s*[\"']?(?:readfile|read_file|webfetch|web_fetch|websearch|web_search|bash|grep|glob|ls)\b", re.IGNORECASE),
+    re.compile(r"\binvoke\s+name\s*=\s*[\"']?(?:readfile|read_file|webfetch|web_fetch|websearch|web_search|bash|grep|glob|ls)\b[\s\S]{0,160}\bDSML\b", re.IGNORECASE),
+    re.compile(r"\bDSML\b[\s\S]{0,160}\bparameter\s+name\s*=\s*[\"']?(?:url|filepath|file_path|path|maxcontentlength|max_content_length|query)\b", re.IGNORECASE),
+)
 
 
 class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
@@ -228,10 +239,43 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
 
     @staticmethod
     def _contains_tool_call(result: ModelCallResult) -> bool:
+        return any(bool(getattr(message, "tool_calls", None)) for message in PlanToolChoiceMiddleware._result_messages(result))
+
+    @staticmethod
+    def _contains_internal_runtime_protocol(result: ModelCallResult) -> bool:
+        return any(
+            PlanToolChoiceMiddleware._looks_like_internal_runtime_protocol(PlanToolChoiceMiddleware._message_content_text(message))
+            for message in PlanToolChoiceMiddleware._result_messages(result)
+        )
+
+    @staticmethod
+    def _result_messages(result: ModelCallResult) -> list[object]:
         messages = getattr(result, "result", None)
-        if not isinstance(messages, list):
-            messages = [result]
-        return any(bool(getattr(message, "tool_calls", None)) for message in messages)
+        if isinstance(messages, list):
+            return messages
+        return [result]
+
+    @staticmethod
+    def _message_content_text(message: object) -> str:
+        content = getattr(message, "content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    value = item.get("text") or item.get("content")
+                    if isinstance(value, str):
+                        parts.append(value)
+            return " ".join(parts)
+        return str(content)
+
+    @staticmethod
+    def _looks_like_internal_runtime_protocol(text: str) -> bool:
+        normalized = re.sub(r"\s+", " ", text or "").strip()
+        return bool(normalized) and any(pattern.search(normalized) for pattern in _INTERNAL_RUNTIME_PROTOCOL_PATTERNS)
 
     @override
     def wrap_model_call(
@@ -241,10 +285,16 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
     ) -> ModelCallResult:
         prepared = self._prepare(request)
         result = handler(prepared)
-        if PlanToolChoiceMiddleware._is_budget_synthesis_request(prepared) and PlanToolChoiceMiddleware._contains_tool_call(result):
+        if PlanToolChoiceMiddleware._is_budget_synthesis_request(prepared) and (
+            PlanToolChoiceMiddleware._contains_tool_call(result)
+            or PlanToolChoiceMiddleware._contains_internal_runtime_protocol(result)
+        ):
             retry = handler(PlanToolChoiceMiddleware._budget_retry_request(prepared))
-            if PlanToolChoiceMiddleware._contains_tool_call(retry):
-                raise RuntimeError("FacetWrite runtime budget exhausted but model continued requesting tools")
+            if (
+                PlanToolChoiceMiddleware._contains_tool_call(retry)
+                or PlanToolChoiceMiddleware._contains_internal_runtime_protocol(retry)
+            ):
+                raise RuntimeError("FacetWrite runtime budget exhausted but model continued requesting tools or internal runtime protocol")
             return retry
         return result
 
@@ -256,9 +306,15 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
     ) -> ModelCallResult:
         prepared = self._prepare(request)
         result = await handler(prepared)
-        if PlanToolChoiceMiddleware._is_budget_synthesis_request(prepared) and PlanToolChoiceMiddleware._contains_tool_call(result):
+        if PlanToolChoiceMiddleware._is_budget_synthesis_request(prepared) and (
+            PlanToolChoiceMiddleware._contains_tool_call(result)
+            or PlanToolChoiceMiddleware._contains_internal_runtime_protocol(result)
+        ):
             retry = await handler(PlanToolChoiceMiddleware._budget_retry_request(prepared))
-            if PlanToolChoiceMiddleware._contains_tool_call(retry):
-                raise RuntimeError("FacetWrite runtime budget exhausted but model continued requesting tools")
+            if (
+                PlanToolChoiceMiddleware._contains_tool_call(retry)
+                or PlanToolChoiceMiddleware._contains_internal_runtime_protocol(retry)
+            ):
+                raise RuntimeError("FacetWrite runtime budget exhausted but model continued requesting tools or internal runtime protocol")
             return retry
         return result

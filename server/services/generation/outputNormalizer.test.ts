@@ -38,6 +38,26 @@ test("blocks leaked Agent Runtime DSML tool calls from skill runs", () => {
   assert.ok(result.events.some((event) => event.eventType === "internal_output_blocked"));
 });
 
+test("blocks leaked Agent Runtime DSML webfetch tool_calls from skill runs", () => {
+  const result = normalizeAgentRunOutput({
+    text: '< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch"> < | | DSML | | parameter name="url" string="true">https://arxiv.org/abs/2504.19678< / | / DSML | | parameter> < | | DSML | | parameter name="maxcontentlength" string="false">5000< / | / DSML | | parameter> < / | / DSML | | invoke> < / | / DSML | | tool_calls>',
+    locale: "zh",
+    source: "agent-backend"
+  });
+
+  assert.equal(result.text.includes("webfetch"), false);
+  assert.equal(result.text.includes("2504.19678"), false);
+  assert.equal(result.text.includes("maxcontentlength"), false);
+  assert.match(result.text, /内部运行信息/);
+  assert.ok(result.events.some((event) => event.eventType === "internal_output_blocked"));
+});
+
+test("does not block ordinary prose about tool calls", () => {
+  const text = sanitizeVisibleText("This section explains how web fetch tool calls are budgeted.", "en");
+
+  assert.equal(text, "This section explains how web fetch tool calls are budgeted.");
+});
+
 test("blocks AgentBackend provider-unavailable fallback messages", () => {
   const result = normalizeAgentRunOutput({
     text: "The configured LLM provider is temporarily unavailable after multiple retries. Please wait a moment and continue the conversation.",

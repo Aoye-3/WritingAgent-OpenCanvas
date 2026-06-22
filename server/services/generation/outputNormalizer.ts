@@ -1,6 +1,7 @@
 import type { Locale } from "../../promptBuilder.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import { extractSourceLinks, formatSourceLinks } from "./sourceLinks.js";
+import { containsInternalRuntimeProtocol, internalRuntimeProtocolPreview } from "../../../shared/internalRuntimeProtocol.js";
 
 const blockedPromptPatterns = [
   /You are FacetWrite(?:'s)? (?:writing assistant|text agent)/i,
@@ -14,10 +15,7 @@ const blockedPromptPatterns = [
   /Content Exists Risk/i,
   /The configured LLM provider (?:is|rejected the request)/i,
   /LLM request failed:.*reasoning_content/i,
-  /reasoning_content.*(?:must be passed back|thinking mode)/i,
-  /<\s*(?:\|\s*){1,2}DSML\s*(?:\|\s*){1,2}/i,
-  /\|\s*DSML\s*\|\s*toolcalls?\s*>/i,
-  /\|\s*invoke\s+name\s*=\s*["']?(?:readfile|web_fetch|web_search|bash|grep|glob|ls)/i
+  /reasoning_content.*(?:must be passed back|thinking mode)/i
 ];
 
 type NormalizeInput = {
@@ -56,7 +54,7 @@ export function sanitizeVisibleText(text: string, locale: Locale = "en") {
   const trimmed = text.trim();
   if (!trimmed) return "";
 
-  if (blockedPromptPatterns.some((pattern) => pattern.test(trimmed))) {
+  if (blockedPromptPatterns.some((pattern) => pattern.test(trimmed)) || containsInternalRuntimeProtocol(trimmed)) {
     return blockedMessage(locale);
   }
 
@@ -200,5 +198,5 @@ function readString(value: unknown) {
 }
 
 function preview(text: string) {
-  return text.replace(/\s+/g, " ").slice(0, 160);
+  return internalRuntimeProtocolPreview(text);
 }

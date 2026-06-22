@@ -138,6 +138,8 @@ The backend direct-delivery planner persists those dimensions in the created nod
 
 Generic long-task progressive delivery also writes stable `整体概述` / `Overview` and `正文` / `Body` nodes in batch-delivery mode. Evidence events create separate `研究摘录` / `进度摘录` reference nodes. Body checkpoints update the same stable body node only up to the Project or one-run `bodyDraftWriteLimit`; after synthesis starts, further tool events stay in the run trace and do not create more intermediate Canvas nodes. When the Agent returns final assistant text, generic progressive delivery replaces the stable body draft and emits `canvas_delivery_body_final_committed`. Explicit direct Canvas delivery still uses the structured delivery planner and keeps its heading-based body nodes; the generic final-body replacement is skipped for those runs.
 
+Canvas delivery is gated by the server-owned `TaskHandlingPolicy`. Only `long_task`, `plan_execution`, and `explicit_canvas` requests may create or update Canvas nodes. `simple_chat` and `plan_intake` remain conversation-only even when Skills or thinking mode are enabled; short answers and Plan clarification acknowledgements must not create `Overview`, `Body`, progress, or final-body nodes.
+
 ## Node Markdown Rendering
 Canvas content nodes render Markdown in read-only mode. Editing still uses the raw Markdown textarea so users can revise the source text directly.
 

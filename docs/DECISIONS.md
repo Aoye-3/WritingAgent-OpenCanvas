@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-06-23: Task Handling Policy Gates Canvas Delivery
+
+Decision: Add a server-owned `TaskHandlingPolicy` before Agent Runtime context is sent. The policy classifies each request as `simple_chat`, `plan_intake`, `long_task`, `explicit_canvas`, or `plan_execution`, and only Canvas-eligible classes may create or update Canvas nodes. Skills and thinking mode are complexity signals, not standalone authorization for Canvas writes.
+
+Reason: Skill-assisted Plan intake could return process text such as "I need to confirm a few key points" and the progressive Canvas finalizer treated it as deliverable body content. Short Q&A also should remain ordinary conversation even if runtime controls are enabled.
+
+Impact: `simple_chat` and `plan_intake` are conversation-only. `long_task` and `plan_execution` can use progressive Canvas delivery, while `explicit_canvas` keeps the direct delivery planner. Final Canvas writeback rejects process clarification text and internal Runtime protocol output, preserving safe progress nodes on failure without pretending the run succeeded.
+
 ## 2026-06-21: Long Agent Runs Use Explicit Runtime Budgets And Body Checkpoints
 
 Decision: Add a per-request `runtimeBudgetProfile` (`low`, `medium`, `high`, default `medium`) and keep long-task Canvas progress server-owned. The profile maps to LangGraph recursion limit, model-call budget, evidence-tool budget, and synthesis reserve steps. During batch-delivery runs the server updates the stable `正文` / `Body` node with a working body checkpoint as evidence arrives, then replaces it with final content only when the runtime succeeds.

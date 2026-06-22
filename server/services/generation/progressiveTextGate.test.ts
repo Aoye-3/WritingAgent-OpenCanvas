@@ -28,3 +28,7 @@ test("Canvas delivery marker is treated as unsafe for ordinary streaming release
 test("Agent Runtime DSML tool call marker is treated as unsafe for streaming release", () => {
   assert.equal(looksUnsafeForStream('< | | DSML | | toolcalls> < / | / DSML | / invoke name="readfile">'), true);
 });
+
+test("Agent Runtime DSML webfetch tool_calls marker is treated as unsafe for streaming release", () => {
+  assert.equal(looksUnsafeForStream('< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch"> < | | DSML | | parameter name="maxcontentlength">5000'), true);
+});

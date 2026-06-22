@@ -1,4 +1,5 @@
 import type { GenerateRequest } from "../../contracts/generation.js";
+import { containsInternalRuntimeProtocol } from "../../../shared/internalRuntimeProtocol.js";
 
 export type ProgressiveTextGate = {
   push: (token: string) => void;
@@ -10,7 +11,7 @@ const minChunkLength = 24;
 const preferredChunkLength = 48;
 const maxChunkLength = 80;
 const canvasDeliveryBlockPattern = /```facetwrite_(?:canvas|diagram)_delivery|facetwrite_(?:canvas|diagram)_delivery/i;
-const unsafeStreamPattern = /#\s*AgentCard|#\s*Loaded Skills|#\s*Current User Instruction|#\s*Output Contract|FacetWrite runtime context|reasoning_content|LLM request failed:|Content Exists Risk|The configured LLM provider (?:is|rejected the request)|"results"\s*:|"tool_call_id"\s*:|facetwrite_(?:canvas|diagram)_delivery|<\s*(?:\|\s*){1,2}DSML\s*(?:\|\s*){1,2}|\|\s*DSML\s*\|\s*toolcalls?\s*>|\|\s*invoke\s+name\s*=\s*["']?(?:readfile|web_fetch|web_search|bash|grep|glob|ls)/i;
+const unsafeStreamPattern = /#\s*AgentCard|#\s*Loaded Skills|#\s*Current User Instruction|#\s*Output Contract|FacetWrite runtime context|reasoning_content|LLM request failed:|Content Exists Risk|The configured LLM provider (?:is|rejected the request)|"results"\s*:|"tool_call_id"\s*:|facetwrite_(?:canvas|diagram)_delivery/i;
 
 export function createProgressiveTextGate(
   locale: GenerateRequest["locale"],
@@ -89,7 +90,7 @@ export function splitProgressiveTextForTest(text: string, locale: GenerateReques
 }
 
 export function looksUnsafeForStream(text: string) {
-  return unsafeStreamPattern.test(text);
+  return unsafeStreamPattern.test(text) || containsInternalRuntimeProtocol(text);
 }
 
 function findCanvasDeliveryBlockStart(text: string) {

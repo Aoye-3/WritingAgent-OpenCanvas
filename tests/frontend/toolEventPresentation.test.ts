@@ -5,6 +5,7 @@ import {
   reduceLiveToolEvent,
   shouldRefreshThreadStateForToolEvent
 } from "../../src/app/hooks/toolEventPresentation";
+import { looksUnsafeForReasoningStream } from "../../src/app/hooks/useGenerationRun";
 
 test("repeated tool events update one streaming status instead of chat activity lines", () => {
   let state = createLiveToolEventState();
@@ -53,5 +54,11 @@ test("Canvas and artifact lifecycle events request live thread-state refresh", (
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_synthesis_started", payload: {} }), false);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_body_final_committed", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_failed_summary_committed", payload: {} }), true);
+  assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_plan_waiting_for_user", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_tool_completed", payload: { toolName: "web_search" } }), false);
+});
+
+test("reasoning stream blocks leaked Agent Runtime DSML", () => {
+  assert.equal(looksUnsafeForReasoningStream('< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">'), true);
+  assert.equal(looksUnsafeForReasoningStream("I will summarize the gathered sources next."), false);
 });

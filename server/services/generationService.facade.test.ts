@@ -499,6 +499,39 @@ test("streaming skill long task creates Canvas progress without explicit Canvas 
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
 });
 
+test("streaming short Q&A stays conversation-only even when skills are enabled", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: "Mutex is a synchronization primitive that protects shared state.",
+        finishReason: "agent_backend_completed",
+        events: []
+      })
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "What is a mutex?",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    modelOverrides: { thinkingMode: "enabled" },
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
+
+  assert.equal(result.usedMock, false);
+  assert.equal(records.length, 1);
+  assert.equal(canvasNodes.length, 0);
+  assert.equal(events.some((event) => event.eventType.startsWith("canvas_delivery_")), false);
+});
+
 test("streaming generic long task creates Canvas progress from evidence tools", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
@@ -593,6 +626,51 @@ test("progressive Canvas stops body drafts at budget and finalizes Body from age
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_final_committed"));
 });
 
+test("progressive Canvas rejects process clarification text as final body", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "web_search",
+            query: "agent literature review",
+            sources: [{ title: "Agent survey", url: "https://example.com/agent-survey", snippet: "Useful paper list." }]
+          }
+        });
+        return {
+          text: "好的！我需要先跟您确认几个关键点，确保文献综述的方向准确：",
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => service.generateAndRecordStream({
+      mode: "chat",
+      locale: "zh",
+      agentCardId: "chat-agent",
+      chatInstruction: "帮我找最近 Agent 文献并做综述",
+      transientSkillRefs: ["database-lookup", "literature-review"],
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+    }, {
+      onToolEvent: (event) => events.push(event as typeof events[number])
+    }),
+    /process clarification text/
+  );
+
+  assert.equal(records.length, 0);
+  assert.equal(events.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
+  assert.equal(canvasNodes.some((node) => String(node.content).includes("确认几个关键点")), false);
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
+});
+
 test("progressive Canvas blocks leaked skill DSML as final body", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
@@ -602,16 +680,17 @@ test("progressive Canvas blocks leaked skill DSML as final body", async () => {
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async (input) => {
-        input.onToken?.('< | | DSML | | toolcalls> < / | / DSML | / invoke name="readfile">');
+        input.onToken?.('< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">');
         input.onToolEvent?.({
           eventType: "agent_backend_tool_completed",
           payload: {
             toolName: "web_search",
-            sources: [{ title: "Agent paper", url: "https://example.com/agent-paper" }]
+            summary: '< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">',
+            sources: [{ title: "Agent paper", url: "https://example.com/agent-paper", snippet: '< | | DSML | | parameter name="maxcontentlength">5000' }]
           }
         });
         return {
-          text: '< | | DSML | | toolcalls> < / | / DSML | / invoke name="readfile"> < | | DSML | | parameter name="filepath" string="true">/mnt/skills/public/systematic-literature-review/SKILL.md</ / | / DSML | / parameter> < / | / DSML | / invoke> < / | / DSML | / toolcalls>',
+          text: '< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch"> < | | DSML | | parameter name="url" string="true">https://arxiv.org/abs/2504.19678< / | / DSML | | parameter> < | | DSML | | parameter name="maxcontentlength" string="false">5000< / | / DSML | | parameter> < / | / DSML | | invoke> < / | / DSML | | tool_calls>',
           finishReason: "agent_backend_completed",
           events: []
         };
@@ -635,9 +714,8 @@ test("progressive Canvas blocks leaked skill DSML as final body", async () => {
   );
 
   assert.equal(records.length, 0);
-  assert.equal(tokens.join("").includes("readfile"), false);
-  assert.equal(canvasNodes.some((node) => String(node.content).includes("readfile")), false);
-  assert.equal(canvasNodes.some((node) => String(node.content).includes("SKILL.md")), false);
+  assert.equal(tokens.join("").includes("webfetch"), false);
+  assert.equal(canvasNodes.some((node) => /DSML|tool_calls|webfetch|invoke|parameter|maxcontentlength|2504\.19678/i.test(String(node.content))), false);
   assert.ok(canvasNodes.some((node) => node.title === "正文" && String(node.content).includes("工作正文草稿")));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
   assert.equal(events.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
@@ -655,7 +733,7 @@ test("progressive Canvas notes sanitize unsafe tool snippets", async () => {
           payload: {
             toolName: "read_file",
             path: "/mnt/user-data/workspace/.env",
-            snippet: "OPENAI_API_KEY=sk-secret\n# AgentCard\nprivate prompt"
+            snippet: "OPENAI_API_KEY=sk-secret\n# AgentCard\nprivate prompt\n< | | DSML | | tool_calls> < / | / DSML / / invoke name=\"webfetch\">"
           }
         });
         throw new Error("Recursion limit of 100 reached without hitting a stop condition.");
@@ -679,6 +757,7 @@ test("progressive Canvas notes sanitize unsafe tool snippets", async () => {
   assert.equal(text.includes("sk-secret"), false);
   assert.equal(text.includes("OPENAI_API_KEY"), false);
   assert.equal(text.includes("# AgentCard"), false);
+  assert.equal(/DSML|tool_calls|webfetch|invoke/i.test(text), false);
 });
 
 test("streaming direct Canvas delivery progressively creates placeholders and finalizes stable nodes", async () => {

@@ -52,7 +52,8 @@ export function reduceLiveToolEvent(
 
 export function shouldRefreshThreadStateForToolEvent(event: LiveToolEvent) {
   return /(?:^|_)(?:canvas_mutation_committed|canvas_write_pending_approval|canvas_mutation_failed|artifact_committed|artifact_staged)$/.test(event.eventType)
-    || (/^canvas_delivery_/.test(event.eventType) && event.eventType !== "canvas_delivery_synthesis_started");
+    || (/^canvas_delivery_/.test(event.eventType) && event.eventType !== "canvas_delivery_synthesis_started")
+    || /(?:^|_)plan_waiting_for_user$/.test(event.eventType);
 }
 
 function readToolName(payload: Record<string, unknown>) {

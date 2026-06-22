@@ -479,3 +479,57 @@ def test_budget_retry_fails_if_model_still_requests_tools():
             ),
             handler,
         )
+
+
+def test_budget_retry_forces_final_answer_when_model_emits_text_tool_protocol():
+    middleware = PlanToolChoiceMiddleware()
+    calls = []
+    messages = [
+        HumanMessage(content="Research this"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+    ]
+
+    def handler(model_request):
+        calls.append([tool.name for tool in model_request.tools])
+        if len(calls) == 1:
+            return AIMessage(content='< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">')
+        return AIMessage(content="Final answer from existing evidence")
+
+    result = middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            progressive_enabled=True,
+            evidence_tool_limit=1,
+            evidence_tools=["web_search"],
+            force_synthesis_after_evidence=True,
+        ),
+        handler,
+    )
+
+    assert calls == [[], []]
+    assert result.content == "Final answer from existing evidence"
+
+
+def test_budget_retry_fails_if_model_still_emits_text_tool_protocol():
+    middleware = PlanToolChoiceMiddleware()
+    messages = [
+        HumanMessage(content="Research this"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+    ]
+
+    def handler(_model_request):
+        return AIMessage(content='< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">')
+
+    with pytest.raises(RuntimeError, match="runtime budget exhausted"):
+        middleware.wrap_model_call(
+            request(
+                phase="chat",
+                messages=messages,
+                progressive_enabled=True,
+                evidence_tool_limit=1,
+                evidence_tools=["web_search"],
+                force_synthesis_after_evidence=True,
+            ),
+            handler,
+        )
