@@ -54,6 +54,17 @@ export type ProjectSummary = {
   modelConfigIds: string[];
 };
 
+export type RuntimeBudgetProfile = "low" | "medium" | "high";
+
+export type ProjectRuntimeSettings = {
+  runtimeBudgetProfile: RuntimeBudgetProfile;
+  evidenceToolLimit: number;
+  bodyDraftWriteLimit: number;
+  modelCallLimit: number;
+  recursionLimit: number;
+  synthesisReserveSteps: number;
+};
+
 export type DeliverableType = "auto" | "document" | "outline" | "analysis" | "checklist" | "proposal";
 
 export type ProjectBrief = {

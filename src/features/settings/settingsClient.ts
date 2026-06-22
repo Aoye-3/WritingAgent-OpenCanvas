@@ -2,6 +2,7 @@ import type {
   AgentBackendConfigOverview,
   AgentBackendRuntimeStatus,
   CanvasSettings,
+  ProjectRuntimeSettings,
   SettingsSaveRequest,
   SettingsStatus,
   SettingsValidationResponse
@@ -38,4 +39,14 @@ export async function getCanvasSettings(): Promise<CanvasSettings> {
 
 export async function saveCanvasSettings(payload: CanvasSettings): Promise<CanvasSettings> {
   return apiPut<CanvasSettings>("/api/settings/canvas", payload);
+}
+
+export async function getProjectRuntimeSettings(projectId: string): Promise<ProjectRuntimeSettings> {
+  const response = await apiGet<{ settings: ProjectRuntimeSettings }>(`/api/projects/${projectId}/runtime-settings`);
+  return response.settings;
+}
+
+export async function saveProjectRuntimeSettings(projectId: string, payload: ProjectRuntimeSettings): Promise<ProjectRuntimeSettings> {
+  const response = await apiPut<{ settings: ProjectRuntimeSettings }>(`/api/projects/${projectId}/runtime-settings`, payload);
+  return response.settings;
 }

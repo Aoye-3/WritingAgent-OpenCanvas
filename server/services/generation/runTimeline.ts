@@ -66,6 +66,18 @@ export function toolEventToTimelineEvent(builder: RunTimelineBuilder, event: Too
   const payload = record(event.payload);
   const toolName = string(payload.toolName) || string(payload.tool) || "tool";
   const label = toolLabel(toolName, builder.locale);
+  if (/^canvas_delivery_/.test(event.eventType)) {
+    if (event.eventType === "canvas_delivery_synthesis_started") {
+      return builder.event("decision", "running", builder.locale === "zh" ? "最终综合" : "Final synthesis", builder.locale === "zh" ? "预算已满足，正在基于已有材料生成最终正文。" : "Budget reached; synthesizing the final body from gathered material.", payload);
+    }
+    const title = string(payload.title) || (builder.locale === "zh" ? "Canvas 交付" : "Canvas delivery");
+    const summary = string(payload.summary) || (builder.locale === "zh" ? "Canvas 渐进交付已更新。" : "Progressive Canvas delivery updated.");
+    const displayTitle = string(payload.displayTitle) || title;
+    const committed = string(payload.status) === "committed" || /_committed$/.test(event.eventType);
+    return committed
+      ? builder.event("canvas_node_committed", "completed", displayTitle, summary, payload)
+      : builder.event("tool_started", "running", displayTitle, summary, { ...payload, toolName });
+  }
   if (/(?:^|_)tool_failed$/.test(event.eventType) || /(?:^|_)canvas_mutation_failed$/.test(event.eventType)) {
     return builder.event("tool_completed", "failed", label, builder.locale === "zh" ? `${label}失败` : `${label} failed`, { ...payload, toolName });
   }

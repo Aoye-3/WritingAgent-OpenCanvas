@@ -137,8 +137,11 @@ _CONTEXT_CONFIGURABLE_KEYS: frozenset[str] = frozenset(
         "facetwrite_recursion_limit",
         "facetwrite_model_call_limit",
         "facetwrite_evidence_tool_limit",
+        "facetwrite_body_draft_write_limit",
+        "facetwrite_body_draft_writes_used",
         "facetwrite_synthesis_reserve_steps",
         "facetwrite_force_synthesis_after_evidence",
+        "facetwrite_force_synthesis_after_body_drafts",
         "facetwrite_evidence_tools",
     }
 )

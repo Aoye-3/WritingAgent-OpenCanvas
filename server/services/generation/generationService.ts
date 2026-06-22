@@ -1,7 +1,7 @@
 ﻿import type { AgentRuntimeAdapter } from "../../agentRuntimeAdapter.js";
 import type { StreamStatus } from "../../agentRunLoop.js";
 import type { GenerateRequest, GenerateResponse } from "../../contracts/generation.js";
-import type { SQLiteStorageRepository } from "../../storage.js";
+import type { ProjectRuntimeSettings, SQLiteStorageRepository } from "../../storage.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { KnowledgeService } from "../../knowledge/service.js";
 import type { AgentRuntimePort } from "../../runtime/agentRuntimePort.js";
@@ -82,15 +82,10 @@ const streamLabels = {
 const progressiveEvidenceTools = ["web_search", "web_fetch", "read_file", "bash", "grep", "glob", "ls", "knowledge_base"] as const;
 type RuntimeBudgetProfile = NonNullable<GenerateRequest["runtimeBudgetProfile"]>;
 
-const runtimeBudgetProfiles: Record<RuntimeBudgetProfile, {
-  recursionLimit: number;
-  modelCallLimit: number;
-  evidenceToolLimit: number;
-  synthesisReserveSteps: number;
-}> = {
-  low: { recursionLimit: 40, modelCallLimit: 10, evidenceToolLimit: 4, synthesisReserveSteps: 10 },
-  medium: { recursionLimit: 80, modelCallLimit: 20, evidenceToolLimit: 8, synthesisReserveSteps: 16 },
-  high: { recursionLimit: 160, modelCallLimit: 36, evidenceToolLimit: 18, synthesisReserveSteps: 24 }
+const runtimeBudgetProfiles: Record<RuntimeBudgetProfile, ProjectRuntimeSettings> = {
+  low: { runtimeBudgetProfile: "low", recursionLimit: 40, modelCallLimit: 10, evidenceToolLimit: 4, bodyDraftWriteLimit: 1, synthesisReserveSteps: 10 },
+  medium: { runtimeBudgetProfile: "medium", recursionLimit: 80, modelCallLimit: 20, evidenceToolLimit: 8, bodyDraftWriteLimit: 3, synthesisReserveSteps: 16 },
+  high: { runtimeBudgetProfile: "high", recursionLimit: 160, modelCallLimit: 36, evidenceToolLimit: 18, bodyDraftWriteLimit: 5, synthesisReserveSteps: 24 }
 };
 
 export function createGenerationService(
@@ -225,7 +220,7 @@ export function createGenerationService(
     payload = withPlanGeneration(payload, threadId, storage);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     payload = withRuntimeContext(payload, context.canvasDeliveryContract);
-    payload = withProgressiveCanvasDeliveryContext(payload, context);
+    payload = withProgressiveCanvasDeliveryContext(payload, context, storage.getProjectRuntimeSettings(selection.projectId));
     const agentCard = context.runtimeConfig.agentCard;
     let textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
@@ -233,7 +228,9 @@ export function createGenerationService(
     const timelineEvents: RunTimelineEvent[] = [];
     const deliveryId = stableCanvasDeliveryId(threadId, payload, storage);
     let researchDeliverySequence = 0;
+    let bodyDraftWriteCount = 0;
     let progressiveDeliveryStarted = false;
+    let progressiveSynthesisStarted = false;
     const progressiveEvidenceEntries: ProgressiveEvidenceEntry[] = [];
     const publicReasoning = createPublicReasoningEmitter(payload.locale, callbacks.onReasoningToken);
     const emitTimeline = (event: RunTimelineEvent) => {
@@ -264,6 +261,7 @@ export function createGenerationService(
     const observeToolEvent = (event: ToolEventRecord) => {
       emitRuntimeToolEvent(event);
       if (isProgressiveToolCompletion(event)) ensureProgressiveDeliveryStarted();
+      if (progressiveSynthesisStarted) return;
       const researchEvents = commitProgressiveResearchDelivery({
         payload,
         threadId,
@@ -282,15 +280,31 @@ export function createGenerationService(
         emitRuntimeToolEvent(researchEvent);
       }
       if (researchEvents.length) {
-        for (const bodyEvent of commitProgressiveBodyCheckpointDelivery({
+        const budget = readProgressiveDeliveryBudget(payload);
+        const bodyEvents = bodyDraftWriteCount < budget.bodyDraftWriteLimit ? commitProgressiveBodyCheckpointDelivery({
           payload,
           projectId: selection.projectId,
           storage,
           deliveryId,
-          entries: progressiveEvidenceEntries
-        })) {
+          entries: progressiveEvidenceEntries,
+          draftIndex: bodyDraftWriteCount + 1,
+          draftLimit: budget.bodyDraftWriteLimit
+        }) : [];
+        if (bodyEvents.length) bodyDraftWriteCount += 1;
+        for (const bodyEvent of bodyEvents) {
           runtimeEvents.push(bodyEvent);
           emitRuntimeToolEvent(bodyEvent);
+        }
+        if (progressiveEvidenceEntries.length >= budget.evidenceToolLimit || bodyDraftWriteCount >= budget.bodyDraftWriteLimit) {
+          progressiveSynthesisStarted = true;
+          const synthesisEvent = canvasDeliveryEvent("canvas_delivery_synthesis_started", deliveryId, payload.locale, undefined, {
+            evidenceCount: progressiveEvidenceEntries.length,
+            bodyDraftWriteCount,
+            evidenceToolLimit: budget.evidenceToolLimit,
+            bodyDraftWriteLimit: budget.bodyDraftWriteLimit
+          });
+          runtimeEvents.push(synthesisEvent);
+          emitRuntimeToolEvent(synthesisEvent);
         }
       }
     };
@@ -357,9 +371,22 @@ export function createGenerationService(
             timeline,
             emitTimeline
           });
+          const progressiveFinalized = finalizeProgressiveCanvasDelivery({
+            payload,
+            projectId: selection.projectId,
+            storage,
+            deliveryId,
+            text: finalized.text || normalized.text,
+            events: baseEvents,
+            timeline,
+            emitTimeline
+          });
+          for (const finalEvent of progressiveFinalized.events) {
+            emitRuntimeToolEvent(finalEvent);
+          }
           const completed = timeline.event("run_completed", "completed", payload.locale === "zh" ? "运行完成" : "Run completed", payload.locale === "zh" ? "最终内容已生成。" : "Final content is ready.");
           emitTimeline(completed);
-          const events = [...baseEvents, ...timelineEvents.map(timelineEventToToolEvent)];
+          const events = [...baseEvents, ...progressiveFinalized.events, ...timelineEvents.map(timelineEventToToolEvent)];
           planOrchestrator.complete(threadId, payload);
           const recorded = recordGenerationRun({
             storage,
@@ -371,7 +398,7 @@ export function createGenerationService(
             modelId: context.modelSettings.model,
             mode: context.mode,
             prompt: context.prompt,
-            text: finalized.text,
+            text: progressiveFinalized.text || finalized.text,
             provider: "agent-backend",
             usedMock: false,
             toolState: context.effectiveToolState,
@@ -631,23 +658,24 @@ function withRuntimeContext(payload: GenerateRequest, canvasDeliveryContract?: C
   };
 }
 
-function withProgressiveCanvasDeliveryContext(payload: GenerateRequest, context: Awaited<ReturnType<typeof buildGenerationRunContext>>): GenerateRequest {
+function withProgressiveCanvasDeliveryContext(payload: GenerateRequest, context: Awaited<ReturnType<typeof buildGenerationRunContext>>, projectSettings: ProjectRuntimeSettings): GenerateRequest {
   if (readCanvasWorkflowMode(payload.contextValues) !== "batch_delivery") return payload;
-  const profile = readRuntimeBudgetProfile(payload.runtimeBudgetProfile);
-  const budget = runtimeBudgetProfiles[profile];
+  const budget = resolveRuntimeBudget(payload.runtimeBudgetProfile, projectSettings);
   return {
     ...payload,
     contextValues: {
       ...payload.contextValues,
-      runtimeBudgetProfile: profile,
+      runtimeBudgetProfile: budget.runtimeBudgetProfile,
       progressiveCanvasDelivery: {
         enabled: true,
-        runtimeBudgetProfile: profile,
+        runtimeBudgetProfile: budget.runtimeBudgetProfile,
         recursionLimit: budget.recursionLimit,
         modelCallLimit: budget.modelCallLimit,
         evidenceToolLimit: budget.evidenceToolLimit,
+        bodyDraftWriteLimit: budget.bodyDraftWriteLimit,
         synthesisReserveSteps: budget.synthesisReserveSteps,
         forceSynthesisAfterEvidence: true,
+        forceSynthesisAfterBodyDrafts: true,
         evidenceTools: [...progressiveEvidenceTools],
         trigger: progressiveCanvasDeliveryTrigger(payload, context)
       }
@@ -655,8 +683,33 @@ function withProgressiveCanvasDeliveryContext(payload: GenerateRequest, context:
   };
 }
 
+function resolveRuntimeBudget(profileOverride: GenerateRequest["runtimeBudgetProfile"], projectSettings: ProjectRuntimeSettings): ProjectRuntimeSettings {
+  if (profileOverride) {
+    return { ...runtimeBudgetProfiles[readRuntimeBudgetProfile(profileOverride)] };
+  }
+  return projectSettings;
+}
+
 function readRuntimeBudgetProfile(value: GenerateRequest["runtimeBudgetProfile"] | unknown): RuntimeBudgetProfile {
   return value === "low" || value === "high" ? value : "medium";
+}
+
+function readProgressiveDeliveryBudget(payload: GenerateRequest): ProjectRuntimeSettings {
+  const delivery = record(payload.contextValues?.progressiveCanvasDelivery);
+  const profile = readRuntimeBudgetProfile(delivery.runtimeBudgetProfile);
+  const fallback = runtimeBudgetProfiles[profile];
+  return {
+    runtimeBudgetProfile: profile,
+    evidenceToolLimit: readPositiveInt(delivery.evidenceToolLimit, fallback.evidenceToolLimit),
+    bodyDraftWriteLimit: readPositiveInt(delivery.bodyDraftWriteLimit, fallback.bodyDraftWriteLimit),
+    modelCallLimit: readPositiveInt(delivery.modelCallLimit, fallback.modelCallLimit),
+    recursionLimit: readPositiveInt(delivery.recursionLimit, fallback.recursionLimit),
+    synthesisReserveSteps: readPositiveInt(delivery.synthesisReserveSteps, fallback.synthesisReserveSteps)
+  };
+}
+
+function readPositiveInt(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 function progressiveCanvasDeliveryTrigger(payload: GenerateRequest, context: Awaited<ReturnType<typeof buildGenerationRunContext>>) {
@@ -747,6 +800,88 @@ function finalizeCanvasDelivery(input: {
   return { text: content.assistantText || input.text, timelineEvents: localTimelineEvents };
 }
 
+function finalizeProgressiveCanvasDelivery(input: {
+  payload: GenerateRequest;
+  projectId: string;
+  storage: SQLiteStorageRepository;
+  deliveryId: string;
+  text: string;
+  events: ToolEventRecord[];
+  timeline?: ReturnType<typeof createRunTimelineBuilder>;
+  emitTimeline?: (event: RunTimelineEvent) => void;
+}) {
+  if (!isProgressiveCanvasDeliveryEnabled(input.payload)) return { text: input.text, events: [] as ToolEventRecord[] };
+  const instruction = input.payload.chatInstruction ?? input.payload.freeTextPrompt ?? "";
+  if (isDirectCanvasDeliveryIntent(instruction)) return { text: input.text, events: [] as ToolEventRecord[] };
+  const assistantText = input.text.trim();
+  if (!assistantText) return { text: input.text, events: [] as ToolEventRecord[] };
+  const timeline = input.timeline ?? createRunTimelineBuilder({ threadId: input.payload.threadId ?? "pending", locale: input.payload.locale });
+  const emit = input.emitTimeline ?? (() => undefined);
+  const content = resolveCanvasDeliveryContent({
+    instruction,
+    locale: input.payload.locale,
+    text: assistantText,
+    events: input.events
+  });
+  const overviewTitle = input.payload.locale === "zh" ? "整体概述" : "Overview";
+  const bodyTitle = input.payload.locale === "zh" ? "正文" : "Body";
+  const plan: CanvasDeliveryPlan = {
+    required: true,
+    moduleId: "document_batch",
+    nodes: [
+      {
+        id: stableDeliveryId("node", input.deliveryId, 1),
+        kind: "document",
+        title: overviewTitle,
+        content: content.outlineMarkdown || outlineFromFinalBody(content.bodyMarkdown || assistantText, input.payload.locale),
+        x: 560,
+        y: 120,
+        width: 520,
+        height: 260,
+        metadata: { deliveryId: input.deliveryId, phase: "outline", progressive: true, status: "final" }
+      },
+      {
+        id: stableDeliveryId("node", input.deliveryId, 2),
+        kind: "document",
+        title: bodyTitle,
+        content: content.bodyMarkdown || assistantText,
+        x: 1280,
+        y: 120,
+        width: 640,
+        height: 520,
+        metadata: { deliveryId: input.deliveryId, phase: "body", progressive: true, status: "final" }
+      }
+    ],
+    edges: []
+  };
+  const committed = commitCanvasDelivery(input.storage, input.projectId, plan);
+  for (const item of committed) {
+    emit(timeline.event(
+      "canvas_node_committed",
+      "completed",
+      item.title,
+      input.payload.locale === "zh" ? `最终内容已写入节点：${item.title}` : `Final content written to node: ${item.title}`,
+      { nodeId: item.nodeId, title: item.title, deliveryId: input.deliveryId }
+    ));
+  }
+  const body = committed.find((item) => item.nodeId === stableDeliveryId("node", input.deliveryId, 2));
+  return {
+    text: content.assistantText || input.text,
+    events: body ? [canvasDeliveryEvent("canvas_delivery_body_final_committed", input.deliveryId, input.payload.locale, body, {
+      displayTitle: input.payload.locale === "zh" ? "最终正文" : "Final body"
+    })] : [] as ToolEventRecord[]
+  };
+}
+
+function outlineFromFinalBody(body: string, locale: GenerateRequest["locale"]) {
+  const title = locale === "zh" ? "整体概述" : "Overview";
+  const firstParagraph = body
+    .split(/\n{2,}/)
+    .map((part) => part.replace(/^#+\s*/, "").trim())
+    .find(Boolean);
+  return [`# ${title}`, "", firstParagraph ?? (locale === "zh" ? "最终内容已生成。" : "Final content is ready.")].join("\n");
+}
+
 function beginProgressiveCanvasDelivery(input: {
   payload: GenerateRequest;
   threadId: string;
@@ -810,7 +945,8 @@ function canvasDeliveryEvent(
   eventType: string,
   deliveryId: string,
   locale: GenerateRequest["locale"],
-  item?: { nodeId: string; title: string }
+  item?: { nodeId: string; title: string },
+  extraPayload: Record<string, unknown> = {}
 ): ToolEventRecord {
   return {
     eventType: eventType as ToolEventRecord["eventType"],
@@ -820,7 +956,8 @@ function canvasDeliveryEvent(
       deliveryId,
       status: /started$/.test(eventType) ? "running" : "committed",
       summary: locale === "zh" ? "Canvas 渐进交付已更新。" : "Progressive Canvas delivery updated.",
-      ...(item ? { nodeId: item.nodeId, title: item.title } : {})
+      ...(item ? { nodeId: item.nodeId, title: item.title } : {}),
+      ...extraPayload
     }
   };
 }
@@ -890,6 +1027,8 @@ function commitProgressiveBodyCheckpointDelivery(input: {
   storage: SQLiteStorageRepository;
   deliveryId: string;
   entries: ProgressiveEvidenceEntry[];
+  draftIndex: number;
+  draftLimit: number;
 }): ToolEventRecord[] {
   if (!isProgressiveCanvasDeliveryEnabled(input.payload) || input.entries.length === 0) return [];
   const title = input.payload.locale === "zh" ? "正文" : "Body";
@@ -911,7 +1050,12 @@ function commitProgressiveBodyCheckpointDelivery(input: {
     edges: []
   };
   const [committed] = commitCanvasDelivery(input.storage, input.projectId, plan);
-  return committed ? [canvasDeliveryEvent("canvas_delivery_body_checkpoint_committed", input.deliveryId, input.payload.locale, committed)] : [];
+  return committed ? [canvasDeliveryEvent("canvas_delivery_body_checkpoint_committed", input.deliveryId, input.payload.locale, committed, {
+    draftIndex: input.draftIndex,
+    draftLimit: input.draftLimit,
+    evidenceCount: input.entries.length,
+    displayTitle: input.payload.locale === "zh" ? `正文草稿 ${input.draftIndex}` : `Body draft ${input.draftIndex}`
+  })] : [];
 }
 
 function commitProgressiveFailureDelivery(input: {

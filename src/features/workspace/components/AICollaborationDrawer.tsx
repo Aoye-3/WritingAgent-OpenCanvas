@@ -63,6 +63,7 @@ type AICollaborationDrawerProps = {
   isSending: boolean;
   modelSelectionDisabled: boolean;
   configuredModels: ConfiguredModelApiSummary[];
+  runtimeBudgetProfile?: GenerateRequest["runtimeBudgetProfile"];
   selectedModelConfigId?: string | null;
   modelSettings?: ConversationModelControls;
   onApproveWriteRequest: (requestId: string) => Promise<void>;
@@ -125,6 +126,7 @@ export function AICollaborationDrawer({
   isSending,
   modelSelectionDisabled,
   configuredModels,
+  runtimeBudgetProfile,
   selectedModelConfigId,
   modelSettings,
   onApproveWriteRequest,
@@ -155,7 +157,7 @@ export function AICollaborationDrawer({
   const [input, setInput] = useState("");
   const supportsThinking = modelSettings?.providerId === "deepseek";
   const [thinkingChoice, setThinkingChoice] = useState<ThinkingChoice>(modelSettingsToThinkingChoice(modelSettings));
-  const [runtimeBudgetChoice, setRuntimeBudgetChoice] = useState<RuntimeBudgetChoice>("medium");
+  const [runtimeBudgetChoice, setRuntimeBudgetChoice] = useState<RuntimeBudgetChoice>(runtimeBudgetProfile ?? "medium");
   const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
   const [annotations, setAnnotations] = useState<MessageAnnotation[]>([]);
   const [writeDraft, setWriteDraft] = useState<WriteDraft | null>(null);
@@ -185,6 +187,10 @@ export function AICollaborationDrawer({
   useEffect(() => {
     if (!supportsThinking) setThinkingMenuOpen(false);
   }, [supportsThinking]);
+
+  useEffect(() => {
+    setRuntimeBudgetChoice(runtimeBudgetProfile ?? "medium");
+  }, [runtimeBudgetProfile]);
 
   useEffect(() => {
     if (!inputDraft) return;
@@ -271,13 +277,16 @@ export function AICollaborationDrawer({
       await onPlansChanged();
     }
     try {
+      const runtimeBudgetOverride = runtimeBudgetChoice === (runtimeBudgetProfile ?? "medium")
+        ? undefined
+        : runtimeBudgetChoice;
       const sendResult = await onSend(text, supportsThinking ? thinkingOverridesFromChoice(thinkingChoice) : undefined, {
         ...(mindChainContext ? { canvasMindChain: mindChainContext.text } : {}),
         ...(awaitingPlan ? { awaitingPlan: { id: awaitingPlan.id, answer: text } } : {}),
         ...(revisePlan ? { awaitingPlan: { id: revisePlan.id, revise: true } } : {}),
         ...(enabledSkillRefs.length ? { transientSkillRefs: enabledSkillRefs } : {}),
         ...(disabledSkillRefs.length ? { disabledSkillRefs } : {}),
-        runtimeBudgetProfile: runtimeBudgetChoice
+        ...(runtimeBudgetOverride ? { runtimeBudgetProfile: runtimeBudgetOverride } : {})
       });
       if (sendResult) {
         onSkillOverridesConsumed();

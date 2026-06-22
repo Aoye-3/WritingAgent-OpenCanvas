@@ -37,6 +37,17 @@ export type CanvasSettings = {
   undoDepth: number;
 };
 
+export type RuntimeBudgetProfile = "low" | "medium" | "high";
+
+export type ProjectRuntimeSettings = {
+  runtimeBudgetProfile: RuntimeBudgetProfile;
+  evidenceToolLimit: number;
+  bodyDraftWriteLimit: number;
+  modelCallLimit: number;
+  recursionLimit: number;
+  synthesisReserveSteps: number;
+};
+
 export type ProviderApiConfigSummary = {
   providerId: string;
   providerLabel: string;

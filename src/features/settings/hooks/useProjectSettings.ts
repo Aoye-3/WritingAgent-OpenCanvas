@@ -1,9 +1,18 @@
 import { FormEvent, useEffect, useState } from "react";
-import { getAgentBackendConfigOverview, getAgentBackendRuntimeStatus, getCanvasSettings, getSettingsStatus, saveCanvasSettings, saveSettings, shutdownDevServer, validateSettings } from "../settingsClient";
+import { getAgentBackendConfigOverview, getAgentBackendRuntimeStatus, getCanvasSettings, getProjectRuntimeSettings, getSettingsStatus, saveCanvasSettings, saveProjectRuntimeSettings, saveSettings, shutdownDevServer, validateSettings } from "../settingsClient";
 import { fallbackAgentBackendConfig, fallbackAgentBackendStatus, fallbackStatus, resolvePreset } from "../settingsDefaults";
-import type { AgentBackendConfigOverview, AgentBackendRuntimeStatus, SettingsStatus } from "../types";
+import type { AgentBackendConfigOverview, AgentBackendRuntimeStatus, ProjectRuntimeSettings, SettingsStatus } from "../types";
 
-export function useProjectSettings(open: boolean, copy: {
+const fallbackRuntimeSettings: ProjectRuntimeSettings = {
+  runtimeBudgetProfile: "medium",
+  evidenceToolLimit: 8,
+  bodyDraftWriteLimit: 3,
+  modelCallLimit: 20,
+  recursionLimit: 80,
+  synthesisReserveSteps: 16
+};
+
+export function useProjectSettings(open: boolean, projectId: string, copy: {
   validateSuccess: string;
   validateFailed: string;
   saveSuccess: string;
@@ -18,6 +27,7 @@ export function useProjectSettings(open: boolean, copy: {
   const [agentBackendStatus, setAgentBackendStatus] = useState<AgentBackendRuntimeStatus>(fallbackAgentBackendStatus);
   const [agentBackendConfig, setAgentBackendConfig] = useState<AgentBackendConfigOverview>(fallbackAgentBackendConfig);
   const [canvasUndoDepth, setCanvasUndoDepth] = useState(20);
+  const [runtimeSettings, setRuntimeSettings] = useState<ProjectRuntimeSettings>(fallbackRuntimeSettings);
   const [message, setMessage] = useState("");
   const [busyState, setBusyState] = useState<"idle" | "saving" | "validating" | "stopping">("idle");
 
@@ -50,7 +60,12 @@ export function useProjectSettings(open: boolean, copy: {
     getCanvasSettings()
       .then((canvasSettings) => setCanvasUndoDepth(canvasSettings.undoDepth))
       .catch(() => setCanvasUndoDepth(20));
-  }, [open]);
+    if (projectId) {
+      getProjectRuntimeSettings(projectId)
+        .then(setRuntimeSettings)
+        .catch(() => setRuntimeSettings(fallbackRuntimeSettings));
+    }
+  }, [open, projectId]);
 
   const handleValidate = async () => {
     setBusyState("validating");
@@ -123,6 +138,24 @@ export function useProjectSettings(open: boolean, copy: {
     }
   };
 
+  const handleRuntimeSettingsSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!projectId) return;
+    setBusyState("saving");
+    setMessage("");
+    try {
+      const saved = await saveProjectRuntimeSettings(projectId, runtimeSettings);
+      setRuntimeSettings(saved);
+      setMessage(copy.saveSuccess);
+    } finally {
+      setBusyState("idle");
+    }
+  };
+
+  const updateRuntimeSettings = (patch: Partial<ProjectRuntimeSettings>) => {
+    setRuntimeSettings((current) => ({ ...current, ...patch }));
+  };
+
   return {
     apiKey,
     baseURL,
@@ -130,6 +163,7 @@ export function useProjectSettings(open: boolean, copy: {
     agentBackendConfig,
     agentBackendStatus,
     canvasUndoDepth,
+    runtimeSettings,
     message,
     model,
     modelPreset,
@@ -138,6 +172,7 @@ export function useProjectSettings(open: boolean, copy: {
     systemPrompt,
     handleSubmit,
     handleCanvasSettingsSubmit,
+    handleRuntimeSettingsSubmit,
     handleShutdownDevServer,
     handleValidate,
     setApiKey,
@@ -146,6 +181,7 @@ export function useProjectSettings(open: boolean, copy: {
     setModelPreset,
     setProviderId,
     setSystemPrompt,
-    setCanvasUndoDepth
+    setCanvasUndoDepth,
+    updateRuntimeSettings
   };
 }

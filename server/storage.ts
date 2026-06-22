@@ -29,6 +29,7 @@ import type {
   CanvasWriteRequestInput,
   CanvasWriteRequestStatus,
   JsonValue,
+  ProjectRuntimeSettings,
   ProjectBrief,
   RunRecordInput,
   StoredBrief,
@@ -59,7 +60,9 @@ export type {
   CanvasWriteRequestStatus,
   JsonValue,
   ProjectSummary,
+  ProjectRuntimeSettings,
   ProjectBrief,
+  RuntimeBudgetProfile,
   RunRecordInput,
   StoredMessage,
   StoredOutputVersion,
@@ -162,6 +165,16 @@ export class SQLiteStorageRepository {
   getProject(projectId: string) {
     validateId(projectId, "projectId");
     return this.projects.get(projectId);
+  }
+
+  getProjectRuntimeSettings(projectId: string) {
+    validateId(projectId, "projectId");
+    return this.projects.getRuntimeSettings(projectId);
+  }
+
+  saveProjectRuntimeSettings(projectId: string, input: Partial<ProjectRuntimeSettings>) {
+    validateId(projectId, "projectId");
+    return this.projects.saveRuntimeSettings(projectId, input);
   }
 
   async ensureThread(threadId: string, projectId: string, title = "New conversation") {

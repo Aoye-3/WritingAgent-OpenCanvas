@@ -40,6 +40,52 @@ type UseGenerationRunOptions = {
 
 type TypewriterTarget = "editable" | `message:${string}`;
 
+type LiveThreadStateRefreshRequest = {
+  threadId: string;
+  operationId: number;
+  currentOperationId: () => number;
+  fetchAndApply: (threadId: string) => Promise<ThreadStateResponse>;
+  apply: (state: ThreadStateResponse) => void;
+};
+
+export function createLiveThreadStateRefreshScheduler() {
+  let inFlight: Promise<void> | null = null;
+  let pending: LiveThreadStateRefreshRequest | null = null;
+  let generation = 0;
+
+  const run = (request: LiveThreadStateRefreshRequest, runGeneration = generation) => {
+    const refresh = request.fetchAndApply(request.threadId)
+      .then((state) => {
+        if (runGeneration !== generation || request.operationId !== request.currentOperationId() || state.thread.id !== request.threadId) return;
+        request.apply(state);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (runGeneration !== generation) return;
+        if (inFlight === refresh) inFlight = null;
+        const next = pending;
+        pending = null;
+        if (next) run(next, runGeneration);
+      });
+    inFlight = refresh;
+  };
+
+  return {
+    request(request: LiveThreadStateRefreshRequest) {
+      if (inFlight) {
+        pending = request;
+        return;
+      }
+      run(request);
+    },
+    reset() {
+      generation += 1;
+      inFlight = null;
+      pending = null;
+    }
+  };
+}
+
 export function useGenerationRun(options: UseGenerationRunOptions) {
   const [generation, setGeneration] = useState<GenerateResponse | null>(null);
   const [editableOutput, setEditableOutput] = useState("");
@@ -59,7 +105,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const activeChatMessageIdRef = useRef<string | null>(null);
   const blockedReasoningMessageIdsRef = useRef<Set<string>>(new Set());
   const liveToolEventStateRef = useRef(createLiveToolEventState());
-  const liveStateRefreshRef = useRef<Promise<void> | null>(null);
+  const liveStateRefreshRef = useRef(createLiveThreadStateRefreshScheduler());
 
   useEffect(() => {
     chatAbortControllerRef.current?.abort();
@@ -67,7 +113,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     activeChatMessageIdRef.current = null;
     blockedReasoningMessageIdsRef.current = new Set();
     liveToolEventStateRef.current = createLiveToolEventState();
-    liveStateRefreshRef.current = null;
+    liveStateRefreshRef.current.reset();
     operationIdRef.current += 1;
     setIsGenerating(false);
     setIsChatSending(false);
@@ -86,7 +132,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     activeChatMessageIdRef.current = null;
     blockedReasoningMessageIdsRef.current = new Set();
     liveToolEventStateRef.current = createLiveToolEventState();
-    liveStateRefreshRef.current = null;
+    liveStateRefreshRef.current.reset();
     operationIdRef.current += 1;
     setGeneration(null);
     setEditableOutput("");
@@ -115,17 +161,13 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   };
 
   const refreshLiveThreadState = (threadId: string, operationId: number) => {
-    if (liveStateRefreshRef.current) return;
-    const refresh = options.onFetchAndApplyThreadState(threadId)
-      .then((state) => {
-        if (operationId !== operationIdRef.current || state.thread.id !== threadId) return;
-        options.onApplyLiveThreadState(state);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (liveStateRefreshRef.current === refresh) liveStateRefreshRef.current = null;
-      });
-    liveStateRefreshRef.current = refresh;
+    liveStateRefreshRef.current.request({
+      threadId,
+      operationId,
+      currentOperationId: () => operationIdRef.current,
+      fetchAndApply: options.onFetchAndApplyThreadState,
+      apply: options.onApplyLiveThreadState
+    });
   };
 
   const appendToolEvent = (event: unknown, threadId: string, operationId: number) => {
@@ -545,8 +587,8 @@ function omitSkillOverrideRefs(requestContext?: Record<string, unknown>) {
   return rest;
 }
 
-function readRuntimeBudgetProfile(value: unknown): GenerateRequest["runtimeBudgetProfile"] {
-  return value === "low" || value === "medium" || value === "high" ? value : "medium";
+function readRuntimeBudgetProfile(value: unknown): GenerateRequest["runtimeBudgetProfile"] | undefined {
+  return value === "low" || value === "medium" || value === "high" ? value : undefined;
 }
 
 function isAbortError(error: unknown) {
@@ -555,6 +597,7 @@ function isAbortError(error: unknown) {
 
 function eventStatusPhase(eventType: string): CollaborationMessage["status"] {
   if (/(?:^|_)tool_failed$/.test(eventType) || /(?:^|_)canvas_mutation_failed$/.test(eventType)) return "error";
+  if (eventType === "canvas_delivery_synthesis_started" || eventType === "canvas_delivery_body_final_committed") return "finalizing";
   if (/(?:^|_)tool_(?:started|completed)$/.test(eventType)) return "searching";
   return "writing";
 }

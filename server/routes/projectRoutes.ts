@@ -53,6 +53,22 @@ export function registerProjectRoutes(app: Express, { storage, agentRuntime }: P
     }
   });
 
+  app.get("/api/projects/:projectId/runtime-settings", (request, response) => {
+    const project = storage.getProject(request.params.projectId);
+    if (!project) return sendError(response, 404, "not_found", "Project not found");
+    sendOk(response, { settings: storage.getProjectRuntimeSettings(request.params.projectId) });
+  });
+
+  app.put("/api/projects/:projectId/runtime-settings", (request, response) => {
+    try {
+      const settings = storage.saveProjectRuntimeSettings(request.params.projectId, request.body);
+      if (!settings) return sendError(response, 404, "not_found", "Project not found");
+      sendOk(response, { settings });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to save runtime settings"));
+    }
+  });
+
   app.put("/api/projects/:projectId/models", (request, response) => {
     try {
       const ids = Array.isArray(request.body?.configuredModelApiIds)

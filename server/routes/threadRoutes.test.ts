@@ -68,6 +68,14 @@ async function post(app: express.Express, path: string, body: unknown) {
   });
 }
 
+async function put(app: express.Express, path: string, body: unknown) {
+  return localJsonRequest(app, path, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
 async function get(app: express.Express, path: string) {
   return localJsonRequest(app, path);
 }
@@ -85,6 +93,33 @@ test("renames an active thread title", async () => {
 
   storage.moveThreadToTrash(threadId);
   await storage.hardDeleteThread(threadId);
+});
+
+test("project runtime settings are isolated per project", async () => {
+  const { app, storage } = await withThreadRoutes();
+  const suffix = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const firstProjectId = `runtime_a_${suffix}`;
+  const secondProjectId = `runtime_b_${suffix}`;
+  storage.createProject(firstProjectId, "Runtime A");
+  storage.createProject(secondProjectId, "Runtime B");
+
+  const saved = await put(app, `/api/projects/${firstProjectId}/runtime-settings`, {
+    runtimeBudgetProfile: "high",
+    evidenceToolLimit: 12,
+    bodyDraftWriteLimit: 4,
+    modelCallLimit: 30,
+    recursionLimit: 120,
+    synthesisReserveSteps: 20
+  });
+  const first = await get(app, `/api/projects/${firstProjectId}/runtime-settings`);
+  const second = await get(app, `/api/projects/${secondProjectId}/runtime-settings`);
+
+  assert.equal(saved.status, 200);
+  assert.equal((first.body.settings as { runtimeBudgetProfile: string }).runtimeBudgetProfile, "high");
+  assert.equal((first.body.settings as { evidenceToolLimit: number }).evidenceToolLimit, 12);
+  assert.equal((first.body.settings as { bodyDraftWriteLimit: number }).bodyDraftWriteLimit, 4);
+  assert.equal((second.body.settings as { runtimeBudgetProfile: string }).runtimeBudgetProfile, "medium");
+  assert.equal((second.body.settings as { bodyDraftWriteLimit: number }).bodyDraftWriteLimit, 3);
 });
 
 test("rejects blank thread titles", async () => {

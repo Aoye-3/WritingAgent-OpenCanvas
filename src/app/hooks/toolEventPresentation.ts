@@ -52,7 +52,7 @@ export function reduceLiveToolEvent(
 
 export function shouldRefreshThreadStateForToolEvent(event: LiveToolEvent) {
   return /(?:^|_)(?:canvas_mutation_committed|canvas_write_pending_approval|canvas_mutation_failed|artifact_committed|artifact_staged)$/.test(event.eventType)
-    || /^canvas_delivery_/.test(event.eventType);
+    || (/^canvas_delivery_/.test(event.eventType) && event.eventType !== "canvas_delivery_synthesis_started");
 }
 
 function readToolName(payload: Record<string, unknown>) {
@@ -91,6 +91,9 @@ function lifecycleActivityText(eventType: string, locale: Locale) {
     return locale === "zh" ? "Canvas 节点已创建或更新" : "Canvas node created or updated";
   }
   if (/^canvas_delivery_/.test(eventType)) {
+    if (eventType === "canvas_delivery_body_checkpoint_committed") return locale === "zh" ? "正文草稿已更新" : "Body draft updated";
+    if (eventType === "canvas_delivery_synthesis_started") return locale === "zh" ? "正在最终综合" : "Final synthesis running";
+    if (eventType === "canvas_delivery_body_final_committed") return locale === "zh" ? "最终正文已写入 Canvas" : "Final body written to Canvas";
     return locale === "zh" ? "Canvas 渐进交付已更新" : "Progressive Canvas delivery updated";
   }
   if (/(?:^|_)canvas_write_pending_approval$/.test(eventType)) {

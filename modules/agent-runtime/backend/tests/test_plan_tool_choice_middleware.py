@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
@@ -57,7 +58,8 @@ def canvas_write(operation: str, content: str) -> str:
 def request(*, phase: str, stage: str | None = None, messages=None, canvas_action=None, phase_attempt_id=None,
             allowed_tool_refs=None, tool_state=None, evidence_tool_limit=None, evidence_tools=None,
             progressive_enabled=None, model_call_limit=None, recursion_limit=None, synthesis_reserve_steps=None,
-            force_synthesis_after_evidence=None):
+            force_synthesis_after_evidence=None, body_draft_write_limit=None, body_draft_writes_used=None,
+            force_synthesis_after_body_drafts=None):
     runtime = SimpleNamespace(context={
         "facetwrite_plan_phase": phase,
         "facetwrite_plan_stage": stage,
@@ -66,12 +68,15 @@ def request(*, phase: str, stage: str | None = None, messages=None, canvas_actio
         "facetwrite_allowed_tool_refs": allowed_tool_refs,
         "facetwrite_tool_state": tool_state,
         "facetwrite_evidence_tool_limit": evidence_tool_limit,
+        "facetwrite_body_draft_write_limit": body_draft_write_limit,
+        "facetwrite_body_draft_writes_used": body_draft_writes_used,
         "facetwrite_evidence_tools": evidence_tools,
         "facetwrite_progressive_canvas_delivery_enabled": progressive_enabled,
         "facetwrite_model_call_limit": model_call_limit,
         "facetwrite_recursion_limit": recursion_limit,
         "facetwrite_synthesis_reserve_steps": synthesis_reserve_steps,
         "facetwrite_force_synthesis_after_evidence": force_synthesis_after_evidence,
+        "facetwrite_force_synthesis_after_body_drafts": force_synthesis_after_body_drafts,
     })
     initial_messages = messages or [HumanMessage(content="Plan this task")]
     initial_tools = [plan_update, plan_clarification_submit, plan_revision_submit, web_search, web_fetch, read_file, artifact_stage, canvas_write]
@@ -410,3 +415,67 @@ def test_does_not_force_another_artifact_after_artifact_stage_returns():
     )
 
     assert captured["request"].tool_choice is None
+
+
+def test_budget_retry_forces_final_answer_when_model_keeps_requesting_tools():
+    middleware = PlanToolChoiceMiddleware()
+    calls = []
+    messages = [
+        HumanMessage(content="Research this"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+    ]
+
+    def handler(model_request):
+        calls.append([tool.name for tool in model_request.tools])
+        if len(calls) == 1:
+            return AIMessage(content="", tool_calls=[{
+                "id": "call_search",
+                "name": "web_search",
+                "args": {"query": "more"},
+                "type": "tool_call",
+            }])
+        return AIMessage(content="Final answer from existing evidence")
+
+    result = middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            progressive_enabled=True,
+            evidence_tool_limit=1,
+            evidence_tools=["web_search"],
+            force_synthesis_after_evidence=True,
+        ),
+        handler,
+    )
+
+    assert calls == [[], []]
+    assert result.content == "Final answer from existing evidence"
+
+
+def test_budget_retry_fails_if_model_still_requests_tools():
+    middleware = PlanToolChoiceMiddleware()
+    messages = [
+        HumanMessage(content="Research this"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+    ]
+
+    def handler(_model_request):
+        return AIMessage(content="", tool_calls=[{
+            "id": "call_search",
+            "name": "web_search",
+            "args": {"query": "more"},
+            "type": "tool_call",
+        }])
+
+    with pytest.raises(RuntimeError, match="runtime budget exhausted"):
+        middleware.wrap_model_call(
+            request(
+                phase="chat",
+                messages=messages,
+                progressive_enabled=True,
+                evidence_tool_limit=1,
+                evidence_tools=["web_search"],
+                force_synthesis_after_evidence=True,
+            ),
+            handler,
+        )

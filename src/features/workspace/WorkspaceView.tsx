@@ -92,6 +92,7 @@ type WorkspaceViewProps = {
   onRetryProjectBrief: () => Promise<void>;
   onRetryTaskBrief: () => Promise<void>;
   promptPreview: string;
+  runtimeBudgetProfile?: GenerateRequest["runtimeBudgetProfile"];
   projectBrief: ProjectBrief;
   taskBrief: TaskBrief;
   projectBriefStatus: BriefSaveStatus;
@@ -165,6 +166,7 @@ export function WorkspaceView({
   onUpdateCanvasWorkflow,
   onUndoCanvas,
   promptPreview,
+  runtimeBudgetProfile,
   projectBrief,
   taskBrief,
   projectBriefStatus,
@@ -414,6 +416,7 @@ export function WorkspaceView({
           skillFolders={skillFolders}
           skillCatalogStatus={skillCatalogStatus}
           configuredModels={configuredModels}
+          runtimeBudgetProfile={runtimeBudgetProfile}
           selectedModelConfigId={selectedModelConfigId}
           modelSettings={{
             providerId: selectedConfiguredModel?.providerId,

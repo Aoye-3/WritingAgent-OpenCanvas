@@ -78,6 +78,14 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
       ensureThread: async () => undefined,
       getThread: () => ({ id: "thread_test", projectId: "project_test", title: "Test", configuredModelApiId: "configured-test", contextResetAt, updatedAt: "" }),
       getProject: () => ({ id: "project_test", title: "Test", summary: "", updatedAt: "" }),
+      getProjectRuntimeSettings: () => ({
+        runtimeBudgetProfile: "medium",
+        evidenceToolLimit: 8,
+        bodyDraftWriteLimit: 3,
+        modelCallLimit: 20,
+        recursionLimit: 80,
+        synthesisReserveSteps: 16
+      }),
       getProjectModelBindings: () => ["configured-test"],
       getProjectSharedContext: () => undefined,
       getProjectBrief: () => ({ brief: {}, revision: 0 }),
@@ -427,7 +435,10 @@ test("streaming direct Canvas delivery commits a research note after each search
   assert.equal(records.length, 0);
   assert.ok(canvasNodes.some((node) => node.title === "\u7814\u7a76\u6458\u5f55 1" && String(node.content).includes("LLM agent survey 2025")));
   assert.ok(canvasNodes.some((node) => node.title === "\u7814\u7a76\u6458\u5f55 1" && String(node.content).includes("https://example.com/agent-survey")));
-  assert.ok(canvasNodes.some((node) => node.title === "\u6b63\u6587" && String(node.content).includes("\u5de5\u4f5c\u6b63\u6587\u8349\u7a3f")));
+  const bodyNode = canvasNodes.find((node) => node.title === "\u6b63\u6587");
+  assert.ok(bodyNode);
+  assert.ok(String(bodyNode.content).includes("\u5de5\u4f5c\u6b63\u6587\u8349\u7a3f"));
+  assert.equal(String(bodyNode.content).includes("\u6b63\u5728\u751f\u6210\u5185\u5bb9"), false);
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_checkpoint_committed"));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_research_committed"));
 });
@@ -530,6 +541,56 @@ test("streaming generic long task creates Canvas progress from evidence tools", 
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_research_committed"));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_checkpoint_committed"));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
+});
+
+test("progressive Canvas stops body drafts at budget and finalizes Body from agent answer", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        for (let index = 1; index <= 4; index += 1) {
+          input.onToolEvent?.({
+            eventType: "agent_backend_tool_completed",
+            payload: {
+              toolName: "web_fetch",
+              url: `https://example.com/source-${index}`,
+              snippet: `Evidence ${index}`
+            }
+          });
+        }
+        return {
+          text: "# Final report\n\nThis is the final synthesized answer.",
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Research and summarize agent runtime budgets",
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
+
+  assert.equal(result.usedMock, false);
+  assert.equal(records.length, 1);
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_synthesis_started"));
+  assert.equal(events.filter((event) => event.eventType === "canvas_delivery_body_checkpoint_committed").length, 3);
+  assert.ok(canvasNodes.some((node) => node.title === "Progress note 3"));
+  assert.equal(canvasNodes.some((node) => node.title === "Progress note 4"), false);
+  const body = canvasNodes.find((node) => node.title === "Body");
+  assert.ok(body);
+  assert.equal(String(body.content).includes("Working body draft"), false);
+  assert.ok(String(body.content).includes("This is the final synthesized answer."));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_final_committed"));
 });
 
 test("progressive Canvas notes sanitize unsafe tool snippets", async () => {

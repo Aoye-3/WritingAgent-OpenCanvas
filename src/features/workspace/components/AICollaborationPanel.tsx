@@ -28,6 +28,7 @@ type AICollaborationPanelProps = {
   skillFolders: SkillFolderItem[];
   skillCatalogStatus: "idle" | "loading" | "ready" | "error";
   configuredModels: ConfiguredModelApiSummary[];
+  runtimeBudgetProfile?: GenerateRequest["runtimeBudgetProfile"];
   selectedModelConfigId?: string | null;
   modelSettings?: ConversationModelControls;
   onApproveWriteRequest: (requestId: string) => Promise<void>;

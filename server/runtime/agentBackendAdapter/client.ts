@@ -69,8 +69,11 @@ type AgentBackendRunContext = {
   facetwrite_recursion_limit?: number;
   facetwrite_model_call_limit?: number;
   facetwrite_evidence_tool_limit?: number;
+  facetwrite_body_draft_write_limit?: number;
+  facetwrite_body_draft_writes_used?: number;
   facetwrite_synthesis_reserve_steps?: number;
   facetwrite_force_synthesis_after_evidence?: boolean;
+  facetwrite_force_synthesis_after_body_drafts?: boolean;
   facetwrite_evidence_tools?: string[];
 };
 
@@ -185,6 +188,9 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
   const evidenceToolLimit = typeof progressiveDelivery?.evidenceToolLimit === "number" && progressiveDelivery.evidenceToolLimit > 0
     ? Math.floor(progressiveDelivery.evidenceToolLimit)
     : undefined;
+  const bodyDraftWriteLimit = typeof progressiveDelivery?.bodyDraftWriteLimit === "number" && progressiveDelivery.bodyDraftWriteLimit > 0
+    ? Math.floor(progressiveDelivery.bodyDraftWriteLimit)
+    : undefined;
   const recursionLimit = typeof progressiveDelivery?.recursionLimit === "number" && progressiveDelivery.recursionLimit > 0
     ? Math.floor(progressiveDelivery.recursionLimit)
     : undefined;
@@ -198,6 +204,7 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     ? progressiveDelivery.runtimeBudgetProfile
     : progressiveDelivery?.runtimeBudgetProfile === "medium" ? "medium" : undefined;
   const forceSynthesisAfterEvidence = progressiveDelivery?.forceSynthesisAfterEvidence === true ? true : undefined;
+  const forceSynthesisAfterBodyDrafts = progressiveDelivery?.forceSynthesisAfterBodyDrafts === true ? true : undefined;
   const evidenceTools = Array.isArray(progressiveDelivery?.evidenceTools)
     ? progressiveDelivery.evidenceTools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0)
     : undefined;
@@ -223,8 +230,10 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
       facetwrite_recursion_limit: recursionLimit,
       facetwrite_model_call_limit: modelCallLimit,
       facetwrite_evidence_tool_limit: evidenceToolLimit,
+      facetwrite_body_draft_write_limit: bodyDraftWriteLimit,
       facetwrite_synthesis_reserve_steps: synthesisReserveSteps,
       facetwrite_force_synthesis_after_evidence: forceSynthesisAfterEvidence,
+      facetwrite_force_synthesis_after_body_drafts: forceSynthesisAfterBodyDrafts,
       facetwrite_evidence_tools: evidenceTools
     };
   }
@@ -248,8 +257,10 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     facetwrite_recursion_limit: recursionLimit,
     facetwrite_model_call_limit: modelCallLimit,
     facetwrite_evidence_tool_limit: evidenceToolLimit,
+    facetwrite_body_draft_write_limit: bodyDraftWriteLimit,
     facetwrite_synthesis_reserve_steps: synthesisReserveSteps,
     facetwrite_force_synthesis_after_evidence: forceSynthesisAfterEvidence,
+    facetwrite_force_synthesis_after_body_drafts: forceSynthesisAfterBodyDrafts,
     facetwrite_evidence_tools: evidenceTools,
     ...(memoryContent ? { facetwrite_memory_content: memoryContent } : {})
   };

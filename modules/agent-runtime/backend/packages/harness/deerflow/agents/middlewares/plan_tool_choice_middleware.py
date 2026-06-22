@@ -104,6 +104,8 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         recursion_limit = PlanToolChoiceMiddleware._positive_int(context.get("facetwrite_recursion_limit"))
         reserve_steps = PlanToolChoiceMiddleware._positive_int(context.get("facetwrite_synthesis_reserve_steps")) or 0
         evidence_limit = PlanToolChoiceMiddleware._positive_int(context.get("facetwrite_evidence_tool_limit"))
+        body_draft_limit = PlanToolChoiceMiddleware._positive_int(context.get("facetwrite_body_draft_write_limit"))
+        body_draft_writes = PlanToolChoiceMiddleware._positive_int(context.get("facetwrite_body_draft_writes_used")) or 0
         evidence_tools_raw = context.get("facetwrite_evidence_tools")
         evidence_tools = {value for value in evidence_tools_raw if isinstance(value, str)} if isinstance(evidence_tools_raw, list) else set()
         completed_evidence_tools = PlanToolChoiceMiddleware._completed_tool_count(request, evidence_tools)
@@ -111,12 +113,13 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         estimated_steps_used = len(request.messages)
 
         evidence_exhausted = bool(evidence_limit and completed_evidence_tools >= evidence_limit and context.get("facetwrite_force_synthesis_after_evidence") is True)
+        body_drafts_exhausted = bool(body_draft_limit and body_draft_writes >= body_draft_limit and context.get("facetwrite_force_synthesis_after_body_drafts") is True)
         model_exhausting = bool(model_limit and model_calls >= max(model_limit - 1, 1))
         recursion_exhausting = bool(recursion_limit and reserve_steps and recursion_limit - estimated_steps_used <= reserve_steps)
-        if not (evidence_exhausted or model_exhausting or recursion_exhausting):
+        if not (evidence_exhausted or body_drafts_exhausted or model_exhausting or recursion_exhausting):
             return request
 
-        reason = "evidence budget reached" if evidence_exhausted else "model budget nearly exhausted" if model_exhausting else "runtime step reserve reached"
+        reason = "evidence budget reached" if evidence_exhausted else "body draft budget reached" if body_drafts_exhausted else "model budget nearly exhausted" if model_exhausting else "runtime step reserve reached"
         reminder = HumanMessage(
             content=(
                 "FacetWrite runtime budget notice: stop calling tools now. "
@@ -128,6 +131,29 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         messages = list(request.messages)
         if not any(isinstance(message, HumanMessage) and message.additional_kwargs.get("facetwrite_budget_notice") for message in messages[-3:]):
             messages.append(reminder)
+        return request.override(messages=messages, tools=[], tool_choice=None)
+
+    @staticmethod
+    def _is_budget_synthesis_request(request: ModelRequest) -> bool:
+        return (
+            not request.tools
+            and any(
+                isinstance(message, HumanMessage)
+                and message.additional_kwargs.get("facetwrite_budget_notice")
+                for message in request.messages[-4:]
+            )
+        )
+
+    @staticmethod
+    def _budget_retry_request(request: ModelRequest) -> ModelRequest:
+        messages = list(request.messages)
+        messages.append(HumanMessage(
+            content=(
+                "FacetWrite hard budget guard: the previous response requested tools after the runtime budget was exhausted. "
+                "Do not call tools. Produce the final answer now from the evidence already present in the conversation."
+            ),
+            additional_kwargs={"hide_from_ui": True, "facetwrite_budget_notice": True},
+        ))
         return request.override(messages=messages, tools=[], tool_choice=None)
 
     @staticmethod
@@ -214,7 +240,13 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelCallResult:
         prepared = self._prepare(request)
-        return handler(prepared)
+        result = handler(prepared)
+        if PlanToolChoiceMiddleware._is_budget_synthesis_request(prepared) and PlanToolChoiceMiddleware._contains_tool_call(result):
+            retry = handler(PlanToolChoiceMiddleware._budget_retry_request(prepared))
+            if PlanToolChoiceMiddleware._contains_tool_call(retry):
+                raise RuntimeError("FacetWrite runtime budget exhausted but model continued requesting tools")
+            return retry
+        return result
 
     @override
     async def awrap_model_call(
@@ -223,4 +255,10 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelCallResult:
         prepared = self._prepare(request)
-        return await handler(prepared)
+        result = await handler(prepared)
+        if PlanToolChoiceMiddleware._is_budget_synthesis_request(prepared) and PlanToolChoiceMiddleware._contains_tool_call(result):
+            retry = await handler(PlanToolChoiceMiddleware._budget_retry_request(prepared))
+            if PlanToolChoiceMiddleware._contains_tool_call(retry):
+                raise RuntimeError("FacetWrite runtime budget exhausted but model continued requesting tools")
+            return retry
+        return result

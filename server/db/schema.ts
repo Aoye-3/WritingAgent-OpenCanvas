@@ -318,6 +318,19 @@ export function migrateStorageSchema(db: DatabaseSync) {
     );
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS project_runtime_settings (
+      project_id TEXT PRIMARY KEY,
+      runtime_budget_profile TEXT NOT NULL,
+      evidence_tool_limit INTEGER NOT NULL,
+      body_draft_write_limit INTEGER NOT NULL,
+      model_call_limit INTEGER NOT NULL,
+      recursion_limit INTEGER NOT NULL,
+      synthesis_reserve_steps INTEGER NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
   const version2 = db.prepare(`SELECT version FROM schema_version WHERE version = 2`).get();
   if (!version2) {
     db.exec(`

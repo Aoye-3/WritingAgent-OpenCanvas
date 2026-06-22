@@ -521,8 +521,10 @@ test("sends progressive Canvas evidence controls for skill long tasks", () => {
         recursionLimit: 80,
         modelCallLimit: 20,
         evidenceToolLimit: 8,
+        bodyDraftWriteLimit: 3,
         synthesisReserveSteps: 16,
         forceSynthesisAfterEvidence: true,
+        forceSynthesisAfterBodyDrafts: true,
         evidenceTools: ["web_search", "web_fetch", "read_file", "bash"]
       }
     },
@@ -536,8 +538,10 @@ test("sends progressive Canvas evidence controls for skill long tasks", () => {
   assert.equal(request.context.facetwrite_recursion_limit, 80);
   assert.equal(request.context.facetwrite_model_call_limit, 20);
   assert.equal(request.context.facetwrite_evidence_tool_limit, 8);
+  assert.equal(request.context.facetwrite_body_draft_write_limit, 3);
   assert.equal(request.context.facetwrite_synthesis_reserve_steps, 16);
   assert.equal(request.context.facetwrite_force_synthesis_after_evidence, true);
+  assert.equal(request.context.facetwrite_force_synthesis_after_body_drafts, true);
   assert.deepEqual(request.context.facetwrite_evidence_tools, ["web_search", "web_fetch", "read_file", "bash"]);
 });
 

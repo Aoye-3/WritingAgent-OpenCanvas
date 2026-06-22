@@ -1,6 +1,33 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { ProjectSummary } from "../storageTypes.js";
+import type { ProjectRuntimeSettings, ProjectSummary, RuntimeBudgetProfile } from "../storageTypes.js";
 import { nowIso } from "./storageRepositoryUtils.js";
+
+const runtimeBudgetDefaults: Record<RuntimeBudgetProfile, ProjectRuntimeSettings> = {
+  low: {
+    runtimeBudgetProfile: "low",
+    evidenceToolLimit: 4,
+    bodyDraftWriteLimit: 1,
+    modelCallLimit: 10,
+    recursionLimit: 40,
+    synthesisReserveSteps: 10
+  },
+  medium: {
+    runtimeBudgetProfile: "medium",
+    evidenceToolLimit: 8,
+    bodyDraftWriteLimit: 3,
+    modelCallLimit: 20,
+    recursionLimit: 80,
+    synthesisReserveSteps: 16
+  },
+  high: {
+    runtimeBudgetProfile: "high",
+    evidenceToolLimit: 18,
+    bodyDraftWriteLimit: 5,
+    modelCallLimit: 36,
+    recursionLimit: 160,
+    synthesisReserveSteps: 24
+  }
+};
 
 export class ProjectRepository {
   constructor(private db: DatabaseSync) {}
@@ -66,4 +93,72 @@ export class ProjectRepository {
   touch(projectId: string, updatedAt = nowIso()) {
     this.db.prepare(`UPDATE projects SET updated_at = ? WHERE id = ?`).run(updatedAt, projectId);
   }
+
+  getRuntimeSettings(projectId: string): ProjectRuntimeSettings {
+    const row = this.db.prepare(
+      `SELECT runtime_budget_profile as runtimeBudgetProfile,
+              evidence_tool_limit as evidenceToolLimit,
+              body_draft_write_limit as bodyDraftWriteLimit,
+              model_call_limit as modelCallLimit,
+              recursion_limit as recursionLimit,
+              synthesis_reserve_steps as synthesisReserveSteps
+       FROM project_runtime_settings WHERE project_id = ?`
+    ).get(projectId) as ProjectRuntimeSettings | undefined;
+    return normalizeRuntimeSettings(row);
+  }
+
+  saveRuntimeSettings(projectId: string, input: Partial<ProjectRuntimeSettings>): ProjectRuntimeSettings | undefined {
+    if (!this.get(projectId)) return undefined;
+    const settings = normalizeRuntimeSettings(input);
+    const now = nowIso();
+    this.db.prepare(
+      `INSERT INTO project_runtime_settings
+         (project_id, runtime_budget_profile, evidence_tool_limit, body_draft_write_limit, model_call_limit, recursion_limit, synthesis_reserve_steps, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(project_id) DO UPDATE SET
+         runtime_budget_profile = excluded.runtime_budget_profile,
+         evidence_tool_limit = excluded.evidence_tool_limit,
+         body_draft_write_limit = excluded.body_draft_write_limit,
+         model_call_limit = excluded.model_call_limit,
+         recursion_limit = excluded.recursion_limit,
+         synthesis_reserve_steps = excluded.synthesis_reserve_steps,
+         updated_at = excluded.updated_at`
+    ).run(
+      projectId,
+      settings.runtimeBudgetProfile,
+      settings.evidenceToolLimit,
+      settings.bodyDraftWriteLimit,
+      settings.modelCallLimit,
+      settings.recursionLimit,
+      settings.synthesisReserveSteps,
+      now
+    );
+    this.touch(projectId, now);
+    return settings;
+  }
+}
+
+export function defaultRuntimeBudgetSettings(profile: RuntimeBudgetProfile = "medium"): ProjectRuntimeSettings {
+  return { ...runtimeBudgetDefaults[profile] };
+}
+
+function normalizeRuntimeSettings(input: Partial<ProjectRuntimeSettings> | undefined): ProjectRuntimeSettings {
+  const profile = input?.runtimeBudgetProfile === "low" || input?.runtimeBudgetProfile === "high"
+    ? input.runtimeBudgetProfile
+    : "medium";
+  const defaults = runtimeBudgetDefaults[profile];
+  return {
+    runtimeBudgetProfile: profile,
+    evidenceToolLimit: clampInt(input?.evidenceToolLimit, defaults.evidenceToolLimit, 1, 50),
+    bodyDraftWriteLimit: clampInt(input?.bodyDraftWriteLimit, defaults.bodyDraftWriteLimit, 1, 12),
+    modelCallLimit: clampInt(input?.modelCallLimit, defaults.modelCallLimit, 3, 80),
+    recursionLimit: clampInt(input?.recursionLimit, defaults.recursionLimit, 20, 240),
+    synthesisReserveSteps: clampInt(input?.synthesisReserveSteps, defaults.synthesisReserveSteps, 4, 80)
+  };
+}
+
+function clampInt(value: unknown, fallback: number, min: number, max: number) {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : NaN;
+  if (!Number.isInteger(number)) return fallback;
+  return Math.min(Math.max(number, min), max);
 }

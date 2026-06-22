@@ -8,7 +8,7 @@ import { useAppNavigation } from "../features/app/useAppNavigation";
 import type { GenerateRequest } from "../features/generation/types";
 import { I18nProvider, useI18n } from "../features/i18n/I18nProvider";
 import { ProjectSettingsPanel } from "../features/settings/ProjectSettingsPanel";
-import { getAgentBackendRuntimeStatus, getCanvasSettings } from "../features/settings/settingsClient";
+import { getAgentBackendRuntimeStatus, getCanvasSettings, getProjectRuntimeSettings } from "../features/settings/settingsClient";
 import { StartView } from "../features/start/StartView";
 import { HomeView } from "../features/home/HomeView";
 import { KnowledgeSettingsView } from "../features/knowledge/KnowledgeSettingsView";
@@ -99,6 +99,7 @@ function AppContent() {
   const [toolState, setToolState] = useState<GenerateRequest["toolState"]>({ web_search: true, knowledge_base: false, canvas_write: true });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [canvasUndoDepth, setCanvasUndoDepth] = useState(20);
+  const [runtimeBudgetProfile, setRuntimeBudgetProfile] = useState<GenerateRequest["runtimeBudgetProfile"]>("medium");
 
   const applyThreadState = (state: ThreadStateResponse) => {
     activeProjectIdRef.current = state.thread.projectId;
@@ -363,6 +364,11 @@ function AppContent() {
 
   useEffect(() => {
     activeProjectIdRef.current = activeProjectId;
+    if (activeProjectId) {
+      void getProjectRuntimeSettings(activeProjectId)
+        .then((settings) => setRuntimeBudgetProfile(settings.runtimeBudgetProfile))
+        .catch(() => setRuntimeBudgetProfile("medium"));
+    }
   }, [activeProjectId]);
 
   useEffect(() => {
@@ -586,8 +592,9 @@ function AppContent() {
         onUndoCanvas={canvasState.undoCanvas}
         promptPreview={promptPreview}
         toolState={toolState}
+        runtimeBudgetProfile={runtimeBudgetProfile}
       />
-      <ProjectSettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <ProjectSettingsPanel open={settingsOpen} projectId={activeProjectId} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

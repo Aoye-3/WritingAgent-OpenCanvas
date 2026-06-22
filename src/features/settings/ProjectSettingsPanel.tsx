@@ -5,14 +5,42 @@ import { ProviderSettingsForm } from "./components/ProviderSettingsForm";
 import { useProjectSettings } from "./hooks/useProjectSettings";
 import { Button, IconButton, Panel } from "../../shared/ui";
 
+const runtimeBudgetPresets = {
+  low: {
+    runtimeBudgetProfile: "low",
+    evidenceToolLimit: 4,
+    bodyDraftWriteLimit: 1,
+    modelCallLimit: 10,
+    recursionLimit: 40,
+    synthesisReserveSteps: 10
+  },
+  medium: {
+    runtimeBudgetProfile: "medium",
+    evidenceToolLimit: 8,
+    bodyDraftWriteLimit: 3,
+    modelCallLimit: 20,
+    recursionLimit: 80,
+    synthesisReserveSteps: 16
+  },
+  high: {
+    runtimeBudgetProfile: "high",
+    evidenceToolLimit: 18,
+    bodyDraftWriteLimit: 5,
+    modelCallLimit: 36,
+    recursionLimit: 160,
+    synthesisReserveSteps: 24
+  }
+} as const;
+
 type ProjectSettingsPanelProps = {
   open: boolean;
+  projectId: string;
   onClose: () => void;
 };
 
-export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProps) {
-  const { t } = useI18n();
-  const settings = useProjectSettings(open, {
+export function ProjectSettingsPanel({ open, projectId, onClose }: ProjectSettingsPanelProps) {
+  const { locale, t } = useI18n();
+  const settings = useProjectSettings(open, projectId, {
     validateSuccess: t("settings.validateSuccess"),
     validateFailed: t("settings.validateFailed"),
     saveSuccess: t("settings.saveSuccess")
@@ -54,6 +82,37 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
         </dl>
 
         <AgentBackendRuntimePanel config={settings.agentBackendConfig} status={settings.agentBackendStatus} />
+
+        <Panel className="settings-canvas-panel" aria-labelledby="settings-runtime-budget-title">
+          <form onSubmit={settings.handleRuntimeSettingsSubmit}>
+            <div>
+              <h3 id="settings-runtime-budget-title">{locale === "zh" ? "Agent 运行预算" : "Agent run budget"}</h3>
+              <p>{locale === "zh" ? "设置当前项目的默认运行档位、证据收集次数和正文草稿写入次数。" : "Set this project's default run profile, evidence collection limit, and body draft write limit."}</p>
+            </div>
+            <label className="settings-field">
+              <span>{locale === "zh" ? "默认档位" : "Default profile"}</span>
+              <select
+                value={settings.runtimeSettings.runtimeBudgetProfile}
+                onChange={(event) => {
+                  const profile = event.currentTarget.value as keyof typeof runtimeBudgetPresets;
+                  settings.updateRuntimeSettings(runtimeBudgetPresets[profile]);
+                }}
+              >
+                <option value="low">{locale === "zh" ? "低" : "Low"}</option>
+                <option value="medium">{locale === "zh" ? "中" : "Medium"}</option>
+                <option value="high">{locale === "zh" ? "高" : "High"}</option>
+              </select>
+            </label>
+            <RuntimeNumberField label={locale === "zh" ? "证据工具次数" : "Evidence tools"} value={settings.runtimeSettings.evidenceToolLimit} min={1} max={50} onChange={(evidenceToolLimit) => settings.updateRuntimeSettings({ evidenceToolLimit })} />
+            <RuntimeNumberField label={locale === "zh" ? "正文草稿写入次数" : "Body draft writes"} value={settings.runtimeSettings.bodyDraftWriteLimit} min={1} max={12} onChange={(bodyDraftWriteLimit) => settings.updateRuntimeSettings({ bodyDraftWriteLimit })} />
+            <RuntimeNumberField label={locale === "zh" ? "模型轮次" : "Model calls"} value={settings.runtimeSettings.modelCallLimit} min={3} max={80} onChange={(modelCallLimit) => settings.updateRuntimeSettings({ modelCallLimit })} />
+            <RuntimeNumberField label={locale === "zh" ? "递归步数" : "Recursion steps"} value={settings.runtimeSettings.recursionLimit} min={20} max={240} onChange={(recursionLimit) => settings.updateRuntimeSettings({ recursionLimit })} />
+            <RuntimeNumberField label={locale === "zh" ? "综合预留步数" : "Synthesis reserve"} value={settings.runtimeSettings.synthesisReserveSteps} min={4} max={80} onChange={(synthesisReserveSteps) => settings.updateRuntimeSettings({ synthesisReserveSteps })} />
+            <Button disabled={settings.busyState !== "idle" || !projectId} type="submit" variant="secondary">
+              {settings.busyState === "saving" ? t("settings.saving") : t("settings.save")}
+            </Button>
+          </form>
+        </Panel>
 
         <Panel className="settings-canvas-panel" aria-labelledby="settings-canvas-title">
           <form onSubmit={settings.handleCanvasSettingsSubmit}>
@@ -127,5 +186,32 @@ export function ProjectSettingsPanel({ open, onClose }: ProjectSettingsPanelProp
         </Panel>
       </section>
     </div>
+  );
+}
+
+function RuntimeNumberField({
+  label,
+  value,
+  min,
+  max,
+  onChange
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="settings-field">
+      <span>{label}</span>
+      <input
+        min={min}
+        max={max}
+        type="number"
+        value={value}
+        onChange={(event) => onChange(Number(event.currentTarget.value))}
+      />
+    </label>
   );
 }

@@ -136,6 +136,8 @@ Current default content-node sizes are deliberately wider than the minimum size 
 
 The backend direct-delivery planner persists those dimensions in the created node draft. Retrying the same stable delivery id updates existing delivery nodes with the current title, content, position, size, kind, and metadata, so old narrow nodes do not keep stale geometry after a layout contract change.
 
+Generic long-task progressive delivery also writes stable `整体概述` / `Overview` and `正文` / `Body` nodes in batch-delivery mode. Evidence events create separate `研究摘录` / `进度摘录` reference nodes. Body checkpoints update the same stable body node only up to the Project or one-run `bodyDraftWriteLimit`; after synthesis starts, further tool events stay in the run trace and do not create more intermediate Canvas nodes. When the Agent returns final assistant text, generic progressive delivery replaces the stable body draft and emits `canvas_delivery_body_final_committed`. Explicit direct Canvas delivery still uses the structured delivery planner and keeps its heading-based body nodes; the generic final-body replacement is skipped for those runs.
+
 ## Node Markdown Rendering
 Canvas content nodes render Markdown in read-only mode. Editing still uses the raw Markdown textarea so users can revise the source text directly.
 
@@ -263,6 +265,8 @@ Canvas V2 uses the existing API shape:
 - `POST /api/threads/:threadId/canvas/suggestions/:suggestionId/convert-to-node`
 - `GET /api/settings/canvas`
 - `PUT /api/settings/canvas`
+- `GET /api/projects/:projectId/runtime-settings`
+- `PUT /api/projects/:projectId/runtime-settings`
 
 Canvas nodes remain in `canvas_nodes`. Directed edges live in `canvas_edges`. Workflow state lives in `canvas_workflows`, and node suggestions live in `canvas_workflow_suggestions`. Canvas settings use the generic `settings` table with key `canvas`. Canvas routes call `server/domains/canvas/`; the domain service calls the storage facade; the SQL implementation lives in `server/repositories/canvasRepository.ts`. `server/storage.ts` keeps compatibility methods for existing route/service callers.
 

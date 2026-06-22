@@ -47,6 +47,8 @@ Knowledge Base vector stores and uploads are created under:
   - Conversations belonging to one Project, with `configured_model_api_id` and optional `context_reset_at`. The reset boundary preserves history while excluding older messages from later model context.
 - `project_briefs`
   - One optional Project Brief JSON payload per Project, with autosave revision and update timestamp.
+- `project_runtime_settings`
+  - One optional Agent run budget row per Project. Missing rows use the medium defaults. The row stores runtime profile, evidence-tool limit, body-draft write limit, model-call limit, recursion limit, and synthesis reserve steps.
 - `thread_task_briefs`
   - One optional Current Task Brief JSON payload per Thread, with autosave revision and update timestamp.
 - `messages`
@@ -112,6 +114,8 @@ Free arrows, shapes, tables, and asset cards are explicit saved user artifacts a
 
 ## Thread And Project Semantics
 Projects are backed by `projects` and renamed independently from their Threads. Threads are conversations inside a Project and own the explicit `configured_model_api_id` for model selection; they do not own Agent identity, Canvas resources, project model bindings, or project shared context.
+
+Project runtime settings are Project-owned defaults, not Thread state. Generation reads them when the request does not provide a one-run `runtimeBudgetProfile` override, so changing one Project's Agent run budget does not affect other Projects or existing Thread history.
 
 ## Migration Notes
 Schema creation and migration live in `server/db/schema.ts`. Schema version 3 completed the Project-owned Canvas migration. Schema version 4 adds `threads.context_reset_at` without deleting conversation history. Model Config, Agent definitions, and Knowledge data are retained.
