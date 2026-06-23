@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-06-24: Skill Scope Guard Uses Two-Phase Clarification And Structured Runtime Artifacts
+
+Decision: Research-scope Skill guard runs as a two-phase protocol. Phase one is a clarification-only Runtime pass: FacetWrite exposes only `ask_clarification`, disables provider thinking/reasoning controls for this forced-tool call, removes Canvas/progressive/file/evidence delivery context, and requires a structured `agent_backend_agent_clarification_requested` event. After the user answers, phase two sends the original task plus the selected answer, restores normal Skill tools, thinking settings, runtime budget, and long-task progressive delivery eligibility.
+
+Reason: DeepSeek reasoning/thinking paths can reject forced `tool_choice`, but disabling thinking alone did not cover the full failure. Runtime can successfully intercept `ask_clarification` while LangGraph streams partial `AIMessageChunk.tool_calls` with empty or incomplete args; if the adapter validates those chunks too early, the UI sees `missing_question` and the guard fails despite a successful Runtime run. The stable bridge is the middleware-owned structured payload carried on the `ask_clarification` `ToolMessage` artifact/additional kwargs, plus complete tool-call args when available.
+
+Impact: The adapter must ignore empty/partial streamed `ask_clarification` args, accept JSON-string tool args, and map only structured Runtime artifacts or complete structured args into the public clarification event. It must not parse formatted ToolMessage content, Markdown lists, or ordinary assistant prose into buttons. Guard phase success still creates no Canvas nodes; continuation after a selected answer may resume progressive Canvas/file delivery.
+
 ## 2026-06-23: Skill Scope Clarification Is A Strict Runtime Protocol
 
 Decision: Under-scoped research-scope Skill requests use a guarded Agent Runtime pass that exposes only `ask_clarification` and accepts only a structured clarification event. The valid contract is a non-empty `question` plus 2-3 structured `options` with `id`, `label`, and `detail` or `description`; Runtime may fall back to a single JSON object with the same shape only when a provider cannot emit the tool call.
@@ -8,7 +16,7 @@ Reason: Fixed server option templates made the clarification feel shallow and de
 
 Impact: `agent_backend_agent_clarification_requested` is the only event that creates the Agent clarification choice card. Invalid protocol output becomes a diagnostic event and must not create buttons, Canvas nodes, final Body content, or Markdown files. The event carries `resumeContext` so the selected answer preserves the original instruction, transient Skills, disabled Skills, runtime budget, and Canvas workflow. The first guarded run creates no Canvas nodes; after a valid answer, long Skill tasks can resume progressive delivery.
 
-Known provider issue: the local DeepSeek reasoning path can reject explicit `tool_choice="ask_clarification"` with `Thinking mode does not support this tool_choice`. In that failure mode Runtime emits no valid clarification event, and FacetWrite correctly fails the guard with `AgentBackend skill scope guard requires a structured ask_clarification response`. Debug the Runtime provider/middleware compatibility before relaxing the protocol or parsing prose as buttons.
+Known provider/protocol issue: DeepSeek reasoning paths can reject explicit `tool_choice="ask_clarification"` unless the guard request disables thinking/reasoning for phase one. A later `missing_question` failure usually means the provider call succeeded but the adapter consumed partial streamed tool-call args or missed the middleware-owned ToolMessage artifact. Debug the Runtime/provider/adapter contract before relaxing the protocol or parsing prose as buttons.
 
 ## 2026-06-23: Agent Runtime Clarifications Use Composer State
 

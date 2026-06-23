@@ -474,7 +474,8 @@ test("explicit Canvas creation forces canvas_write and sends a structured action
     toolState: {}
   }, { enabled: true, baseUrl: "http://127.0.0.1:8000", assistantId: "lead_agent" });
 
-  assert.equal(request.context.facetwrite_tool_state.canvas_write, true);
+  const toolState = request.context.facetwrite_tool_state as Record<string, boolean>;
+  assert.equal(toolState.canvas_write, true);
   assert.ok(request.context.facetwrite_allowed_tool_refs.includes("canvas_write"));
   assert.equal((request.context.facetwrite_canvas_action as { operation: string }).operation, "create");
 });
@@ -573,6 +574,81 @@ test("sends progressive Canvas evidence controls for skill long tasks", () => {
   assert.deepEqual(request.context.facetwrite_evidence_tools, ["web_search", "web_fetch", "read_file", "bash"]);
 });
 
+test("skill clarification guard exposes only ask_clarification even with progressive Canvas context", () => {
+  const card = getAgentCard("summary");
+  const request = buildRunRequest({
+    threadId: "thread_skill_guard",
+    projectId: "project_canvas",
+    configuredModelApiId: "deepseek--configured",
+    modelSettings: {
+      configuredModelApiId: "deepseek--configured",
+      providerId: "deepseek",
+      model: "deepseek-v4-flash",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: true,
+      toolCallMode: "auto",
+      maxToolCalls: 20,
+      thinkingMode: "enabled",
+      reasoningEffort: "high"
+    },
+    agentCard: card,
+    settings: defaultAgentSettings(card),
+    messages: [{ role: "user", content: "Review recent agent literature" }],
+    prompt: "Review recent agent literature",
+    chatInstruction: "Review recent agent literature",
+    allowedToolRefs: ["ask_clarification", "web_search", "canvas_write", "write_file", "present_files"],
+    contextValues: {
+      facetwrite_clarification_policy: { mode: "skill_scope_guard", instruction: "Call ask_clarification." },
+      canvasAction: { id: "canvas_action_create", operation: "create", risk: "low", requiresTool: true },
+      progressiveCanvasDelivery: {
+        enabled: true,
+        runtimeBudgetProfile: "high",
+        recursionLimit: 220,
+        modelCallLimit: 56,
+        evidenceToolLimit: 32,
+        bodyDraftWriteLimit: 8,
+        synthesisReserveSteps: 44,
+        forceSynthesisAfterEvidence: true,
+        evidenceTools: ["web_search", "web_fetch", "read_file", "bash"]
+      }
+    },
+    toolState: { web_search: true, knowledge_base: true, canvas_write: true }
+  }, { enabled: true, baseUrl: "http://127.0.0.1:8000", assistantId: "lead_agent" });
+
+  assert.deepEqual(request.context.facetwrite_allowed_tool_refs, ["ask_clarification"]);
+  assert.deepEqual(request.context.facetwrite_tool_state, { ask_clarification: true });
+  assert.equal(request.context.facetwrite_canvas_action, undefined);
+  assert.equal(request.context.facetwrite_markdown_file_delivery_required, undefined);
+  assert.equal(request.context.facetwrite_progressive_canvas_delivery_enabled, undefined);
+  assert.equal(request.context.facetwrite_evidence_tools, undefined);
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("web_search"), false);
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("canvas_write"), false);
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("write_file"), false);
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("present_files"), false);
+  assert.equal(request.config.configurable.thinking_enabled, false);
+  assert.equal(request.context.thinking_enabled, false);
+  assert.equal(request.config.configurable.reasoning_effort, undefined);
+  assert.equal(request.context.reasoning_effort, undefined);
+  assert.equal(request.config.configurable.facetwrite_clarification_phase, "clarification_guard");
+  assert.equal(request.context.facetwrite_clarification_phase, "clarification_guard");
+  assert.deepEqual(request.config.configurable.facetwrite_clarification_policy, {
+    mode: "skill_scope_guard",
+    instruction: "Call ask_clarification."
+  });
+  assert.deepEqual(request.context.facetwrite_clarification_policy, {
+    mode: "skill_scope_guard",
+    instruction: "Call ask_clarification."
+  });
+  assert.deepEqual(request.context.facetwrite_context_values.facetwrite_clarification_policy, {
+    mode: "skill_scope_guard",
+    instruction: "Call ask_clarification."
+  });
+});
+
 test("maps ask_clarification tool calls into structured Agent clarification events", async () => {
   const body = [
     'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_clarify","name":"ask_clarification","args":{"question":"Which scope should I use?","options":[{"id":"focused","label":"Focused","detail":"Use the existing core papers.","recommended":true},{"id":"broad","label":"Broad","detail":"Run an extra search round.","recommended":false}]}}]}]\n\n'
@@ -585,6 +661,72 @@ test("maps ask_clarification tool calls into structured Agent clarification even
   assert.equal(clarification.payload.toolCallId, "call_clarify");
   assert.equal(clarification.payload.question, "Which scope should I use?");
   assert.equal(Array.isArray(clarification.payload.options), true);
+  assert.equal(result.text, "");
+});
+
+test("maps ask_clarification tool calls with JSON string args", async () => {
+  const args = JSON.stringify({
+    question: "Which scope should I use?",
+    options: [
+      { id: "focused", label: "Focused", detail: "Use the existing core papers.", recommended: true },
+      { id: "broad", label: "Broad", detail: "Run an extra search round.", recommended: false }
+    ]
+  });
+  const body = `event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_clarify_json_args","name":"ask_clarification","args":${JSON.stringify(args)}}]}]\n\n`;
+
+  const result = await runWithBody(body);
+  const clarification = result.events.find((event) => event.eventType === "agent_backend_agent_clarification_requested");
+
+  assert.ok(clarification);
+  assert.equal(clarification.payload.toolCallId, "call_clarify_json_args");
+  assert.equal(clarification.payload.question, "Which scope should I use?");
+  assert.equal(result.events.some((event) => event.eventType === "agent_backend_agent_clarification_invalid"), false);
+  assert.equal(result.text, "");
+});
+
+test("maps structured ask_clarification ToolMessage artifacts and ignores partial chunks", async () => {
+  const artifact = {
+    type: "agent_clarification_requested",
+    question: "Which research scope should I use?",
+    options: [
+      { id: "recent", label: "Recent", detail: "Focus on recent papers.", recommended: true },
+      { id: "broad", label: "Broad", detail: "Scan the wider literature." }
+    ]
+  };
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_clarify_partial","name":"ask_clarification","args":""}]}]\n\n',
+    `event: messages-tuple\ndata: [{"type":"tool","name":"ask_clarification","tool_call_id":"call_clarify_partial","content":"Which research scope should I use?","artifact":${JSON.stringify(artifact)}}]\n\n`
+  ].join("");
+
+  const result = await runWithBody(body);
+  const clarification = result.events.find((event) => event.eventType === "agent_backend_agent_clarification_requested");
+
+  assert.ok(clarification);
+  assert.equal(clarification.payload.source, "runtime_tool_message_artifact");
+  assert.equal(clarification.payload.toolCallId, "call_clarify_partial");
+  assert.equal(clarification.payload.question, "Which research scope should I use?");
+  assert.equal(result.events.some((event) => event.eventType === "agent_backend_agent_clarification_invalid"), false);
+  assert.equal(result.text, "");
+});
+
+test("maps values-only structured ask_clarification ToolMessage artifacts", async () => {
+  const artifact = {
+    type: "agent_clarification_requested",
+    question: "Which delivery should I prepare?",
+    options: [
+      { id: "summary", label: "Summary", detail: "Prepare a concise summary.", recommended: true },
+      { id: "report", label: "Report", detail: "Prepare a full report." }
+    ]
+  };
+  const body = `event: values\ndata: {"messages":[{"type":"tool","name":"ask_clarification","tool_call_id":"call_values_clarify","content":"ignored formatted text","additional_kwargs":{"facetwrite_clarification":${JSON.stringify(artifact)}}}]}\n\n`;
+
+  const result = await runWithBody(body);
+  const clarification = result.events.find((event) => event.eventType === "agent_backend_agent_clarification_requested");
+
+  assert.ok(clarification);
+  assert.equal(clarification.payload.source, "runtime_tool_message_artifact");
+  assert.equal(clarification.payload.toolCallId, "call_values_clarify");
+  assert.equal(clarification.payload.question, "Which delivery should I prepare?");
   assert.equal(result.text, "");
 });
 

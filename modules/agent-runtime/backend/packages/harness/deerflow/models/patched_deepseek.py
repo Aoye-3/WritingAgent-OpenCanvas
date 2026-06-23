@@ -14,6 +14,41 @@ from langchain_core.messages import AIMessage
 from langchain_deepseek import ChatDeepSeek
 
 
+def _payload_enables_thinking(payload: dict) -> bool:
+    extra_body = payload.get("extra_body")
+    if isinstance(extra_body, dict):
+        thinking = extra_body.get("thinking")
+        if isinstance(thinking, dict) and thinking.get("type") == "enabled":
+            return True
+        chat_template_kwargs = extra_body.get("chat_template_kwargs")
+        if isinstance(chat_template_kwargs, dict):
+            if chat_template_kwargs.get("thinking") is True or chat_template_kwargs.get("enable_thinking") is True:
+                return True
+    thinking = payload.get("thinking")
+    if isinstance(thinking, dict) and thinking.get("type") == "enabled":
+        return True
+    reasoning_effort = payload.get("reasoning_effort")
+    return isinstance(reasoning_effort, str) and reasoning_effort not in ("", "none", "minimal")
+
+
+def _has_specific_tool_choice(payload: dict) -> bool:
+    tool_choice = payload.get("tool_choice")
+    if isinstance(tool_choice, str):
+        return tool_choice not in ("", "auto", "none", "required", "any")
+    if (
+        isinstance(tool_choice, dict)
+        and tool_choice.get("type") == "function"
+        and isinstance(tool_choice.get("name"), str)
+    ):
+        return True
+    return (
+        isinstance(tool_choice, dict)
+        and tool_choice.get("type") == "function"
+        and isinstance(tool_choice.get("function"), dict)
+        and isinstance(tool_choice["function"].get("name"), str)
+    )
+
+
 class PatchedChatDeepSeek(ChatDeepSeek):
     """ChatDeepSeek with proper reasoning_content preservation.
 
@@ -48,6 +83,9 @@ class PatchedChatDeepSeek(ChatDeepSeek):
 
         # Call parent to get the base payload
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+
+        if _payload_enables_thinking(payload) and _has_specific_tool_choice(payload):
+            payload.pop("tool_choice", None)
 
         # Match payload messages with original messages to restore reasoning_content
         payload_messages = payload.get("messages", [])

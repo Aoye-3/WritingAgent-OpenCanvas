@@ -20,6 +20,7 @@ from deerflow.agents.middlewares.view_image_middleware import ViewImageMiddlewar
 from deerflow.agents.thread_state import ThreadState
 from deerflow.config.agents_config import load_agent_config, validate_agent_name
 from deerflow.config.app_config import AppConfig, get_app_config
+from deerflow.config.model_config import ModelConfig
 from deerflow.models import create_chat_model
 from deerflow.skills.tool_policy import filter_tools_by_skill_allowed_tools
 from deerflow.skills.types import Skill
@@ -34,6 +35,30 @@ def _get_runtime_config(config: RunnableConfig) -> dict:
     if isinstance(context, dict):
         cfg.update(context)
     return cfg
+
+
+def _is_skill_scope_guard(cfg: dict) -> bool:
+    policy = cfg.get("facetwrite_clarification_policy")
+    if not isinstance(policy, dict):
+        context_values = cfg.get("facetwrite_context_values")
+        if isinstance(context_values, dict):
+            policy = context_values.get("facetwrite_clarification_policy")
+    return isinstance(policy, dict) and policy.get("mode") == "skill_scope_guard"
+
+
+def _guard_model_kwargs(model_config: ModelConfig, *, skill_scope_guard: bool) -> dict:
+    if not skill_scope_guard:
+        return {}
+    disabled_settings = model_config.when_thinking_disabled
+    if isinstance(disabled_settings, dict):
+        thinking = (disabled_settings.get("extra_body") or {}).get("thinking") if isinstance(disabled_settings.get("extra_body"), dict) else None
+        if isinstance(thinking, dict) and thinking.get("type") == "disabled":
+            return {}
+    model_name = str(getattr(model_config, "model", "") or "").lower()
+    api_base = str(getattr(model_config, "api_base", "") or getattr(model_config, "base_url", "") or "").lower()
+    if "deepseek" not in model_name and "deepseek" not in api_base:
+        return {}
+    return {"extra_body": {"thinking": {"type": "disabled"}}}
 
 
 def _resolve_model_name(requested_model_name: str | None = None, *, app_config: AppConfig | None = None) -> str:
@@ -374,6 +399,12 @@ def _make_lead_agent(config: RunnableConfig, *, app_config: AppConfig):
 
     if model_config is None:
         raise ValueError("No chat model could be resolved. Please configure at least one model in config.yaml or provide a valid 'model_name'/'model' in the request.")
+    skill_scope_guard = _is_skill_scope_guard(cfg)
+    model_kwargs = _guard_model_kwargs(model_config, skill_scope_guard=skill_scope_guard)
+    if skill_scope_guard:
+        logger.info("Skill scope guard disables thinking for forced ask_clarification compatibility.")
+        thinking_enabled = False
+        reasoning_effort = None
     if thinking_enabled and not model_config.supports_thinking:
         logger.warning(f"Thinking mode is enabled but model '{model_name}' does not support it; fallback to non-thinking mode.")
         thinking_enabled = False
@@ -412,7 +443,7 @@ def _make_lead_agent(config: RunnableConfig, *, app_config: AppConfig):
         # Special bootstrap agent with minimal prompt for initial custom agent creation flow
         tools = get_available_tools(model_name=model_name, subagent_enabled=subagent_enabled, app_config=resolved_app_config) + [setup_agent]
         return create_agent(
-            model=create_chat_model(name=model_name, thinking_enabled=thinking_enabled, app_config=resolved_app_config),
+            model=create_chat_model(name=model_name, thinking_enabled=thinking_enabled, app_config=resolved_app_config, **model_kwargs),
             tools=filter_tools_by_skill_allowed_tools(tools, skills_for_tool_policy),
             middleware=_build_middlewares(config, model_name=model_name, app_config=resolved_app_config),
             system_prompt=apply_prompt_template(
@@ -430,7 +461,7 @@ def _make_lead_agent(config: RunnableConfig, *, app_config: AppConfig):
     # Default lead agent (unchanged behavior)
     tools = get_available_tools(model_name=model_name, groups=agent_config.tool_groups if agent_config else None, subagent_enabled=subagent_enabled, app_config=resolved_app_config)
     return create_agent(
-        model=create_chat_model(name=model_name, thinking_enabled=thinking_enabled, reasoning_effort=reasoning_effort, app_config=resolved_app_config),
+        model=create_chat_model(name=model_name, thinking_enabled=thinking_enabled, reasoning_effort=reasoning_effort, app_config=resolved_app_config, **model_kwargs),
         tools=filter_tools_by_skill_allowed_tools(tools + extra_tools, skills_for_tool_policy),
         middleware=_build_middlewares(config, model_name=model_name, agent_name=agent_name, app_config=resolved_app_config),
         system_prompt=apply_prompt_template(

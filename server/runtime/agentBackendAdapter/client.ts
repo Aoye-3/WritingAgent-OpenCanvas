@@ -77,7 +77,8 @@ type AgentBackendRunContext = {
   facetwrite_markdown_file_delivery_policy?: string;
   facetwrite_markdown_file_delivery_required?: boolean;
   facetwrite_task_completion_policy?: string;
-  facetwrite_clarification_policy?: string;
+  facetwrite_clarification_policy?: string | Record<string, unknown>;
+  facetwrite_clarification_phase?: "clarification_guard";
 };
 
 export async function runAgentBackendAgent(input: AgentBackendRunInput): Promise<AgentBackendRunResult> {
@@ -124,20 +125,32 @@ async function formatRuntimeHttpError(response: Response) {
 }
 
 export function buildRunRequest(input: AgentBackendRunInput, config: AgentBackendRuntimeConfig) {
-  const runtimeContext = buildAgentBackendRunContext(input);
-  const canvasAction = input.contextValues?.canvasAction as CanvasAction | undefined ?? resolveCanvasAction({
-    threadId: input.threadId,
-    instruction: input.chatInstruction,
-    selectedCanvasNodeId: input.selectedCanvasNodeId
-  });
-  const baseAllowedToolRefs = canvasAction?.requiresTool
+  const baseRuntimeContext = buildAgentBackendRunContext(input);
+  const skillScopeGuardPolicy = skillScopeGuardPolicyFromContext(input.contextValues);
+  const skillScopeGuard = Boolean(skillScopeGuardPolicy);
+  const runtimeContext = skillScopeGuardPolicy
+    ? withClarificationGuardContext(baseRuntimeContext, skillScopeGuardPolicy)
+    : baseRuntimeContext;
+  const providedCanvasAction = input.contextValues?.canvasAction as CanvasAction | undefined;
+  const canvasAction = skillScopeGuard
+    ? undefined
+    : providedCanvasAction ?? resolveCanvasAction({
+      threadId: input.threadId,
+      instruction: input.chatInstruction,
+      selectedCanvasNodeId: input.selectedCanvasNodeId
+    });
+  const baseAllowedToolRefs = skillScopeGuard
+    ? ["ask_clarification"]
+    : canvasAction?.requiresTool
     ? [...new Set([...(input.allowedToolRefs ?? input.agentCard.toolRefs), "canvas_write"])]
     : input.allowedToolRefs ?? input.agentCard.toolRefs;
   const chatAllowedToolRefs = baseAllowedToolRefs;
-  const allowedToolRefs = runtimeContext.facetwrite_markdown_file_delivery_required
+  const allowedToolRefs = !skillScopeGuard && runtimeContext.facetwrite_markdown_file_delivery_required
     ? [...new Set([...chatAllowedToolRefs, "write_file", "present_files"])]
     : chatAllowedToolRefs;
-  const toolState = canvasAction?.requiresTool
+  const toolState = skillScopeGuard
+    ? { ask_clarification: true }
+    : canvasAction?.requiresTool
     ? { ...(input.toolState ?? {}), canvas_write: true }
     : input.toolState ?? {};
   return {
@@ -173,6 +186,40 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
     if_not_exists: "create",
     on_disconnect: "cancel",
     on_completion: "keep"
+  };
+}
+
+function skillScopeGuardPolicyFromContext(contextValues: AgentBackendRunInput["contextValues"]) {
+  const policy = contextValues?.facetwrite_clarification_policy;
+  return isRecord(policy) && policy.mode === "skill_scope_guard" ? policy : undefined;
+}
+
+function withoutProgressiveDeliveryContext(context: AgentBackendRunContext): AgentBackendRunContext {
+  return {
+    ...context,
+    facetwrite_research_tool_limit: undefined,
+    facetwrite_progressive_canvas_delivery_enabled: undefined,
+    facetwrite_runtime_budget_profile: undefined,
+    facetwrite_recursion_limit: undefined,
+    facetwrite_model_call_limit: undefined,
+    facetwrite_evidence_tool_limit: undefined,
+    facetwrite_body_draft_write_limit: undefined,
+    facetwrite_body_draft_writes_used: undefined,
+    facetwrite_synthesis_reserve_steps: undefined,
+    facetwrite_force_synthesis_after_evidence: undefined,
+    facetwrite_evidence_tools: undefined,
+    facetwrite_markdown_file_delivery_policy: undefined,
+    facetwrite_markdown_file_delivery_required: undefined
+  };
+}
+
+function withClarificationGuardContext(context: AgentBackendRunContext, policy: Record<string, unknown>): AgentBackendRunContext {
+  return {
+    ...withoutProgressiveDeliveryContext(context),
+    thinking_enabled: false,
+    reasoning_effort: undefined,
+    facetwrite_clarification_policy: policy,
+    facetwrite_clarification_phase: "clarification_guard"
   };
 }
 
@@ -505,8 +552,15 @@ function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<strin
     }
     return type && /^(?:task_|plan_|artifact_|canvas_|agent_clarification_)/.test(type) ? [{ eventType: `agent_backend_${type}`, payload: data }] : [];
   }
+  if (event === "values" && isRecord(data) && Array.isArray(data.messages)) {
+    return data.messages.flatMap((message) => mapMessageToolEvents(message, toolCallArgsById));
+  }
   if (event !== "messages" && event !== "messages-tuple") return [];
   const message = Array.isArray(data) ? data[0] : data;
+  return mapMessageToolEvents(message, toolCallArgsById);
+}
+
+function mapMessageToolEvents(message: unknown, toolCallArgsById: Map<string, Record<string, unknown>>): ToolEventRecord[] {
   if (!isRecord(message)) return [];
 
   if (Array.isArray(message.tool_calls)) {
@@ -516,8 +570,9 @@ function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<strin
       if (!toolName) return [];
       const toolCallId = typeof toolCall.id === "string" ? toolCall.id : undefined;
       const args = toolCallArgs(toolCall);
-      if (toolCallId) toolCallArgsById.set(toolCallId, args);
+      if (toolCallId && !isEmptyRecord(args)) toolCallArgsById.set(toolCallId, args);
       if (toolName === "ask_clarification") {
+        if (isEmptyRecord(args)) return [];
         return [agentClarificationEventFromSource(args, { toolName, toolCallId, source: "ask_clarification" })];
       }
       const started: ToolEventRecord = {
@@ -542,6 +597,20 @@ function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<strin
     });
   }
 
+  if (Array.isArray(message.tool_call_chunks)) {
+    return message.tool_call_chunks.flatMap((toolCall) => {
+      if (!isRecord(toolCall)) return [];
+      const toolName = typeof toolCall.name === "string" ? toolCall.name : toolFunctionName(toolCall);
+      if (toolName !== "ask_clarification") return [];
+      const toolCallId = typeof toolCall.id === "string" ? toolCall.id : undefined;
+      const args = toolCallArgs(toolCall);
+      if (toolCallId && !isEmptyRecord(args)) toolCallArgsById.set(toolCallId, args);
+      return isEmptyRecord(args)
+        ? []
+        : [agentClarificationEventFromSource(args, { toolName, toolCallId, source: "ask_clarification" })];
+    });
+  }
+
   const structuredClarification = structuredAssistantClarificationEvent(message);
   if (structuredClarification) return [structuredClarification];
 
@@ -552,7 +621,10 @@ function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<strin
   const failed = structured.some((event) => /_failed$/.test(event.eventType))
     || (typeof message.content === "string" && message.content.startsWith("Error:"));
   const toolName = typeof message.name === "string" ? message.name : "unknown";
-  if (toolName === "ask_clarification") return [];
+  if (toolName === "ask_clarification") {
+    const event = structuredToolMessageClarificationEvent(message);
+    return event ? [event] : [];
+  }
   const sources = toolName === "web_search" ? extractWebSearchSources(message.content) : [];
   const toolCallId = typeof message.tool_call_id === "string" ? message.tool_call_id : undefined;
   const startedArgs = toolCallId ? toolCallArgsById.get(toolCallId) ?? {} : {};
@@ -579,19 +651,28 @@ function toolFunctionName(toolCall: Record<string, unknown>) {
 
 function toolCallArgs(toolCall: Record<string, unknown>): Record<string, unknown> {
   if (isRecord(toolCall.args)) return toolCall.args;
+  if (typeof toolCall.args === "string") return parseJsonRecord(toolCall.args);
   const fn = toolCall.function;
   if (isRecord(fn)) {
     if (isRecord(fn.arguments)) return fn.arguments;
     if (typeof fn.arguments === "string") {
-      try {
-        const parsed = JSON.parse(fn.arguments) as unknown;
-        return isRecord(parsed) ? parsed : {};
-      } catch {
-        return {};
-      }
+      return parseJsonRecord(fn.arguments);
     }
   }
   return {};
+}
+
+function isEmptyRecord(value: Record<string, unknown>) {
+  return Object.keys(value).length === 0;
+}
+
+function parseJsonRecord(value: string) {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 function safeToolArgs(toolName: string, args: Record<string, unknown>) {
@@ -645,6 +726,30 @@ function structuredAssistantClarificationEvent(value: unknown): ToolEventRecord 
   const type = readSourceString(source.type) || readSourceString(parsed.type);
   if (type !== "agent_clarification_requested") return undefined;
   return agentClarificationEventFromSource(source, { source: "assistant_structured_object" });
+}
+
+function structuredToolMessageClarificationEvent(message: Record<string, unknown>): ToolEventRecord | undefined {
+  const candidates = [
+    message.artifact,
+    isRecord(message.additional_kwargs) ? message.additional_kwargs.facetwrite_clarification : undefined,
+    isRecord(message.response_metadata) ? message.response_metadata.facetwrite_clarification : undefined
+  ];
+  const source = candidates.find((candidate): candidate is Record<string, unknown> => {
+    if (!isRecord(candidate)) return false;
+    const payload = isRecord(candidate.clarification) ? candidate.clarification : candidate;
+    return readSourceString(payload.type) === "agent_clarification_requested";
+  });
+  if (!source) return undefined;
+  const payload = isRecord(source.clarification) ? source.clarification : source;
+  const toolCallId = readSourceString(message.tool_call_id);
+  return agentClarificationEventFromSource({
+    ...payload,
+    ...(toolCallId ? { toolCallId } : {})
+  }, {
+    toolName: "ask_clarification",
+    toolCallId: toolCallId || undefined,
+    source: "runtime_tool_message_artifact"
+  });
 }
 
 function agentClarificationEventFromSource(source: Record<string, unknown>, meta: { toolName?: string; toolCallId?: string; source: string }): ToolEventRecord {

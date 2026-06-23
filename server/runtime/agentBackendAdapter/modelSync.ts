@@ -22,6 +22,8 @@ type RuntimeModel = {
   base_url: string;
   supports_thinking: boolean;
   supports_reasoning_effort: boolean;
+  when_thinking_enabled?: Record<string, unknown>;
+  when_thinking_disabled?: Record<string, unknown>;
 };
 
 type SyncModel = Omit<ConfiguredModelApi, "providerId"> & { providerId: string };
@@ -116,6 +118,7 @@ async function pushConfiguredModels(models: RuntimeModel[]) {
 }
 
 function toRuntimeModel(config: SyncModel): RuntimeModel {
+  const thinkingConfig = providerThinkingConfig(config.providerId);
   return {
     name: config.id,
     display_name: config.modelName ?? config.modelId,
@@ -124,8 +127,25 @@ function toRuntimeModel(config: SyncModel): RuntimeModel {
     model: config.modelId,
     api_key: config.apiKey,
     base_url: config.baseURL,
-    supports_thinking: false,
-    supports_reasoning_effort: false
+    supports_thinking: Boolean(thinkingConfig),
+    supports_reasoning_effort: false,
+    ...(thinkingConfig ?? {})
+  };
+}
+
+function providerThinkingConfig(providerId: string): Pick<RuntimeModel, "when_thinking_enabled" | "when_thinking_disabled"> | undefined {
+  if (providerId !== "deepseek") return undefined;
+  return {
+    when_thinking_enabled: {
+      extra_body: {
+        thinking: { type: "enabled" }
+      }
+    },
+    when_thinking_disabled: {
+      extra_body: {
+        thinking: { type: "disabled" }
+      }
+    }
   };
 }
 

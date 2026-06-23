@@ -178,6 +178,36 @@ class TestAskClarificationToolSchema:
 class TestClarificationCommandIdempotency:
     """Clarification tool-call retries should not duplicate messages in state."""
 
+    def test_tool_message_carries_structured_clarification_artifact(self, middleware):
+        request = SimpleNamespace(
+            tool_call={
+                "name": "ask_clarification",
+                "id": "call-clarify-structured",
+                "args": {
+                    "question": "Which scope should I use?",
+                    "clarification_type": "approach_choice",
+                    "context": "The selected skill can run narrow or broad research.",
+                    "options": [
+                        {"id": "recent", "label": "Recent", "detail": "Focus on recent papers", "recommended": True},
+                        {"id": "broad", "label": "Broad", "description": "Scan the wider literature"},
+                    ],
+                },
+            }
+        )
+
+        command = middleware.wrap_tool_call(request, lambda _req: pytest.fail("handler should not be called"))
+        message = command.update["messages"][0]
+
+        assert message.name == "ask_clarification"
+        assert message.artifact["type"] == "agent_clarification_requested"
+        assert message.artifact["question"] == "Which scope should I use?"
+        assert message.artifact["context"] == "The selected skill can run narrow or broad research."
+        assert message.artifact["options"] == [
+            {"id": "recent", "label": "Recent", "detail": "Focus on recent papers", "recommended": True},
+            {"id": "broad", "label": "Broad", "detail": "Scan the wider literature", "recommended": False},
+        ]
+        assert message.additional_kwargs["facetwrite_clarification"] == message.artifact
+
     def test_repeated_tool_call_uses_stable_message_id(self, middleware):
         request = SimpleNamespace(
             tool_call={

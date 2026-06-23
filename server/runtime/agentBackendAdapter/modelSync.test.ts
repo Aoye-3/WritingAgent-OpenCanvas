@@ -77,3 +77,34 @@ test("syncs registry providers that use the OpenAI protocol", async () => {
   assert.equal(service.isModelReady("silicon-model"), true);
   assert.equal(pushed[0]?.model, "Qwen/Qwen3.5-35B-A3B");
 });
+
+test("syncs DeepSeek models with explicit thinking enable and disable settings", async () => {
+  let pushed: Array<{
+    supports_thinking: boolean;
+    supports_reasoning_effort: boolean;
+    when_thinking_enabled?: unknown;
+    when_thinking_disabled?: unknown;
+  }> = [];
+  const service = createModelRuntimeSyncService({
+    loadModels: async () => [{
+      ...configuredModels[0],
+      id: "deepseek-config",
+      providerId: "deepseek",
+      modelId: "deepseek-v4-flash",
+      baseURL: "https://api.deepseek.com"
+    }],
+    pushModels: async (models) => (pushed = models, { count: models.length })
+  });
+
+  await service.sync();
+
+  assert.equal(service.isModelReady("deepseek-config"), true);
+  assert.equal(pushed[0]?.supports_thinking, true);
+  assert.equal(pushed[0]?.supports_reasoning_effort, false);
+  assert.deepEqual(pushed[0]?.when_thinking_enabled, {
+    extra_body: { thinking: { type: "enabled" } }
+  });
+  assert.deepEqual(pushed[0]?.when_thinking_disabled, {
+    extra_body: { thinking: { type: "disabled" } }
+  });
+});

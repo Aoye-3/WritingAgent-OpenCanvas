@@ -168,11 +168,12 @@ def test_make_lead_agent_disables_thinking_when_model_does_not_support_it(monkey
 
     captured: dict[str, object] = {}
 
-    def _fake_create_chat_model(*, name, thinking_enabled, reasoning_effort=None, app_config=None):
+    def _fake_create_chat_model(*, name, thinking_enabled, reasoning_effort=None, app_config=None, **kwargs):
         captured["name"] = name
         captured["thinking_enabled"] = thinking_enabled
         captured["reasoning_effort"] = reasoning_effort
         captured["app_config"] = app_config
+        captured["extra_body"] = kwargs.get("extra_body")
         return object()
 
     monkeypatch.setattr(lead_agent_module, "create_chat_model", _fake_create_chat_model)
@@ -212,11 +213,12 @@ def test_make_lead_agent_reads_runtime_options_from_context(monkeypatch):
 
     captured: dict[str, object] = {}
 
-    def _fake_create_chat_model(*, name, thinking_enabled, reasoning_effort=None, app_config=None):
+    def _fake_create_chat_model(*, name, thinking_enabled, reasoning_effort=None, app_config=None, **kwargs):
         captured["name"] = name
         captured["thinking_enabled"] = thinking_enabled
         captured["reasoning_effort"] = reasoning_effort
         captured["app_config"] = app_config
+        captured["extra_body"] = kwargs.get("extra_body")
         return object()
 
     monkeypatch.setattr(lead_agent_module, "create_chat_model", _fake_create_chat_model)
@@ -242,6 +244,94 @@ def test_make_lead_agent_reads_runtime_options_from_context(monkeypatch):
         "app_config": app_config,
     }
     get_available_tools.assert_called_once_with(model_name="context-model", groups=None, subagent_enabled=True, app_config=app_config)
+    assert result["model"] is not None
+
+
+def test_make_lead_agent_disables_thinking_for_skill_scope_guard(monkeypatch):
+    app_config = _make_app_config([_make_model("deepseek-thinking", supports_thinking=True)])
+
+    import deerflow.tools as tools_module
+
+    monkeypatch.setattr(lead_agent_module, "get_app_config", lambda: app_config)
+    monkeypatch.setattr(tools_module, "get_available_tools", lambda **kwargs: [])
+    monkeypatch.setattr(lead_agent_module, "_build_middlewares", lambda config, model_name, agent_name=None, **kwargs: [])
+
+    captured: dict[str, object] = {}
+
+    def _fake_create_chat_model(*, name, thinking_enabled, reasoning_effort=None, app_config=None, **kwargs):
+        captured["name"] = name
+        captured["thinking_enabled"] = thinking_enabled
+        captured["reasoning_effort"] = reasoning_effort
+        captured["app_config"] = app_config
+        captured["extra_body"] = kwargs.get("extra_body")
+        return object()
+
+    monkeypatch.setattr(lead_agent_module, "create_chat_model", _fake_create_chat_model)
+    monkeypatch.setattr(lead_agent_module, "create_agent", lambda **kwargs: kwargs)
+
+    result = lead_agent_module.make_lead_agent(
+        {
+            "context": {
+                "model_name": "deepseek-thinking",
+                "thinking_enabled": True,
+                "reasoning_effort": "high",
+                "facetwrite_clarification_policy": {
+                    "mode": "skill_scope_guard",
+                    "instruction": "Call ask_clarification.",
+                },
+            }
+        }
+    )
+
+    assert captured["name"] == "deepseek-thinking"
+    assert captured["thinking_enabled"] is False
+    assert captured["reasoning_effort"] is None
+    assert captured["app_config"] is app_config
+    assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert result["model"] is not None
+
+
+def test_make_lead_agent_clears_reasoning_effort_for_skill_scope_guard_without_thinking_support(monkeypatch):
+    app_config = _make_app_config([_make_model("deepseek-synced", supports_thinking=False)])
+
+    import deerflow.tools as tools_module
+
+    monkeypatch.setattr(lead_agent_module, "get_app_config", lambda: app_config)
+    monkeypatch.setattr(tools_module, "get_available_tools", lambda **kwargs: [])
+    monkeypatch.setattr(lead_agent_module, "_build_middlewares", lambda config, model_name, agent_name=None, **kwargs: [])
+
+    captured: dict[str, object] = {}
+
+    def _fake_create_chat_model(*, name, thinking_enabled, reasoning_effort=None, app_config=None, **kwargs):
+        captured["name"] = name
+        captured["thinking_enabled"] = thinking_enabled
+        captured["reasoning_effort"] = reasoning_effort
+        captured["app_config"] = app_config
+        captured["extra_body"] = kwargs.get("extra_body")
+        return object()
+
+    monkeypatch.setattr(lead_agent_module, "create_chat_model", _fake_create_chat_model)
+    monkeypatch.setattr(lead_agent_module, "create_agent", lambda **kwargs: kwargs)
+
+    result = lead_agent_module.make_lead_agent(
+        {
+            "context": {
+                "model_name": "deepseek-synced",
+                "thinking_enabled": True,
+                "reasoning_effort": "high",
+                "facetwrite_clarification_policy": {
+                    "mode": "skill_scope_guard",
+                    "instruction": "Call ask_clarification.",
+                },
+            }
+        }
+    )
+
+    assert captured["name"] == "deepseek-synced"
+    assert captured["thinking_enabled"] is False
+    assert captured["reasoning_effort"] is None
+    assert captured["app_config"] is app_config
+    assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
     assert result["model"] is not None
 
 

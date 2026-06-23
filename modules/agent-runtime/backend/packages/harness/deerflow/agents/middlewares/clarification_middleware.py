@@ -64,6 +64,54 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
             return f"{label} - {detail}"
         return label or detail or str(option)
 
+    def _normalize_options(self, options: object) -> list[dict]:
+        if isinstance(options, str):
+            try:
+                options = json.loads(options)
+            except (json.JSONDecodeError, TypeError):
+                options = [options]
+
+        if options is None:
+            options = []
+        elif not isinstance(options, list):
+            options = [options]
+
+        normalized: list[dict] = []
+        for index, option in enumerate(options, 1):
+            if hasattr(option, "model_dump"):
+                option = option.model_dump()
+            if isinstance(option, dict):
+                label = str(option.get("label") or option.get("title") or option.get("id") or "").strip()
+                detail = str(option.get("detail") or option.get("description") or "").strip()
+                option_id = str(option.get("id") or f"option_{index}").strip()
+                normalized.append({
+                    "id": option_id or f"option_{index}",
+                    "label": label,
+                    "detail": detail,
+                    "recommended": option.get("recommended") is True,
+                })
+                continue
+            label = str(option).strip()
+            normalized.append({
+                "id": f"option_{index}",
+                "label": label,
+                "detail": "",
+                "recommended": False,
+            })
+        return normalized
+
+    def _structured_clarification_payload(self, args: dict) -> dict:
+        payload = {
+            "type": "agent_clarification_requested",
+            "question": str(args.get("question") or "").strip(),
+            "clarification_type": str(args.get("clarification_type") or "missing_info").strip(),
+            "options": self._normalize_options(args.get("options")),
+        }
+        context = str(args.get("context") or "").strip()
+        if context:
+            payload["context"] = context
+        return payload
+
     def _format_clarification_message(self, args: dict) -> str:
         """Format the clarification arguments into a user-friendly message.
 
@@ -141,6 +189,7 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
 
         # Format the clarification message
         formatted_message = self._format_clarification_message(args)
+        structured_payload = self._structured_clarification_payload(args)
 
         # Get the tool call ID
         tool_call_id = request.tool_call.get("id", "")
@@ -152,6 +201,8 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
             content=formatted_message,
             tool_call_id=tool_call_id,
             name="ask_clarification",
+            artifact=structured_payload,
+            additional_kwargs={"facetwrite_clarification": structured_payload},
         )
 
         # Return a Command that:
