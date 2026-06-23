@@ -34,3 +34,26 @@ test("redacts DSML tool protocol from tool event payload strings", () => {
   assert.equal(JSON.stringify(payload).includes("DSML"), false);
   assert.equal(JSON.stringify(payload).includes("webfetch"), false);
 });
+
+test("summarizes checkpoint canvas node payloads without full node content", () => {
+  const payload = sanitizeToolEventPayload({
+    eventType: "canvas_delivery_body_checkpoint_committed",
+    nodeId: "node_body_draft",
+    title: "Body draft",
+    displayTitle: "Body draft 4",
+    node: {
+      id: "node_body_draft",
+      title: "Body draft",
+      content: "# Body draft\n\nWorking draft content",
+      x: 10,
+      y: 20
+    }
+  }) as Record<string, unknown>;
+
+  const node = payload.node as Record<string, unknown>;
+  assert.equal(node.id, "node_body_draft");
+  assert.equal(node.title, "Body draft");
+  assert.equal(node.content, undefined);
+  assert.equal(node.contentPreview, "# Body draft\n\nWorking draft content");
+  assert.match(String(node.contentHash), /^[a-f0-9]{64}$/);
+});

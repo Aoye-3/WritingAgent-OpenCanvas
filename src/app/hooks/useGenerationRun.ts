@@ -62,7 +62,9 @@ export function createLiveThreadStateRefreshScheduler() {
         if (runGeneration !== generation || request.operationId !== request.currentOperationId() || state.thread.id !== request.threadId) return;
         request.apply(state);
       })
-      .catch(() => undefined)
+      .catch((error) => {
+        console.warn("Live thread state refresh failed", error instanceof Error ? error.message : "Unknown error");
+      })
       .finally(() => {
         if (runGeneration !== generation) return;
         if (inFlight === refresh) inFlight = null;

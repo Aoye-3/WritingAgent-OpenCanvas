@@ -58,6 +58,14 @@ function fakeAgentRuntime(config = runtimeConfig()): AgentRuntimeAdapter {
   } as unknown as AgentRuntimeAdapter;
 }
 
+function answeredAgentClarification() {
+  return {
+    clarificationId: "skill_clarification_answered",
+    selectedOptionId: "recent_focused",
+    answer: "Use the recent focused scope."
+  };
+}
+
 function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string }> = [], contextResetAt?: string) {
   const records: unknown[] = [];
   const canvasWriteRequests: unknown[] = [];
@@ -350,6 +358,7 @@ test("direct Canvas delivery treats process clarification text as recoverable ou
     agentCardId: "chat-agent",
     chatInstruction: "Review recent agent literature and organize the results in Canvas.",
     transientSkillRefs: ["literature-review"],
+    contextValues: { agentClarification: answeredAgentClarification() },
     toolState: { web_search: true }
   }, (event) => events.push(event as typeof events[number]));
 
@@ -557,7 +566,7 @@ test("streaming skill long task creates Canvas progress without explicit Canvas 
       chatInstruction: "帮我查找最近Agent相关的文献，并且做文献综述",
       transientSkillRefs: ["database-lookup", "literature-review"],
       modelOverrides: { thinkingMode: "enabled" },
-      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, agentClarification: answeredAgentClarification() },
       toolState: { web_search: true }
     }, {
       onToolEvent: (event) => events.push(event as typeof events[number])
@@ -610,6 +619,55 @@ test("streaming short Q&A stays conversation-only even when skills are enabled",
   assert.equal(records.length, 1);
   assert.equal(canvasNodes.length, 0);
   assert.equal(events.some((event) => event.eventType.startsWith("canvas_delivery_")), false);
+});
+
+test("skill preflight asks for clarification before vague Chinese literature search", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const timelineEvents: Array<{ status: string; payload?: Record<string, unknown> }> = [];
+  let agentCalled = false;
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => {
+        agentCalled = true;
+        return {
+          text: "Should not run",
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "chat-agent",
+    chatInstruction: "帮我查找最近 Agent 相关的文献，并且做文献综述。",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+    toolState: { web_search: true }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number]),
+    onTimelineEvent: (event) => timelineEvents.push(event)
+  });
+
+  assert.equal(agentCalled, false);
+  assert.equal(records.length, 1);
+  assert.match(result.text, /确认任务范围/);
+  assert.equal(canvasNodes.length, 0);
+  assert.ok(events.some((event) => event.eventType === "agent_backend_agent_clarification_requested"));
+  assert.equal(events.some((event) => event.eventType === "agent_backend_tool_started"), false);
+  assert.equal(events.some((event) => event.eventType === "agent_backend_tool_completed"), false);
+  assert.equal(events.some((event) => event.eventType.startsWith("canvas_delivery_")), false);
+  const clarification = events.find((event) => event.eventType === "agent_backend_agent_clarification_requested");
+  const options = clarification?.payload.options as Array<{ recommended?: boolean }> | undefined;
+  assert.equal(options?.length, 3);
+  assert.equal(options?.[0]?.recommended, true);
+  const timelineClarification = timelineEvents.find((event) => event.payload?.eventType === "agent_backend_agent_clarification_requested");
+  assert.equal(timelineClarification?.status, "waiting");
 });
 
 test("streaming generic long task creates Canvas progress from evidence tools", async () => {
@@ -698,15 +756,18 @@ test("progressive Canvas keeps body drafts until evidence budget and finalizes B
   assert.equal(result.usedMock, false);
   assert.equal(records.length, 1);
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_synthesis_started"));
-  assert.equal(events.filter((event) => event.eventType === "canvas_delivery_body_checkpoint_committed").length, 16);
+  assert.equal(events.filter((event) => event.eventType === "canvas_delivery_body_checkpoint_committed").length, 4);
   const checkpoint = events.find((event) => event.eventType === "canvas_delivery_body_checkpoint_committed");
+  assert.ok(String(checkpoint?.payload.nodeId).endsWith("_4"));
   assert.equal((checkpoint?.payload.node as { title?: string } | undefined)?.title, "Body draft");
   assert.ok(String((checkpoint?.payload.node as { content?: string } | undefined)?.content ?? "").includes("Working body draft"));
+  assert.ok(String((checkpoint?.payload.node as { content?: string } | undefined)?.content ?? "").startsWith("# Body draft"));
   assert.ok(canvasNodes.some((node) => node.title === "Progress note 3"));
   assert.ok(canvasNodes.some((node) => node.title === "Progress note 16"));
   const draft = canvasNodes.find((node) => node.title === "Body draft");
   assert.ok(draft);
-  assert.ok(String(draft.content).includes("Evidence 16"));
+  assert.ok(String(draft.content).includes("Evidence 4"));
+  assert.equal(String(draft.content).includes("Evidence 16"), false);
   const body = canvasNodes.find((node) => node.title === "Body");
   assert.ok(body);
   assert.equal(String(body.content).includes("Working body draft"), false);
@@ -800,7 +861,7 @@ test("progressive Canvas falls back to a Markdown file document after multiple w
       threadId: "thread_md_fallback",
       agentCardId: "chat-agent",
       chatInstruction: "Review recent agent literature and write a detailed report",
-      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, agentClarification: answeredAgentClarification() },
       toolState: { web_search: true }
     });
 
@@ -913,7 +974,7 @@ test("progressive Canvas recovers final body and fallback Markdown from committe
       agentCardId: "chat-agent",
       chatInstruction: "Review recent agent literature and write a detailed report",
       transientSkillRefs: ["literature-review"],
-      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, agentClarification: answeredAgentClarification() },
       toolState: { web_search: true }
     });
 
@@ -979,7 +1040,7 @@ test("progressive Canvas does not create a fallback Markdown document from clari
     agentCardId: "chat-agent",
     chatInstruction: "Review recent agent literature and write a detailed report",
     transientSkillRefs: ["literature-review"],
-    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, agentClarification: answeredAgentClarification() },
     toolState: { web_search: true }
   });
 
@@ -1042,7 +1103,7 @@ test("progressive Canvas finalizes reference links from committed canvas_write s
     agentCardId: "chat-agent",
     chatInstruction: "Review recent agent literature and produce a literature review",
     transientSkillRefs: ["database-lookup", "literature-review"],
-    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, agentClarification: answeredAgentClarification() },
     toolState: { web_search: true }
   }, {
     onToolEvent: (event) => events.push(event as typeof events[number])
@@ -1090,7 +1151,7 @@ test("progressive Canvas ignores ask_clarification events during ordinary long t
     agentCardId: "chat-agent",
     chatInstruction: "帮我查找最近Agent相关的文献，并且做文献综述",
     transientSkillRefs: ["database-lookup", "literature-review"],
-    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, agentClarification: answeredAgentClarification() },
     toolState: { web_search: true }
   }, {
     onToolEvent: (event) => events.push(event as typeof events[number])
@@ -1144,7 +1205,7 @@ test("progressive Canvas emits waiting clarification timeline without creating a
     agentCardId: "chat-agent",
     chatInstruction: "Review recent agent literature and produce a literature review",
     transientSkillRefs: ["database-lookup", "literature-review"],
-    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, agentClarification: answeredAgentClarification() },
     toolState: { web_search: true }
   }, {
     onToolEvent: (event) => events.push(event as typeof events[number]),
@@ -1201,7 +1262,7 @@ test("progressive Canvas maps native string option clarification into waiting ti
     agentCardId: "chat-agent",
     chatInstruction: "Review recent agent literature and produce a literature review",
     transientSkillRefs: ["database-lookup", "literature-review"],
-    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, agentClarification: answeredAgentClarification() },
     toolState: { web_search: true }
   }, {
     onToolEvent: (event) => events.push(event as typeof events[number]),
@@ -1272,7 +1333,7 @@ test("progressive Canvas filters raw tool output from progress and final body no
     agentCardId: "chat-agent",
     chatInstruction: "Review recent agent literature and produce a detailed report",
     transientSkillRefs: ["literature-review"],
-    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, agentClarification: answeredAgentClarification() },
     toolState: { web_search: true }
   });
 
@@ -1319,7 +1380,7 @@ test("progressive Canvas treats process clarification text as recoverable output
     agentCardId: "chat-agent",
     chatInstruction: "Review recent Agent literature and summarize the findings",
     transientSkillRefs: ["database-lookup", "literature-review"],
-    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, agentClarification: answeredAgentClarification() }
   }, {
     onToolEvent: (event) => events.push(event as typeof events[number])
   });
@@ -1371,7 +1432,7 @@ test("progressive Canvas blocks leaked skill DSML as final body", async () => {
       agentCardId: "chat-agent",
       chatInstruction: "帮我查找最近Agent相关的文献，并且做文献综述",
       transientSkillRefs: ["database-lookup", "literature-review"],
-      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, agentClarification: answeredAgentClarification() }
     }, {
       onToken: (token) => tokens.push(token),
       onToolEvent: (event) => events.push(event as typeof events[number])

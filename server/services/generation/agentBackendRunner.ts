@@ -71,6 +71,9 @@ function allowedToolsForRequest(input: AgentBackendRunnerInput) {
     allowed.add("write_file");
     allowed.add("present_files");
   }
+  if (shouldAllowAgentClarification(input.payload)) {
+    allowed.add("ask_clarification");
+  }
   return [...allowed];
 }
 
@@ -78,4 +81,10 @@ function isProgressiveMarkdownFileDelivery(payload: GenerateRequest) {
   const delivery = payload.contextValues?.progressiveCanvasDelivery;
   if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) return false;
   return (delivery as Record<string, unknown>).enabled === true;
+}
+
+function shouldAllowAgentClarification(payload: GenerateRequest) {
+  if ((payload.transientSkillRefs ?? []).length > 0) return true;
+  if (isProgressiveMarkdownFileDelivery(payload)) return true;
+  return Boolean(payload.contextValues?.facetwrite_clarification_policy);
 }

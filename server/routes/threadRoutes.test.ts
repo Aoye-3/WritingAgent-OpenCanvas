@@ -280,6 +280,69 @@ test("resets conversation context without deleting visible message history", asy
   assert.equal(storage.getThread(threadId)?.contextResetAt, result.body.contextResetAt);
 });
 
+test("thread state returns run timeline events for the latest run only", async () => {
+  const { app, storage } = await withThreadRoutes();
+  const projectId = `project_timeline_filter_${Date.now()}`;
+  const threadId = `${projectId}_thread`;
+  storage.createProject(projectId, "Timeline filter project");
+  await storage.ensureThread(threadId, projectId);
+
+  storage.recordRun({
+    threadId,
+    agentCardId: "blog-post",
+    mode: "chat",
+    prompt: "old prompt",
+    output: "old output",
+    provider: "mock",
+    usedMock: true,
+    userMessage: "old message",
+    events: [{
+      eventType: "run_timeline_canvas_node_committed",
+      payload: {
+        id: "timeline_old",
+        threadId,
+        runId: "pending",
+        sequence: 1,
+        eventType: "canvas_node_committed",
+        status: "completed",
+        title: "Body draft 6",
+        summary: "old draft",
+        createdAt: "2026-06-23T00:00:00.000Z"
+      }
+    }]
+  });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  storage.recordRun({
+    threadId,
+    agentCardId: "blog-post",
+    mode: "chat",
+    prompt: "new prompt",
+    output: "new output",
+    provider: "mock",
+    usedMock: true,
+    userMessage: "new message",
+    events: [{
+      eventType: "run_timeline_canvas_node_committed",
+      payload: {
+        id: "timeline_new",
+        threadId,
+        runId: "pending",
+        sequence: 1,
+        eventType: "canvas_node_committed",
+        status: "completed",
+        title: "Final body",
+        summary: "new final",
+        createdAt: "2026-06-23T00:00:01.000Z"
+      }
+    }]
+  });
+
+  const result = await get(app, `/api/threads/${threadId}/state`);
+  const timeline = result.body.runTimelineEvents as Array<{ title: string }>;
+  assert.equal(result.status, 200);
+  assert.deepEqual(timeline.map((event) => event.title), ["Final body"]);
+});
+
 test("lists only active threads for the requested Project in update order", async () => {
   const { app, storage } = await withThreadRoutes();
   const projectId = `project_thread_list_${Date.now()}`;

@@ -89,30 +89,33 @@ export function planCanvasDelivery(input: CanvasDeliveryInput): CanvasDeliveryPl
 
 export function commitCanvasDelivery(storage: SQLiteStorageRepository, projectId: string, plan: CanvasDeliveryPlan) {
   if (!plan.required) return [];
-  const existingNodes = new Set(storage.listCanvasNodes(projectId).map((node) => node.id));
+  const existingNodes = new Map(storage.listCanvasNodes(projectId).map((node) => [node.id, node]));
   const existingEdges = new Set(storage.listCanvasEdges(projectId).map((edge) => edge.id));
   const committed: Array<{ nodeId: string; title: string; node?: unknown }> = [];
   for (const node of plan.nodes) {
     let committedNode: unknown;
-    if (existingNodes.has(node.id)) {
-      committedNode = storage.updateCanvasNode(projectId, node.id, {
-        title: node.title,
-        content: node.content,
-        kind: node.kind,
-        x: node.x,
-        y: node.y,
-        width: node.width,
-        height: node.height,
-        metadata: { canvasDelivery: true, ...(node.metadata ?? {}) },
-        includeInProjectContext: node.includeInProjectContext ?? true
-      });
+    const nextNode = {
+      title: node.title,
+      content: node.content,
+      kind: node.kind,
+      x: node.x,
+      y: node.y,
+      width: node.width,
+      height: node.height,
+      metadata: { canvasDelivery: true, ...(node.metadata ?? {}) },
+      includeInProjectContext: node.includeInProjectContext ?? true
+    };
+    const existing = existingNodes.get(node.id);
+    if (existing) {
+      if (canvasNodeMatches(existing, nextNode)) continue;
+      committedNode = storage.updateCanvasNode(projectId, node.id, nextNode);
     } else {
       committedNode = storage.createCanvasNode(projectId, {
         ...node,
-        metadata: { canvasDelivery: true, ...(node.metadata ?? {}) },
-        includeInProjectContext: node.includeInProjectContext ?? true
+        metadata: nextNode.metadata,
+        includeInProjectContext: nextNode.includeInProjectContext
       });
-      existingNodes.add(node.id);
+      existingNodes.set(node.id, { ...node, projectId, metadata: nextNode.metadata, includeInProjectContext: nextNode.includeInProjectContext } as never);
     }
     committed.push({ nodeId: node.id, title: node.title, node: committedNode });
   }
@@ -123,6 +126,38 @@ export function commitCanvasDelivery(storage: SQLiteStorageRepository, projectId
     }
   }
   return committed;
+}
+
+type CanvasNodeCommitSnapshot = {
+  title: string;
+  content: string;
+  kind: CanvasDeliveryPlan["nodes"][number]["kind"];
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  metadata?: Record<string, unknown>;
+  includeInProjectContext?: boolean;
+};
+
+function canvasNodeMatches(existing: unknown, next: CanvasNodeCommitSnapshot) {
+  const current = existing && typeof existing === "object" && !Array.isArray(existing) ? existing as Record<string, unknown> : {};
+  return current.title === next.title
+    && current.content === next.content
+    && current.kind === next.kind
+    && current.x === next.x
+    && current.y === next.y
+    && current.width === next.width
+    && current.height === next.height
+    && current.includeInProjectContext === (next.includeInProjectContext ?? true)
+    && stableJson(current.metadata ?? {}) === stableJson(next.metadata ?? {});
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (!value || typeof value !== "object") return JSON.stringify(value);
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
 }
 
 function documentBatchDeliveryModule(): CanvasDeliveryModule {

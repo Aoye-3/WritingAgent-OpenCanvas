@@ -77,6 +77,10 @@ export function toolEventToTimelineEvent(builder: RunTimelineBuilder, event: Too
     });
   }
   if (/^canvas_delivery_/.test(event.eventType)) {
+    if (event.eventType === "canvas_delivery_body_checkpoint_committed") {
+      const displayTitle = string(payload.displayTitle) || string(payload.title) || (builder.locale === "zh" ? "正文草稿" : "Body draft");
+      return builder.event("canvas_node_committed", "completed", displayTitle, builder.locale === "zh" ? "正文草稿节点已更新。" : "Body draft node updated.", payload);
+    }
     if (event.eventType === "canvas_delivery_clarification_committed") {
       return builder.event("canvas_node_committed", "waiting", string(payload.displayTitle) || (builder.locale === "zh" ? "交互确认" : "Clarification"), string(payload.question) || (builder.locale === "zh" ? "需要用户选择后继续。" : "Waiting for the user to choose an option."), payload);
     }

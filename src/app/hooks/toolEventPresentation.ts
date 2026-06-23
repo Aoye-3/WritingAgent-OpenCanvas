@@ -60,6 +60,7 @@ export function shouldRefreshThreadStateForToolEvent(event: LiveToolEvent) {
 
 export function readLiveCanvasNodeSnapshot(event: LiveToolEvent): CanvasNode | undefined {
   if (!/^canvas_delivery_.*_committed$/.test(event.eventType)) return undefined;
+  if (event.eventType === "canvas_delivery_body_checkpoint_committed") return undefined;
   const node = readRecord(event.payload?.node);
   const id = readNonEmptyString(node.id);
   const projectId = readNonEmptyString(node.projectId);
@@ -156,6 +157,7 @@ function lifecycleActivityText(eventType: string, locale: Locale) {
     return locale === "zh" ? "Canvas 节点已创建或更新" : "Canvas node created or updated";
   }
   if (/^canvas_delivery_/.test(eventType)) {
+    if (eventType === "canvas_delivery_body_checkpoint_committed") return locale === "zh" ? "正文草稿节点已更新" : "Body draft node updated";
     if (eventType === "canvas_delivery_clarification_committed") return locale === "zh" ? "需要补充信息" : "Waiting for user choice";
     if (eventType === "canvas_delivery_body_checkpoint_committed") return locale === "zh" ? "正文草稿已更新" : "Body draft updated";
     if (eventType === "canvas_delivery_synthesis_started") return locale === "zh" ? "正在最终综合" : "Final synthesis running";

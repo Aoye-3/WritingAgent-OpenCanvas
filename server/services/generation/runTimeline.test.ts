@@ -45,6 +45,7 @@ test("run timeline treats committed Canvas delivery events as completed node upd
   assert.equal(event.eventType, "canvas_node_committed");
   assert.equal(event.status, "completed");
   assert.equal(event.title, "Body draft 1");
+  assert.equal(event.summary, "Body draft node updated.");
   assert.deepEqual(event.payload?.nodeId, "node_body");
   assert.deepEqual(event.payload?.deliveryId, "delivery_1");
   assert.equal(JSON.stringify(event).includes("hidden"), false);

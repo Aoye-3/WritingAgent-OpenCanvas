@@ -10,11 +10,11 @@ Impact: Structured Agent clarification events must not create `kind:"clarificati
 
 ## 2026-06-23: Progressive Body Drafts Use Separate Canvas Nodes
 
-Decision: Progressive long-task checkpoints update a stable `正文草稿` / `Body draft` document node instead of reusing the final `正文` / `Body` node. Final synthesis writes to the separate final Body node only when a real deliverable is available. `canvas_delivery_body_checkpoint_committed` includes the committed node snapshot in `payload.node`.
+Decision: Progressive long-task checkpoints update a stable `正文草稿` / `Body draft` document node instead of reusing the final `正文` / `Body` node. Final synthesis writes to the separate final Body node only when a real deliverable is available. `canvas_delivery_body_checkpoint_committed` carries draft-node live hints, not full node content.
 
 Reason: The timeline can show `正文草稿 N` while the Canvas node title and content remain `正文`, which makes users think no draft node exists or that the final Body node is stale. Separating draft and final nodes makes recoverable work visible without blurring it with final deliverables.
 
-Impact: Debugging progressive delivery should inspect the stable Body draft node for intermediate checkpoints and the final Body node for completed output. Body draft count remains informational and does not force final synthesis. Frontend refresh logic applies valid `payload.node` snapshots from committed delivery events immediately by node id, then reconciles against thread state after the run.
+Impact: Debugging progressive delivery should inspect the stable Body draft node for intermediate checkpoints and the final Body node for completed output. `bodyDraftWriteLimit` is a hard cap on checkpoint writes; research/progress nodes can continue until the evidence budget triggers final synthesis. Frontend refresh logic treats checkpoint payloads as `nodeId`/`contentPreview`/`contentHash` hints and reconciles full content through thread state refresh.
 
 ## 2026-06-23: Long Markdown Deliverables Use File Document Nodes
 

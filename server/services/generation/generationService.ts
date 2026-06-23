@@ -127,6 +127,28 @@ export function createGenerationService(
       runtimeEvents.push(event);
       observeToolEvent(event);
     }
+    const preflightClarification = skillClarificationPreflight(payload, threadId);
+    if (preflightClarification) {
+      runtimeEvents.push(preflightClarification);
+      observeToolEvent(preflightClarification);
+      return recordGenerationRun({
+        storage,
+        payload,
+        threadId,
+        agentCardId: agentCard.id,
+        agentTitle: agentCard.title[payload.locale],
+        configuredModelApiId: context.modelSettings.configuredModelApiId,
+        modelId: context.modelSettings.model,
+        mode: context.mode,
+        prompt: context.prompt,
+        text: skillClarificationAssistantText(payload.locale),
+        provider: "agent-backend",
+        usedMock: false,
+        toolState: context.effectiveToolState,
+        events: runtimeEvents,
+        finishReason: "clarification_required"
+      });
+    }
 
     try {
       planOrchestrator.prepare(threadId, payload);
@@ -308,19 +330,21 @@ export function createGenerationService(
       }
       if (researchEvents.length && !progressiveSynthesisStarted) {
         const budget = readProgressiveDeliveryBudget(payload);
-        const bodyEvents = commitProgressiveBodyCheckpointDelivery({
-          payload,
-          projectId: selection.projectId,
-          storage,
-          deliveryId,
-          entries: progressiveEvidenceEntries,
-          draftIndex: bodyDraftWriteCount + 1,
-          draftLimit: budget.bodyDraftWriteLimit
-        });
-        if (bodyEvents.length) bodyDraftWriteCount += 1;
-        for (const bodyEvent of bodyEvents) {
-          runtimeEvents.push(bodyEvent);
-          emitRuntimeToolEvent(bodyEvent);
+        if (bodyDraftWriteCount < budget.bodyDraftWriteLimit) {
+          const bodyEvents = commitProgressiveBodyCheckpointDelivery({
+            payload,
+            projectId: selection.projectId,
+            storage,
+            deliveryId,
+            entries: progressiveEvidenceEntries,
+            draftIndex: bodyDraftWriteCount + 1,
+            draftLimit: budget.bodyDraftWriteLimit
+          });
+          if (bodyEvents.length) bodyDraftWriteCount += 1;
+          for (const bodyEvent of bodyEvents) {
+            runtimeEvents.push(bodyEvent);
+            emitRuntimeToolEvent(bodyEvent);
+          }
         }
         if (progressiveEvidenceEntries.length >= budget.evidenceToolLimit) {
           progressiveSynthesisStarted = true;
@@ -349,6 +373,31 @@ export function createGenerationService(
     emitTimeline(timeline.event("phase_started", "running", payload.locale === "zh" ? "准备执行" : "Preparing run", payload.locale === "zh" ? "正在准备上下文、工具和运行环境。" : "Preparing context, tools, and runtime."));
     if (context.transientSkillNames.length) {
       emitTimeline(skillUsageTimelineEvent(timeline, payload.locale, context.transientSkillNames));
+    }
+    const preflightClarification = skillClarificationPreflight(payload, threadId);
+    if (preflightClarification) {
+      runtimeEvents.push(preflightClarification);
+      emitRuntimeToolEvent(preflightClarification);
+      const text = skillClarificationAssistantText(payload.locale);
+      textGate.push(text);
+      textGate.flush();
+      return recordGenerationRun({
+        storage,
+        payload,
+        threadId,
+        agentCardId: agentCard.id,
+        agentTitle: agentCard.title[payload.locale],
+        configuredModelApiId: context.modelSettings.configuredModelApiId,
+        modelId: context.modelSettings.model,
+        mode: context.mode,
+        prompt: context.prompt,
+        text,
+        provider: "agent-backend",
+        usedMock: false,
+        toolState: context.effectiveToolState,
+        events: [...runtimeEvents, ...timelineEvents.map(timelineEventToToolEvent)],
+        finishReason: "clarification_required"
+      });
     }
     if (shouldStartProgressiveCanvasDeliveryImmediately(payload, context)) ensureProgressiveDeliveryStarted();
 
@@ -807,6 +856,66 @@ function skillUsageTimelineEvent(
     locale === "zh" ? `使用技能：${refs.join(", ")}` : `Using skills: ${refs.join(", ")}`,
     { source: "composer", skillRefs: refs }
   );
+}
+
+function skillClarificationPreflight(payload: GenerateRequest, threadId: string): ToolEventRecord | undefined {
+  const skillRefs = (payload.transientSkillRefs ?? []).map((skillRef) => skillRef.toLowerCase());
+  const needsClarification = skillRefs.some((skillRef) => {
+    return skillRef === "literature-review"
+      || skillRef.endsWith(":literature-review")
+      || skillRef.endsWith("/literature-review")
+      || skillRef === "database-lookup"
+      || skillRef.endsWith(":database-lookup")
+      || skillRef.endsWith("/database-lookup");
+  });
+  const instruction = payload.chatInstruction ?? payload.freeTextPrompt ?? "";
+  const scopeSensitiveTask = /(?:literature|review|survey|paper|database|lookup|search|research|文献|综述|调研|检索|搜索|查找|数据库)/i.test(instruction);
+  if (!needsClarification || !scopeSensitiveTask || hasAnsweredSkillClarification(payload)) return undefined;
+  const clarificationId = `skill_clarification_${hashString(`${threadId}:${skillRefs.join("|")}:${instruction}`).toString(36)}`;
+  return {
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      toolCallId: clarificationId,
+      clarificationId,
+      status: "pending",
+      source: "skill_preflight",
+      skillRefs: payload.transientSkillRefs ?? [],
+      question: payload.locale === "zh"
+        ? "开始检索前，请先确认本次文献/数据库任务的范围。"
+        : "Before I start searching, please confirm the scope for this literature/database task.",
+      options: skillClarificationOptions(payload.locale)
+    }
+  };
+}
+
+function hasAnsweredSkillClarification(payload: GenerateRequest) {
+  const clarification = record(payload.contextValues?.agentClarification);
+  return Boolean(
+    readString(clarification.answer)
+    || readString(clarification.selectedOptionId)
+    || readString(clarification.clarificationId)
+  );
+}
+
+function skillClarificationOptions(locale: GenerateRequest["locale"]) {
+  return locale === "zh"
+    ? [
+      { id: "recent_focused", label: "近两年综述", detail: "聚焦 2025-2026 年 Agent 相关代表性文献，输出综述。", recommended: true },
+      { id: "broad_survey", label: "广泛扫描", detail: "放宽年份和来源范围，先做广泛检索再筛选。", recommended: false },
+      { id: "specific_scope", label: "指定方向", detail: "我会补充具体对象、时间窗、数据库或关键词后再开始。", recommended: false }
+    ]
+    : [
+      { id: "recent_focused", label: "Recent review", detail: "Focus on representative Agent literature from 2025-2026 and produce a review.", recommended: true },
+      { id: "broad_survey", label: "Broad scan", detail: "Search a wider year and source range, then filter the useful results.", recommended: false },
+      { id: "specific_scope", label: "Specific scope", detail: "I will provide the target object, time window, database, or keywords before you start.", recommended: false }
+    ];
+}
+
+function skillClarificationAssistantText(locale: GenerateRequest["locale"]) {
+  return locale === "zh"
+    ? "开始检索前需要先确认任务范围。请选择一个范围后，我会继续执行。"
+    : "I need to confirm the task scope before searching. Choose one option and I will continue.";
 }
 
 function finalizeCanvasDelivery(input: {
@@ -1783,7 +1892,7 @@ function researchNoteMarkdown(input: ProgressiveEvidenceEntry) {
 
 function progressiveBodyCheckpointMarkdown(locale: GenerateRequest["locale"], entries: ProgressiveEvidenceEntry[]) {
   const recent = entries.slice(-8);
-  const heading = locale === "zh" ? "正文" : "Body";
+  const heading = locale === "zh" ? "正文草稿" : "Body draft";
   const status = locale === "zh" ? "工作正文草稿" : "Working body draft";
   const findings = locale === "zh" ? "已形成的正文要点" : "Draft points";
   const basis = locale === "zh" ? "依据" : "Basis";

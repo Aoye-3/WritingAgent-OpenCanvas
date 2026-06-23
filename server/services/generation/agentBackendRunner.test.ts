@@ -91,6 +91,51 @@ test("forwards file delivery tools for progressive Canvas runs", async () => {
 
   assert.ok(allowedToolRefs.includes("write_file"));
   assert.ok(allowedToolRefs.includes("present_files"));
+  assert.ok(allowedToolRefs.includes("ask_clarification"));
+});
+
+test("forwards ask_clarification for transient skill runs", async () => {
+  let allowedToolRefs: string[] = [];
+  await runAgentBackendGeneration({
+    payload: {
+      mode: "chat",
+      locale: "en",
+      threadId: "thread_1",
+      chatInstruction: "Review recent agent literature",
+      transientSkillRefs: ["literature-review"]
+    },
+    threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "model_1",
+    modelSettings: {
+      configuredModelApiId: "model_1",
+      providerId: "deepseek",
+      model: "deepseek-chat",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: true,
+      toolCallMode: "auto",
+      maxToolCalls: 20
+    },
+    runtimeConfig: { enabledTools: ["web_search"], agentCard: {}, settings: {} } as never,
+    messages: [],
+    prompt: "prompt"
+  }, {
+    getRuntimeConfig: () => ({ enabled: true } as never),
+    runAgent: async (input) => {
+      allowedToolRefs = input.allowedToolRefs ?? [];
+      return {
+        text: "Done",
+        finishReason: "agent_backend_completed",
+        events: []
+      };
+    }
+  });
+
+  assert.ok(allowedToolRefs.includes("ask_clarification"));
 });
 
 test("rejects empty server-managed Canvas delivery", async () => {

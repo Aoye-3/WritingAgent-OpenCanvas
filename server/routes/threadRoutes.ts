@@ -190,15 +190,20 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
     storage.migrateCanvasWorkflowRoleNodes(projectId);
     const plans = storage.listPlanRuns(request.params.threadId);
     const toolEvents = storage.listToolEvents(request.params.threadId);
+    const outputVersions = storage.listOutputVersions(request.params.threadId);
+    const latestRunId = outputVersions[0]?.runId;
+    const runTimelineSourceEvents = latestRunId
+      ? toolEvents.filter((event) => event.runId === latestRunId)
+      : toolEvents;
     sendOk(response, {
       thread,
       project,
       messages: storage.listMessages(request.params.threadId),
       projectBrief: storage.getProjectBrief(projectId),
       taskBrief: storage.getTaskBrief(request.params.threadId),
-      outputVersions: storage.listOutputVersions(request.params.threadId),
+      outputVersions,
       toolEvents,
-      runTimelineEvents: toolEvents.map(timelineEventFromToolEvent).filter((event): event is NonNullable<typeof event> => Boolean(event)),
+      runTimelineEvents: runTimelineSourceEvents.map(timelineEventFromToolEvent).filter((event): event is NonNullable<typeof event> => Boolean(event)),
       canvasNodes: storage.listCanvasNodes(projectId),
       canvasEdges: storage.listCanvasEdges(projectId),
       canvasObjects: storage.listCanvasObjects(projectId),
