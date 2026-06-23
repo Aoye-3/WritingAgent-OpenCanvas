@@ -1,9 +1,52 @@
 from typing import Literal
 
 from langchain.tools import tool
+from pydantic import BaseModel, Field, model_validator
 
 
-@tool("ask_clarification", parse_docstring=True, return_direct=True)
+class ClarificationOption(BaseModel):
+    id: str = Field(description="Stable option id, for example recent_review.")
+    label: str = Field(description="Short user-facing option label.")
+    detail: str | None = Field(default=None, description="Short explanation of what this option means.")
+    description: str | None = Field(default=None, description="Short explanation of what this option means.")
+    recommended: bool = Field(default=False, description="Whether this option is recommended. At most one option can be recommended.")
+
+    @model_validator(mode="after")
+    def require_detail_or_description(self):
+        if not (self.detail and self.detail.strip()) and not (self.description and self.description.strip()):
+            raise ValueError("Clarification options require detail or description")
+        return self
+
+
+class AskClarificationArgs(BaseModel):
+    question: str = Field(description="The specific clarification question to ask the user.")
+    clarification_type: Literal[
+        "missing_info",
+        "ambiguous_requirement",
+        "approach_choice",
+        "risk_confirmation",
+        "suggestion",
+    ] = Field(description="The type of clarification needed.")
+    context: str | None = Field(default=None, description="Optional context explaining why clarification is needed.")
+    options: list[ClarificationOption] = Field(
+        min_length=2,
+        max_length=3,
+        description="Two or three mutually exclusive choices for the user.",
+    )
+
+    @model_validator(mode="after")
+    def require_single_recommended_option(self):
+        if sum(1 for option in self.options if option.recommended) > 1:
+            raise ValueError("At most one clarification option can be recommended")
+        return self
+
+
+@tool(
+    "ask_clarification",
+    args_schema=AskClarificationArgs,
+    description="Ask the user one structured clarification with a question and two or three choices.",
+    return_direct=True,
+)
 def ask_clarification_tool(
     question: str,
     clarification_type: Literal[
@@ -14,7 +57,7 @@ def ask_clarification_tool(
         "suggestion",
     ],
     context: str | None = None,
-    options: list[str] | None = None,
+    options: list[ClarificationOption] | None = None,
 ) -> str:
     """Ask the user for clarification when you need more information to proceed.
 
@@ -47,7 +90,7 @@ def ask_clarification_tool(
         question: The clarification question to ask the user. Be specific and clear.
         clarification_type: The type of clarification needed (missing_info, ambiguous_requirement, approach_choice, risk_confirmation, suggestion).
         context: Optional context explaining why clarification is needed. Helps the user understand the situation.
-        options: Optional list of choices (for approach_choice or suggestion types). Present clear options for the user to choose from.
+        options: Required list of 2-3 choices. Each option must include id, label, and detail or description. At most one option may be recommended.
     """
     # This is a placeholder implementation
     # The actual logic is handled by ClarificationMiddleware which intercepts this tool call

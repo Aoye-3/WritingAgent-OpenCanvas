@@ -58,6 +58,25 @@ test("canvas delivery planner supports English and mixed canvas delivery intent"
   }
 });
 
+test("canvas delivery planner supports Chinese overview body references node intent", () => {
+  const delivery = planCanvasDelivery({
+    deliveryId: "run_chinese_nodes",
+    projectId: "project_1",
+    instruction: "\u8bf7\u6574\u7406\u5230\u753b\u5e03\uff0c\u521b\u5efa\u6982\u8ff0\u3001\u6b63\u6587\u3001\u53c2\u8003\u94fe\u63a5\u8282\u70b9",
+    locale: "zh",
+    content: {
+      assistantText: "\u5df2\u5b8c\u6210\u3002",
+      outlineMarkdown: "# \u6982\u8ff0\n- A\n- B",
+      bodyMarkdown: "# A\nAlpha\n\n# B\nBeta",
+      sources: [{ title: "Source", url: "https://example.com/source" }],
+      usedStructuredBlock: false
+    }
+  });
+
+  assert.equal(delivery.required, true);
+  assert.deepEqual(delivery.nodes.map((node) => node.title), ["\u6982\u8ff0", "A", "B", "\u6765\u6e90"]);
+});
+
 test("direct document delivery keeps each Markdown section as one node without paginating long sections", () => {
   const longSection = `# Research\n${"Long paragraph. ".repeat(140).trim()}`;
   const delivery = planCanvasDelivery({

@@ -110,14 +110,16 @@ export function createGenerationService(
     payload = withOrchestrationPolicy(withCanvasAction(payload, threadId, storage));
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
     payload = withPlanGeneration(payload, threadId, storage);
+    payload = withSkillClarificationGuard(payload, threadId);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     payload = withTaskHandlingPolicy(payload, context);
     payload = withRuntimeContext(payload, context.canvasDeliveryContract);
     const agentCard = context.runtimeConfig.agentCard;
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
     const observeToolEvent = (event: ToolEventRecord) => {
-      planOrchestrator.observe(threadId, event);
-      onToolEvent?.(event);
+      const observed = withSkillClarificationResumeContext(event, payload);
+      planOrchestrator.observe(threadId, observed);
+      onToolEvent?.(observed);
     };
     for (const event of canvasActionEvents(payload)) {
       runtimeEvents.push(event);
@@ -127,29 +129,6 @@ export function createGenerationService(
       runtimeEvents.push(event);
       observeToolEvent(event);
     }
-    const preflightClarification = skillClarificationPreflight(payload, threadId);
-    if (preflightClarification) {
-      runtimeEvents.push(preflightClarification);
-      observeToolEvent(preflightClarification);
-      return recordGenerationRun({
-        storage,
-        payload,
-        threadId,
-        agentCardId: agentCard.id,
-        agentTitle: agentCard.title[payload.locale],
-        configuredModelApiId: context.modelSettings.configuredModelApiId,
-        modelId: context.modelSettings.model,
-        mode: context.mode,
-        prompt: context.prompt,
-        text: skillClarificationAssistantText(payload.locale),
-        provider: "agent-backend",
-        usedMock: false,
-        toolState: context.effectiveToolState,
-        events: runtimeEvents,
-        finishReason: "clarification_required"
-      });
-    }
-
     try {
       planOrchestrator.prepare(threadId, payload);
       const agentBackendRun = await runAgentRuntimeGeneration({
@@ -177,7 +156,7 @@ export function createGenerationService(
           runtimeEvents.push(...(normalized.events ?? []), event);
           observeToolEvent(event);
         } else {
-          const baseEvents = [...runtimeEvents, ...(normalized.events ?? [])];
+          const baseEvents = [...runtimeEvents, ...(normalized.events ?? []).map((event) => withSkillClarificationResumeContext(event, payload))];
           const finalized = finalizeCanvasDelivery({
             payload,
             threadId,
@@ -250,6 +229,7 @@ export function createGenerationService(
     payload = withOrchestrationPolicy(withCanvasAction(payload, threadId, storage));
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
     payload = withPlanGeneration(payload, threadId, storage);
+    payload = withSkillClarificationGuard(payload, threadId);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     payload = withTaskHandlingPolicy(payload, context);
     payload = withRuntimeContext(payload, context.canvasDeliveryContract);
@@ -293,15 +273,16 @@ export function createGenerationService(
       }
     };
     const observeToolEvent = (event: ToolEventRecord) => {
-      if (!runtimeEvents.includes(event)) runtimeEvents.push(event);
-      emitRuntimeToolEvent(event);
-      if (isProgressiveToolCompletion(event)) ensureProgressiveDeliveryStarted();
+      const observed = withSkillClarificationResumeContext(event, payload);
+      if (!runtimeEvents.includes(observed)) runtimeEvents.push(observed);
+      emitRuntimeToolEvent(observed);
+      if (isProgressiveToolCompletion(observed)) ensureProgressiveDeliveryStarted();
       const fileDocumentEvents = commitProgressiveFileDocumentDelivery({
         payload,
         projectId: selection.projectId,
         storage,
         deliveryId,
-        event,
+        event: observed,
         nextSequence: () => {
           fileDocumentSequence += 1;
           return fileDocumentSequence;
@@ -317,7 +298,7 @@ export function createGenerationService(
         projectId: selection.projectId,
         storage,
         deliveryId,
-        event,
+        event: observed,
         onEvidenceEntry: (entry) => progressiveEvidenceEntries.push(entry),
         nextSequence: () => {
           researchDeliverySequence += 1;
@@ -374,32 +355,7 @@ export function createGenerationService(
     if (context.transientSkillNames.length) {
       emitTimeline(skillUsageTimelineEvent(timeline, payload.locale, context.transientSkillNames));
     }
-    const preflightClarification = skillClarificationPreflight(payload, threadId);
-    if (preflightClarification) {
-      runtimeEvents.push(preflightClarification);
-      emitRuntimeToolEvent(preflightClarification);
-      const text = skillClarificationAssistantText(payload.locale);
-      textGate.push(text);
-      textGate.flush();
-      return recordGenerationRun({
-        storage,
-        payload,
-        threadId,
-        agentCardId: agentCard.id,
-        agentTitle: agentCard.title[payload.locale],
-        configuredModelApiId: context.modelSettings.configuredModelApiId,
-        modelId: context.modelSettings.model,
-        mode: context.mode,
-        prompt: context.prompt,
-        text,
-        provider: "agent-backend",
-        usedMock: false,
-        toolState: context.effectiveToolState,
-        events: [...runtimeEvents, ...timelineEvents.map(timelineEventToToolEvent)],
-        finishReason: "clarification_required"
-      });
-    }
-    if (shouldStartProgressiveCanvasDeliveryImmediately(payload, context)) ensureProgressiveDeliveryStarted();
+    if (!isSkillClarificationGuarded(payload) && shouldStartProgressiveCanvasDeliveryImmediately(payload, context)) ensureProgressiveDeliveryStarted();
 
     try {
       planOrchestrator.prepare(threadId, payload);
@@ -450,7 +406,7 @@ export function createGenerationService(
           textGate.flush();
           callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
           publicReasoning.emit("finalize", payload.locale === "zh" ? "正在整理最终回答，并校准 Canvas 节点内容。" : "Organizing the final answer and reconciling Canvas nodes.");
-          const baseEvents = [...runtimeEvents, ...(normalized.events ?? [])];
+          const baseEvents = [...runtimeEvents, ...(normalized.events ?? []).map((event) => withSkillClarificationResumeContext(event, payload))];
           const finalized = finalizeCanvasDelivery({
             payload,
             threadId,
@@ -507,7 +463,7 @@ export function createGenerationService(
       }
     } catch (error) {
       planOrchestrator.fail(threadId, payload, error);
-      if (isProgressiveCanvasDeliveryEnabled(payload)) {
+      if (!isSkillClarificationGuarded(payload) && isProgressiveCanvasDeliveryEnabled(payload)) {
         ensureProgressiveDeliveryStarted();
         for (const failureEvent of commitProgressiveFailureDelivery({
           payload,
@@ -858,64 +814,93 @@ function skillUsageTimelineEvent(
   );
 }
 
-function skillClarificationPreflight(payload: GenerateRequest, threadId: string): ToolEventRecord | undefined {
+function withSkillClarificationGuard(payload: GenerateRequest, threadId: string): GenerateRequest {
+  if (!needsSkillScopeClarification(payload)) return payload;
   const skillRefs = (payload.transientSkillRefs ?? []).map((skillRef) => skillRef.toLowerCase());
-  const needsClarification = skillRefs.some((skillRef) => {
-    return skillRef === "literature-review"
-      || skillRef.endsWith(":literature-review")
-      || skillRef.endsWith("/literature-review")
-      || skillRef === "database-lookup"
-      || skillRef.endsWith(":database-lookup")
-      || skillRef.endsWith("/database-lookup");
-  });
   const instruction = payload.chatInstruction ?? payload.freeTextPrompt ?? "";
-  const scopeSensitiveTask = /(?:literature|review|survey|paper|database|lookup|search|research|文献|综述|调研|检索|搜索|查找|数据库)/i.test(instruction);
-  if (!needsClarification || !scopeSensitiveTask || hasAnsweredSkillClarification(payload)) return undefined;
   const clarificationId = `skill_clarification_${hashString(`${threadId}:${skillRefs.join("|")}:${instruction}`).toString(36)}`;
   return {
-    eventType: "agent_backend_agent_clarification_requested",
-    payload: {
-      type: "agent_clarification_requested",
-      toolCallId: clarificationId,
-      clarificationId,
-      status: "pending",
-      source: "skill_preflight",
-      skillRefs: payload.transientSkillRefs ?? [],
-      question: payload.locale === "zh"
-        ? "开始检索前，请先确认本次文献/数据库任务的范围。"
-        : "Before I start searching, please confirm the scope for this literature/database task.",
-      options: skillClarificationOptions(payload.locale)
+    ...payload,
+    contextValues: {
+      ...payload.contextValues,
+      facetwrite_clarification_policy: {
+        mode: "skill_scope_guard",
+        source: "server_guard",
+        clarificationId,
+        originalInstruction: instruction,
+        skillRefs: payload.transientSkillRefs ?? [],
+        disabledSkillRefs: payload.disabledSkillRefs ?? [],
+        runtimeBudgetProfile: payload.runtimeBudgetProfile,
+        canvas: record(payload.contextValues?.canvas),
+        instruction: payload.locale === "zh"
+          ? "当前文献/数据库类任务缺少范围。你必须先依据已加载 Skill 的要求调用 ask_clarification，且参数必须包含 question 和 2-3 个 options；每个 option 必须有 id、label、detail 或 description，最多一个 recommended:true。不要输出普通澄清话术、Markdown 选项列表或以冒号结尾的自然语言问题；如果无法调用工具，只能输出完整 JSON 对象 {\"type\":\"agent_clarification_requested\",\"question\":\"...\",\"options\":[...]}，不能包含任何额外文本。在用户回答前不要调用 web_search、web_fetch、knowledge_base、write_file、present_files 或其他证据工具。"
+          : "This literature/database task is underspecified. Use the loaded Skill instructions to call ask_clarification first, and the arguments must include question plus 2-3 options; every option must include id, label, and detail or description, with at most one recommended:true. Do not output ordinary clarification prose, Markdown option lists, or natural-language questions ending in a colon. If tool calling is unavailable, output only a complete JSON object {\"type\":\"agent_clarification_requested\",\"question\":\"...\",\"options\":[...]} with no surrounding text. Do not call web_search, web_fetch, knowledge_base, write_file, present_files, or other evidence tools until the user answers."
+      }
     }
   };
 }
 
+function needsSkillScopeClarification(payload: GenerateRequest) {
+  const skillRefs = (payload.transientSkillRefs ?? []).map((skillRef) => skillRef.toLowerCase());
+  const needsClarification = skillRefs.some(isClarificationSensitiveSkill);
+  const instruction = payload.chatInstruction ?? payload.freeTextPrompt ?? "";
+  const scopeSensitiveTask = /(?:literature|review|survey|paper|database|lookup|search|research|citation|bibliography|github|repo|repository|market|industry|competitive|competitor|newsletter|digest|roundup|news|briefing|文献|综述|调研|检索|搜索|查找|数据库|论文|引用|参考文献|市场|行业|竞品|竞争|简报|周报|新闻|仓库|开源项目)/i.test(instruction);
+  return needsClarification && scopeSensitiveTask && !hasAnsweredSkillClarification(payload);
+}
+
+function isSkillClarificationGuarded(payload: GenerateRequest) {
+  return record(payload.contextValues?.facetwrite_clarification_policy).mode === "skill_scope_guard";
+}
+
+function isClarificationSensitiveSkill(skillRef: string) {
+  const names = [
+    "database-lookup",
+    "paper-lookup",
+    "literature-review",
+    "systematic-literature-review",
+    "deep-research",
+    "github-deep-research",
+    "citation-management",
+    "newsletter-generation",
+    "consulting-analysis"
+  ];
+  return names.some((name) => skillRef === name || skillRef.endsWith(`:${name}`) || skillRef.endsWith(`/${name}`));
+}
+
 function hasAnsweredSkillClarification(payload: GenerateRequest) {
   const clarification = record(payload.contextValues?.agentClarification);
+  const option = record(clarification.option);
   return Boolean(
     readString(clarification.answer)
     || readString(clarification.selectedOptionId)
-    || readString(clarification.clarificationId)
+    || readString(option.id)
+    || readString(option.label)
   );
 }
 
-function skillClarificationOptions(locale: GenerateRequest["locale"]) {
-  return locale === "zh"
-    ? [
-      { id: "recent_focused", label: "近两年综述", detail: "聚焦 2025-2026 年 Agent 相关代表性文献，输出综述。", recommended: true },
-      { id: "broad_survey", label: "广泛扫描", detail: "放宽年份和来源范围，先做广泛检索再筛选。", recommended: false },
-      { id: "specific_scope", label: "指定方向", detail: "我会补充具体对象、时间窗、数据库或关键词后再开始。", recommended: false }
-    ]
-    : [
-      { id: "recent_focused", label: "Recent review", detail: "Focus on representative Agent literature from 2025-2026 and produce a review.", recommended: true },
-      { id: "broad_survey", label: "Broad scan", detail: "Search a wider year and source range, then filter the useful results.", recommended: false },
-      { id: "specific_scope", label: "Specific scope", detail: "I will provide the target object, time window, database, or keywords before you start.", recommended: false }
-    ];
+function withSkillClarificationResumeContext(event: ToolEventRecord, payload: GenerateRequest): ToolEventRecord {
+  if (!isSkillClarificationGuarded(payload) || !isAgentClarificationEvent(event)) return event;
+  const eventPayload = record(event.payload);
+  if (Object.keys(record(eventPayload.resumeContext)).length > 0) return event;
+  const policy = record(payload.contextValues?.facetwrite_clarification_policy);
+  const runtimeBudgetProfile = readOptionalRuntimeBudgetProfile(policy.runtimeBudgetProfile);
+  return {
+    ...event,
+    payload: {
+      ...eventPayload,
+      resumeContext: {
+        originalInstruction: readString(policy.originalInstruction),
+        transientSkillRefs: readStringList(policy.skillRefs),
+        disabledSkillRefs: readStringList(policy.disabledSkillRefs),
+        ...(runtimeBudgetProfile ? { runtimeBudgetProfile } : {}),
+        canvas: record(policy.canvas)
+      }
+    }
+  };
 }
 
-function skillClarificationAssistantText(locale: GenerateRequest["locale"]) {
-  return locale === "zh"
-    ? "开始检索前需要先确认任务范围。请选择一个范围后，我会继续执行。"
-    : "I need to confirm the task scope before searching. Choose one option and I will continue.";
+function readOptionalRuntimeBudgetProfile(value: unknown): GenerateRequest["runtimeBudgetProfile"] | undefined {
+  return value === "low" || value === "medium" || value === "high" ? value : undefined;
 }
 
 function finalizeCanvasDelivery(input: {

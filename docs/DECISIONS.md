@@ -1,5 +1,15 @@
 # FacetWrite Technical Decisions
 
+## 2026-06-23: Skill Scope Clarification Is A Strict Runtime Protocol
+
+Decision: Under-scoped research-scope Skill requests use a guarded Agent Runtime pass that exposes only `ask_clarification` and accepts only a structured clarification event. The valid contract is a non-empty `question` plus 2-3 structured `options` with `id`, `label`, and `detail` or `description`; Runtime may fall back to a single JSON object with the same shape only when a provider cannot emit the tool call.
+
+Reason: Fixed server option templates made the clarification feel shallow and detached from the loaded Skill, while plain assistant prose such as "I need to clarify a few directions:" cannot reliably drive the composer choice UI or resume the original Skill task. A strict protocol gives the Agent the authorship of the question while keeping frontend rendering and Canvas delivery deterministic.
+
+Impact: `agent_backend_agent_clarification_requested` is the only event that creates the Agent clarification choice card. Invalid protocol output becomes a diagnostic event and must not create buttons, Canvas nodes, final Body content, or Markdown files. The event carries `resumeContext` so the selected answer preserves the original instruction, transient Skills, disabled Skills, runtime budget, and Canvas workflow. The first guarded run creates no Canvas nodes; after a valid answer, long Skill tasks can resume progressive delivery.
+
+Known provider issue: the local DeepSeek reasoning path can reject explicit `tool_choice="ask_clarification"` with `Thinking mode does not support this tool_choice`. In that failure mode Runtime emits no valid clarification event, and FacetWrite correctly fails the guard with `AgentBackend skill scope guard requires a structured ask_clarification response`. Debug the Runtime provider/middleware compatibility before relaxing the protocol or parsing prose as buttons.
+
 ## 2026-06-23: Agent Runtime Clarifications Use Composer State
 
 Decision: Treat Agent Runtime `ask_clarification` as pending conversation input, not Canvas delivery. The AgentBackend adapter emits `agent_backend_agent_clarification_requested`, the run timeline mirrors it as `status:"waiting"`, and the right composer renders the existing choice-card UI from that structured timeline payload.

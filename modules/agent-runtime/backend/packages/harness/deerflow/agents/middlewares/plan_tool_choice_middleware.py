@@ -37,6 +37,9 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             raise RuntimeError(f"Plan submission failed: {failure_reason}")
         request = PlanToolChoiceMiddleware._filter_tools(request, context)
         request = PlanToolChoiceMiddleware._apply_runtime_budget(request, context)
+        if PlanToolChoiceMiddleware._is_skill_scope_guard(context):
+            if not PlanToolChoiceMiddleware._has_tool_result(request, "ask_clarification") and PlanToolChoiceMiddleware._has_tool(request, "ask_clarification"):
+                return request.override(tool_choice="ask_clarification")
         if phase == "chat" and isinstance(canvas_action, dict) and canvas_action.get("requiresTool") is True:
             if not PlanToolChoiceMiddleware._has_tool_result(request, "canvas_write") and PlanToolChoiceMiddleware._has_tool(request, "canvas_write"):
                 return request.override(tool_choice="canvas_write")
@@ -205,6 +208,17 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
     @staticmethod
     def _tool_name(tool: object) -> str | None:
         return tool.get("name") if isinstance(tool, dict) else getattr(tool, "name", None)
+
+    @staticmethod
+    def _is_skill_scope_guard(context: object) -> bool:
+        if not isinstance(context, dict):
+            return False
+        policy = context.get("facetwrite_clarification_policy")
+        if not isinstance(policy, dict):
+            context_values = context.get("facetwrite_context_values")
+            if isinstance(context_values, dict):
+                policy = context_values.get("facetwrite_clarification_policy")
+        return isinstance(policy, dict) and policy.get("mode") == "skill_scope_guard"
 
     @staticmethod
     def _plan_submission_failure_reason(request: ModelRequest) -> str | None:

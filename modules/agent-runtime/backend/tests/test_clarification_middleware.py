@@ -7,6 +7,7 @@ import pytest
 from langgraph.graph.message import add_messages
 
 from deerflow.agents.middlewares.clarification_middleware import ClarificationMiddleware
+from deerflow.tools.builtins.clarification_tool import ask_clarification_tool
 
 
 @pytest.fixture
@@ -120,6 +121,58 @@ class TestFormatClarificationMessage:
         assert "2. 2" in result
         assert "3. True" in result
         assert "4. None" in result
+
+    def test_structured_options_render_label_and_detail(self, middleware):
+        args = {
+            "question": "Which scope?",
+            "clarification_type": "approach_choice",
+            "options": [
+                {"id": "recent", "label": "Recent review", "detail": "Focus on the last two years", "recommended": True},
+                {"id": "broad", "label": "Broad scan", "description": "Cover the full field"},
+            ],
+        }
+        result = middleware._format_clarification_message(args)
+        assert "1. Recent review - Focus on the last two years" in result
+        assert "2. Broad scan - Cover the full field" in result
+
+
+class TestAskClarificationToolSchema:
+    def test_requires_two_structured_options(self):
+        schema = ask_clarification_tool.args_schema
+        assert schema is not None
+
+        with pytest.raises(ValueError):
+            schema.model_validate({
+                "question": "Which scope?",
+                "clarification_type": "approach_choice",
+                "options": [
+                    {"id": "only", "label": "Only one", "detail": "One option is not enough"},
+                ],
+            })
+
+    def test_rejects_missing_option_label_and_multiple_recommended(self):
+        schema = ask_clarification_tool.args_schema
+        assert schema is not None
+
+        with pytest.raises(ValueError):
+            schema.model_validate({
+                "question": "Which scope?",
+                "clarification_type": "approach_choice",
+                "options": [
+                    {"id": "a", "detail": "Missing label"},
+                    {"id": "b", "label": "B", "detail": "Valid"},
+                ],
+            })
+
+        with pytest.raises(ValueError):
+            schema.model_validate({
+                "question": "Which scope?",
+                "clarification_type": "approach_choice",
+                "options": [
+                    {"id": "a", "label": "A", "detail": "First", "recommended": True},
+                    {"id": "b", "label": "B", "detail": "Second", "recommended": True},
+                ],
+            })
 
 
 class TestClarificationCommandIdempotency:

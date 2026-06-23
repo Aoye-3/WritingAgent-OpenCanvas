@@ -606,6 +606,63 @@ test("maps native ask_clarification string options into structured Agent clarifi
   assert.equal(result.text, "");
 });
 
+test("maps structured assistant clarification JSON and suppresses raw assistant text", async () => {
+  const clarification = {
+    type: "agent_clarification_requested",
+    question: "Which Agent scope should I review?",
+    options: [
+      { id: "llm_agents", label: "LLM agents", detail: "Focus on recent LLM agent systems.", recommended: true },
+      { id: "multi_agent", label: "Multi-agent", detail: "Focus on coordination and collaboration." }
+    ]
+  };
+  const body = `event: messages-tuple\ndata: [{"type":"ai","content":${JSON.stringify(JSON.stringify(clarification))}}]\n\n`;
+
+  const result = await runWithBody(body);
+  const event = result.events.find((item) => item.eventType === "agent_backend_agent_clarification_requested");
+
+  assert.ok(event);
+  assert.equal(event.payload.source, "assistant_structured_object");
+  assert.equal(event.payload.question, "Which Agent scope should I review?");
+  assert.equal(result.text, "");
+});
+
+test("maps values-only structured assistant clarification JSON into an event", async () => {
+  const clarification = {
+    type: "agent_clarification_requested",
+    question: "Which Agent scope should I review?",
+    options: [
+      { id: "recent", label: "Recent", detail: "Focus on recent papers.", recommended: true },
+      { id: "broad", label: "Broad", detail: "Scan broadly." }
+    ]
+  };
+  const body = `event: values\ndata: {"messages":[{"type":"ai","content":${JSON.stringify(JSON.stringify(clarification))}}]}\n\n`;
+
+  const result = await runWithBody(body);
+  const event = result.events.find((item) => item.eventType === "agent_backend_agent_clarification_requested");
+
+  assert.ok(event);
+  assert.equal(event.payload.source, "assistant_structured_object");
+  assert.equal(event.payload.question, "Which Agent scope should I review?");
+  assert.equal(result.text, "");
+});
+
+test("emits invalid clarification diagnostics for malformed ask_clarification payloads", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_bad_clarify","name":"ask_clarification","args":{"question":"Which scope?","options":[{"id":"only","label":"Only one"}]}}]}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body);
+  const event = result.events.find((item) => item.eventType === "agent_backend_agent_clarification_invalid");
+
+  assert.ok(event);
+  assert.equal(event.payload.toolCallId, "call_bad_clarify");
+  assert.equal(event.payload.reason, "insufficient_options");
+  assert.equal(event.payload.hasQuestion, true);
+  assert.equal(event.payload.optionCount, 1);
+  assert.deepEqual(event.payload.optionShape, ["object:id,label"]);
+  assert.equal(result.text, "");
+});
+
 test("maps structured Canvas envelopes from bridged tool results", async () => {
   const envelope = JSON.stringify({ content: "Committed.", event: { tool: "canvas_write", eventType: "canvas_mutation_committed", nodeId: "node_1", projectId: "project_1", status: "committed" } });
   const body = `event: messages\ndata: [{"type":"tool","name":"canvas_write","tool_call_id":"call_canvas","content":${JSON.stringify(`Committed.\n__FACETWRITE_EVENT__${envelope}`)}}]\n\n`;

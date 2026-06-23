@@ -55,6 +55,15 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
         """
         return any("\u4e00" <= char <= "\u9fff" for char in text)
 
+    def _format_option(self, option: object) -> str:
+        if not isinstance(option, dict):
+            return str(option)
+        label = str(option.get("label") or option.get("title") or option.get("id") or "").strip()
+        detail = str(option.get("detail") or option.get("description") or "").strip()
+        if label and detail:
+            return f"{label} - {detail}"
+        return label or detail or str(option)
+
     def _format_clarification_message(self, args: dict) -> str:
         """Format the clarification arguments into a user-friendly message.
 
@@ -110,7 +119,7 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
         if options and len(options) > 0:
             message_parts.append("")  # blank line for spacing
             for i, option in enumerate(options, 1):
-                message_parts.append(f"  {i}. {option}")
+                message_parts.append(f"  {i}. {self._format_option(option)}")
 
         return "\n".join(message_parts)
 

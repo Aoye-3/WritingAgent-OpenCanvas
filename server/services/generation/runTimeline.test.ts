@@ -81,3 +81,35 @@ test("run timeline keeps Canvas delivery started events running", () => {
   assert.equal(event.status, "running");
   assert.equal(event.title, "Canvas delivery");
 });
+
+test("run timeline does not turn invalid clarification payloads into waiting choices", () => {
+  const builder = createRunTimelineBuilder({ threadId: "thread_1", runId: "pending", locale: "en" });
+  const event = toolEventToTimelineEvent(builder, {
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      question: "Which scope?",
+      options: [{ id: "only", label: "Only one" }]
+    }
+  });
+
+  assert.equal(event.eventType, "tool_completed");
+  assert.equal(event.status, "failed");
+  assert.equal(event.payload?.eventType, "agent_backend_agent_clarification_invalid");
+});
+
+test("run timeline includes invalid clarification reason in the summary", () => {
+  const builder = createRunTimelineBuilder({ threadId: "thread_1", runId: "pending", locale: "en" });
+  const event = toolEventToTimelineEvent(builder, {
+    eventType: "agent_backend_agent_clarification_invalid",
+    payload: {
+      type: "agent_clarification_invalid",
+      summary: "Agent clarification payload was invalid",
+      reason: "missing_options"
+    }
+  });
+
+  assert.equal(event.eventType, "tool_completed");
+  assert.equal(event.status, "failed");
+  assert.equal(event.summary, "Agent clarification payload was invalid: missing_options");
+});

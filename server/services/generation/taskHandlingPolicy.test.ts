@@ -53,6 +53,8 @@ test("classifies slash plan requests as Plan intake without Canvas", () => {
 
 test("detects process clarification text that must not become Canvas content", () => {
   assert.equal(isProcessClarificationText("好的！我需要先跟您确认几个关键点，确保文献综述的方向准确："), true);
+  assert.equal(isProcessClarificationText("好的，我需要先明确几个关键方向："), true);
+  assert.equal(isProcessClarificationText("开始检索前需要确定任务范围。"), true);
   assert.equal(isProcessClarificationText("Before I proceed, please clarify the target audience."), true);
   assert.equal(isProcessClarificationText("最终结论：应采用预算门禁和最终回写双重策略。"), false);
 });

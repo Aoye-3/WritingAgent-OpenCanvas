@@ -52,6 +52,8 @@ export function isProcessClarificationText(value: string): boolean {
     /璺熸偍[\s\S]{0,120}纭/i,
     /(?:需要|我需要|请|先)(?:您|你)?(?:确认|澄清|补充|选择)(?:几个|一些|一下)?(?:关键点|问题|方向|选项)/i,
     /(?:需要|我需要).{0,12}(?:确认|澄清|补充|选择)(?:几个|一些|一下)?(?:关键点|问题|方向|选项)/i,
+    /(?:需要|我需要|请|先).{0,20}(?:明确|确定|选定)(?:几个|一些|一下)?(?:关键点|问题|方向|选项|范围)/i,
+    /(?:明确|确定|选定).{0,20}(?:关键点|问题|方向|选项|范围)(?:后|之后|以后)?(?:再|才)?(?:开始|继续|执行|检索|研究|撰写)?/i,
     /(?:在|开始|继续|撰写|执行|检索|研究)(?:之前|前).{0,40}(?:确认|澄清|补充|选择)/i,
     /(?:before i (?:proceed|continue|start|write|research)|i need to (?:clarify|confirm|ask)|let me clarify|please (?:clarify|confirm|choose))/i
   ].some((pattern) => pattern.test(text));

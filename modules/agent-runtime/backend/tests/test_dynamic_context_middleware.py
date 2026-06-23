@@ -25,6 +25,10 @@ def _fake_runtime():
     return SimpleNamespace(context={})
 
 
+def _fake_runtime_with_context(context: dict):
+    return SimpleNamespace(context=context)
+
+
 def _reminder_msg(content: str, msg_id: str) -> HumanMessage:
     """Build a reminder HumanMessage the way the middleware would produce it."""
     return HumanMessage(
@@ -84,6 +88,47 @@ def test_memory_included_when_present():
     assert "User prefers Python." in reminder_content
     assert "<current_date>2026-05-08, Friday</current_date>" in reminder_content
     assert result["messages"][1].content == "Hi"
+
+
+def test_injects_facetwrite_clarification_policy_from_runtime_context():
+    mw = _make_middleware()
+    state = {"messages": [HumanMessage(content="Review Agent papers", id="msg-1")]}
+    runtime = _fake_runtime_with_context({
+        "facetwrite_clarification_policy": {
+            "mode": "skill_scope_guard",
+            "instruction": "Call ask_clarification with two or three structured options.",
+        }
+    })
+
+    with mock.patch("deerflow.agents.lead_agent.prompt._get_memory_context", return_value=""), mock.patch("deerflow.agents.middlewares.dynamic_context_middleware.datetime") as mock_dt:
+        mock_dt.now.return_value.strftime.return_value = "2026-05-08, Friday"
+        result = mw.before_agent(state, runtime)
+
+    reminder_content = result["messages"][0].content
+    assert "<facetwrite_clarification>" in reminder_content
+    assert "Mode: skill_scope_guard" in reminder_content
+    assert "structured options" in reminder_content
+
+
+def test_injects_facetwrite_clarification_policy_from_nested_context_values():
+    mw = _make_middleware()
+    state = {"messages": [HumanMessage(content="Review Agent papers", id="msg-1")]}
+    runtime = _fake_runtime_with_context({
+        "facetwrite_context_values": {
+            "facetwrite_clarification_policy": {
+                "mode": "skill_scope_guard",
+                "instruction": "Use the structured clarification protocol.",
+            }
+        }
+    })
+
+    with mock.patch("deerflow.agents.lead_agent.prompt._get_memory_context", return_value=""), mock.patch("deerflow.agents.middlewares.dynamic_context_middleware.datetime") as mock_dt:
+        mock_dt.now.return_value.strftime.return_value = "2026-05-08, Friday"
+        result = mw.before_agent(state, runtime)
+
+    reminder_content = result["messages"][0].content
+    assert "<facetwrite_clarification>" in reminder_content
+    assert "Use the structured clarification protocol." in reminder_content
 
 
 # ---------------------------------------------------------------------------

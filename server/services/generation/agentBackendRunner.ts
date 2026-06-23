@@ -54,14 +54,21 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     onStatus: input.onStatus
   });
 
+  if (isSkillClarificationGuarded(input.payload) && !hasAgentClarificationEvent(run.events)) {
+    throw new Error("AgentBackend skill scope guard requires a structured ask_clarification response");
+  }
+
   if (!run.text && !run.events.some((event) => /(?:^|_)(?:plan|artifact|canvas)_/.test(event.eventType))) {
-    throw new Error("AgentBackend completed with no visible assistant text or structured lifecycle events");
+    if (!hasAgentClarificationEvent(run.events)) {
+      throw new Error("AgentBackend completed with no visible assistant text or structured lifecycle events");
+    }
   }
 
   return run;
 }
 
 function allowedToolsForRequest(input: AgentBackendRunnerInput) {
+  if (isSkillClarificationGuarded(input.payload)) return ["ask_clarification"];
   const allowed = new Set<string>(input.runtimeConfig.enabledTools);
   for (const tool of ["plan_clarification_submit", "plan_revision_submit", "artifact_stage"] as const) {
     if (input.payload.toolState?.[tool]) allowed.add(tool);
@@ -87,4 +94,14 @@ function shouldAllowAgentClarification(payload: GenerateRequest) {
   if ((payload.transientSkillRefs ?? []).length > 0) return true;
   if (isProgressiveMarkdownFileDelivery(payload)) return true;
   return Boolean(payload.contextValues?.facetwrite_clarification_policy);
+}
+
+function isSkillClarificationGuarded(payload: GenerateRequest) {
+  const policy = payload.contextValues?.facetwrite_clarification_policy;
+  if (!policy || typeof policy !== "object" || Array.isArray(policy)) return false;
+  return (policy as Record<string, unknown>).mode === "skill_scope_guard";
+}
+
+function hasAgentClarificationEvent(events: ToolEventRecord[]) {
+  return events.some((event) => /agent_clarification_requested$/.test(event.eventType));
 }

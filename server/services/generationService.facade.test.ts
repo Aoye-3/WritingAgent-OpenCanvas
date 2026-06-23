@@ -9,6 +9,7 @@ import type { ChatClient } from "../providerRuntime.js";
 import type { SQLiteStorageRepository } from "../storage.js";
 import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
 import type { KnowledgeSearchInput } from "../knowledge/service.js";
+import type { ToolEventRecord } from "../toolRuntime.js";
 
 function runtimeConfig(): AgentRuntimeConfig {
   const agentCard = agentCards[0];
@@ -621,21 +622,40 @@ test("streaming short Q&A stays conversation-only even when skills are enabled",
   assert.equal(events.some((event) => event.eventType.startsWith("canvas_delivery_")), false);
 });
 
-test("skill preflight asks for clarification before vague Chinese literature search", async () => {
+test("skill scope guard lets AgentBackend ask clarification before vague Chinese literature search", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
   const timelineEvents: Array<{ status: string; payload?: Record<string, unknown> }> = [];
   let agentCalled = false;
+  let allowedToolRefs: string[] = [];
+  let observedContextValues: Record<string, unknown> = {};
+  const originalInstruction = "\u5e2e\u6211\u67e5\u627e\u6700\u8fd1 Agent \u76f8\u5173\u7684\u6587\u732e\uff0c\u5e76\u4e14\u505a\u6587\u732e\u7efc\u8ff0\u3002";
+  const clarificationEvent: ToolEventRecord = {
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      toolCallId: "runtime_clarification_1",
+      clarificationId: "runtime_clarification_1",
+      question: "Which Agent literature scope should I review?",
+      options: [
+        { id: "recent_review", label: "\u8fd1\u4e24\u5e74\u7efc\u8ff0", detail: "Focus on 2025-2026 representative papers.", recommended: true },
+        { id: "broad_scan", label: "\u5e7f\u6cdb\u626b\u63cf", detail: "Cover a wider time range and topic set." }
+      ]
+    }
+  };
   const service = createGenerationService(storage, fakeAgentRuntime(), {
     modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
-      runAgent: async () => {
+      runAgent: async (input) => {
         agentCalled = true;
+        allowedToolRefs = input.allowedToolRefs ?? [];
+        observedContextValues = input.contextValues ?? {};
+        input.onToolEvent?.(clarificationEvent);
         return {
-          text: "Should not run",
-          finishReason: "agent_backend_completed",
-          events: []
+          text: "",
+          finishReason: "clarification_required",
+          events: [clarificationEvent]
         };
       }
     }
@@ -645,8 +665,9 @@ test("skill preflight asks for clarification before vague Chinese literature sea
     mode: "chat",
     locale: "zh",
     agentCardId: "chat-agent",
-    chatInstruction: "帮我查找最近 Agent 相关的文献，并且做文献综述。",
+    chatInstruction: originalInstruction,
     transientSkillRefs: ["database-lookup", "literature-review"],
+    runtimeBudgetProfile: "high",
     contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
     toolState: { web_search: true }
   }, {
@@ -654,20 +675,135 @@ test("skill preflight asks for clarification before vague Chinese literature sea
     onTimelineEvent: (event) => timelineEvents.push(event)
   });
 
-  assert.equal(agentCalled, false);
+  assert.equal(agentCalled, true);
+  assert.deepEqual(allowedToolRefs, ["ask_clarification"]);
+  assert.equal((observedContextValues.facetwrite_clarification_policy as { mode?: string }).mode, "skill_scope_guard");
   assert.equal(records.length, 1);
-  assert.match(result.text, /确认任务范围/);
+  assert.equal(result.finishReason, "clarification_required");
   assert.equal(canvasNodes.length, 0);
   assert.ok(events.some((event) => event.eventType === "agent_backend_agent_clarification_requested"));
   assert.equal(events.some((event) => event.eventType === "agent_backend_tool_started"), false);
   assert.equal(events.some((event) => event.eventType === "agent_backend_tool_completed"), false);
   assert.equal(events.some((event) => event.eventType.startsWith("canvas_delivery_")), false);
   const clarification = events.find((event) => event.eventType === "agent_backend_agent_clarification_requested");
-  const options = clarification?.payload.options as Array<{ recommended?: boolean }> | undefined;
-  assert.equal(options?.length, 3);
-  assert.equal(options?.[0]?.recommended, true);
+  const resumeContext = clarification?.payload.resumeContext as Record<string, unknown> | undefined;
+  assert.equal(resumeContext?.originalInstruction, originalInstruction);
+  assert.deepEqual(resumeContext?.transientSkillRefs, ["database-lookup", "literature-review"]);
+  assert.equal(resumeContext?.runtimeBudgetProfile, "high");
   const timelineClarification = timelineEvents.find((event) => event.payload?.eventType === "agent_backend_agent_clarification_requested");
   assert.equal(timelineClarification?.status, "waiting");
+});
+
+test("skill scope guard rejects plain text clarification without creating Canvas nodes", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: "\u597d\u7684\uff0c\u6211\u9700\u8981\u5148\u660e\u786e\u51e0\u4e2a\u5173\u952e\u65b9\u5411\uff1a",
+        finishReason: "agent_backend_completed",
+        events: []
+      })
+    }
+  });
+
+  await assert.rejects(
+    () => service.generateAndRecordStream({
+      mode: "chat",
+      locale: "zh",
+      agentCardId: "chat-agent",
+      chatInstruction: "\u5e2e\u6211\u67e5\u627e\u6700\u8fd1 Agent \u76f8\u5173\u7684\u6587\u732e\uff0c\u5e76\u4e14\u505a\u6587\u732e\u7efc\u8ff0\u3002",
+      transientSkillRefs: ["database-lookup", "literature-review"],
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+      toolState: { web_search: true }
+    }, { onToolEvent: (event) => events.push(event) }),
+    /skill scope guard requires a structured ask_clarification response/i
+  );
+
+  assert.equal(canvasNodes.length, 0);
+  assert.equal(records.length, 0);
+  assert.ok(events.some((event) => event.eventType === "agent_backend_runtime_failed"));
+});
+
+test("skill scope guard covers installed research skills beyond literature and database lookup", async () => {
+  const guardedSkills = [
+    { skill: "paper-lookup", instruction: "Search papers about AI agents" },
+    { skill: "systematic-literature-review", instruction: "Do a survey of agent memory research" },
+    { skill: "deep-research", instruction: "Research the AI agent market" },
+    { skill: "github-deep-research", instruction: "Analyze open source agent repositories on GitHub" },
+    { skill: "citation-management", instruction: "Find citations about agent evaluation" },
+    { skill: "newsletter-generation", instruction: "Create a weekly AI agent news digest" },
+    { skill: "consulting-analysis", instruction: "Create an industry research report about AI agents" }
+  ];
+
+  for (const { skill, instruction } of guardedSkills) {
+    const { storage, canvasNodes } = fakeStorage();
+    let allowedToolRefs: string[] = [];
+    const clarificationEvent: ToolEventRecord = {
+      eventType: "agent_backend_agent_clarification_requested",
+      payload: {
+        type: "agent_clarification_requested",
+        clarificationId: `clarify_${skill}`,
+        question: "What scope should I use?",
+        options: [{ id: "a", label: "Recent" }, { id: "b", label: "Broad" }]
+      }
+    };
+    const service = createGenerationService(storage, fakeAgentRuntime(), {
+      modelRuntime: fakeModelRuntime,
+      agentBackend: {
+        getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+        runAgent: async (input) => {
+          allowedToolRefs = input.allowedToolRefs ?? [];
+          input.onToolEvent?.(clarificationEvent);
+          return { text: "", finishReason: "clarification_required", events: [clarificationEvent] };
+        }
+      }
+    });
+
+    const result = await service.generateAndRecordStream({
+      mode: "chat",
+      locale: "en",
+      agentCardId: "chat-agent",
+      chatInstruction: instruction,
+      transientSkillRefs: [skill],
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+      toolState: { web_search: true }
+    });
+
+    assert.equal(result.finishReason, "clarification_required", skill);
+    assert.deepEqual(allowedToolRefs, ["ask_clarification"], skill);
+    assert.equal(canvasNodes.length, 0, skill);
+  }
+});
+
+test("skill scope guard does not block ordinary writing skills", async () => {
+  const { storage, records } = fakeStorage();
+  let allowedToolRefs: string[] = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        allowedToolRefs = input.allowedToolRefs ?? [];
+        return { text: "Drafted outline", finishReason: "agent_backend_completed", events: [] };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Research a topic and draft a blog post outline",
+    transientSkillRefs: ["blog-post"],
+    toolState: { web_search: true }
+  });
+
+  assert.equal(result.text, "Drafted outline");
+  assert.notDeepEqual(allowedToolRefs, ["ask_clarification"]);
+  assert.equal(records.length, 1);
 });
 
 test("streaming generic long task creates Canvas progress from evidence tools", async () => {

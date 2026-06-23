@@ -28,6 +28,7 @@ from deerflow.sandbox.tools import (
     write_file_tool,
 )
 from deerflow.tools.builtins.present_file_tool import present_file_tool
+from deerflow.tools.builtins.clarification_tool import ask_clarification_tool
 from deerflow.tools.builtins.setup_agent_tool import setup_agent
 from deerflow.tools.builtins.task_tool import task_tool
 from deerflow.tools.builtins.update_agent_tool import update_agent
@@ -56,6 +57,14 @@ _TOOL_CASES = [
     (write_file_tool, {"description": "write", "path": "/tmp/x", "content": "hi"}),
     (str_replace_tool, {"description": "replace", "path": "/tmp/x", "old_str": "a", "new_str": "b"}),
     (present_file_tool, {"filepaths": ["/tmp/x"], "tool_call_id": "call-1"}),
+    (ask_clarification_tool, {
+        "question": "Which scope?",
+        "clarification_type": "approach_choice",
+        "options": [
+            {"id": "recent", "label": "Recent", "detail": "Focus on recent items", "recommended": True},
+            {"id": "broad", "label": "Broad", "detail": "Scan broadly"},
+        ],
+    }),
     (view_image_tool, {"image_path": "/tmp/img.png", "tool_call_id": "call-1"}),
     (task_tool, {"description": "do", "prompt": "go", "subagent_type": "general-purpose", "tool_call_id": "call-1"}),
     (skill_manage_tool, {"action": "list", "name": "demo"}),

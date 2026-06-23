@@ -38,6 +38,8 @@ test("Agent clarification timeline events render the composer choice card", asyn
   assert.match(source, /agent_backend_agent_clarification_requested/);
   assert.match(source, /agent_clarification_requested/);
   assert.match(source, /clarificationId/);
+  assert.match(source, /resumeContext/);
+  assert.match(source, /readAgentClarificationResumeContext/);
   assert.match(source, /function AgentClarificationChoiceCard/);
   assert.match(source, /clarification\.options\.map/);
   assert.match(source, /onAnswer=\{\(optionId\) => answerAgentClarification\(pendingAgentClarification, optionId\)\}/);
@@ -49,6 +51,19 @@ test("clarification option clicks inject the selected option detail into Plan co
   const source = await readFile("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
   assert.match(source, /option: \{ id: option\.id, label: option\.label, description: option\.description, recommended: option\.recommended \}/);
   assert.match(source, /awaitingPlan: \{/);
+});
+
+test("Agent clarification continuation preserves original task and skill overrides", async () => {
+  const source = await readFile("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
+  assert.match(source, /resume\?\.originalInstruction/);
+  assert.match(source, /Selected clarification: \$\{selectedText\}/);
+  assert.match(source, /transientSkillRefs/);
+  assert.match(source, /disabledSkillRefs: resumeDisabledSkillRefs/);
+  assert.match(source, /runtimeBudgetProfile: resume\.runtimeBudgetProfile/);
+  assert.match(source, /canvas: resume\.canvas/);
+  assert.match(source, /selectedOptionId: option\.id/);
+  assert.match(source, /isAgentClarificationRequired\(sendResult\)/);
+  assert.doesNotMatch(source, /await onSend\(option\.label, undefined, \{\s*agentClarification/s);
 });
 
 test("clarification options use tooltip details instead of body prose", async () => {

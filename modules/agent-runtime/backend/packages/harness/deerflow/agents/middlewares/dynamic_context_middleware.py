@@ -78,6 +78,32 @@ def _is_user_injection_target(message: object) -> bool:
     return isinstance(message, HumanMessage) and not is_dynamic_context_reminder(message) and message.name != _SUMMARY_MESSAGE_NAME
 
 
+def _facetwrite_policy(runtime_context: dict | None, key: str) -> object | None:
+    if not isinstance(runtime_context, dict):
+        return None
+    if key in runtime_context:
+        return runtime_context.get(key)
+    context_values = runtime_context.get("facetwrite_context_values")
+    if isinstance(context_values, dict):
+        return context_values.get(key)
+    return None
+
+
+def _facetwrite_policy_text(policy: object) -> str:
+    if isinstance(policy, str):
+        return policy.strip()
+    if not isinstance(policy, dict):
+        return ""
+    instruction = policy.get("instruction")
+    parts: list[str] = []
+    mode = policy.get("mode")
+    if isinstance(mode, str) and mode.strip():
+        parts.append(f"Mode: {mode.strip()}")
+    if isinstance(instruction, str) and instruction.strip():
+        parts.append(instruction.strip())
+    return "\n".join(parts).strip()
+
+
 class DynamicContextMiddleware(AgentMiddleware):
     """Inject memory and current date into HumanMessages as a <system-reminder>.
 
@@ -122,18 +148,25 @@ class DynamicContextMiddleware(AgentMiddleware):
             lines.append(memory_context.strip())
             lines.append("")  # blank line separating memory from date
         lines.append(f"<current_date>{current_date}</current_date>")
-        completion_policy = runtime_context.get("facetwrite_task_completion_policy") if isinstance(runtime_context, dict) else None
+        clarification_policy = _facetwrite_policy(runtime_context, "facetwrite_clarification_policy")
+        clarification_text = _facetwrite_policy_text(clarification_policy)
+        if clarification_text:
+            lines.append("")
+            lines.append("<facetwrite_clarification>")
+            lines.append(clarification_text)
+            lines.append("</facetwrite_clarification>")
+        completion_policy = _facetwrite_policy(runtime_context, "facetwrite_task_completion_policy")
         if isinstance(completion_policy, str) and completion_policy.strip():
             lines.append("")
             lines.append("<facetwrite_task_completion>")
             lines.append(completion_policy.strip())
             lines.append("</facetwrite_task_completion>")
-        markdown_policy = runtime_context.get("facetwrite_markdown_file_delivery_policy") if isinstance(runtime_context, dict) else None
+        markdown_policy = _facetwrite_policy(runtime_context, "facetwrite_markdown_file_delivery_policy")
         if isinstance(markdown_policy, str) and markdown_policy.strip():
             lines.append("")
             lines.append("<facetwrite_file_delivery>")
             lines.append(markdown_policy.strip())
-            if runtime_context.get("facetwrite_markdown_file_delivery_required") is True:
+            if _facetwrite_policy(runtime_context, "facetwrite_markdown_file_delivery_required") is True:
                 lines.append("This file delivery policy is required for the current FacetWrite progressive Canvas run.")
             lines.append("</facetwrite_file_delivery>")
         lines.append("</system-reminder>")

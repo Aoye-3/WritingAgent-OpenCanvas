@@ -55,11 +55,17 @@ def canvas_write(operation: str, content: str) -> str:
     return operation
 
 
+@tool
+def ask_clarification(question: str, options: list) -> str:
+    """Ask a structured clarification."""
+    return question
+
+
 def request(*, phase: str, stage: str | None = None, messages=None, canvas_action=None, phase_attempt_id=None,
             allowed_tool_refs=None, tool_state=None, evidence_tool_limit=None, evidence_tools=None,
             progressive_enabled=None, model_call_limit=None, recursion_limit=None, synthesis_reserve_steps=None,
             force_synthesis_after_evidence=None, body_draft_write_limit=None, body_draft_writes_used=None,
-            force_synthesis_after_body_drafts=None):
+            force_synthesis_after_body_drafts=None, clarification_policy=None):
     runtime = SimpleNamespace(context={
         "facetwrite_plan_phase": phase,
         "facetwrite_plan_stage": stage,
@@ -77,9 +83,10 @@ def request(*, phase: str, stage: str | None = None, messages=None, canvas_actio
         "facetwrite_synthesis_reserve_steps": synthesis_reserve_steps,
         "facetwrite_force_synthesis_after_evidence": force_synthesis_after_evidence,
         "facetwrite_force_synthesis_after_body_drafts": force_synthesis_after_body_drafts,
+        "facetwrite_clarification_policy": clarification_policy,
     })
     initial_messages = messages or [HumanMessage(content="Plan this task")]
-    initial_tools = [plan_update, plan_clarification_submit, plan_revision_submit, web_search, web_fetch, read_file, artifact_stage, canvas_write]
+    initial_tools = [plan_update, plan_clarification_submit, plan_revision_submit, web_search, web_fetch, read_file, artifact_stage, canvas_write, ask_clarification]
 
     def build(current_messages, current_tools, current_tool_choice=None):
         return SimpleNamespace(
@@ -128,6 +135,24 @@ def test_filters_chat_tools_using_allowed_refs_and_disabled_state():
     )
 
     assert [tool.name for tool in captured["request"].tools] == ["canvas_write"]
+
+
+def test_skill_scope_guard_forces_ask_clarification_after_tool_filtering():
+    middleware = PlanToolChoiceMiddleware()
+    captured = {}
+
+    middleware.wrap_model_call(
+        request(
+            phase="chat",
+            allowed_tool_refs=["ask_clarification"],
+            tool_state={"ask_clarification": True, "web_search": True},
+            clarification_policy={"mode": "skill_scope_guard", "instruction": "Ask first."},
+        ),
+        lambda model_request: captured.setdefault("request", model_request),
+    )
+
+    assert [tool.name for tool in captured["request"].tools] == ["ask_clarification"]
+    assert captured["request"].tool_choice == "ask_clarification"
 
 
 def test_filters_evidence_tools_after_total_budget_reached():

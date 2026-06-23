@@ -67,9 +67,21 @@ export function toolEventToTimelineEvent(builder: RunTimelineBuilder, event: Too
   const toolName = string(payload.toolName) || string(payload.tool) || "tool";
   const label = toolLabel(toolName, builder.locale);
   const payloadType = string(payload.type) || string(payload.eventType);
+  if (event.eventType === "agent_backend_agent_clarification_invalid" || payloadType === "agent_clarification_invalid") {
+    const reason = string(payload.reason);
+    const summary = string(payload.summary) || (builder.locale === "zh" ? "Agent 返回的澄清选项不完整。" : "The Agent returned an incomplete clarification payload.");
+    return builder.event("tool_completed", "failed", builder.locale === "zh" ? "澄清协议无效" : "Invalid clarification", reason ? `${summary}: ${reason}` : summary, payload);
+  }
   if (/agent_clarification_requested$/.test(event.eventType) || payloadType === "agent_clarification_requested") {
     const question = string(payload.question);
     const options = clarificationOptions(payload.options);
+    if (!question || options.length < 2) {
+      return builder.event("tool_completed", "failed", builder.locale === "zh" ? "澄清协议无效" : "Invalid clarification", builder.locale === "zh" ? "Agent 返回的澄清问题或选项不完整。" : "The Agent returned a clarification without a valid question and options.", {
+        ...payload,
+        eventType: "agent_backend_agent_clarification_invalid",
+        options
+      });
+    }
     return builder.event("decision", "waiting", builder.locale === "zh" ? "需要补充信息" : "Clarification needed", question || (builder.locale === "zh" ? "需要用户选择后继续。" : "Waiting for the user to choose an option."), {
       ...payload,
       eventType: "agent_backend_agent_clarification_requested",

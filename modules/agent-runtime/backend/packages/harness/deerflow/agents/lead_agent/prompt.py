@@ -426,7 +426,10 @@ ask_clarification(
     question="Your specific question here?",
     clarification_type="missing_info",  # or other type
     context="Why you need this information",  # optional but recommended
-    options=["option1", "option2"]  # optional, for choices
+    options=[
+        {{"id": "option_1", "label": "Option 1", "detail": "What this choice means", "recommended": True}},
+        {{"id": "option_2", "label": "Option 2", "detail": "What this choice means"}},
+    ]  # required, 2-3 structured choices
 )
 ```
 
@@ -437,7 +440,11 @@ You (action): ask_clarification(
     question="Which environment should I deploy to?",
     clarification_type="approach_choice",
     context="I need to know the target environment for proper configuration",
-    options=["development", "staging", "production"]
+    options=[
+        {{"id": "development", "label": "Development", "detail": "Deploy to the development environment"}},
+        {{"id": "staging", "label": "Staging", "detail": "Deploy to staging for validation", "recommended": True}},
+        {{"id": "production", "label": "Production", "detail": "Deploy directly to production"}},
+    ]
 )
 [Execution stops - wait for user response]
 

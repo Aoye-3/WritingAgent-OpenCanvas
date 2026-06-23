@@ -220,7 +220,7 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
   const taskCompletionPolicy = planPolicy.phase === "chat"
     ? "Complete the user's task directly when reasonable defaults are enough. If a selected skill genuinely needs missing information before continuing, ask exactly one structured multiple-choice clarification with 2-3 mutually exclusive options and one recommended option. Do not ask open-ended questions, and do not write clarification text into final deliverables or Markdown files."
     : undefined;
-  const clarificationPolicy = "When clarification is blocking, use the ask_clarification tool or an equivalent structured clarification object with question, options, descriptions/details, and exactly one recommended option. The UI will render it as a choice card and Canvas clarification node.";
+  const clarificationPolicy = "When clarification is blocking, emit only the structured clarification protocol. Prefer the ask_clarification tool. The payload must be { type:'agent_clarification_requested', question:string, options:[2-3 items] }, and every option must include id, label, and detail or description; at most one option may be recommended. If tool calling is unavailable, output exactly one JSON object with the same fields and no surrounding prose or Markdown. Never answer with ordinary clarification prose, Markdown option lists, or a sentence ending in a colon.";
   const evidenceTools = Array.isArray(progressiveDelivery?.evidenceTools)
     ? progressiveDelivery.evidenceTools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0)
     : undefined;
@@ -349,8 +349,9 @@ async function readAgentBackendStream(
       if (reasoningText) {
         callbacks.onReasoningToken?.(reasoningText);
       }
+      let toolEvents = mapToolEvents(parsed.event, parsed.data, toolCallArgsById);
       const text = extractText(parsed.event, parsed.data);
-      if (text) {
+      if (text && !shouldSuppressAssistantText(toolEvents)) {
         if (messageId) {
           const parts = textByMessageId.get(messageId) ?? [];
           parts.push(text);
@@ -363,10 +364,19 @@ async function readAgentBackendStream(
         callbacks.onToken?.(text);
       }
       if (parsed.event === "values") {
-        finalValuesText = extractFinalValuesText(parsed.data) ?? finalValuesText;
+        const nextFinalText = extractFinalValuesText(parsed.data);
+        if (nextFinalText) {
+          const structuredClarification = structuredAssistantClarificationEvent(nextFinalText);
+          if (structuredClarification) {
+            if (!events.some((event) => /agent_clarification_(?:requested|invalid)$/.test(event.eventType))) {
+              toolEvents = [...toolEvents, structuredClarification];
+            }
+          } else {
+            finalValuesText = nextFinalText;
+          }
+        }
       }
 
-      const toolEvents = mapToolEvents(parsed.event, parsed.data, toolCallArgsById);
       for (const event of toolEvents) {
         const key = toolEventDedupeKey(event);
         if (key && emittedToolEventKeys.has(key)) continue;
@@ -380,6 +390,14 @@ async function readAgentBackendStream(
       if (nextUsage) usage = nextUsage;
     }
   }
+}
+
+function shouldSuppressAssistantText(events: ToolEventRecord[]) {
+  return events.some((event) => {
+    const source = readSourceString(event.payload?.source);
+    return source === "assistant_structured_object"
+      && (event.eventType === "agent_backend_agent_clarification_requested" || event.eventType === "agent_backend_agent_clarification_invalid");
+  });
 }
 
 function extractRuntimeError(event: string, data: unknown): string | undefined {
@@ -482,6 +500,9 @@ function reasoningTextFromMessageLike(value: unknown): string | undefined {
 function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<string, Record<string, unknown>>): ToolEventRecord[] {
   if (event === "custom" && isRecord(data)) {
     const type = typeof data.type === "string" ? data.type : typeof data.event === "string" ? data.event : undefined;
+    if (type === "agent_clarification_requested") {
+      return [agentClarificationEventFromSource(data, { source: "runtime_custom_event" })];
+    }
     return type && /^(?:task_|plan_|artifact_|canvas_|agent_clarification_)/.test(type) ? [{ eventType: `agent_backend_${type}`, payload: data }] : [];
   }
   if (event !== "messages" && event !== "messages-tuple") return [];
@@ -497,17 +518,7 @@ function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<strin
       const args = toolCallArgs(toolCall);
       if (toolCallId) toolCallArgsById.set(toolCallId, args);
       if (toolName === "ask_clarification") {
-        const clarification = readAgentClarification(args);
-        return clarification ? [{
-          eventType: "agent_backend_agent_clarification_requested",
-          payload: {
-            type: "agent_clarification_requested",
-            toolName,
-            toolCallId,
-            status: "pending",
-            ...clarification
-          }
-        }] : [];
+        return [agentClarificationEventFromSource(args, { toolName, toolCallId, source: "ask_clarification" })];
       }
       const started: ToolEventRecord = {
         eventType: "agent_backend_tool_started",
@@ -530,6 +541,9 @@ function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<strin
         : [started];
     });
   }
+
+  const structuredClarification = structuredAssistantClarificationEvent(message);
+  if (structuredClarification) return [structuredClarification];
 
   const messageType = typeof message.type === "string" ? message.type.toLowerCase() : "";
   const role = typeof message.role === "string" ? message.role.toLowerCase() : "";
@@ -617,10 +631,84 @@ function safeToolArgs(toolName: string, args: Record<string, unknown>) {
   return {};
 }
 
+function structuredAssistantClarificationEvent(value: unknown): ToolEventRecord | undefined {
+  const text = typeof value === "string" ? value.trim() : textFromMessageLike(value)?.trim() ?? "";
+  if (!text || !text.startsWith("{") || !text.endsWith("}")) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed)) return undefined;
+  const source = isRecord(parsed.clarification) ? parsed.clarification : parsed;
+  const type = readSourceString(source.type) || readSourceString(parsed.type);
+  if (type !== "agent_clarification_requested") return undefined;
+  return agentClarificationEventFromSource(source, { source: "assistant_structured_object" });
+}
+
+function agentClarificationEventFromSource(source: Record<string, unknown>, meta: { toolName?: string; toolCallId?: string; source: string }): ToolEventRecord {
+  const result = readAgentClarification(source);
+  const toolCallId = meta.toolCallId || readSourceString(source.toolCallId) || readSourceString(source.clarificationId) || undefined;
+  const basePayload = {
+    type: "agent_clarification_requested",
+    ...(meta.toolName ? { toolName: meta.toolName } : {}),
+    ...(toolCallId ? { toolCallId } : {}),
+    ...(readSourceString(source.clarificationId) ? { clarificationId: readSourceString(source.clarificationId) } : {}),
+    status: "pending",
+    source: meta.source
+  };
+  if (!result.valid) {
+    return {
+      eventType: "agent_backend_agent_clarification_invalid",
+      payload: {
+        ...basePayload,
+        type: "agent_clarification_invalid",
+        status: "failed",
+        reason: result.reason,
+        ...clarificationDiagnostics(source),
+        summary: "Agent clarification payload was invalid"
+      }
+    };
+  }
+  return {
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      ...basePayload,
+      question: result.question,
+      options: result.options,
+      ...(isRecord(source.resumeContext) ? { resumeContext: source.resumeContext } : {})
+    }
+  };
+}
+
+function clarificationDiagnostics(args: Record<string, unknown>) {
+  const source = isRecord(args.clarification) ? args.clarification : args;
+  const rawQuestion = source.question;
+  const rawOptions = source.options;
+  return {
+    hasQuestion: typeof rawQuestion === "string" && rawQuestion.trim().length > 0,
+    optionCount: Array.isArray(rawOptions) ? rawOptions.length : 0,
+    optionShape: describeClarificationOptionShape(rawOptions)
+  };
+}
+
+function describeClarificationOptionShape(value: unknown) {
+  if (!Array.isArray(value)) return value === undefined ? "missing" : typeof value;
+  return value.slice(0, 3).map((item) => {
+    if (typeof item === "string") return "string";
+    if (!isRecord(item)) return typeof item;
+    const fields = ["id", "label", "title", "detail", "description", "recommended"]
+      .filter((field) => field in item);
+    return fields.length ? `object:${fields.join(",")}` : "object";
+  });
+}
+
 function readAgentClarification(args: Record<string, unknown>) {
   const source = isRecord(args.clarification) ? args.clarification : args;
   const question = readSourceString(source.question);
   const rawOptions = Array.isArray(source.options) ? source.options : [];
+  const tooManyOptions = rawOptions.length > 3;
   const options = rawOptions.flatMap((item, index) => {
     if (typeof item === "string") {
       const label = readSourceString(item);
@@ -635,11 +723,16 @@ function readAgentClarification(args: Record<string, unknown>) {
     return [{ id, label: label.slice(0, 160), detail: detail.slice(0, 500), recommended: item.recommended === true }];
   }).slice(0, 3);
   const recommendedCount = options.filter((option) => option.recommended).length;
-  if (!question || options.length < 2 || options.length > 3 || recommendedCount > 1) return undefined;
+  if (!question) return { valid: false as const, reason: "missing_question" };
+  if (!Array.isArray(source.options)) return { valid: false as const, reason: "missing_options" };
+  if (tooManyOptions) return { valid: false as const, reason: "too_many_options" };
+  if (rawOptions.length !== options.length) return { valid: false as const, reason: "missing_option_label" };
+  if (options.length < 2) return { valid: false as const, reason: "insufficient_options" };
+  if (recommendedCount > 1) return { valid: false as const, reason: "multiple_recommended_options" };
   const normalizedOptions = recommendedCount === 0
     ? options.map((option, index) => ({ ...option, recommended: index === 0 }))
     : options;
-  return { question: question.slice(0, 500), options: normalizedOptions };
+  return { valid: true as const, question: question.slice(0, 500), options: normalizedOptions };
 }
 
 function safeToolResult(toolName: string, content: unknown) {

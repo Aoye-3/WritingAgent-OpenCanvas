@@ -295,8 +295,10 @@ export function AICollaborationDrawer({
         ...(runtimeBudgetOverride ? { runtimeBudgetProfile: runtimeBudgetOverride } : {})
       });
       if (sendResult) {
-        onSkillOverridesConsumed();
-        setSkillPickerOpen(false);
+        if (!isAgentClarificationRequired(sendResult)) {
+          onSkillOverridesConsumed();
+          setSkillPickerOpen(false);
+        }
       }
       if (mindChainContext) onMindChainContextConsumed();
     } catch {
@@ -365,14 +367,28 @@ export function AICollaborationDrawer({
   const answerAgentClarification = async (clarification: AgentClarificationPrompt, optionId: string) => {
     const option = clarification.options.find((item) => item.id === optionId);
     if (!option) return;
+    const resume = clarification.resumeContext;
+    const transientSkillRefs = resume?.transientSkillRefs.length ? resume.transientSkillRefs : enabledSkillRefs;
+    const resumeDisabledSkillRefs = resume?.disabledSkillRefs.length ? resume.disabledSkillRefs : disabledSkillRefs;
+    const selectedText = `${option.label}${option.detail ? ` - ${option.detail}` : ""}`;
+    const instructionText = resume?.originalInstruction
+      ? `${resume.originalInstruction}\n\nSelected clarification: ${selectedText}`
+      : option.label;
     setClarificationBusy(true);
     try {
       setLocallyAnsweredAgentClarificationIds((current) => current.includes(clarification.clarificationId) ? current : [...current, clarification.clarificationId]);
-      await onSend(option.label, undefined, {
+      await onSend(instructionText, undefined, {
+        ...(transientSkillRefs.length ? { transientSkillRefs } : {}),
+        ...(resumeDisabledSkillRefs.length ? { disabledSkillRefs: resumeDisabledSkillRefs } : {}),
+        ...(resume?.runtimeBudgetProfile ? { runtimeBudgetProfile: resume.runtimeBudgetProfile } : {}),
+        ...(resume?.canvas && Object.keys(resume.canvas).length ? { canvas: resume.canvas } : {}),
         agentClarification: {
           clarificationId: clarification.clarificationId,
           question: clarification.question,
-          option
+          selectedOptionId: option.id,
+          answer: option.label,
+          option,
+          ...(resume?.originalInstruction ? { originalInstruction: resume.originalInstruction } : {})
         }
       });
     } finally {
@@ -860,6 +876,15 @@ type AgentClarificationPrompt = {
   clarificationId: string;
   question: string;
   options: Array<{ id: string; label: string; detail: string; recommended: boolean }>;
+  resumeContext?: AgentClarificationResumeContext;
+};
+
+type AgentClarificationResumeContext = {
+  originalInstruction: string;
+  transientSkillRefs: string[];
+  disabledSkillRefs: string[];
+  runtimeBudgetProfile?: GenerateRequest["runtimeBudgetProfile"];
+  canvas: Record<string, unknown>;
 };
 
 function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "message", onAnswer }: {
@@ -911,7 +936,8 @@ function latestPendingAgentClarification(messages: CollaborationMessage[], ignor
     if (!clarificationId || ignored.has(clarificationId)) continue;
     const question = readString(payload.question);
     const options = readClarificationOptions(payload.options);
-    if (question && options.length >= 2) return { clarificationId, question, options };
+    const resumeContext = readAgentClarificationResumeContext(payload.resumeContext);
+    if (question && options.length >= 2) return { clarificationId, question, options, ...(resumeContext ? { resumeContext } : {}) };
   }
   return undefined;
 }
@@ -934,6 +960,41 @@ function readClarificationOptions(value: unknown): AgentClarificationPrompt["opt
 
 function readString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function readAgentClarificationResumeContext(value: unknown): AgentClarificationResumeContext | undefined {
+  const record = readRecord(value);
+  const originalInstruction = readString(record.originalInstruction);
+  const transientSkillRefs = readStringList(record.transientSkillRefs);
+  const disabledSkillRefs = readStringList(record.disabledSkillRefs);
+  const runtimeBudgetProfile = readRuntimeBudgetProfile(record.runtimeBudgetProfile);
+  const canvas = readRecord(record.canvas);
+  if (!originalInstruction && transientSkillRefs.length === 0 && disabledSkillRefs.length === 0 && !runtimeBudgetProfile && Object.keys(canvas).length === 0) {
+    return undefined;
+  }
+  return {
+    originalInstruction,
+    transientSkillRefs,
+    disabledSkillRefs,
+    ...(runtimeBudgetProfile ? { runtimeBudgetProfile } : {}),
+    canvas
+  };
+}
+
+function readRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function readStringList(value: unknown) {
+  return Array.isArray(value) ? value.map(readString).filter(Boolean) : [];
+}
+
+function readRuntimeBudgetProfile(value: unknown): GenerateRequest["runtimeBudgetProfile"] | undefined {
+  return value === "low" || value === "medium" || value === "high" ? value : undefined;
+}
+
+function isAgentClarificationRequired(value: unknown) {
+  return readRecord(value).finishReason === "clarification_required";
 }
 
 function isWriteConfirmation(text: string) {
