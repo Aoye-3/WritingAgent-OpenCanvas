@@ -1,5 +1,29 @@
 # FacetWrite Technical Decisions
 
+## 2026-06-23: Progressive Body Drafts Use Separate Canvas Nodes
+
+Decision: Progressive long-task checkpoints update a stable `正文草稿` / `Body draft` document node instead of reusing the final `正文` / `Body` node. Final synthesis writes to the separate final Body node only when a real deliverable is available. `canvas_delivery_body_checkpoint_committed` includes the committed node snapshot in `payload.node`.
+
+Reason: The timeline can show `正文草稿 N` while the Canvas node title and content remain `正文`, which makes users think no draft node exists or that the final Body node is stale. Separating draft and final nodes makes recoverable work visible without blurring it with final deliverables.
+
+Impact: Debugging progressive delivery should inspect the stable Body draft node for intermediate checkpoints and the final Body node for completed output. Body draft count remains informational and does not force final synthesis. Frontend refresh logic may use `payload.node` from delivery events for immediate visible updates, then reconcile against thread state after the run.
+
+## 2026-06-23: Long Markdown Deliverables Use File Document Nodes
+
+Decision: Represent long Markdown outputs from Agent Runtime as `file_document` Canvas nodes backed by `/mnt/user-data/outputs/*.md`, rather than storing the full Markdown in ordinary `document` node content. `write_file` and `present_files` events create or update one stable node per virtual path, and the frontend opens the full content through a read-only Markdown preview API.
+
+Reason: Research and review tasks can produce long reports that make the Canvas crowded, expensive to include in follow-up context, and hard to scan. The Canvas should preserve the collaboration structure: overview, progress/source notes, final answer summary, references, and a compact document entry point.
+
+Impact: `file_document` is a separate node kind, not a `document` renderer variant. It stores only short file metadata and defaults to `includeInProjectContext:false`. The preview endpoint accepts only current-thread output Markdown paths, rejects traversal and non-Markdown files, and limits read size. Medium/long tasks with two or more web-search rounds or complex long-form Skills should prefer `write_file` plus `present_files`; if Runtime omits file delivery, Node finalization writes a fallback Markdown file and creates the same document entry. Lightweight Canvas output continues to use ordinary `document` nodes.
+
+## 2026-06-23: Progressive References Prefer Authored Document Links
+
+Decision: Progressive Canvas finalization collects sources from final Canvas content, committed `canvas_write` content, and tool events, then prefers authored Markdown links from the final document before broad `web_search` result links.
+
+Reason: Long research tasks may perform several web searches, but the useful bibliography is often assembled in the final Markdown report. Filling the `References` node from the first search page hides the curated arXiv/DOI links the user expects to see.
+
+Impact: `canvas_mutation_committed` preserves extracted content sources, and final progressive delivery creates or refreshes a dedicated reference node when sources exist. Search progress nodes can still show intermediate search results, but the final reference node should prioritize the authored bibliography.
+
 ## 2026-06-23: Task Handling Policy Gates Canvas Delivery
 
 Decision: Add a server-owned `TaskHandlingPolicy` before Agent Runtime context is sent. The policy classifies each request as `simple_chat`, `plan_intake`, `long_task`, `explicit_canvas`, or `plan_execution`, and only Canvas-eligible classes may create or update Canvas nodes. Skills and thinking mode are complexity signals, not standalone authorization for Canvas writes.
@@ -10,11 +34,11 @@ Impact: `simple_chat` and `plan_intake` are conversation-only. `long_task` and `
 
 ## 2026-06-21: Long Agent Runs Use Explicit Runtime Budgets And Body Checkpoints
 
-Decision: Add a per-request `runtimeBudgetProfile` (`low`, `medium`, `high`, default `medium`) and keep long-task Canvas progress server-owned. The profile maps to LangGraph recursion limit, model-call budget, evidence-tool budget, and synthesis reserve steps. During batch-delivery runs the server updates the stable `正文` / `Body` node with a working body checkpoint as evidence arrives, then replaces it with final content only when the runtime succeeds.
+Decision: Add a per-request `runtimeBudgetProfile` (`low`, `medium`, `high`, default `medium`) and keep long-task Canvas progress server-owned. The profile maps to LangGraph recursion limit, model-call budget, evidence-tool budget, and synthesis reserve steps. During batch-delivery runs the server updates a stable `正文草稿` / `Body draft` node with working checkpoints as evidence arrives, then writes final content to the separate `正文` / `Body` node only when the runtime succeeds.
 
 Reason: Increasing LangGraph `recursion_limit` alone hides the symptom but does not force the Agent to stop searching and write. The observed failure mode was a long tool loop that produced many reference nodes, then hit `GRAPH_RECURSION_LIMIT` before final synthesis, leaving `正文` empty. Users need visible control over run depth and recoverable body progress even when the final Agent run fails.
 
-Impact: The composer exposes `低 / 中 / 高` as a compact run-budget control independent of thinking mode. The AgentBackend adapter forwards both `config.recursion_limit` and `facetwrite_*` budget context. Python middleware removes evidence tools and injects a final-synthesis instruction near the budget boundary. `canvas_delivery_body_checkpoint_committed` is a live Canvas-refresh event, not a success condition; runs with only progress/checkpoint events still fail if no final assistant text or final structured lifecycle outcome exists.
+Impact: The composer exposes `低 / 中 / 高` as a compact run-budget control independent of thinking mode. The AgentBackend adapter forwards both `config.recursion_limit` and `facetwrite_*` budget context. Python middleware removes evidence tools and injects a final-synthesis instruction near the budget boundary. `canvas_delivery_body_checkpoint_committed` is a live Canvas-refresh event with a committed draft-node snapshot, not a success condition; runs with only progress/checkpoint events still fail if no final assistant text or final structured lifecycle outcome exists.
 
 ## 2026-06-21: Project Skill Folders Are Managed Through The Catalog API
 

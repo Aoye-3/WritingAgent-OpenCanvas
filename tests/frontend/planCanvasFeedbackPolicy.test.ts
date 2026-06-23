@@ -25,10 +25,11 @@ test("Canvas Plan nodes prefer structured projection metadata before content fal
 test("pending Plan clarification is rendered as the composer form", async () => {
   const source = await readFile("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
   assert.match(source, /pendingClarificationPlan/);
+  assert.match(source, /pendingAgentClarification/);
   assert.match(source, /drawer-chat-composer-clarification/);
   assert.match(source, /variant="composer"/);
-  assert.match(source, /hidden=\{Boolean\(pendingClarificationPlan\)\}/);
-  assert.match(source, /disabled=\{Boolean\(pendingClarificationPlan\)\}/);
+  assert.match(source, /hidden=\{Boolean\(pendingClarificationPlan \|\| pendingAgentClarification\)\}/);
+  assert.match(source, /disabled=\{Boolean\(pendingClarificationPlan \|\| pendingAgentClarification\)\}/);
 });
 
 test("clarification option clicks inject the selected option detail into Plan context", async () => {

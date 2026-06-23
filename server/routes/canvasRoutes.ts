@@ -1,12 +1,14 @@
 import type { Express } from "express";
 import type { CanvasDomainService } from "../domains/canvas/index.js";
 import { errorMessage, sendError, sendOk } from "../utils/http.js";
+import type { MarkdownOutputPreview } from "../services/threadOutputPreview.js";
 
 type CanvasRouteDeps = {
   canvasService: CanvasDomainService;
+  readMarkdownOutputPreview?: (threadId: string, virtualPath: string) => Promise<MarkdownOutputPreview>;
 };
 
-export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRouteDeps) {
+export function registerCanvasRoutes(app: Express, { canvasService, readMarkdownOutputPreview }: CanvasRouteDeps) {
   const projectIdForThread = (threadId: string) => canvasService.projectIdForThread(threadId);
   app.get("/api/threads/:threadId/canvas", (request, response) => {
     try {
@@ -15,6 +17,20 @@ export function registerCanvasRoutes(app: Express, { canvasService }: CanvasRout
       sendOk(response, canvas);
     } catch (error) {
       sendError(response, 404, "not_found", errorMessage(error, "Thread not found"));
+    }
+  });
+
+  app.get("/api/threads/:threadId/canvas/document-preview", async (request, response) => {
+    if (!readMarkdownOutputPreview) {
+      sendError(response, 404, "not_found", "Markdown preview is not available");
+      return;
+    }
+    try {
+      const virtualPath = typeof request.query.path === "string" ? request.query.path : "";
+      if (!virtualPath) throw new Error("Markdown preview path is required");
+      sendOk(response, { document: await readMarkdownOutputPreview(request.params.threadId, virtualPath) });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to read Markdown preview"));
     }
   });
 

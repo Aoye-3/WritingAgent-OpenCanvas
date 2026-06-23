@@ -3,7 +3,8 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, LightbulbIcon, ModelConfigIcon, SearchIcon, SendIcon, StopIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
-import type { AgentCard, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
+import type { AgentCard, CanvasNode, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
+import type { CanvasNodePatch } from "../../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
 import { useI18n } from "../../i18n/I18nProvider";
 import { AnnotationChipRow, CanvasWriteProposalPanel, type MessageAnnotation } from "./CanvasWriteProposalPanel";
@@ -46,6 +47,7 @@ type AICollaborationDrawerProps = {
   agentCards: AgentCard[];
   canvasWriteRequests: CanvasWriteRequest[];
   canvasWriteSuggestions: CanvasWriteSuggestion[];
+  canvasNodes: CanvasNode[];
   collapsed: boolean;
   inputDraft: string;
   mindChainContext: CanvasMindChainContext | null;
@@ -71,6 +73,7 @@ type AICollaborationDrawerProps = {
   onResetContext: () => Promise<void>;
   onApplyWriteText: (text: string) => Promise<void>;
   onRejectWriteRequest: (requestId: string) => Promise<void>;
+  onUpdateCanvasNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
   onInputDraftConsumed: () => void;
   onMindChainContextConsumed: () => void;
   onRemoveMindChainContext: () => void;
@@ -109,6 +112,7 @@ export function AICollaborationDrawer({
   agentCards,
   canvasWriteRequests,
   canvasWriteSuggestions,
+  canvasNodes,
   collapsed,
   inputDraft,
   mindChainContext,
@@ -134,6 +138,7 @@ export function AICollaborationDrawer({
   onResetContext,
   onApplyWriteText,
   onRejectWriteRequest,
+  onUpdateCanvasNode,
   onInputDraftConsumed,
   onMindChainContextConsumed,
   onRemoveMindChainContext,
@@ -169,6 +174,7 @@ export function AICollaborationDrawer({
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [contextResetNotice, setContextResetNotice] = useState(false);
   const [clarificationBusy, setClarificationBusy] = useState(false);
+  const [locallyAnsweredAgentClarificationNodeIds, setLocallyAnsweredAgentClarificationNodeIds] = useState<string[]>([]);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const drawerTransition = reduceMotion ? { duration: 0 } : { type: "spring" as const, stiffness: 300, damping: 32 };
 
@@ -179,6 +185,14 @@ export function AICollaborationDrawer({
   const hasWriteProposal = Boolean(writeDraft || pendingWriteRequest || annotations.length);
   const timeline = useMemo(() => buildPlanTimeline(messages, plans), [messages, plans]);
   const pendingClarificationPlan = plans.find((plan) => plan.status === "awaiting_user" && plan.clarification?.status === "pending");
+  const answeredAgentClarificationNodeIds = useMemo(() => {
+    const ids = new Set(locallyAnsweredAgentClarificationNodeIds);
+    for (const node of canvasNodes) {
+      if (node.kind === "clarification" && isAnsweredAgentClarificationNode(node)) ids.add(node.id);
+    }
+    return [...ids];
+  }, [canvasNodes, locallyAnsweredAgentClarificationNodeIds]);
+  const pendingAgentClarification = useMemo(() => latestPendingAgentClarification(messages, answeredAgentClarificationNodeIds), [answeredAgentClarificationNodeIds, messages]);
 
   useEffect(() => {
     setThinkingChoice(modelSettingsToThinkingChoice(modelSettings));
@@ -203,6 +217,7 @@ export function AICollaborationDrawer({
   }, [messages, isSending]);
 
   useEffect(() => setContextResetNotice(false), [currentThreadId]);
+  useEffect(() => setLocallyAnsweredAgentClarificationNodeIds([]), [currentThreadId]);
 
   useEffect(() => {
     if (skillPickerOpen) onRequestSkillCatalog();
@@ -349,6 +364,42 @@ export function AICollaborationDrawer({
           ...answer,
           answer: answerText,
           ...(option ? { option: { id: option.id, label: option.label, description: option.description, recommended: option.recommended } } : {})
+        }
+      });
+    } finally {
+      setClarificationBusy(false);
+    }
+  };
+
+  const answerAgentClarification = async (clarification: AgentClarificationPrompt, optionId: string) => {
+    const option = clarification.options.find((item) => item.id === optionId);
+    if (!option) return;
+    setClarificationBusy(true);
+    try {
+      const node = canvasNodes.find((item) => item.id === clarification.nodeId);
+      const nextClarification = {
+        question: clarification.question,
+        options: clarification.options,
+        status: "answered" as const,
+        selectedOptionId: option.id,
+        source: "agent"
+      };
+      if (node) {
+        await onUpdateCanvasNode(node.id, {
+          content: agentClarificationAnsweredCanvasContent(locale, nextClarification),
+          metadata: {
+            ...(node.metadata && typeof node.metadata === "object" && !Array.isArray(node.metadata) ? node.metadata as Record<string, unknown> : {}),
+            clarification: nextClarification
+          },
+          includeInProjectContext: true
+        });
+      }
+      setLocallyAnsweredAgentClarificationNodeIds((current) => current.includes(clarification.nodeId) ? current : [...current, clarification.nodeId]);
+      await onSend(option.label, undefined, {
+        agentClarification: {
+          nodeId: clarification.nodeId,
+          question: clarification.question,
+          option
         }
       });
     } finally {
@@ -557,7 +608,7 @@ export function AICollaborationDrawer({
         </button>
       ) : null}
 
-      <form className={pendingClarificationPlan ? "drawer-chat-composer drawer-chat-composer-clarification" : "drawer-chat-composer"} onSubmit={submit}>
+      <form className={pendingClarificationPlan || pendingAgentClarification ? "drawer-chat-composer drawer-chat-composer-clarification" : "drawer-chat-composer"} onSubmit={submit}>
         <div className="composer-control-row" data-testid="composer-control-row">
           <div className="composer-agent-section">
             <AgentIcon aria-hidden="true" size={16} />
@@ -615,6 +666,15 @@ export function AICollaborationDrawer({
             onAnswer={(answer) => answerClarification(pendingClarificationPlan, answer)}
           />
         ) : null}
+        {pendingAgentClarification ? (
+          <AgentClarificationChoiceCard
+            busy={clarificationBusy}
+            clarification={pendingAgentClarification}
+            locale={locale}
+            variant="composer"
+            onAnswer={(optionId) => answerAgentClarification(pendingAgentClarification, optionId)}
+          />
+        ) : null}
         {mindChainContext ? (
           <div className="mind-chain-context-chip" data-testid="mind-chain-context-chip">
             <span>{t("workspace.mindChainContext", { count: mindChainContext.nodeCount })}</span>
@@ -632,7 +692,7 @@ export function AICollaborationDrawer({
           aria-orientation="horizontal"
           className="composer-resize-handle"
           data-testid="composer-resize-handle"
-          hidden={Boolean(pendingClarificationPlan)}
+          hidden={Boolean(pendingClarificationPlan || pendingAgentClarification)}
           onPointerDown={startComposerResize}
           role="separator"
           title={t("workspace.resizeMessageInputTitle")}
@@ -642,15 +702,15 @@ export function AICollaborationDrawer({
         <textarea
           aria-label={t("workspace.aiMessage")}
           data-testid="ai-collaboration-input"
-          disabled={Boolean(pendingClarificationPlan)}
-          hidden={Boolean(pendingClarificationPlan)}
+          disabled={Boolean(pendingClarificationPlan || pendingAgentClarification)}
+          hidden={Boolean(pendingClarificationPlan || pendingAgentClarification)}
           placeholder={t("workspace.askAiPlaceholder")}
           rows={3}
           style={{ height: composerHeight }}
           value={input}
           onChange={(event) => setInput(event.target.value)}
         />
-        <div className="composer-tool-row" hidden={Boolean(pendingClarificationPlan)}>
+        <div className="composer-tool-row" hidden={Boolean(pendingClarificationPlan || pendingAgentClarification)}>
           <ToolUseIconBar allowedTools={allowedTools} toolState={toolState} onToolStateChange={onToolStateChange} />
           <div className="composer-skill-picker">
             <button
@@ -821,6 +881,123 @@ function ReasoningStreamPanel({ message }: { message: CollaborationMessage }) {
 
 function streamingStatusLabel(message: CollaborationMessage, fallback: string) {
   return message.statusLabel || fallback;
+}
+
+type AgentClarificationPrompt = {
+  nodeId: string;
+  question: string;
+  options: Array<{ id: string; label: string; detail: string; recommended: boolean }>;
+};
+
+function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "message", onAnswer }: {
+  clarification: AgentClarificationPrompt;
+  busy: boolean;
+  locale: "en" | "zh";
+  variant?: "message" | "composer";
+  onAnswer: (optionId: string) => Promise<void>;
+}) {
+  return (
+    <section className={`plan-clarification-card plan-clarification-card-${variant}`} data-status="pending">
+      <div className="plan-clarification-heading">
+        <strong>{locale === "zh" ? "选择后继续" : "Choose to continue"}</strong>
+        <span>{locale === "zh" ? "需要补充信息" : "Clarification needed"}</span>
+      </div>
+      <p>{clarification.question}</p>
+      <div className="plan-clarification-options" role="group" aria-label={clarification.question}>
+        {clarification.options.map((option) => (
+          <button
+            aria-label={`${option.label}${option.detail ? `: ${option.detail}` : ""}`}
+            disabled={busy}
+            key={option.id}
+            onClick={() => void onAnswer(option.id)}
+            title={option.detail}
+            type="button"
+          >
+            <span>
+              <strong>{option.label}</strong>
+              {option.recommended ? <em>{locale === "zh" ? "推荐" : "Recommended"}</em> : null}
+              {option.detail ? <b className="plan-clarification-detail" title={option.detail}>?</b> : null}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function latestPendingAgentClarification(messages: CollaborationMessage[], ignoredNodeIds: string[]): AgentClarificationPrompt | undefined {
+  const ignored = new Set(ignoredNodeIds);
+  const events = messages.flatMap((message) => message.timeline ?? []);
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.payload?.eventType !== "canvas_delivery_clarification_committed") continue;
+    if (event.payload.status && event.payload.status !== "committed") continue;
+    const nodeId = readString(event.payload.nodeId);
+    if (ignored.has(nodeId)) continue;
+    const question = readString(event.payload.question);
+    const options = readClarificationOptions(event.payload.options);
+    if (nodeId && question && options.length >= 2) return { nodeId, question, options };
+  }
+  return undefined;
+}
+
+function readClarificationOptions(value: unknown): AgentClarificationPrompt["options"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const label = readString(record.label);
+    if (!label) return [];
+    return [{
+      id: readString(record.id) || `option_${index + 1}`,
+      label,
+      detail: readString(record.detail) || readString(record.description),
+      recommended: record.recommended === true
+    }];
+  }).slice(0, 3);
+}
+
+function agentClarificationAnsweredContent(locale: "en" | "zh", clarification: {
+  question: string;
+  options: AgentClarificationPrompt["options"];
+  selectedOptionId: string;
+}) {
+  const option = clarification.options.find((item) => item.id === clarification.selectedOptionId);
+  return [
+    `# ${locale === "zh" ? "澄清确认" : "Clarification"}`,
+    "",
+    `- ${locale === "zh" ? "问题" : "Question"}: ${clarification.question}`,
+    `- ${locale === "zh" ? "选择" : "Choice"}: ${option?.label ?? ""}`,
+    option?.detail ? `- ${locale === "zh" ? "详情" : "Detail"}: ${option.detail}` : ""
+  ].filter(Boolean).join("\n");
+}
+void agentClarificationAnsweredContent;
+
+function agentClarificationAnsweredCanvasContent(locale: "en" | "zh", clarification: {
+  question: string;
+  options: AgentClarificationPrompt["options"];
+  selectedOptionId: string;
+}) {
+  const option = clarification.options.find((item) => item.id === clarification.selectedOptionId);
+  return [
+    `# ${locale === "zh" ? "澄清确认" : "Clarification"}`,
+    "",
+    `- ${locale === "zh" ? "问题" : "Question"}: ${clarification.question}`,
+    `- ${locale === "zh" ? "选择" : "Choice"}: ${option?.label ?? ""}`,
+    option?.detail ? `- ${locale === "zh" ? "详情" : "Detail"}: ${option.detail}` : ""
+  ].filter(Boolean).join("\n");
+}
+
+function isAnsweredAgentClarificationNode(node: CanvasNode) {
+  const metadata = node.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
+  const clarification = (metadata as Record<string, unknown>).clarification;
+  if (!clarification || typeof clarification !== "object" || Array.isArray(clarification)) return false;
+  return (clarification as Record<string, unknown>).status === "answered";
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function isWriteConfirmation(text: string) {

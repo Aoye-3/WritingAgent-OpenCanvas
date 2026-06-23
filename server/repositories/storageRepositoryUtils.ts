@@ -12,7 +12,7 @@ export function validateId(value: string, label: string) {
 }
 
 export function validateNodeKind(value: string): CanvasNodeKind {
-  if (value === "document" || value === "note" || value === "reference" || value === "role" || value === "plan") return value;
+  if (value === "document" || value === "note" || value === "reference" || value === "role" || value === "plan" || value === "file_document" || value === "clarification") return value;
   throw new Error("Invalid canvas node kind");
 }
 
@@ -34,6 +34,8 @@ export function defaultCanvasTitle(kind: CanvasNodeKind) {
   if (kind === "reference") return "Untitled reference";
   if (kind === "role") return "Role";
   if (kind === "plan") return "Plan";
+  if (kind === "file_document") return "Document file";
+  if (kind === "clarification") return "Clarification";
   return "Untitled document";
 }
 

@@ -62,10 +62,20 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
 }
 
 function allowedToolsForRequest(input: AgentBackendRunnerInput) {
-  const allowed = new Set(input.runtimeConfig.enabledTools);
+  const allowed = new Set<string>(input.runtimeConfig.enabledTools);
   for (const tool of ["plan_clarification_submit", "plan_revision_submit", "artifact_stage"] as const) {
     if (input.payload.toolState?.[tool]) allowed.add(tool);
   }
   if (input.payload.canvasAction?.requiresTool) allowed.add("canvas_write");
+  if (isProgressiveMarkdownFileDelivery(input.payload)) {
+    allowed.add("write_file");
+    allowed.add("present_files");
+  }
   return [...allowed];
+}
+
+function isProgressiveMarkdownFileDelivery(payload: GenerateRequest) {
+  const delivery = payload.contextValues?.progressiveCanvasDelivery;
+  if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) return false;
+  return (delivery as Record<string, unknown>).enabled === true;
 }

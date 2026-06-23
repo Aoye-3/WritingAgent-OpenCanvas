@@ -83,8 +83,9 @@ def _normalize_presented_filepath(
 @tool("present_files", parse_docstring=True)
 def present_file_tool(
     runtime: Runtime,
-    filepaths: list[str],
     tool_call_id: Annotated[str, InjectedToolCallId],
+    filepaths: list[str] | None = None,
+    file_paths: list[str] | None = None,
 ) -> Command:
     """Make files visible to the user for viewing and rendering in the client interface.
 
@@ -104,8 +105,12 @@ def present_file_tool(
 
     Args:
         filepaths: List of absolute file paths to present to the user. **Only** files in `/mnt/user-data/outputs` can be presented.
+        file_paths: Compatibility alias for filepaths.
     """
     try:
+        filepaths = filepaths or file_paths or []
+        if not filepaths:
+            raise ValueError("filepaths is required")
         normalized_paths = [_normalize_presented_filepath(runtime, filepath) for filepath in filepaths]
     except ValueError as exc:
         return Command(

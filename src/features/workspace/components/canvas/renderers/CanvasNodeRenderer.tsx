@@ -9,12 +9,15 @@ import { ReferenceNodeRenderer } from "./ReferenceNodeRenderer";
 import { RoleNodeRenderer } from "./RoleNodeRenderer";
 import { PlanNodeRenderer } from "./PlanNodeRenderer";
 import { DiagramNodeRenderer } from "./DiagramNodeRenderer";
+import { FileDocumentNodeRenderer } from "./FileDocumentNodeRenderer";
+import { ClarificationNodeRenderer } from "./ClarificationNodeRenderer";
 
 type CanvasNodeRendererProps = {
   isSelected: boolean;
   isResizing: boolean;
   locale: CanvasLocale;
   node: CanvasNode;
+  onOpenDocumentPreview: (node: CanvasNode) => void;
   onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
   agentCardId?: string;
   modelOverrides?: CanvasRangeRewriteDraft["modelOverrides"];
@@ -33,6 +36,8 @@ export function CanvasNodeRenderer(props: CanvasNodeRendererProps) {
   }
 
   if (props.node.kind === "document") return <DocumentNodeRenderer {...props} />;
+  if (props.node.kind === "file_document") return <FileDocumentNodeRenderer locale={props.locale} node={props.node} onOpenDocumentPreview={props.onOpenDocumentPreview} />;
+  if (props.node.kind === "clarification") return <ClarificationNodeRenderer locale={props.locale} node={props.node} onUpdateNode={props.onUpdateNode} />;
   if (props.node.kind === "note") return <NoteNodeRenderer {...props} />;
   if (props.node.kind === "role") return <RoleNodeRenderer {...props} />;
   if (props.node.kind === "plan") return <PlanNodeRenderer node={props.node} />;

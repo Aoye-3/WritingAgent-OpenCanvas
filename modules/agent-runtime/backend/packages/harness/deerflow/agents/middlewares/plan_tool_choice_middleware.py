@@ -115,8 +115,6 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         recursion_limit = PlanToolChoiceMiddleware._positive_int(context.get("facetwrite_recursion_limit"))
         reserve_steps = PlanToolChoiceMiddleware._positive_int(context.get("facetwrite_synthesis_reserve_steps")) or 0
         evidence_limit = PlanToolChoiceMiddleware._positive_int(context.get("facetwrite_evidence_tool_limit"))
-        body_draft_limit = PlanToolChoiceMiddleware._positive_int(context.get("facetwrite_body_draft_write_limit"))
-        body_draft_writes = PlanToolChoiceMiddleware._positive_int(context.get("facetwrite_body_draft_writes_used")) or 0
         evidence_tools_raw = context.get("facetwrite_evidence_tools")
         evidence_tools = {value for value in evidence_tools_raw if isinstance(value, str)} if isinstance(evidence_tools_raw, list) else set()
         completed_evidence_tools = PlanToolChoiceMiddleware._completed_tool_count(request, evidence_tools)
@@ -124,13 +122,36 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         estimated_steps_used = len(request.messages)
 
         evidence_exhausted = bool(evidence_limit and completed_evidence_tools >= evidence_limit and context.get("facetwrite_force_synthesis_after_evidence") is True)
-        body_drafts_exhausted = bool(body_draft_limit and body_draft_writes >= body_draft_limit and context.get("facetwrite_force_synthesis_after_body_drafts") is True)
         model_exhausting = bool(model_limit and model_calls >= max(model_limit - 1, 1))
         recursion_exhausting = bool(recursion_limit and reserve_steps and recursion_limit - estimated_steps_used <= reserve_steps)
-        if not (evidence_exhausted or body_drafts_exhausted or model_exhausting or recursion_exhausting):
+        if not (evidence_exhausted or model_exhausting or recursion_exhausting):
             return request
 
-        reason = "evidence budget reached" if evidence_exhausted else "body draft budget reached" if body_drafts_exhausted else "model budget nearly exhausted" if model_exhausting else "runtime step reserve reached"
+        reason = "evidence budget reached" if evidence_exhausted else "model budget nearly exhausted" if model_exhausting else "runtime step reserve reached"
+        file_delivery_required = context.get("facetwrite_markdown_file_delivery_required") is True
+        file_presented = PlanToolChoiceMiddleware._has_tool_result(request, "present_files")
+        if file_delivery_required and not file_presented:
+            delivery_tools = [
+                tool for tool in request.tools
+                if PlanToolChoiceMiddleware._tool_name(tool) in {"write_file", "present_files"}
+            ]
+            reminder = HumanMessage(
+                content=(
+                    "FacetWrite runtime budget notice: stop evidence gathering now. "
+                    f"Reason: {reason}. First synthesize the complete user deliverable from the gathered evidence, "
+                    "including the actual report, summary tables, findings, and references when applicable. "
+                    "Then write that full Markdown deliverable to `/mnt/user-data/outputs/*.md` with write_file, "
+                    "and call present_files for that file. Do not write a delivery note, skill-loading note, "
+                    "clarification question, or file-save status as the file content. Keep the chat response concise "
+                    "only after the complete file is presented."
+                ),
+                additional_kwargs={"hide_from_ui": True, "facetwrite_budget_notice": True},
+            )
+            messages = list(request.messages)
+            if not any(isinstance(message, HumanMessage) and message.additional_kwargs.get("facetwrite_budget_notice") for message in messages[-3:]):
+                messages.append(reminder)
+            return request.override(messages=messages, tools=delivery_tools, tool_choice=None)
+
         reminder = HumanMessage(
             content=(
                 "FacetWrite runtime budget notice: stop calling tools now. "

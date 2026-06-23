@@ -386,6 +386,28 @@ test("uses final values AI message when AgentBackend does not emit assistant mes
   assert.equal(result.text, "Hello from AgentBackend");
 });
 
+test("ignores final values ask_clarification tool message as visible text", async () => {
+  const body = [
+    'event: values\ndata: {"messages":[{"type":"human","content":"Review papers"},{"type":"tool","name":"ask_clarification","tool_call_id":"call_clarify","content":"需要确认综述的时间范围吗？"}]}\n\n',
+    'event: end\ndata: null\n\n'
+  ].join("");
+
+  const result = await runWithBody(body);
+
+  assert.equal(result.text, "");
+});
+
+test("ignores streamed ask_clarification tool message as visible text", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"tool","name":"ask_clarification","tool_call_id":"call_clarify","content":"请选择时间范围：\\n  1. 2024-2026\\n  2. 2025-2026"}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body);
+
+  assert.equal(result.text, "");
+  assert.equal(result.events.some((event) => event.eventType === "agent_backend_tool_completed" && event.payload.toolName === "ask_clarification"), false);
+});
+
 test("only accepts assistant text from AgentBackend message tuples", async () => {
   const body = [
     'event: messages-tuple\ndata: [{"role":"system","content":"You are FacetWrite system prompt"}]\n\n',
@@ -514,17 +536,17 @@ test("sends progressive Canvas evidence controls for skill long tasks", () => {
     messages: [{ role: "user", content: "Review recent agent literature" }],
     prompt: "Review recent agent literature",
     chatInstruction: "Review recent agent literature",
+    allowedToolRefs: [...card.toolRefs, "ask_clarification"],
     contextValues: {
       progressiveCanvasDelivery: {
         enabled: true,
         runtimeBudgetProfile: "medium",
-        recursionLimit: 80,
-        modelCallLimit: 20,
-        evidenceToolLimit: 8,
-        bodyDraftWriteLimit: 3,
-        synthesisReserveSteps: 16,
+        recursionLimit: 140,
+        modelCallLimit: 32,
+        evidenceToolLimit: 16,
+        bodyDraftWriteLimit: 4,
+        synthesisReserveSteps: 28,
         forceSynthesisAfterEvidence: true,
-        forceSynthesisAfterBodyDrafts: true,
         evidenceTools: ["web_search", "web_fetch", "read_file", "bash"]
       }
     },
@@ -533,16 +555,37 @@ test("sends progressive Canvas evidence controls for skill long tasks", () => {
 
   assert.equal(request.context.facetwrite_progressive_canvas_delivery_enabled, true);
   assert.equal(request.config.configurable.facetwrite_progressive_canvas_delivery_enabled, true);
-  assert.equal(request.config.recursion_limit, 80);
+  assert.equal(request.config.recursion_limit, 140);
   assert.equal(request.context.facetwrite_runtime_budget_profile, "medium");
-  assert.equal(request.context.facetwrite_recursion_limit, 80);
-  assert.equal(request.context.facetwrite_model_call_limit, 20);
-  assert.equal(request.context.facetwrite_evidence_tool_limit, 8);
-  assert.equal(request.context.facetwrite_body_draft_write_limit, 3);
-  assert.equal(request.context.facetwrite_synthesis_reserve_steps, 16);
+  assert.equal(request.context.facetwrite_recursion_limit, 140);
+  assert.equal(request.context.facetwrite_model_call_limit, 32);
+  assert.equal(request.context.facetwrite_evidence_tool_limit, 16);
+  assert.equal(request.context.facetwrite_body_draft_write_limit, 4);
+  assert.equal(request.context.facetwrite_synthesis_reserve_steps, 28);
   assert.equal(request.context.facetwrite_force_synthesis_after_evidence, true);
-  assert.equal(request.context.facetwrite_force_synthesis_after_body_drafts, true);
+  assert.equal((request.context as Record<string, unknown>).facetwrite_force_synthesis_after_body_drafts, undefined);
+  assert.equal(request.context.facetwrite_markdown_file_delivery_required, true);
+  assert.ok(request.context.facetwrite_allowed_tool_refs.includes("write_file"));
+  assert.ok(request.context.facetwrite_allowed_tool_refs.includes("present_files"));
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("ask_clarification"), true);
+  assert.match(String(request.context.facetwrite_task_completion_policy), /exactly one structured multiple-choice clarification/);
+  assert.match(String(request.context.facetwrite_clarification_policy), /ask_clarification/);
   assert.deepEqual(request.context.facetwrite_evidence_tools, ["web_search", "web_fetch", "read_file", "bash"]);
+});
+
+test("maps ask_clarification tool calls into structured Agent clarification events", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_clarify","name":"ask_clarification","args":{"question":"Which scope should I use?","options":[{"id":"focused","label":"Focused","detail":"Use the existing core papers.","recommended":true},{"id":"broad","label":"Broad","detail":"Run an extra search round.","recommended":false}]}}]}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body);
+  const clarification = result.events.find((event) => event.eventType === "agent_backend_agent_clarification_requested");
+
+  assert.ok(clarification);
+  assert.equal(clarification.payload.toolCallId, "call_clarify");
+  assert.equal(clarification.payload.question, "Which scope should I use?");
+  assert.equal(Array.isArray(clarification.payload.options), true);
+  assert.equal(result.text, "");
 });
 
 test("maps structured Canvas envelopes from bridged tool results", async () => {
@@ -550,6 +593,23 @@ test("maps structured Canvas envelopes from bridged tool results", async () => {
   const body = `event: messages\ndata: [{"type":"tool","name":"canvas_write","tool_call_id":"call_canvas","content":${JSON.stringify(`Committed.\n__FACETWRITE_EVENT__${envelope}`)}}]\n\n`;
   const result = await runWithBody(body);
   assert.ok(result.events.some((event) => event.eventType === "agent_backend_canvas_mutation_committed" && event.payload.nodeId === "node_1"));
+});
+
+test("maps canvas_write tool_failed envelopes as Canvas mutation failures", async () => {
+  const envelope = JSON.stringify({
+    content: "Canvas write request failed: Missing target.",
+    event: {
+      tool: "canvas_write",
+      eventType: "tool_failed",
+      reason: "request_failed",
+      summary: "Canvas write request failed: Missing target."
+    }
+  });
+  const body = `event: messages\ndata: [{"type":"tool","name":"canvas_write","tool_call_id":"call_canvas","content":${JSON.stringify(`Error: Canvas write request failed: Missing target.\n__FACETWRITE_EVENT__${envelope}`)}}]\n\n`;
+  const result = await runWithBody(body);
+
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_tool_failed" && event.payload.reason === "request_failed" && event.payload.summary === "Canvas write request failed: Missing target."));
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_canvas_mutation_failed" && event.payload.reason === "request_failed"));
 });
 
 test("marks slash Plan requests as the AgentBackend planning phase", () => {

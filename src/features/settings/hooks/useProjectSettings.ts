@@ -5,11 +5,11 @@ import type { AgentBackendConfigOverview, AgentBackendRuntimeStatus, ProjectRunt
 
 const fallbackRuntimeSettings: ProjectRuntimeSettings = {
   runtimeBudgetProfile: "medium",
-  evidenceToolLimit: 8,
-  bodyDraftWriteLimit: 3,
-  modelCallLimit: 20,
-  recursionLimit: 80,
-  synthesisReserveSteps: 16
+  evidenceToolLimit: 16,
+  bodyDraftWriteLimit: 4,
+  modelCallLimit: 32,
+  recursionLimit: 140,
+  synthesisReserveSteps: 28
 };
 
 export function useProjectSettings(open: boolean, projectId: string, copy: {

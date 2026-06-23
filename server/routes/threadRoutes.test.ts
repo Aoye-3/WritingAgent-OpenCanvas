@@ -100,8 +100,10 @@ test("project runtime settings are isolated per project", async () => {
   const suffix = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const firstProjectId = `runtime_a_${suffix}`;
   const secondProjectId = `runtime_b_${suffix}`;
+  const thirdProjectId = `runtime_c_${suffix}`;
   storage.createProject(firstProjectId, "Runtime A");
   storage.createProject(secondProjectId, "Runtime B");
+  storage.createProject(thirdProjectId, "Runtime C");
 
   const saved = await put(app, `/api/projects/${firstProjectId}/runtime-settings`, {
     runtimeBudgetProfile: "high",
@@ -111,15 +113,25 @@ test("project runtime settings are isolated per project", async () => {
     recursionLimit: 120,
     synthesisReserveSteps: 20
   });
+  const highDefaults = await put(app, `/api/projects/${thirdProjectId}/runtime-settings`, {
+    runtimeBudgetProfile: "high"
+  });
   const first = await get(app, `/api/projects/${firstProjectId}/runtime-settings`);
   const second = await get(app, `/api/projects/${secondProjectId}/runtime-settings`);
+  const third = await get(app, `/api/projects/${thirdProjectId}/runtime-settings`);
 
   assert.equal(saved.status, 200);
+  assert.equal(highDefaults.status, 200);
   assert.equal((first.body.settings as { runtimeBudgetProfile: string }).runtimeBudgetProfile, "high");
   assert.equal((first.body.settings as { evidenceToolLimit: number }).evidenceToolLimit, 12);
   assert.equal((first.body.settings as { bodyDraftWriteLimit: number }).bodyDraftWriteLimit, 4);
   assert.equal((second.body.settings as { runtimeBudgetProfile: string }).runtimeBudgetProfile, "medium");
-  assert.equal((second.body.settings as { bodyDraftWriteLimit: number }).bodyDraftWriteLimit, 3);
+  assert.equal((second.body.settings as { bodyDraftWriteLimit: number }).bodyDraftWriteLimit, 4);
+  assert.equal((third.body.settings as { evidenceToolLimit: number }).evidenceToolLimit, 32);
+  assert.equal((third.body.settings as { bodyDraftWriteLimit: number }).bodyDraftWriteLimit, 8);
+  assert.equal((third.body.settings as { modelCallLimit: number }).modelCallLimit, 56);
+  assert.equal((third.body.settings as { recursionLimit: number }).recursionLimit, 220);
+  assert.equal((third.body.settings as { synthesisReserveSteps: number }).synthesisReserveSteps, 44);
 });
 
 test("rejects blank thread titles", async () => {

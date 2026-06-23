@@ -232,6 +232,69 @@ test("canvas_write commits low-risk create operations and returns the real node 
   assert.equal(result.payload.status, "committed");
 });
 
+test("canvas_write committed payload includes sources extracted from content", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_sources",
+      type: "function",
+      function: {
+        name: "canvas_write",
+        arguments: JSON.stringify({
+          operation: "create",
+          title: "References",
+          content: [
+            "| Paper | Link |",
+            "|---|---|",
+            "| Agent survey | [2503.21460](https://arxiv.org/abs/2503.21460) |"
+          ].join("\n")
+        })
+      }
+    },
+    {
+      commitCanvasWrite(input) {
+        assert.equal(input.operation, "create");
+        return { id: "node_references", projectId: "project_1", kind: "document", title: input.title ?? "References" };
+      }
+    }
+  );
+
+  assert.deepEqual(result.payload.sources, [{ title: "2503.21460", url: "https://arxiv.org/abs/2503.21460" }]);
+});
+
+test("canvas_write creates a new node when append has no target", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_append_without_target",
+      type: "function",
+      function: {
+        name: "canvas_write",
+        arguments: JSON.stringify({
+          operation: "append",
+          title: "Appendix: Search Methodology",
+          content: "## Appendix\nSearch criteria."
+        })
+      }
+    },
+    {
+      commitCanvasWrite(input) {
+        assert.equal(input.operation, "create");
+        assert.equal(input.targetNodeId, undefined);
+        assert.equal(input.title, "Appendix: Search Methodology");
+        assert.equal(input.content, "## Appendix\nSearch criteria.");
+        return { id: "node_append_as_create", projectId: "project_1", kind: "document", title: input.title ?? "Appendix: Search Methodology" };
+      },
+      createCanvasWriteRequest() {
+        throw new Error("append without target must not create a proposal");
+      }
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.operation, "create");
+  assert.equal(result.payload.requestedOperation, "append");
+  assert.equal(result.payload.status, "committed");
+});
+
 test("canvas_write uses the server-recognized operation instead of the model-selected operation", async () => {
   const result = await executeToolCall(
     {

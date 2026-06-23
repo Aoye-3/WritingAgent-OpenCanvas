@@ -8,6 +8,7 @@ type CanvasFlowCallbacks = {
   onConvertSuggestionToNode: (suggestionId: string, kind?: CanvasNodeKind) => Promise<void>;
   onDeleteNode: (nodeId: string) => Promise<void>;
   onIgnoreSuggestion: (suggestionId: string) => Promise<void>;
+  onOpenDocumentPreview: (node: CanvasNode) => void;
   onCreationPreviewBlocked: () => void;
   onRequestNodeMenu: (nodeId: string, screen: { x: number; y: number }) => void;
   onTextSelectionChange: (selection?: CanvasTextSelection) => void;
@@ -112,6 +113,7 @@ function isSameFlowNode(current: CanvasFlowNode, next: CanvasFlowNode) {
     && current.data.onCreationPreviewBlocked === next.data.onCreationPreviewBlocked
     && current.data.onDeleteNode === next.data.onDeleteNode
     && current.data.onIgnoreSuggestion === next.data.onIgnoreSuggestion
+    && current.data.onOpenDocumentPreview === next.data.onOpenDocumentPreview
     && current.data.onRejectWriteRequest === next.data.onRejectWriteRequest
     && current.data.onRequestNodeMenu === next.data.onRequestNodeMenu
     && current.data.onRequestRangeRewrite === next.data.onRequestRangeRewrite

@@ -23,6 +23,7 @@ import { registerThreadRoutes } from "./routes/threadRoutes.js";
 import { registerPlanRoutes } from "./routes/planRoutes.js";
 import { PlanExecutor } from "./services/planExecutor.js";
 import { syncConfiguredModelsToAgentBackend } from "./runtime/agentBackendAdapter/modelSync.js";
+import { readMarkdownOutputPreview } from "./services/threadOutputPreview.js";
 
 export async function createApp() {
   const app = express();
@@ -53,7 +54,7 @@ export async function createApp() {
   registerThreadRoutes(app, { storage, agentRuntime });
   registerPlanRoutes(app, storage, planExecutor);
   registerProjectRoutes(app, { storage, agentRuntime });
-  registerCanvasRoutes(app, { canvasService });
+  registerCanvasRoutes(app, { canvasService, readMarkdownOutputPreview });
   registerSettingsRoutes(app, { storage });
   registerGenerationRoutes(app, { generationService, canvasService });
   storage.listRunnablePlanExecutions().forEach(({ threadId, planId }) => planExecutor.wake(threadId, planId));

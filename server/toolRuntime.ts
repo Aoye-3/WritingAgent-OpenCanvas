@@ -4,6 +4,7 @@ import type { JsonValue, PlanArtifactLink, PlanClarification, PlanRun, PlanStepS
 import type { KnowledgeService } from "./knowledge/service.js";
 import { allowedToolDefinitions, toChatCompletionTool, toolCatalog, type ToolState } from "./tools/catalog.js";
 import { evaluateToolExecutionPolicy, isToolRef } from "./tools/toolPolicyGuard.js";
+import { extractSourceLinks } from "./services/generation/sourceLinks.js";
 
 export type ToolExecutionContext = {
   threadId?: string;
@@ -191,7 +192,10 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
     const content = readString(args.content);
     const targetNodeId = readString(context.canvasAction?.targetNodeId) || readString(args.targetNodeId) || context.selectedCanvasNodeId || undefined;
     const actionOperation = readCanvasOperation(context.canvasAction?.operation);
-    const operation = actionOperation ?? normalizeCanvasOperation(readCanvasOperation(args.operation), targetNodeId, context.chatInstruction);
+    const requestedOperation = actionOperation ?? readCanvasOperation(args.operation);
+    const operation = actionOperation === "append" && !targetNodeId
+      ? "create"
+      : actionOperation ?? normalizeCanvasOperation(requestedOperation, targetNodeId, context.chatInstruction);
     if (!operation) {
       return {
         ok: false,
@@ -216,6 +220,7 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
         content,
         rationale: readString(args.rationale)
       };
+      const sources = extractSourceLinks({ text: content, limit: 40 });
       if (operation === "create" || operation === "append") {
         if (!context.commitCanvasWrite) {
           return {
@@ -234,8 +239,10 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
             nodeId: node.id,
             projectId: node.projectId,
             operation,
+            ...(requestedOperation && requestedOperation !== operation ? { requestedOperation } : {}),
             status: "committed",
-            title: node.title
+            title: node.title,
+            ...(sources.length ? { sources } : {})
           }
         };
       }
@@ -309,6 +316,7 @@ function readCanvasOperation(value: unknown) {
 }
 
 function normalizeCanvasOperation(operation: "create" | "replace" | "append" | "delete" | undefined, targetNodeId: string | undefined, instruction = "") {
+  if (operation === "append" && !targetNodeId) return "create";
   if (operation !== "replace") return operation;
   if (hasCanvasReplaceIntent(instruction)) return operation;
   return targetNodeId ? "append" : "create";

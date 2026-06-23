@@ -177,6 +177,37 @@ test("canvas_write bridge keeps replacements pending in the real Thread project"
   assert.equal(storage.createdRequests[0]?.projectId, "project_bridge");
 });
 
+test("canvas_write bridge commits append without a target as a new node", async () => {
+  const storage = fakeStorage();
+  const app = createTestApp(storage, "agent-runtime");
+  const result = await request(app, {
+    threadId: "thread_bridge",
+    projectId: "project_bridge",
+    toolName: "canvas_write",
+    arguments: {
+      operation: "append",
+      nodeKind: "document",
+      title: "Appendix: Search Methodology",
+      content: "## Appendix\nSearch criteria."
+    },
+    allowedToolRefs: ["canvas_write"],
+    toolState: { canvas_write: true }
+  }, bridgeHeaders("agent-runtime"), "/api/internal/agent-runtime/tool-call");
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.equal((result.body.payload as { operation: string }).operation, "create");
+  assert.equal((result.body.payload as { requestedOperation: string }).requestedOperation, "append");
+  assert.deepEqual(storage.createdNodes, [{
+    projectId: "project_bridge",
+    id: undefined,
+    kind: "document",
+    title: "Appendix: Search Methodology",
+    content: "## Appendix\nSearch criteria."
+  }]);
+  assert.deepEqual(storage.createdRequests, []);
+});
+
 test("canvas_write bridge rejects a Runtime project that does not own the Thread", async () => {
   const storage = fakeStorage();
   const app = createTestApp(storage, "agent-runtime");

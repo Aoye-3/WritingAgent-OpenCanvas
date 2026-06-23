@@ -8,27 +8,27 @@ import { Button, IconButton, Panel } from "../../shared/ui";
 const runtimeBudgetPresets = {
   low: {
     runtimeBudgetProfile: "low",
-    evidenceToolLimit: 4,
-    bodyDraftWriteLimit: 1,
-    modelCallLimit: 10,
-    recursionLimit: 40,
-    synthesisReserveSteps: 10
-  },
-  medium: {
-    runtimeBudgetProfile: "medium",
     evidenceToolLimit: 8,
-    bodyDraftWriteLimit: 3,
-    modelCallLimit: 20,
+    bodyDraftWriteLimit: 2,
+    modelCallLimit: 18,
     recursionLimit: 80,
     synthesisReserveSteps: 16
   },
+  medium: {
+    runtimeBudgetProfile: "medium",
+    evidenceToolLimit: 16,
+    bodyDraftWriteLimit: 4,
+    modelCallLimit: 32,
+    recursionLimit: 140,
+    synthesisReserveSteps: 28
+  },
   high: {
     runtimeBudgetProfile: "high",
-    evidenceToolLimit: 18,
-    bodyDraftWriteLimit: 5,
-    modelCallLimit: 36,
-    recursionLimit: 160,
-    synthesisReserveSteps: 24
+    evidenceToolLimit: 32,
+    bodyDraftWriteLimit: 8,
+    modelCallLimit: 56,
+    recursionLimit: 220,
+    synthesisReserveSteps: 44
   }
 } as const;
 

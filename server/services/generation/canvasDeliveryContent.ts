@@ -49,6 +49,8 @@ export type CanvasDeliveryContent = {
   invalidDiagramBlock?: boolean;
 };
 
+const CANVAS_DELIVERY_SOURCE_LIMIT = 40;
+
 export function createCanvasDeliveryContract(locale: GenerateRequest["locale"], preferredMode: CanvasWorkflowMode = "batch_delivery"): CanvasDeliveryContract {
   return {
     id: "facetwrite_canvas_delivery_v1",
@@ -77,7 +79,7 @@ export function resolveCanvasDeliveryContent(input: {
     };
   }
   if (parsedDiagram.content) {
-    const eventSources = extractSourceLinks({ events: input.events, limit: 10 });
+    const eventSources = extractSourceLinks({ events: input.events, limit: CANVAS_DELIVERY_SOURCE_LIMIT });
     const sources = mergeSources(eventSources, parsedDiagram.content.sources);
     return {
       assistantText: assistantTextWithSources(parsedDiagram.content.assistantText || stripDeliveryBlocks(input.text), sources, input.locale),
@@ -90,7 +92,7 @@ export function resolveCanvasDeliveryContent(input: {
   }
 
   const parsed = parseStructuredDeliveryBlock(input.text);
-  const eventSources = extractSourceLinks({ events: input.events, limit: 10 });
+  const eventSources = extractSourceLinks({ events: input.events, limit: CANVAS_DELIVERY_SOURCE_LIMIT });
   if (parsed) {
     const sources = mergeSources(eventSources, parsed.sources);
     return {
@@ -104,7 +106,7 @@ export function resolveCanvasDeliveryContent(input: {
 
   const withoutSources = stripSourcesSection(input.text);
   const bodyMarkdown = stripCompletionChatter(withoutSources.text).trim() || input.text.trim();
-  const sources = mergeSources(eventSources, extractSourceLinks({ text: withoutSources.sourcesText, limit: 10 }));
+  const sources = mergeSources(eventSources, extractSourceLinks({ text: withoutSources.sourcesText, limit: CANVAS_DELIVERY_SOURCE_LIMIT })).slice(0, CANVAS_DELIVERY_SOURCE_LIMIT);
   return {
     assistantText: assistantTextWithSources(input.text.trim(), sources, input.locale),
     outlineMarkdown: outlineFromBody(bodyMarkdown, input.locale),
@@ -284,16 +286,27 @@ function readPosition(value: unknown) {
 }
 
 function stripSourcesSection(text: string) {
+  return stripSourcesSectionClean(text);
+}
+
+/*
+  void text;
+  return { text: "", sourcesText: "" };
+  // @ts-ignore legacy unreachable fallback kept only to avoid touching mojibake bytes.
   const match = text.match(/(^|\n)#{1,3}\s*(?:来源|Sources)\s*\n/i);
+  // @ts-ignore legacy unreachable fallback kept only to avoid touching mojibake bytes.
   if (!match || match.index === undefined) return { text, sourcesText: "" };
+  // @ts-ignore legacy unreachable fallback kept only to avoid touching mojibake bytes.
   const start = match.index + match[1].length;
   return {
     text: text.slice(0, start).trim(),
     sourcesText: text.slice(start).trim()
   };
 }
+*/
 
 function stripCompletionChatter(text: string) {
+  return stripCompletionChatterClean(text);
   return text
     .split(/\r?\n/)
     .filter((line) => {
@@ -310,6 +323,7 @@ function stripCompletionChatter(text: string) {
 }
 
 function outlineFromBody(bodyMarkdown: string, locale: GenerateRequest["locale"]) {
+  return outlineFromBodyClean(bodyMarkdown, locale);
   const headings = [...bodyMarkdown.matchAll(/^#{1,3}\s+(.+)$/gm)].map((match) => match[1].trim()).filter(Boolean);
   const listItems = [...bodyMarkdown.matchAll(/^(?:[-*+]\s+|\d+[.)]\s+)(.+)$/gm)]
     .map((match) => match[1].replace(/\*\*/g, "").trim())
@@ -322,6 +336,7 @@ function outlineFromBody(bodyMarkdown: string, locale: GenerateRequest["locale"]
 }
 
 function assistantTextWithSources(text: string, sources: SourceLink[], locale: GenerateRequest["locale"]) {
+  return assistantTextWithSourcesClean(text, sources, locale);
   const cleanText = stripDeliveryBlocks(text).trim();
   if (!sources.length || /https?:\/\//i.test(cleanText)) return cleanText;
   const heading = locale === "zh" ? "来源" : "Sources";
@@ -336,10 +351,55 @@ function mergeSources(...groups: SourceLink[][]) {
       if (!/^https?:\/\//i.test(source.url) || seen.has(source.url)) continue;
       seen.add(source.url);
       merged.push(source);
-      if (merged.length >= 10) return merged;
+      if (merged.length >= CANVAS_DELIVERY_SOURCE_LIMIT) return merged;
     }
   }
   return merged;
+}
+
+function stripSourcesSectionClean(text: string) {
+  const match = text.match(/(^|\n)#{1,3}\s*(?:来源|参考文献|Sources|References)\s*\n/i);
+  if (!match || match.index === undefined) return { text, sourcesText: "" };
+  const start = match.index! + match[1]!.length;
+  return {
+    text: text.slice(0, start).trim(),
+    sourcesText: text.slice(start).trim()
+  };
+}
+
+function stripCompletionChatterClean(text: string) {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return true;
+      if (/^(?:新闻搜索和总结已经完成|搜索和总结已经完成|已经完成|已完成)[！!。.]?$/.test(trimmed)) return false;
+      if (/^我已经.*(?:画板|Canvas|canvas|节点|来源|参考)/.test(trimmed)) return false;
+      if (/^(?:所有内容|Canvas 内容).*(?:包含|包括|更新|写入|生成)/i.test(trimmed)) return false;
+      if (/^每个部分都包含/.test(trimmed)) return false;
+      return true;
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+function outlineFromBodyClean(bodyMarkdown: string, locale: GenerateRequest["locale"]) {
+  const headings = [...bodyMarkdown.matchAll(/^#{1,3}\s+(.+)$/gm)].map((match) => match[1].trim()).filter(Boolean);
+  const listItems = [...bodyMarkdown.matchAll(/^(?:[-*+]\s+|\d+[.)]\s+)(.+)$/gm)]
+    .map((match) => match[1].replace(/\*\*/g, "").trim())
+    .filter(Boolean);
+  const items = (headings.length ? headings : listItems).slice(0, 8);
+  const title = locale === "zh" ? "整体概述" : "Overview";
+  if (items.length) return [`# ${title}`, ...items.map((item) => `- ${item}`)].join("\n");
+  const summary = bodyMarkdown.replace(/\s+/g, " ").slice(0, 180);
+  return [`# ${title}`, summary].filter(Boolean).join("\n\n");
+}
+
+function assistantTextWithSourcesClean(text: string, sources: SourceLink[], locale: GenerateRequest["locale"]) {
+  const cleanText = stripDeliveryBlocks(text).trim();
+  if (!sources.length || /https?:\/\//i.test(cleanText)) return cleanText;
+  const heading = locale === "zh" ? "来源" : "Sources";
+  return `${cleanText}\n\n## ${heading}\n${formatSourceLinks(sources)}`.trim();
 }
 
 function readString(value: unknown) {

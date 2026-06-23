@@ -122,6 +122,20 @@ class DynamicContextMiddleware(AgentMiddleware):
             lines.append(memory_context.strip())
             lines.append("")  # blank line separating memory from date
         lines.append(f"<current_date>{current_date}</current_date>")
+        completion_policy = runtime_context.get("facetwrite_task_completion_policy") if isinstance(runtime_context, dict) else None
+        if isinstance(completion_policy, str) and completion_policy.strip():
+            lines.append("")
+            lines.append("<facetwrite_task_completion>")
+            lines.append(completion_policy.strip())
+            lines.append("</facetwrite_task_completion>")
+        markdown_policy = runtime_context.get("facetwrite_markdown_file_delivery_policy") if isinstance(runtime_context, dict) else None
+        if isinstance(markdown_policy, str) and markdown_policy.strip():
+            lines.append("")
+            lines.append("<facetwrite_file_delivery>")
+            lines.append(markdown_policy.strip())
+            if runtime_context.get("facetwrite_markdown_file_delivery_required") is True:
+                lines.append("This file delivery policy is required for the current FacetWrite progressive Canvas run.")
+            lines.append("</facetwrite_file_delivery>")
         lines.append("</system-reminder>")
 
         return "\n".join(lines)

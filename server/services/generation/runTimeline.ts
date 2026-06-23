@@ -67,6 +67,9 @@ export function toolEventToTimelineEvent(builder: RunTimelineBuilder, event: Too
   const toolName = string(payload.toolName) || string(payload.tool) || "tool";
   const label = toolLabel(toolName, builder.locale);
   if (/^canvas_delivery_/.test(event.eventType)) {
+    if (event.eventType === "canvas_delivery_clarification_committed") {
+      return builder.event("canvas_node_committed", "waiting", string(payload.displayTitle) || (builder.locale === "zh" ? "交互确认" : "Clarification"), string(payload.question) || (builder.locale === "zh" ? "需要用户选择后继续。" : "Waiting for the user to choose an option."), payload);
+    }
     if (event.eventType === "canvas_delivery_synthesis_started") {
       return builder.event("decision", "running", builder.locale === "zh" ? "最终综合" : "Final synthesis", builder.locale === "zh" ? "预算已满足，正在基于已有材料生成最终正文。" : "Budget reached; synthesizing the final body from gathered material.", payload);
     }

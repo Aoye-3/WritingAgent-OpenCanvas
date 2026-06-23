@@ -45,7 +45,7 @@ export type CanvasDeliveryPlan = {
   moduleId?: CanvasDeliveryModuleId;
   nodes: Array<{
     id: string;
-    kind: "document" | "reference";
+    kind: "document" | "reference" | "file_document" | "clarification";
     title: string;
     content: string;
     x: number;
@@ -53,6 +53,7 @@ export type CanvasDeliveryPlan = {
     width: number;
     height: number;
     metadata?: Record<string, unknown>;
+    includeInProjectContext?: boolean;
   }>;
   edges: Array<{ id: string; sourceNodeId: string; targetNodeId: string; label: string }>;
 };
@@ -90,10 +91,11 @@ export function commitCanvasDelivery(storage: SQLiteStorageRepository, projectId
   if (!plan.required) return [];
   const existingNodes = new Set(storage.listCanvasNodes(projectId).map((node) => node.id));
   const existingEdges = new Set(storage.listCanvasEdges(projectId).map((edge) => edge.id));
-  const committed: Array<{ nodeId: string; title: string }> = [];
+  const committed: Array<{ nodeId: string; title: string; node?: unknown }> = [];
   for (const node of plan.nodes) {
+    let committedNode: unknown;
     if (existingNodes.has(node.id)) {
-      storage.updateCanvasNode(projectId, node.id, {
+      committedNode = storage.updateCanvasNode(projectId, node.id, {
         title: node.title,
         content: node.content,
         kind: node.kind,
@@ -102,17 +104,17 @@ export function commitCanvasDelivery(storage: SQLiteStorageRepository, projectId
         width: node.width,
         height: node.height,
         metadata: { canvasDelivery: true, ...(node.metadata ?? {}) },
-        includeInProjectContext: true
+        includeInProjectContext: node.includeInProjectContext ?? true
       });
     } else {
-      storage.createCanvasNode(projectId, {
+      committedNode = storage.createCanvasNode(projectId, {
         ...node,
         metadata: { canvasDelivery: true, ...(node.metadata ?? {}) },
-        includeInProjectContext: true
+        includeInProjectContext: node.includeInProjectContext ?? true
       });
       existingNodes.add(node.id);
     }
-    committed.push({ nodeId: node.id, title: node.title });
+    committed.push({ nodeId: node.id, title: node.title, node: committedNode });
   }
   for (const edge of plan.edges) {
     if (!existingEdges.has(edge.id)) {

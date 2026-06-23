@@ -43,7 +43,7 @@ export function hasManualCanvasSize(metadata: unknown) {
 }
 
 export function isKnownCanvasKind(kind: string): kind is CanvasNodeKind {
-  return kind === "document" || kind === "note" || kind === "reference" || kind === "role" || kind === "plan";
+  return kind === "document" || kind === "note" || kind === "reference" || kind === "role" || kind === "plan" || kind === "file_document" || kind === "clarification";
 }
 
 export function readCanvasNodeMetadata(metadata: unknown): CanvasNodeMetadata {

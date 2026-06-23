@@ -92,6 +92,7 @@ export function CanvasNodeFrame({ data, selected }: NodeProps<CanvasFlowNode>) {
         locale={locale}
         modelOverrides={data.modelOverrides}
         node={node}
+        onOpenDocumentPreview={data.onOpenDocumentPreview}
         pendingRequest={data.writeRequests[0]}
         onApproveWriteRequest={data.onApproveWriteRequest}
         onRejectWriteRequest={data.onRejectWriteRequest}

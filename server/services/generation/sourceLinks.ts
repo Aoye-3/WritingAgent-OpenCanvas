@@ -11,21 +11,23 @@ export function extractSourceLinks(input: {
   limit?: number;
 }): SourceLink[] {
   const limit = input.limit ?? 10;
-  const sources: SourceLink[] = [];
+  const sources: Array<SourceLink & { priority: number }> = [];
   const seen = new Set<string>();
-  const add = (title: string, url: string) => {
+  const add = (title: string, url: string, priority = 0) => {
     const cleanUrl = url.trim();
-    if (!/^https?:\/\//i.test(cleanUrl) || seen.has(cleanUrl) || sources.length >= limit) return;
+    if (!/^https?:\/\//i.test(cleanUrl) || seen.has(cleanUrl)) return;
     seen.add(cleanUrl);
-    sources.push({ title: cleanTitle(title, cleanUrl), url: cleanUrl });
+    sources.push({ title: cleanTitle(title, cleanUrl), url: cleanUrl, priority: priority + scholarlyUrlPriority(cleanUrl) });
   };
 
-  for (const event of input.events ?? []) {
+  const events = [...(input.events ?? [])].sort((left, right) => sourceEventPriority(right) - sourceEventPriority(left));
+  for (const event of events) {
+    const priority = sourceEventPriority(event) * 10;
     const rawSources = Array.isArray(event.payload.sources) ? event.payload.sources : [];
     for (const rawSource of rawSources) {
       if (!rawSource || typeof rawSource !== "object" || Array.isArray(rawSource)) continue;
       const source = rawSource as Record<string, unknown>;
-      add(readString(source.title), readString(source.url));
+      add(readString(source.title), readString(source.url), priority);
     }
   }
 
@@ -33,7 +35,24 @@ export function extractSourceLinks(input: {
     add(source.title, source.url);
   }
 
-  return sources;
+  return sources
+    .sort((left, right) => right.priority - left.priority)
+    .slice(0, limit)
+    .map(({ priority: _priority, ...source }) => source);
+}
+
+function sourceEventPriority(event: ToolEventRecord) {
+  const tool = readString(event.payload.tool) || readString(event.payload.toolName);
+  const eventType = readString(event.payload.eventType) || event.eventType;
+  if (tool === "canvas_write" || /canvas_mutation_committed$/.test(eventType)) return 2;
+  return 1;
+}
+
+function scholarlyUrlPriority(url: string) {
+  if (/\/(?:abs|pdf)\/\d{4}\.\d{4,5}|arxiv\.org/i.test(url)) return 6;
+  if (/doi\.org\/10\.|\/doi\/10\./i.test(url)) return 5;
+  if (/(?:aclanthology|ieeexplore|dl\.acm|springer|sciencedirect|semanticscholar|openreview|proceedings\.mlr)\./i.test(url)) return 4;
+  return 0;
 }
 
 export function formatSourceLinks(sources: SourceLink[]) {

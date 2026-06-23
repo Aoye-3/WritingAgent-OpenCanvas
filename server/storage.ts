@@ -345,7 +345,7 @@ export class SQLiteStorageRepository {
       this.listCanvasNodes(projectId)
         .filter((node) => node.includeInProjectContext)
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-        .map((node) => ({ id: node.id, kind: node.kind, title: node.title, content: node.content })),
+        .map((node) => ({ id: node.id, kind: node.kind, title: node.title, content: projectContextCanvasNodeContent(node) })),
       8_000
     );
     const recentOutputs = takeBudgetedValues(outputRows.map((row) => row.content), 6_000);
@@ -731,6 +731,27 @@ export class SQLiteStorageRepository {
   private touchProject(projectId: string, updatedAt = nowIso()) {
     this.projects.touch(projectId, updatedAt);
   }
+}
+
+function projectContextCanvasNodeContent(node: { kind: string; content: string; metadata: unknown }) {
+  if (node.kind !== "clarification") return node.content;
+  const metadata = node.metadata && typeof node.metadata === "object" && !Array.isArray(node.metadata) ? node.metadata as Record<string, unknown> : {};
+  const clarification = metadata.clarification && typeof metadata.clarification === "object" && !Array.isArray(metadata.clarification)
+    ? metadata.clarification as Record<string, unknown>
+    : undefined;
+  if (!clarification || clarification.status !== "answered") return "";
+  const question = typeof clarification.question === "string" ? clarification.question.trim() : "";
+  const selectedOptionId = typeof clarification.selectedOptionId === "string" ? clarification.selectedOptionId : "";
+  const customAnswer = typeof clarification.customAnswer === "string" ? clarification.customAnswer.trim() : "";
+  const options = Array.isArray(clarification.options) ? clarification.options : [];
+  const selected = options.find((option) => option && typeof option === "object" && !Array.isArray(option) && (option as Record<string, unknown>).id === selectedOptionId) as Record<string, unknown> | undefined;
+  const label = typeof selected?.label === "string" ? selected.label.trim() : "";
+  const detail = typeof selected?.detail === "string" ? selected.detail.trim() : typeof selected?.description === "string" ? selected.description.trim() : "";
+  return [
+    question ? `Question: ${question}` : "",
+    customAnswer ? `Answer: ${customAnswer}` : label ? `Answer: ${label}` : "",
+    detail ? `Detail: ${detail}` : ""
+  ].filter(Boolean).join("\n");
 }
 
 export async function createStorage() {

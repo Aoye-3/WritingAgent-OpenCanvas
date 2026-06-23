@@ -61,6 +61,13 @@ export type CanvasRangeRewriteDraft = {
   };
 };
 
+export type MarkdownOutputPreview = {
+  path: string;
+  fileName: string;
+  size: number;
+  content: string;
+};
+
 export type CanvasEdgeDraft = {
   sourceNodeId: string;
   targetNodeId: string;
@@ -69,6 +76,11 @@ export type CanvasEdgeDraft = {
 
 export async function fetchCanvas(threadId: string): Promise<{ nodes: CanvasNode[]; edges: CanvasEdge[]; objects: CanvasObject[]; writeRequests: CanvasWriteRequest[]; workflow: CanvasWorkflow; suggestions: CanvasWorkflowSuggestion[] }> {
   return apiGet<{ nodes: CanvasNode[]; edges: CanvasEdge[]; objects: CanvasObject[]; writeRequests: CanvasWriteRequest[]; workflow: CanvasWorkflow; suggestions: CanvasWorkflowSuggestion[] }>(`/api/threads/${encodeURIComponent(threadId)}/canvas`);
+}
+
+export async function fetchMarkdownOutputPreview(threadId: string, path: string): Promise<MarkdownOutputPreview> {
+  const payload = await apiGet<{ document: MarkdownOutputPreview }>(`/api/threads/${encodeURIComponent(threadId)}/canvas/document-preview?path=${encodeURIComponent(path)}`);
+  return payload.document;
 }
 
 export async function createCanvasNode(threadId: string, draft: CanvasNodeDraft): Promise<CanvasNode> {

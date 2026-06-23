@@ -73,8 +73,11 @@ type AgentBackendRunContext = {
   facetwrite_body_draft_writes_used?: number;
   facetwrite_synthesis_reserve_steps?: number;
   facetwrite_force_synthesis_after_evidence?: boolean;
-  facetwrite_force_synthesis_after_body_drafts?: boolean;
   facetwrite_evidence_tools?: string[];
+  facetwrite_markdown_file_delivery_policy?: string;
+  facetwrite_markdown_file_delivery_required?: boolean;
+  facetwrite_task_completion_policy?: string;
+  facetwrite_clarification_policy?: string;
 };
 
 export async function runAgentBackendAgent(input: AgentBackendRunInput): Promise<AgentBackendRunResult> {
@@ -127,9 +130,13 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
     instruction: input.chatInstruction,
     selectedCanvasNodeId: input.selectedCanvasNodeId
   });
-  const allowedToolRefs = canvasAction?.requiresTool
+  const baseAllowedToolRefs = canvasAction?.requiresTool
     ? [...new Set([...(input.allowedToolRefs ?? input.agentCard.toolRefs), "canvas_write"])]
     : input.allowedToolRefs ?? input.agentCard.toolRefs;
+  const chatAllowedToolRefs = baseAllowedToolRefs;
+  const allowedToolRefs = runtimeContext.facetwrite_markdown_file_delivery_required
+    ? [...new Set([...chatAllowedToolRefs, "write_file", "present_files"])]
+    : chatAllowedToolRefs;
   const toolState = canvasAction?.requiresTool
     ? { ...(input.toolState ?? {}), canvas_write: true }
     : input.toolState ?? {};
@@ -204,7 +211,16 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     ? progressiveDelivery.runtimeBudgetProfile
     : progressiveDelivery?.runtimeBudgetProfile === "medium" ? "medium" : undefined;
   const forceSynthesisAfterEvidence = progressiveDelivery?.forceSynthesisAfterEvidence === true ? true : undefined;
-  const forceSynthesisAfterBodyDrafts = progressiveDelivery?.forceSynthesisAfterBodyDrafts === true ? true : undefined;
+  const markdownFileDeliveryRequired = progressiveCanvasDeliveryEnabled && !isDirectCanvasDeliveryIntent(input.chatInstruction ?? "")
+    ? true
+    : undefined;
+  const markdownFileDeliveryPolicy = progressiveCanvasDeliveryEnabled
+    ? "For medium or long text deliverables, especially if you perform two or more web_search calls or use a complex writing/research skill, first draft the complete user deliverable, then write that full Markdown report to /mnt/user-data/outputs/*.md with write_file and call present_files. The file content must contain the actual report, summary tables, findings, and references when applicable. Never write a delivery note, skill-loading note, clarification question, or file-save status as the Markdown file content. Keep the final chat response concise only after the full file is saved and presented; the Canvas body should contain a readable summary, while the full document lives in the Markdown file."
+    : undefined;
+  const taskCompletionPolicy = planPolicy.phase === "chat"
+    ? "Complete the user's task directly when reasonable defaults are enough. If a selected skill genuinely needs missing information before continuing, ask exactly one structured multiple-choice clarification with 2-3 mutually exclusive options and one recommended option. Do not ask open-ended questions, and do not write clarification text into final deliverables or Markdown files."
+    : undefined;
+  const clarificationPolicy = "When clarification is blocking, use the ask_clarification tool or an equivalent structured clarification object with question, options, descriptions/details, and exactly one recommended option. The UI will render it as a choice card and Canvas clarification node.";
   const evidenceTools = Array.isArray(progressiveDelivery?.evidenceTools)
     ? progressiveDelivery.evidenceTools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0)
     : undefined;
@@ -233,8 +249,11 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
       facetwrite_body_draft_write_limit: bodyDraftWriteLimit,
       facetwrite_synthesis_reserve_steps: synthesisReserveSteps,
       facetwrite_force_synthesis_after_evidence: forceSynthesisAfterEvidence,
-      facetwrite_force_synthesis_after_body_drafts: forceSynthesisAfterBodyDrafts,
-      facetwrite_evidence_tools: evidenceTools
+      facetwrite_evidence_tools: evidenceTools,
+      facetwrite_markdown_file_delivery_policy: markdownFileDeliveryPolicy,
+      facetwrite_markdown_file_delivery_required: markdownFileDeliveryRequired,
+      facetwrite_task_completion_policy: taskCompletionPolicy,
+      facetwrite_clarification_policy: clarificationPolicy
     };
   }
   const thinkingMode = modelSettings.thinkingMode ?? (modelSettings.providerId === "deepseek" && modelSettings.model === "deepseek-reasoner" ? "enabled" : "disabled");
@@ -260,8 +279,11 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     facetwrite_body_draft_write_limit: bodyDraftWriteLimit,
     facetwrite_synthesis_reserve_steps: synthesisReserveSteps,
     facetwrite_force_synthesis_after_evidence: forceSynthesisAfterEvidence,
-    facetwrite_force_synthesis_after_body_drafts: forceSynthesisAfterBodyDrafts,
     facetwrite_evidence_tools: evidenceTools,
+    facetwrite_markdown_file_delivery_policy: markdownFileDeliveryPolicy,
+    facetwrite_markdown_file_delivery_required: markdownFileDeliveryRequired,
+    facetwrite_task_completion_policy: taskCompletionPolicy,
+    facetwrite_clarification_policy: clarificationPolicy,
     ...(memoryContent ? { facetwrite_memory_content: memoryContent } : {})
   };
 }
@@ -287,6 +309,7 @@ async function readAgentBackendStream(
   const textByMessageId = new Map<string, string[]>();
   const unkeyedText: string[] = [];
   const toolCallArgsById = new Map<string, Record<string, unknown>>();
+  const emittedToolEventKeys = new Set<string>();
   let lastMessageId: string | undefined;
   let finalValuesText: string | undefined;
   let usage: unknown;
@@ -345,6 +368,9 @@ async function readAgentBackendStream(
 
       const toolEvents = mapToolEvents(parsed.event, parsed.data, toolCallArgsById);
       for (const event of toolEvents) {
+        const key = toolEventDedupeKey(event);
+        if (key && emittedToolEventKeys.has(key)) continue;
+        if (key) emittedToolEventKeys.add(key);
         events.push(event);
         callbacks.onStatus?.(statusFromToolEvent(event));
         callbacks.onToolEvent?.(event);
@@ -407,6 +433,13 @@ function extractFinalValuesText(data: unknown): string | undefined {
   return undefined;
 }
 
+function toolEventDedupeKey(event: ToolEventRecord) {
+  const toolName = typeof event.payload?.toolName === "string" ? event.payload.toolName : "";
+  const toolCallId = typeof event.payload?.toolCallId === "string" ? event.payload.toolCallId : "";
+  if (!toolName || !toolCallId) return undefined;
+  return `${event.eventType}:${toolName}:${toolCallId}`;
+}
+
 function textFromMessageTuple(data: unknown): string | undefined {
   if (Array.isArray(data)) {
     return textFromMessageLike(data[0]);
@@ -449,7 +482,7 @@ function reasoningTextFromMessageLike(value: unknown): string | undefined {
 function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<string, Record<string, unknown>>): ToolEventRecord[] {
   if (event === "custom" && isRecord(data)) {
     const type = typeof data.type === "string" ? data.type : typeof data.event === "string" ? data.event : undefined;
-    return type && /^(?:task_|plan_|artifact_|canvas_)/.test(type) ? [{ eventType: `agent_backend_${type}`, payload: data }] : [];
+    return type && /^(?:task_|plan_|artifact_|canvas_|agent_clarification_)/.test(type) ? [{ eventType: `agent_backend_${type}`, payload: data }] : [];
   }
   if (event !== "messages" && event !== "messages-tuple") return [];
   const message = Array.isArray(data) ? data[0] : data;
@@ -463,6 +496,19 @@ function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<strin
       const toolCallId = typeof toolCall.id === "string" ? toolCall.id : undefined;
       const args = toolCallArgs(toolCall);
       if (toolCallId) toolCallArgsById.set(toolCallId, args);
+      if (toolName === "ask_clarification") {
+        const clarification = readAgentClarification(args);
+        return clarification ? [{
+          eventType: "agent_backend_agent_clarification_requested",
+          payload: {
+            type: "agent_clarification_requested",
+            toolName,
+            toolCallId,
+            status: "pending",
+            ...clarification
+          }
+        }] : [];
+      }
       const started: ToolEventRecord = {
         eventType: "agent_backend_tool_started",
         payload: {
@@ -492,6 +538,7 @@ function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<strin
   const failed = structured.some((event) => /_failed$/.test(event.eventType))
     || (typeof message.content === "string" && message.content.startsWith("Error:"));
   const toolName = typeof message.name === "string" ? message.name : "unknown";
+  if (toolName === "ask_clarification") return [];
   const sources = toolName === "web_search" ? extractWebSearchSources(message.content) : [];
   const toolCallId = typeof message.tool_call_id === "string" ? message.tool_call_id : undefined;
   const startedArgs = toolCallId ? toolCallArgsById.get(toolCallId) ?? {} : {};
@@ -543,7 +590,7 @@ function safeToolArgs(toolName: string, args: Record<string, unknown>) {
     return /^https?:\/\//i.test(url) ? { url } : {};
   }
   if (toolName === "read_file") {
-    const path = readSourceString(args.path).slice(0, 500);
+    const path = readSourceString(args.path ?? args.file_path ?? args.filePath).slice(0, 500);
     const startLine = readPositiveInteger(args.start_line ?? args.startLine);
     const endLine = readPositiveInteger(args.end_line ?? args.endLine);
     return {
@@ -556,7 +603,34 @@ function safeToolArgs(toolName: string, args: Record<string, unknown>) {
     const command = readSourceString(args.command ?? args.cmd).slice(0, 240);
     return command ? { command } : {};
   }
+  if (toolName === "write_file") {
+    const path = readSourceString(args.path ?? args.file_path ?? args.filePath).slice(0, 500);
+    return path ? { path } : {};
+  }
+  if (toolName === "present_files") {
+    const filepaths = readStringArray(args.filepaths ?? args.file_paths ?? args.paths)
+      .map((path) => path.slice(0, 500))
+      .filter(Boolean)
+      .slice(0, 20);
+    return filepaths.length ? { filepaths } : {};
+  }
   return {};
+}
+
+function readAgentClarification(args: Record<string, unknown>) {
+  const source = isRecord(args.clarification) ? args.clarification : args;
+  const question = readSourceString(source.question);
+  const rawOptions = Array.isArray(source.options) ? source.options : [];
+  const options = rawOptions.flatMap((item, index) => {
+    if (!isRecord(item)) return [];
+    const id = readSourceString(item.id) || `option_${index + 1}`;
+    const label = readSourceString(item.label) || readSourceString(item.title);
+    const detail = readSourceString(item.detail) || readSourceString(item.description);
+    if (!label) return [];
+    return [{ id, label: label.slice(0, 160), detail: detail.slice(0, 500), recommended: item.recommended === true }];
+  }).slice(0, 3);
+  if (!question || options.length < 2 || options.length > 3 || options.filter((option) => option.recommended).length !== 1) return undefined;
+  return { question: question.slice(0, 500), options };
 }
 
 function safeToolResult(toolName: string, content: unknown) {
@@ -602,6 +676,10 @@ function readSourceString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function readStringArray(value: unknown) {
+  return Array.isArray(value) ? value.map(readSourceString).filter(Boolean) : [];
+}
+
 function readPositiveInteger(value: unknown) {
   const number = typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : 0;
   return Number.isInteger(number) && number > 0 ? number : undefined;
@@ -637,10 +715,14 @@ function structuredToolEvents(content: unknown): ToolEventRecord[] {
   try {
     const envelope = JSON.parse(content.slice(markerIndex + "__FACETWRITE_EVENT__".length)) as unknown;
     if (!isRecord(envelope) || !isRecord(envelope.event) || typeof envelope.event.eventType !== "string") return [];
-    if (!/^(?:plan_|artifact_|canvas_)/.test(envelope.event.eventType)) return [];
-    const events: ToolEventRecord[] = [{ eventType: `agent_backend_${envelope.event.eventType}`, payload: envelope.event }];
-    if (envelope.event.eventType === "artifact_staged" && Array.isArray(envelope.event.artifacts) && envelope.event.artifacts.some((artifact) => isRecord(artifact) && artifact.status === "committed")) {
-      events.push({ eventType: "agent_backend_artifact_committed", payload: { ...envelope.event, eventType: "artifact_committed" } });
+    const eventType = envelope.event.eventType === "tool_failed" && envelope.event.tool === "canvas_write"
+      ? "canvas_mutation_failed"
+      : envelope.event.eventType;
+    if (!/^(?:plan_|artifact_|canvas_)/.test(eventType)) return [];
+    const payload = { ...envelope.event, eventType };
+    const events: ToolEventRecord[] = [{ eventType: `agent_backend_${eventType}`, payload }];
+    if (eventType === "artifact_staged" && Array.isArray(envelope.event.artifacts) && envelope.event.artifacts.some((artifact) => isRecord(artifact) && artifact.status === "committed")) {
+      events.push({ eventType: "agent_backend_artifact_committed", payload: { ...payload, eventType: "artifact_committed" } });
     }
     return events;
   } catch {

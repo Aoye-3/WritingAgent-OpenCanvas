@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile, rm } from "node:fs/promises";
+import path from "node:path";
 import { agentCards, defaultAgentSettings } from "../agentCards.js";
 import { createGenerationService } from "./generationService.js";
 import type { AgentRuntimeConfig } from "./agentDefinitionService.js";
@@ -80,11 +82,11 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
       getProject: () => ({ id: "project_test", title: "Test", summary: "", updatedAt: "" }),
       getProjectRuntimeSettings: () => ({
         runtimeBudgetProfile: "medium",
-        evidenceToolLimit: 8,
-        bodyDraftWriteLimit: 3,
-        modelCallLimit: 20,
-        recursionLimit: 80,
-        synthesisReserveSteps: 16
+        evidenceToolLimit: 16,
+        bodyDraftWriteLimit: 4,
+        modelCallLimit: 32,
+        recursionLimit: 140,
+        synthesisReserveSteps: 28
       }),
       getProjectModelBindings: () => ["configured-test"],
       getProjectSharedContext: () => undefined,
@@ -114,6 +116,7 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
           status: "pending"
         };
       },
+      createCanvasWriteSuggestion: () => ({ id: "suggestion_1", status: "pending" }),
       listCanvasNodes: () => canvasNodes,
       listCanvasEdges: () => canvasEdges,
       createCanvasNode: (_projectId: string, input: Record<string, unknown>) => {
@@ -326,6 +329,39 @@ test("direct Canvas delivery is committed by the server planner without copying 
   assert.equal(canvasEdges.length, 2);
 });
 
+test("direct Canvas delivery treats process clarification text as recoverable output", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: "I've loaded the Systematic Literature Review skill. Let me clarify a few things before proceeding.",
+        finishReason: "agent_backend_completed",
+        events: []
+      })
+    }
+  });
+
+  const result = await service.generateAndRecord({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent agent literature and organize the results in Canvas.",
+    transientSkillRefs: ["literature-review"],
+    toolState: { web_search: true }
+  }, (event) => events.push(event as typeof events[number]));
+
+  assert.equal(result.provider, "agent-backend");
+  assert.equal(result.text.includes("Let me clarify"), false);
+  assert.equal(records.length, 1);
+  assert.equal(canvasNodes.length, 1);
+  assert.equal(canvasNodes[0]?.title, "Clarification needed");
+  assert.equal(String(canvasNodes[0]?.content).includes("Let me clarify"), false);
+  assert.equal(events.some((event) => event.eventType === "agent_backend_runtime_failed"), false);
+});
+
 test("direct Canvas delivery fails without creating nodes when AgentBackend returns no content", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
@@ -435,7 +471,7 @@ test("streaming direct Canvas delivery commits a research note after each search
   assert.equal(records.length, 0);
   assert.ok(canvasNodes.some((node) => node.title === "\u7814\u7a76\u6458\u5f55 1" && String(node.content).includes("LLM agent survey 2025")));
   assert.ok(canvasNodes.some((node) => node.title === "\u7814\u7a76\u6458\u5f55 1" && String(node.content).includes("https://example.com/agent-survey")));
-  const bodyNode = canvasNodes.find((node) => node.title === "\u6b63\u6587");
+  const bodyNode = canvasNodes.find((node) => node.title === "\u6b63\u6587\u8349\u7a3f");
   assert.ok(bodyNode);
   assert.ok(String(bodyNode.content).includes("\u5de5\u4f5c\u6b63\u6587\u8349\u7a3f"));
   assert.equal(String(bodyNode.content).includes("\u6b63\u5728\u751f\u6210\u5185\u5bb9"), false);
@@ -490,7 +526,8 @@ test("streaming skill long task creates Canvas progress without explicit Canvas 
   assert.equal(records.length, 0);
   assert.ok(canvasNodes.some((node) => node.title === "整体概述"));
   assert.ok(canvasNodes.some((node) => node.title === "正文"));
-  assert.ok(canvasNodes.some((node) => node.title === "进度摘录 1" && String(node.content).includes("literature-review/SKILL.md")));
+  assert.equal(canvasNodes.some((node) => String(node.content).includes("literature-review/SKILL.md")), false);
+  assert.equal(canvasNodes.some((node) => String(node.content).includes("/mnt/skills/")), false);
   assert.ok(canvasNodes.some((node) => node.title === "进度摘录 2" && String(node.content).includes("parallel-cli search completed")));
   assert.ok(canvasNodes.some((node) => node.title === "运行失败" && String(node.content).includes("Recursion limit of 100 reached")));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_outline_committed"));
@@ -568,7 +605,7 @@ test("streaming generic long task creates Canvas progress from evidence tools", 
 
   assert.equal(records.length, 0);
   assert.ok(canvasNodes.some((node) => node.title === "Overview"));
-  assert.ok(canvasNodes.some((node) => node.title === "Body" && String(node.content).includes("Working body draft")));
+  assert.ok(canvasNodes.some((node) => node.title === "Body draft" && String(node.content).includes("Working body draft")));
   assert.ok(canvasNodes.some((node) => node.title === "Progress note 1" && String(node.content).includes("https://example.com/runtime-notes")));
   assert.ok(canvasNodes.some((node) => node.title === "Run failed" && String(node.content).includes("Recursion limit of 100 reached")));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_research_committed"));
@@ -576,7 +613,7 @@ test("streaming generic long task creates Canvas progress from evidence tools", 
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
 });
 
-test("progressive Canvas stops body drafts at budget and finalizes Body from agent answer", async () => {
+test("progressive Canvas keeps body drafts until evidence budget and finalizes Body from agent answer", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
@@ -584,7 +621,7 @@ test("progressive Canvas stops body drafts at budget and finalizes Body from age
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async (input) => {
-        for (let index = 1; index <= 4; index += 1) {
+        for (let index = 1; index <= 16; index += 1) {
           input.onToolEvent?.({
             eventType: "agent_backend_tool_completed",
             payload: {
@@ -616,9 +653,15 @@ test("progressive Canvas stops body drafts at budget and finalizes Body from age
   assert.equal(result.usedMock, false);
   assert.equal(records.length, 1);
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_synthesis_started"));
-  assert.equal(events.filter((event) => event.eventType === "canvas_delivery_body_checkpoint_committed").length, 3);
+  assert.equal(events.filter((event) => event.eventType === "canvas_delivery_body_checkpoint_committed").length, 16);
+  const checkpoint = events.find((event) => event.eventType === "canvas_delivery_body_checkpoint_committed");
+  assert.equal((checkpoint?.payload.node as { title?: string } | undefined)?.title, "Body draft");
+  assert.ok(String((checkpoint?.payload.node as { content?: string } | undefined)?.content ?? "").includes("Working body draft"));
   assert.ok(canvasNodes.some((node) => node.title === "Progress note 3"));
-  assert.equal(canvasNodes.some((node) => node.title === "Progress note 4"), false);
+  assert.ok(canvasNodes.some((node) => node.title === "Progress note 16"));
+  const draft = canvasNodes.find((node) => node.title === "Body draft");
+  assert.ok(draft);
+  assert.ok(String(draft.content).includes("Evidence 16"));
   const body = canvasNodes.find((node) => node.title === "Body");
   assert.ok(body);
   assert.equal(String(body.content).includes("Working body draft"), false);
@@ -626,7 +669,525 @@ test("progressive Canvas stops body drafts at budget and finalizes Body from age
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_final_committed"));
 });
 
-test("progressive Canvas rejects process clarification text as final body", async () => {
+test("progressive Canvas creates a file document node for Markdown output files", async () => {
+  const { storage, canvasNodes, canvasEdges } = fakeStorage();
+  const longMarkdown = `# Full report\n\n${"Long section content. ".repeat(200)}`;
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "write_file",
+            path: "/mnt/user-data/outputs/report.md",
+            snippet: longMarkdown
+          }
+        });
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "present_files",
+            filepaths: ["/mnt/user-data/outputs/report.md"]
+          }
+        });
+        return {
+          text: "The Markdown report is ready.",
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Research and write a detailed report",
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+  });
+
+  const fileNodes = canvasNodes.filter((node) => node.kind === "file_document");
+  assert.equal(fileNodes.length, 1);
+  assert.equal((fileNodes[0]?.metadata as { fileDocument?: { status?: string } }).fileDocument?.status, "presented");
+  assert.equal(fileNodes[0]?.includeInProjectContext, false);
+  assert.equal(String(fileNodes[0]?.content).includes("Long section content."), false);
+  assert.ok(String(fileNodes[0]?.content).includes("/mnt/user-data/outputs/report.md"));
+  assert.ok(canvasEdges.some((edge) => edge.targetNodeId === fileNodes[0]?.id));
+});
+
+test("progressive Canvas falls back to a Markdown file document after multiple web searches", async () => {
+  const appRoot = `.facetwrite-test/md-delivery-${Date.now()}`;
+  const previousRoot = process.env.FACETWRITE_APP_ROOT;
+  process.env.FACETWRITE_APP_ROOT = appRoot;
+  try {
+    const { storage, canvasNodes, canvasEdges } = fakeStorage();
+    const longText = `# Full literature report\n\n${"Long section content. ".repeat(220)}UNIQUE_TAIL_SHOULD_ONLY_BE_IN_FILE`;
+    const service = createGenerationService(storage, fakeAgentRuntime(), {
+      modelRuntime: fakeModelRuntime,
+      agentBackend: {
+        getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+        runAgent: async (input) => {
+          for (let index = 1; index <= 2; index += 1) {
+            input.onToolEvent?.({
+              eventType: "agent_backend_tool_completed",
+              payload: {
+                toolName: "web_search",
+                query: `agent literature ${index}`,
+                sources: [{ title: `Source ${index}`, url: `https://example.com/${index}` }]
+              }
+            });
+          }
+          return {
+            text: longText,
+            finishReason: "agent_backend_completed",
+            events: []
+          };
+        }
+      }
+    });
+
+    const result = await service.generateAndRecordStream({
+      mode: "chat",
+      locale: "en",
+      threadId: "thread_md_fallback",
+      agentCardId: "chat-agent",
+      chatInstruction: "Review recent agent literature and write a detailed report",
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+      toolState: { web_search: true }
+    });
+
+    const fileNodes = canvasNodes.filter((node) => node.kind === "file_document");
+    assert.equal(fileNodes.length, 1);
+    const fileDocument = (fileNodes[0]?.metadata as { fileDocument?: { path?: string; status?: string } }).fileDocument;
+    assert.equal(fileDocument?.status, "presented");
+    assert.ok(fileDocument?.path?.startsWith("/mnt/user-data/outputs/facetwrite-delivery-"));
+
+    const body = canvasNodes.find((node) => node.title === "Body");
+    assert.ok(body);
+    assert.ok(String(body.content).includes("Full literature report"));
+    assert.ok(String(body.content).includes("Long section content."));
+    assert.equal(String(body.content).includes("UNIQUE_TAIL_SHOULD_ONLY_BE_IN_FILE"), false);
+    assert.equal(result.text.includes("UNIQUE_TAIL_SHOULD_ONLY_BE_IN_FILE"), false);
+    assert.ok(result.text.includes("/mnt/user-data/outputs/"));
+    assert.ok(canvasEdges.some((edge) => edge.targetNodeId === fileNodes[0]?.id));
+
+    const fileName = fileDocument?.path?.split("/").at(-1) ?? "";
+    const saved = await readFile(path.resolve(process.cwd(), appRoot, "threads", "thread_md_fallback", "user-data", "outputs", fileName), "utf8");
+    assert.ok(saved.includes("UNIQUE_TAIL_SHOULD_ONLY_BE_IN_FILE"));
+  } finally {
+    if (previousRoot === undefined) {
+      delete process.env.FACETWRITE_APP_ROOT;
+    } else {
+      process.env.FACETWRITE_APP_ROOT = previousRoot;
+    }
+    await rm(path.resolve(process.cwd(), appRoot), { recursive: true, force: true });
+  }
+});
+
+test("progressive Canvas recovers final body and fallback Markdown from committed canvas_write content", async () => {
+  const appRoot = `.facetwrite-test/md-recovered-${Date.now()}`;
+  const previousRoot = process.env.FACETWRITE_APP_ROOT;
+  process.env.FACETWRITE_APP_ROOT = appRoot;
+  try {
+    const { storage, canvasNodes } = fakeStorage();
+    const references = Array.from({ length: 6 }, (_, index) => {
+      const id = `2503.${String(21460 + index).padStart(5, "0")}`;
+      return `- [Paper ${index + 1}](https://arxiv.org/abs/${id})`;
+    }).join("\n");
+    const recoveredMarkdown = [
+      "# Systematic Literature Review: AI Agents",
+      "",
+      "## Summary",
+      "",
+      "| ID | Paper | Theme |",
+      "|---|---|---|",
+      "| S1 | Comprehensive Review of AI Agents | Overview |",
+      "| S2 | Survey on LLM Agents | Architecture |",
+      "| S3 | Memory for Autonomous Agents | Memory |",
+      "",
+      "## Core Findings",
+      "",
+      "- Agent architectures converge around planning, memory, tool use, and multi-agent coordination.",
+      "- Evaluation remains fragmented across safety, tool-use accuracy, and long-horizon autonomy.",
+      "- Production deployment depends on observability, governance, and cost controls.",
+      "",
+      "## Research Gaps",
+      "",
+      "- Unified long-horizon benchmarks.",
+      "- Interoperability standards across agent frameworks.",
+      "- Trustworthy memory and provenance mechanisms.",
+      "",
+      "## Detailed Synthesis",
+      "",
+      "Detailed analysis paragraph. ".repeat(160),
+      "",
+      "## References",
+      "",
+      references,
+      "",
+      "UNIQUE_RECOVERED_TAIL"
+    ].join("\n");
+    const service = createGenerationService(storage, fakeAgentRuntime(), {
+      modelRuntime: fakeModelRuntime,
+      agentBackend: {
+        getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+        runAgent: async (input) => {
+          for (let index = 1; index <= 2; index += 1) {
+            input.onToolEvent?.({
+              eventType: "agent_backend_tool_completed",
+              payload: {
+                toolName: "web_search",
+                query: `agent literature ${index}`,
+                sources: [{ title: `Search ${index}`, url: `https://example.com/search-${index}` }]
+              }
+            });
+          }
+          return {
+            text: "I've loaded the Systematic Literature Review skill. Let me clarify a few things before proceeding.",
+            finishReason: "agent_backend_completed",
+            events: [{
+              eventType: "agent_backend_canvas_mutation_committed",
+              payload: {
+                tool: "canvas_write",
+                eventType: "canvas_mutation_committed",
+                content: recoveredMarkdown
+              }
+            }]
+          };
+        }
+      }
+    });
+
+    const result = await service.generateAndRecordStream({
+      mode: "chat",
+      locale: "en",
+      threadId: "thread_md_recovered",
+      agentCardId: "chat-agent",
+      chatInstruction: "Review recent agent literature and write a detailed report",
+      transientSkillRefs: ["literature-review"],
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+      toolState: { web_search: true }
+    });
+
+    const body = canvasNodes.find((node) => node.title === "Body");
+    assert.ok(body);
+    assert.ok(String(body.content).includes("Core Findings"));
+    assert.ok(String(body.content).includes("Comprehensive Review of AI Agents"));
+    assert.equal(String(body.content).includes("Let me clarify"), false);
+    assert.equal(String(body.content).includes("UNIQUE_RECOVERED_TAIL"), false);
+
+    const referencesNode = canvasNodes.find((node) => node.title === "References");
+    assert.ok(referencesNode);
+    assert.ok(String(referencesNode.content).includes("https://arxiv.org/abs/2503.21460"));
+
+    const fileNodes = canvasNodes.filter((node) => node.kind === "file_document");
+    assert.equal(fileNodes.length, 1);
+    assert.ok(result.text.includes("/mnt/user-data/outputs/"));
+    const fileDocument = (fileNodes[0]?.metadata as { fileDocument?: { path?: string } }).fileDocument;
+    const fileName = fileDocument?.path?.split("/").at(-1) ?? "";
+    const saved = await readFile(path.resolve(process.cwd(), appRoot, "threads", "thread_md_recovered", "user-data", "outputs", fileName), "utf8");
+    assert.ok(saved.includes("UNIQUE_RECOVERED_TAIL"));
+    assert.equal(saved.includes("Let me clarify"), false);
+  } finally {
+    if (previousRoot === undefined) {
+      delete process.env.FACETWRITE_APP_ROOT;
+    } else {
+      process.env.FACETWRITE_APP_ROOT = previousRoot;
+    }
+    await rm(path.resolve(process.cwd(), appRoot), { recursive: true, force: true });
+  }
+});
+
+test("progressive Canvas does not create a fallback Markdown document from clarification chatter", async () => {
+  const { storage, canvasNodes } = fakeStorage();
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        for (let index = 1; index <= 2; index += 1) {
+          input.onToolEvent?.({
+            eventType: "agent_backend_tool_completed",
+            payload: {
+              toolName: "web_search",
+              query: `agent literature ${index}`,
+              sources: [{ title: `Search ${index}`, url: `https://example.com/search-${index}` }]
+            }
+          });
+        }
+        return {
+          text: "I've loaded the Systematic Literature Review skill. Let me clarify a few things before proceeding.",
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_md_chatter",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent agent literature and write a detailed report",
+    transientSkillRefs: ["literature-review"],
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+    toolState: { web_search: true }
+  });
+
+  assert.equal(canvasNodes.some((node) => node.kind === "file_document"), false);
+  assert.ok(canvasNodes.some((node) => node.title === "Clarification needed"));
+  assert.equal(canvasNodes.some((node) => String(node.content).includes("Let me clarify")), false);
+});
+
+test("progressive Canvas finalizes reference links from committed canvas_write sources", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const searchSources = Array.from({ length: 12 }, (_, index) => ({
+    title: `Search result ${index + 1}`,
+    url: `https://search.example/${index + 1}`
+  }));
+  const paperSources = Array.from({ length: 12 }, (_, index) => {
+    const paperId = `2503.${String(21460 + index).padStart(5, "0")}`;
+    return {
+      title: paperId,
+      url: `https://arxiv.org/abs/${paperId}`
+    };
+  });
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        const searchEvent = {
+          eventType: "agent_backend_tool_completed" as const,
+          payload: {
+            toolName: "web_search",
+            query: "recent LLM agent papers",
+            sources: searchSources
+          }
+        };
+        input.onToolEvent?.(searchEvent);
+        return {
+          text: "# Literature review\n\nThe final literature map is complete.",
+          finishReason: "agent_backend_completed",
+          events: [
+            searchEvent,
+            {
+              eventType: "agent_backend_canvas_mutation_committed",
+              payload: {
+                tool: "canvas_write",
+                eventType: "canvas_mutation_committed",
+                nodeId: "node_literature_map",
+                sources: paperSources
+              }
+            }
+          ]
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent agent literature and produce a literature review",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+    toolState: { web_search: true }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
+
+  assert.equal(result.usedMock, false);
+  assert.equal(records.length, 1);
+  const references = canvasNodes.find((node) => node.title === "References");
+  assert.ok(references);
+  assert.ok(String(references.content).includes("https://arxiv.org/abs/2503.21460"));
+  assert.equal(String(references.content).includes("https://arxiv.org/abs/2503.21471"), true);
+  assert.ok(String(references.content).indexOf("https://arxiv.org/abs/2503.21460") < String(references.content).indexOf("https://search.example/1"));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_sources_committed" && event.payload.sourceCount === 24));
+});
+
+test("progressive Canvas ignores ask_clarification events during ordinary long task finalization", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            type: "tool_completed",
+            toolName: "ask_clarification",
+            toolCallId: "call_clarify",
+            summary: "请选择文献综述的时间范围。"
+          }
+        });
+        return {
+          text: "# Literature review summary\n\nFinal synthesized summary after choosing the default 2025-2026 window.",
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "chat-agent",
+    chatInstruction: "帮我查找最近Agent相关的文献，并且做文献综述",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+    toolState: { web_search: true }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
+
+  assert.match(result.text, /Document ready|文档已生成|Literature review summary/);
+  assert.equal(records.length, 1);
+  const body = canvasNodes.find((node) => node.title === "正文");
+  assert.ok(body);
+  assert.ok(String(body.content).includes("Final synthesized summary"));
+  assert.equal(canvasNodes.some((node) => node.title === "等待用户确认"), false);
+  assert.equal(canvasNodes.some((node) => node.title === "运行失败"), false);
+  assert.equal(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"), false);
+  assert.equal(events.some((event) => event.eventType === "agent_backend_runtime_failed"), false);
+});
+
+test("progressive Canvas creates a clarification node from structured Agent clarification events", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_agent_clarification_requested",
+          payload: {
+            type: "agent_clarification_requested",
+            toolCallId: "call_clarify",
+            question: "Which review scope should I use?",
+            status: "pending",
+            options: [
+              { id: "focused", label: "Focused", detail: "Use the existing core papers.", recommended: true },
+              { id: "broad", label: "Broad", detail: "Run an additional web search.", recommended: false }
+            ]
+          }
+        });
+        return {
+          text: "# Literature review summary\n\nFinal synthesized summary after choosing the default 2025-2026 window.",
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent agent literature and produce a literature review",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+    toolState: { web_search: true }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
+
+  assert.match(result.text, /Document ready|Literature review summary/);
+  assert.equal(records.length, 1);
+  const clarification = canvasNodes.find((node) => node.kind === "clarification");
+  assert.ok(clarification);
+  assert.equal(clarification.title, "Clarification");
+  assert.ok(String(clarification.content).includes("Which review scope should I use?"));
+  assert.equal((clarification.metadata as { clarification?: { status?: string } } | undefined)?.clarification?.status, "pending");
+  const body = canvasNodes.find((node) => node.title === "Body");
+  assert.ok(body);
+  assert.ok(String(body.content).includes("Final synthesized summary"));
+  assert.equal(String(body.content).includes("Which review scope should I use?"), false);
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_clarification_committed"));
+  assert.equal(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"), false);
+  assert.equal(events.some((event) => event.eventType === "agent_backend_runtime_failed"), false);
+});
+
+test("progressive Canvas filters raw tool output from progress and final body nodes", async () => {
+  const { storage, canvasNodes } = fakeStorage();
+  const noisyHtml = "<html><body><p>Skip to main content Donate > raw arXiv page chrome</p></body></html>";
+  const skillText = "Error invoking tool 'read_file' with kwargs {'path':'/mnt/skills/public/systematic-literature-review/SKILL.md'}\n--- name: systematic-literature-review description: Use this skill when the user wants a systematic literature review";
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "web_fetch",
+            url: "https://arxiv.org/abs/2503.21460",
+            snippet: noisyHtml,
+            sources: [{ title: "Survey on LLM Agents", url: "https://arxiv.org/abs/2503.21460" }]
+          }
+        });
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "read_file",
+            path: "/mnt/skills/public/systematic-literature-review/SKILL.md",
+            summary: skillText
+          }
+        });
+        return {
+          text: [
+            "# Final synthesis",
+            "",
+            "The review identifies evaluation gaps, memory infrastructure, and multi-agent coordination as the main themes.",
+            noisyHtml,
+            skillText,
+            "",
+            "## References",
+            "- [Survey on LLM Agents](https://arxiv.org/abs/2503.21460)"
+          ].join("\n"),
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_sanitize_tool_output",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent agent literature and produce a detailed report",
+    transientSkillRefs: ["literature-review"],
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+    toolState: { web_search: true }
+  });
+
+  const body = canvasNodes.find((node) => node.title === "Body");
+  assert.ok(body);
+  assert.ok(String(body.content).includes("evaluation gaps"));
+  for (const node of canvasNodes) {
+    const content = String(node.content);
+    assert.equal(content.includes("<html>"), false);
+    assert.equal(content.includes("/mnt/skills/"), false);
+    assert.equal(content.includes("Error invoking tool"), false);
+    assert.equal(content.includes("description: Use this skill"), false);
+  }
+});
+
+test("progressive Canvas treats process clarification text as recoverable output, not failure", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
@@ -651,24 +1212,28 @@ test("progressive Canvas rejects process clarification text as final body", asyn
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
-      mode: "chat",
-      locale: "zh",
-      agentCardId: "chat-agent",
-      chatInstruction: "帮我找最近 Agent 文献并做综述",
-      transientSkillRefs: ["database-lookup", "literature-review"],
-      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
-    }, {
-      onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /process clarification text/
-  );
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent Agent literature and summarize the findings",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
 
-  assert.equal(records.length, 0);
-  assert.equal(events.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
-  assert.equal(canvasNodes.some((node) => String(node.content).includes("确认几个关键点")), false);
-  assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
+  assert.equal(records.length, 1);
+  assert.equal(result.text.includes("clarify"), false);
+  const body = canvasNodes.find((node) => node.title === "Body");
+  assert.ok(body);
+  assert.equal(String(body.content).includes("clarify"), false);
+  assert.ok(String(body.content).includes("did not return complete deliverable body content"));
+  const recovery = canvasNodes.find((node) => node.title === "Clarification needed");
+  assert.ok(recovery);
+  assert.equal(String(recovery.content).includes("clarify"), false);
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_final_committed"));
+  assert.equal(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"), false);
 });
 
 test("progressive Canvas blocks leaked skill DSML as final body", async () => {
@@ -716,7 +1281,7 @@ test("progressive Canvas blocks leaked skill DSML as final body", async () => {
   assert.equal(records.length, 0);
   assert.equal(tokens.join("").includes("webfetch"), false);
   assert.equal(canvasNodes.some((node) => /DSML|tool_calls|webfetch|invoke|parameter|maxcontentlength|2504\.19678/i.test(String(node.content))), false);
-  assert.ok(canvasNodes.some((node) => node.title === "正文" && String(node.content).includes("工作正文草稿")));
+  assert.ok(canvasNodes.some((node) => node.title === "正文草稿" && String(node.content).includes("工作正文草稿")));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
   assert.equal(events.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
 });

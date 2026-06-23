@@ -1316,6 +1316,17 @@ def ls_tool(runtime: Runtime, description: str, path: str) -> str:
         return f"Error: Unexpected error listing directory: {_sanitize_error(e, runtime)}"
 
 
+@tool("list_directory", parse_docstring=True)
+def list_directory_tool(runtime: Runtime, description: str, path: str) -> str:
+    """List the contents of a directory up to 2 levels deep in tree format.
+
+    Args:
+        description: Explain why you are listing this directory in short words. ALWAYS PROVIDE THIS PARAMETER FIRST.
+        path: The **absolute** path to the directory to list.
+    """
+    return ls_tool.func(runtime, description, path)
+
+
 @tool("glob", parse_docstring=True)
 def glob_tool(
     runtime: Runtime,
@@ -1440,7 +1451,8 @@ def grep_tool(
 def read_file_tool(
     runtime: Runtime,
     description: str,
-    path: str,
+    path: str | None = None,
+    file_path: str | None = None,
     start_line: int | None = None,
     end_line: int | None = None,
 ) -> str:
@@ -1449,10 +1461,14 @@ def read_file_tool(
     Args:
         description: Explain why you are reading this file in short words. ALWAYS PROVIDE THIS PARAMETER FIRST.
         path: The **absolute** path to the file to read.
+        file_path: Compatibility alias for path.
         start_line: Optional starting line number (1-indexed, inclusive). Use with end_line to read a specific range.
         end_line: Optional ending line number (1-indexed, inclusive). Use with start_line to read a specific range.
     """
     try:
+        path = path or file_path
+        if not path:
+            return "Error: path is required"
         sandbox = ensure_sandbox_initialized(runtime)
         ensure_thread_directories_exist(runtime)
         requested_path = path
@@ -1495,8 +1511,9 @@ def read_file_tool(
 def write_file_tool(
     runtime: Runtime,
     description: str,
-    path: str,
-    content: str,
+    path: str | None = None,
+    content: str | None = None,
+    file_path: str | None = None,
     append: bool = False,
 ) -> str:
     """Write text content to a file. By default this overwrites the target file; set append to true to add content to the end without replacing existing content.
@@ -1505,9 +1522,15 @@ def write_file_tool(
         description: Explain why you are writing to this file in short words. ALWAYS PROVIDE THIS PARAMETER FIRST.
         path: The **absolute** path to the file to write to. ALWAYS PROVIDE THIS PARAMETER SECOND.
         content: The content to write to the file. ALWAYS PROVIDE THIS PARAMETER THIRD.
+        file_path: Compatibility alias for path.
         append: Whether to append content to the end of the file instead of overwriting it. Defaults to false.
     """
     try:
+        path = path or file_path
+        if not path:
+            return "Error: path is required"
+        if content is None:
+            return "Error: content is required"
         sandbox = ensure_sandbox_initialized(runtime)
         ensure_thread_directories_exist(runtime)
         requested_path = path

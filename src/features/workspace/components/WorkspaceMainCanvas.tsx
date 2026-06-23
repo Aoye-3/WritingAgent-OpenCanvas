@@ -8,6 +8,7 @@ import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain"
 type WorkspaceMainCanvasProps = {
   activeTool: CanvasTool;
   canUndo: boolean;
+  threadId: string;
   edges: CanvasEdge[];
   nodes: CanvasNode[];
   objects: CanvasObject[];
@@ -51,6 +52,7 @@ export function WorkspaceMainCanvas(props: WorkspaceMainCanvasProps) {
       <DocumentCanvas
         activeTool={props.activeTool}
         canUndo={props.canUndo}
+        threadId={props.threadId}
         edges={props.edges}
         nodes={props.nodes}
         objects={props.objects}

@@ -84,26 +84,23 @@ To add a new visual-object kind:
 4. Add toolbar behavior and Playwright coverage, then update API and Canvas documentation.
 
 ## Node Model
-The current content node kinds remain:
+The maintained Canvas node kinds are:
 
 ```ts
-type CanvasNodeKind = "document" | "note" | "reference";
+type CanvasNodeKind = "document" | "note" | "reference" | "role" | "plan" | "file_document" | "clarification";
 ```
 
-Role is now also a first-class Canvas function node:
-
-```ts
-type CanvasNodeKind = "document" | "note" | "reference" | "role";
-```
-
-The three kinds now have distinct product/runtime semantics:
+The content and function kinds have distinct product/runtime semantics:
 
 - `note`: user sticky note for thinking. It is excluded from default AI context and only reaches the collaboration drawer when the user explicitly sends a mind chain.
 - `document`: AI output document. New AI Canvas output and approved `canvas_write` creates default to this kind; Agents may edit it through the approval path.
 - `reference`: source/reference material. It participates in default AI context.
 - `role`: workflow control node. It stores `metadata.workflowRole` and affects content only through directed edges.
+- `plan`: server-controlled read-only projection of a persisted PlanRun.
+- `file_document`: compact entry point for a Markdown file under `/mnt/user-data/outputs/*.md`. It stores file metadata in `metadata.fileDocument`, keeps only a short summary in `content`, defaults to `includeInProjectContext:false`, and opens the full Markdown through the preview API.
+- `clarification`: choice-oriented Agent clarification node. It stores the question, options, status, and selected answer in `metadata.clarification`; pending nodes show all options, answered nodes show only the chosen answer and detail.
 
-Nodes can be converted between these three kinds through Canvas node actions that call the existing node PATCH path. Conversion preserves title, content, geometry, metadata, and connections. The Canvas node settings page is intentionally type-only documentation and does not read or mutate current project nodes.
+Ordinary content nodes can be converted between `document`, `note`, `reference`, and `role` through Canvas node actions that call the existing node PATCH path. Conversion preserves title, content, geometry, metadata, and connections. Server-controlled `plan` nodes are read-only projections. `file_document` and `clarification` have dedicated renderers and may be created only when their metadata contract can be satisfied.
 
 Canvas V2 intentionally does not add `form` nodes yet. Future node kinds should be added in this order:
 
@@ -111,7 +108,8 @@ Canvas V2 intentionally does not add `form` nodes yet. Future node kinds should 
 2. Update backend validation and default title behavior.
 3. Update the `canvas_write` tool schema only if Agents are allowed to propose that node kind.
 4. Add a dedicated frontend renderer.
-5. Add migration notes only if existing stored rows need conversion.
+5. Decide whether the kind is manually creatable or server-controlled.
+6. Add migration notes only if existing stored rows need conversion.
 
 The renderer has an unknown-kind fallback so older or future local data can still render safely as a text node instead of breaking the board.
 
@@ -131,12 +129,14 @@ The UI clamps node size with frontend minimum/maximum dimensions. These constrai
 
 Current default content-node sizes are deliberately wider than the minimum size constraints so generated Markdown is readable without immediate manual resizing:
 
-- Manual Canvas creation defaults in `canvasCreation.ts`: `document` 640x260, `reference` 420x190, `note` 380x190, and `role` 340x190.
+- Manual Canvas creation defaults in `canvasCreation.ts`: `document` 640x260, `reference` 420x190, `note` 380x190, `role` 340x190, `file_document` 360x220, and `clarification` 420x260.
 - Direct multi-node Canvas delivery defaults in `server/services/canvasDeliveryPlanner.ts`: `outline` 520x260, `body` 640x520, and `sources` 520x320.
 
 The backend direct-delivery planner persists those dimensions in the created node draft. Retrying the same stable delivery id updates existing delivery nodes with the current title, content, position, size, kind, and metadata, so old narrow nodes do not keep stale geometry after a layout contract change.
 
-Generic long-task progressive delivery also writes stable `整体概述` / `Overview` and `正文` / `Body` nodes in batch-delivery mode. Evidence events create separate `研究摘录` / `进度摘录` reference nodes. Body checkpoints update the same stable body node only up to the Project or one-run `bodyDraftWriteLimit`; after synthesis starts, further tool events stay in the run trace and do not create more intermediate Canvas nodes. When the Agent returns final assistant text, generic progressive delivery replaces the stable body draft and emits `canvas_delivery_body_final_committed`. Explicit direct Canvas delivery still uses the structured delivery planner and keeps its heading-based body nodes; the generic final-body replacement is skipped for those runs.
+Generic long-task progressive delivery writes stable Overview, Body draft, and final Body nodes in batch-delivery mode. Evidence events create separate research/progress reference nodes. Body checkpoints update the stable `Body draft` node as recoverable working state; body draft count is not a hard limit and does not trigger final synthesis by itself. The final `Body` node is reserved for the final deliverable and must not be overwritten by progress text. `canvas_delivery_body_checkpoint_committed` events include the committed node snapshot in `payload.node` so the frontend can refresh the visible draft content immediately. When the Agent returns final assistant text, generic progressive delivery commits the final `Body` node and emits `canvas_delivery_body_final_committed`. Explicit direct Canvas delivery still uses the structured delivery planner and keeps its heading-based body nodes; the generic final-body replacement is skipped for those runs.
+
+If a run uses `write_file` or `present_files` for `/mnt/user-data/outputs/*.md`, progressive delivery must create or update the stable `file_document` node for that virtual path. `present_files` marks the node as ready to preview. If a medium/long progressive run finishes without Runtime file tools, backend finalization writes the final Markdown to the current thread outputs directory and creates the same compact node. Multiple writes to the same Markdown file update one node instead of creating duplicates.
 
 Canvas delivery is gated by the server-owned `TaskHandlingPolicy`. Only `long_task`, `plan_execution`, and `explicit_canvas` requests may create or update Canvas nodes. `simple_chat` and `plan_intake` remain conversation-only even when Skills or thinking mode are enabled; short answers and Plan clarification acknowledgements must not create `Overview`, `Body`, progress, or final-body nodes.
 
@@ -146,6 +146,8 @@ Canvas content nodes render Markdown in read-only mode. Editing still uses the r
 `SourceMarkdownText` is the Canvas node renderer for selectable Markdown text. It supports compact headings, ordered and unordered lists, inline emphasis, inline code, Markdown links, and simple GitHub-style pipe tables. Each rendered text span keeps source-offset metadata so document range rewrite and inline formatting can still map a browser selection back to the original node content. Parsed Markdown blocks are memoized by source text so selection and drag re-renders do not repeatedly parse unchanged node content.
 
 Reference and note nodes use the same read-only Markdown renderer through `EditableTextNode`, so a source list such as `- [Apple](https://example.com)` is displayed as a clickable title rather than raw `[title](url)` syntax. Table rendering is horizontally scrollable inside the node instead of expanding or clipping the card.
+
+`file_document` nodes do not use the editable document renderer. They render through a compact file-card renderer with a preview action. The preview calls `GET /api/threads/:threadId/canvas/document-preview?path=...`, which reads only Markdown files under the current thread's `/mnt/user-data/outputs/` virtual directory. The endpoint rejects path traversal, non-Markdown extensions, and oversized reads; full Markdown stays in the preview panel, not in Canvas node `content`.
 
 ## Canvas Workflow
 Canvas Workflow is a layer on top of Canvas V2. Canvas Mode is the user-facing workspace mode; the current implementation exposes `batch_delivery` as the first mode. Stage remains mode-specific project state for batch delivery, while Role is represented as an independent Canvas function node. Workflow control capabilities should be modeled as nodes and relationships when they need spatial behavior or targeted influence, instead of being stacked into ordinary content-node UI.
@@ -265,6 +267,7 @@ Canvas V2 uses the existing API shape:
 - `POST /api/threads/:threadId/canvas/suggestions/:suggestionId/accept`
 - `POST /api/threads/:threadId/canvas/suggestions/:suggestionId/ignore`
 - `POST /api/threads/:threadId/canvas/suggestions/:suggestionId/convert-to-node`
+- `GET /api/threads/:threadId/canvas/document-preview`
 - `GET /api/settings/canvas`
 - `PUT /api/settings/canvas`
 - `GET /api/projects/:projectId/runtime-settings`
@@ -286,6 +289,9 @@ Important class roles:
 - `.canvas-menu`: right-click creation menu.
 - `.canvas-node-link-port`: common top-right punched-hole link control.
 - `.canvas-node-link-handle`: source/target React Flow handles inside the common link port.
+- `.canvas-file-document-node`: compact `file_document` card content.
+- `.canvas-clarification-node`: choice-oriented `clarification` card content.
+- `.markdown-document-preview`: floating Markdown preview panel for output files.
 
 Use `nodrag` on inputs and buttons that should not drag the node. Use `nopan` on resize controls so pane pan does not steal pointer events.
 
@@ -307,7 +313,7 @@ Before claiming Canvas work is complete, verify:
 - `npm.cmd run test:e2e:canvas`
 - Lightweight frontend tests cover API client errors, Canvas action state transitions, and React Flow mapping without starting a dev server.
 - Canvas renders in the workspace.
-- Background right-click menu creates `document`, `note`, `reference`, and `role` nodes.
+- Background right-click menu creates `document`, `note`, `reference`, `role`, and `clarification` nodes.
 - Node drag persists `x/y`; multi-selected node drag uses the batch position endpoint and remains undoable as one operation.
 - Node resize uses draggable edges, not point handles, and persists `x/y/width/height`.
 - Title/content edit persists after blur.

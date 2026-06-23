@@ -1,5 +1,6 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
-import type { AgentCard, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
+import type { AgentCard, CanvasNode, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
+import type { CanvasNodePatch } from "../../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
 import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain";
 import { AICollaborationDrawer, type ConversationModelControls } from "./AICollaborationDrawer";
@@ -11,6 +12,7 @@ type AICollaborationPanelProps = {
   agentCards: AgentCard[];
   canvasWriteRequests: CanvasWriteRequest[];
   canvasWriteSuggestions: CanvasWriteSuggestion[];
+  canvasNodes: CanvasNode[];
   collapsed: boolean;
   inputDraft: string;
   mindChainContext: CanvasMindChainContext | null;
@@ -36,6 +38,7 @@ type AICollaborationPanelProps = {
   onResetContext: () => Promise<void>;
   onApplyWriteText: (text: string) => Promise<void>;
   onRejectWriteRequest: (requestId: string) => Promise<void>;
+  onUpdateCanvasNode: (nodeId: string, patch: CanvasNodePatch) => Promise<unknown>;
   onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => Promise<unknown>;
   onStopSending: () => void;

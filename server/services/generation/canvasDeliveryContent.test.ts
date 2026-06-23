@@ -66,6 +66,40 @@ test("canvas delivery content fallback removes completion chatter from Canvas bo
   ]);
 });
 
+test("canvas delivery content prioritizes canvas_write reference sources over search results", () => {
+  const searchSources = Array.from({ length: 12 }, (_, index) => ({
+    title: `Search result ${index + 1}`,
+    url: `https://search.example/${index + 1}`
+  }));
+  const paperSources = Array.from({ length: 12 }, (_, index) => {
+    const paperId = `2503.${String(21460 + index).padStart(5, "0")}`;
+    return {
+      title: paperId,
+      url: `https://arxiv.org/abs/${paperId}`
+    };
+  });
+
+  const result = resolveCanvasDeliveryContent({
+    instruction: "Review recent agent literature",
+    locale: "en",
+    text: "# Final literature review\n\nThe references are complete.",
+    events: [
+      {
+        eventType: "agent_backend_tool_completed",
+        payload: { toolName: "web_search", sources: searchSources }
+      },
+      {
+        eventType: "agent_backend_canvas_mutation_committed",
+        payload: { tool: "canvas_write", eventType: "canvas_mutation_committed", sources: paperSources }
+      }
+    ]
+  });
+
+  assert.equal(result.sources.length, 24);
+  assert.deepEqual(result.sources.slice(0, 12).map((source) => source.url), paperSources.map((source) => source.url));
+  assert.deepEqual(result.sources.slice(12).map((source) => source.url), searchSources.map((source) => source.url));
+});
+
 test("canvas delivery content parses structured diagram blocks", () => {
   const result = resolveCanvasDeliveryContent({
     instruction: "做成用户流程图",

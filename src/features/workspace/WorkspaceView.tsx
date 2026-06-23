@@ -351,6 +351,7 @@ export function WorkspaceView({
         <WorkspaceMainCanvas
           activeTool={activeCanvasTool}
           canUndo={canUndoCanvas}
+          threadId={currentThreadId}
           edges={canvasEdges}
           objects={canvasObjects}
           nodes={canvasNodes}
@@ -399,6 +400,7 @@ export function WorkspaceView({
           agentCards={agentCards}
           canvasWriteRequests={canvasWriteRequests}
           canvasWriteSuggestions={canvasWriteSuggestions}
+          canvasNodes={canvasNodes}
           collapsed={rightCollapsed}
           isSending={isChatSending}
           modelSelectionDisabled={isGenerating || isChatSending}
@@ -427,6 +429,7 @@ export function WorkspaceView({
             onResetContext={onResetContext}
           onApplyWriteText={onApplyCanvasWriteFromMessage}
           onRejectWriteRequest={onRejectCanvasWriteRequest}
+          onUpdateCanvasNode={onUpdateCanvasNode}
           onSend={onChatSend}
           onStopSending={onStopChatSend}
           onSelectAgent={onSelectAgent}

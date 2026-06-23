@@ -16,9 +16,10 @@ import {
   type OnSelectionChangeParams
 } from "@xyflow/react";
 import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowMode, CanvasWorkflowStage, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../agents/types";
-import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasNodePositionUpdate, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../../canvas/canvasClient";
+import { fetchMarkdownOutputPreview, type CanvasEdgeDraft, type CanvasNodeDraft, type CanvasNodePatch, type CanvasNodePositionUpdate, type CanvasObjectDraft, type CanvasObjectPatch, type CanvasRangeRewriteDraft, type MarkdownOutputPreview } from "../../canvas/canvasClient";
 import { useI18n } from "../../i18n/I18nProvider";
 import { ResetIcon, ZoomInIcon, ZoomOutIcon } from "../../../shared/icons";
+import { MarkdownText } from "../../../shared/MarkdownText";
 import { CanvasCurveEdge } from "./canvas/CanvasCurveEdge";
 import { CanvasNodeFrame } from "./canvas/CanvasNodeFrame";
 import { CanvasContextMenu, CanvasSelectedNodeWorkflow, CanvasSelectionBar, type CanvasMenuState } from "./canvas/CanvasChrome";
@@ -40,6 +41,7 @@ import type { CanvasTextSelection } from "./canvas/types";
 type DocumentCanvasProps = {
   activeTool: CanvasTool;
   canUndo: boolean;
+  threadId: string;
   edges: CanvasEdge[];
   nodes: CanvasNode[];
   objects: CanvasObject[];
@@ -97,6 +99,7 @@ export function DocumentCanvas(props: DocumentCanvasProps) {
 function DocumentCanvasInner({
   activeTool,
   canUndo,
+  threadId,
   edges,
   nodes,
   objects,
@@ -150,6 +153,7 @@ function DocumentCanvasInner({
   const [recentShapeIds, setRecentShapeIds] = useState<string[]>(["rectangle", "circle", "diamond"]);
   const [creationPreviewPoint, setCreationPreviewPoint] = useState<{ x: number; y: number } | null>(null);
   const [editNewTextId, setEditNewTextId] = useState<string | null>(null);
+  const [documentPreview, setDocumentPreview] = useState<{ path: string; nodeTitle: string; status: "loading" | "ready" | "failed"; document?: MarkdownOutputPreview; error?: string } | null>(null);
   const [, setArrowStart] = useState<{ x: number; y: number } | null>(null);
   const resizingNodeIdRef = useRef<string | null>(null);
   const lastCanvasPointRef = useRef<{ x: number; y: number } | null>(null);
@@ -235,13 +239,21 @@ function DocumentCanvasInner({
     onCreationPreviewBlocked: clearCreationPreview,
     onDeleteNode: (nodeId: string) => actionRef.current.onDeleteNode(nodeId),
     onIgnoreSuggestion: (suggestionId: string) => actionRef.current.onIgnoreSuggestion(suggestionId),
+    onOpenDocumentPreview: (node: CanvasNode) => {
+      const path = readFileDocumentPath(node);
+      if (!path) return;
+      setDocumentPreview({ path, nodeTitle: node.title, status: "loading" });
+      void fetchMarkdownOutputPreview(threadId, path)
+        .then((document) => setDocumentPreview({ path, nodeTitle: node.title, status: "ready", document }))
+        .catch((error) => setDocumentPreview({ path, nodeTitle: node.title, status: "failed", error: error instanceof Error ? error.message : "Unable to load Markdown preview" }));
+    },
     onRejectWriteRequest: (requestId: string) => actionRef.current.onRejectWriteRequest(requestId),
     onRequestNodeMenu: requestNodeMenu,
     onRequestRangeRewrite: (draft: CanvasRangeRewriteDraft) => actionRef.current.onRequestRangeRewrite(draft),
     onTextSelectionChange: handleTextSelectionChange,
     onResizeStateChange: handleResizeStateChange,
     onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => actionRef.current.onUpdateNode(nodeId, patch)
-  }), [clearCreationPreview, handleResizeStateChange, handleTextSelectionChange, requestNodeMenu]);
+  }), [clearCreationPreview, handleResizeStateChange, handleTextSelectionChange, requestNodeMenu, threadId]);
 
   useEffect(() => {
     setFlowNodes((current) => {
@@ -265,7 +277,7 @@ function DocumentCanvasInner({
 
   const createNode = async (kind: CanvasNodeKind) => {
     if (!menu) return;
-    if (kind === "plan") return;
+    if (kind !== "document" && kind !== "note" && kind !== "reference" && kind !== "role" && kind !== "file_document" && kind !== "clarification") return;
     setMenu(null);
     await actionRef.current.onCreateNode(createCanvasNodeDraft(kind, { x: menu.canvasX, y: menu.canvasY }, locale));
   };
@@ -635,6 +647,13 @@ function DocumentCanvasInner({
           onSendToChat={onSendMindChainToChat}
           onToolChange={onToolChange}
         />
+        {documentPreview ? (
+          <MarkdownDocumentPreviewPanel
+            locale={locale}
+            preview={documentPreview}
+            onClose={() => setDocumentPreview(null)}
+          />
+        ) : null}
       </div>
 
       <CanvasSelectionBar
@@ -654,6 +673,41 @@ function DocumentCanvasInner({
 
 function isBlankCanvasPoint(clientX: number, clientY: number) {
   return Boolean(document.elementFromPoint(clientX, clientY)?.closest(".react-flow__pane"));
+}
+
+function MarkdownDocumentPreviewPanel({ locale, preview, onClose }: {
+  locale: "en" | "zh";
+  preview: { path: string; nodeTitle: string; status: "loading" | "ready" | "failed"; document?: MarkdownOutputPreview; error?: string };
+  onClose: () => void;
+}) {
+  const title = preview.document?.fileName ?? preview.nodeTitle;
+  return (
+    <div className="markdown-document-preview-backdrop nodrag nopan" role="presentation">
+      <aside className="markdown-document-preview" aria-label={locale === "zh" ? "Markdown 文档预览" : "Markdown document preview"}>
+        <header className="markdown-document-preview-header">
+          <div>
+            <strong>{title}</strong>
+            <span>{preview.document?.path ?? preview.path}</span>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label={locale === "zh" ? "关闭预览" : "Close preview"}>×</button>
+        </header>
+        <div className="markdown-document-preview-body">
+          {preview.status === "loading" ? <p>{locale === "zh" ? "正在读取 Markdown 文档..." : "Loading Markdown document..."}</p> : null}
+          {preview.status === "failed" ? <p className="markdown-document-preview-error">{preview.error ?? (locale === "zh" ? "无法读取文档。" : "Unable to read document.")}</p> : null}
+          {preview.status === "ready" && preview.document ? <MarkdownText text={preview.document.content} /> : null}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function readFileDocumentPath(node: CanvasNode) {
+  const metadata = node.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return "";
+  const fileDocument = (metadata as Record<string, unknown>).fileDocument;
+  if (!fileDocument || typeof fileDocument !== "object" || Array.isArray(fileDocument)) return "";
+  const path = (fileDocument as Record<string, unknown>).path;
+  return typeof path === "string" ? path : "";
 }
 
 function sameStringArray(left: string[], right: string[]) {

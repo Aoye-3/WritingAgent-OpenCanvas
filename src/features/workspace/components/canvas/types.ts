@@ -23,6 +23,7 @@ export type CanvasFlowNodeData = {
   onAcceptSuggestion: (suggestionId: string) => Promise<void>;
   onConvertSuggestionToNode: (suggestionId: string, kind?: CanvasNodeKind) => Promise<void>;
   onIgnoreSuggestion: (suggestionId: string) => Promise<void>;
+  onOpenDocumentPreview: (node: CanvasNode) => void;
   onCreationPreviewBlocked: () => void;
   onRequestNodeMenu: (nodeId: string, screen: { x: number; y: number }) => void;
   onTextSelectionChange: (selection?: CanvasTextSelection) => void;

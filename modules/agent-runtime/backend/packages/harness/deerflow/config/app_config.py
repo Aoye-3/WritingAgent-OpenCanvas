@@ -48,6 +48,7 @@ FACETWRITE_REQUIRED_TOOLS = (
     {"name": "plan_clarification_submit", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:plan_clarification_submit_tool"},
     {"name": "plan_revision_submit", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:plan_revision_submit_tool"},
     {"name": "artifact_stage", "group": "chat", "use": "deerflow.tools.facetwrite_bridge:artifact_stage_tool"},
+    {"name": "list_directory", "group": "chat", "use": "deerflow.sandbox.tools:list_directory_tool"},
 )
 
 

@@ -236,7 +236,7 @@ export type RunTimelineEvent = {
   createdAt: string;
 };
 
-export type CanvasNodeKind = "document" | "note" | "reference" | "role" | "plan";
+export type CanvasNodeKind = "document" | "note" | "reference" | "role" | "plan" | "file_document" | "clarification";
 export type CanvasWriteOperation = "create" | "replace" | "append" | "replace_range";
 export type CanvasWriteRequestStatus = "pending" | "approved" | "rejected" | "stale";
 export type CanvasWriteSuggestion = {

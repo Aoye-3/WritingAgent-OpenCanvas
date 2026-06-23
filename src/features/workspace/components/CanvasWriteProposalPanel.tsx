@@ -105,7 +105,9 @@ function operationLabel(operation: CanvasWriteRequest["operation"], locale: Loca
 
 function kindLabel(kind: CanvasWriteRequest["nodeKind"], locale: Locale) {
   if (kind === "role") return "Role";
+  if (kind === "file_document") return locale === "zh" ? "文档文件" : "document file";
   if (kind === "plan") return locale === "zh" ? "计划" : "plan";
+  if (kind === "clarification") return locale === "zh" ? "澄清确认" : "clarification";
   return {
     document: locale === "zh" ? "文档" : "document",
     note: locale === "zh" ? "便签" : "note",

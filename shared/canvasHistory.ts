@@ -2,7 +2,7 @@ import type { CanvasObject, CanvasObjectPatch } from "./canvasObjects.js";
 
 export type CanvasHistoryNode = {
   id: string;
-  kind: "document" | "note" | "reference" | "role";
+  kind: "document" | "note" | "reference" | "role" | "file_document" | "clarification";
   title: string;
   content: string;
   x: number;
