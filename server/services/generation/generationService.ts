@@ -241,7 +241,6 @@ export function createGenerationService(
     let researchDeliverySequence = 0;
     let bodyDraftWriteCount = 0;
     let fileDocumentSequence = 0;
-    let clarificationSequence = 0;
     let progressiveDeliveryStarted = false;
     let progressiveSynthesisStarted = false;
     const progressiveEvidenceEntries: ProgressiveEvidenceEntry[] = [];
@@ -274,22 +273,7 @@ export function createGenerationService(
     const observeToolEvent = (event: ToolEventRecord) => {
       if (!runtimeEvents.includes(event)) runtimeEvents.push(event);
       emitRuntimeToolEvent(event);
-      if (isProgressiveToolCompletion(event) || isAgentClarificationEvent(event)) ensureProgressiveDeliveryStarted();
-      const clarificationEvents = commitProgressiveClarificationDelivery({
-        payload,
-        projectId: selection.projectId,
-        storage,
-        deliveryId,
-        event,
-        nextSequence: () => {
-          clarificationSequence += 1;
-          return clarificationSequence;
-        }
-      });
-      for (const clarificationEvent of clarificationEvents) {
-        runtimeEvents.push(clarificationEvent);
-        emitRuntimeToolEvent(clarificationEvent);
-      }
+      if (isProgressiveToolCompletion(event)) ensureProgressiveDeliveryStarted();
       const fileDocumentEvents = commitProgressiveFileDocumentDelivery({
         payload,
         projectId: selection.projectId,
@@ -1565,66 +1549,6 @@ function commitProgressiveResearchDelivery(input: {
   return committed ? [canvasDeliveryEvent("canvas_delivery_research_committed", input.deliveryId, input.payload.locale, committed)] : [];
 }
 
-function commitProgressiveClarificationDelivery(input: {
-  payload: GenerateRequest;
-  projectId: string;
-  storage: SQLiteStorageRepository;
-  deliveryId: string;
-  event: ToolEventRecord;
-  nextSequence: () => number;
-}): ToolEventRecord[] {
-  if (!isProgressiveCanvasDeliveryEnabled(input.payload)) return [];
-  if (!isAgentClarificationEvent(input.event)) return [];
-  const clarification = agentClarificationFromPayload(input.event.payload);
-  if (!clarification) return [];
-  const sequence = input.nextSequence();
-  const nodeId = stableDeliveryId("node", input.deliveryId, 50 + sequence);
-  const title = input.payload.locale === "zh" ? "交互确认" : "Clarification";
-  const plan: CanvasDeliveryPlan = {
-    required: true,
-    moduleId: "document_batch",
-    nodes: [{
-      id: nodeId,
-      kind: "clarification",
-      title,
-      content: clarificationNodeContent(input.payload.locale, clarification),
-      x: 960 + sequence * 40,
-      y: 120 + sequence * 40,
-      width: 420,
-      height: 260,
-      metadata: {
-        deliveryId: input.deliveryId,
-        phase: "clarification",
-        progressive: true,
-        status: "pending",
-        clarification
-      },
-      includeInProjectContext: false
-    }],
-    edges: [
-      {
-        id: stableDeliveryId("edge", input.deliveryId, 50 + sequence * 2),
-        sourceNodeId: stableDeliveryId("node", input.deliveryId, 1),
-        targetNodeId: nodeId,
-        label: "clarify"
-      },
-      {
-        id: stableDeliveryId("edge", input.deliveryId, 51 + sequence * 2),
-        sourceNodeId: nodeId,
-        targetNodeId: stableDeliveryId("node", input.deliveryId, 2),
-        label: "answer"
-      }
-    ]
-  };
-  const [committed] = commitCanvasDelivery(input.storage, input.projectId, plan);
-  return committed ? [canvasDeliveryEvent("canvas_delivery_clarification_committed", input.deliveryId, input.payload.locale, committed, {
-    displayTitle: title,
-    question: clarification.question,
-    options: clarification.options,
-    status: clarification.status
-  })] : [];
-}
-
 function commitProgressiveFileDocumentDelivery(input: {
   payload: GenerateRequest;
   projectId: string;
@@ -1697,65 +1621,10 @@ type ProgressiveEvidenceEntry = {
   sources: Array<{ title: string; url: string; snippet?: string }>;
 };
 
-type AgentClarification = {
-  question: string;
-  options: Array<{ id: string; label: string; detail: string; recommended: boolean }>;
-  status: "pending" | "answered";
-  selectedOptionId?: string;
-  customAnswer?: string;
-  source: "agent";
-};
-
 function isAgentClarificationEvent(event: ToolEventRecord) {
   const payload = record(event.payload);
   const type = readString(payload.type) || readString(payload.eventType);
   return /agent_clarification_requested$/.test(event.eventType) || type === "agent_clarification_requested";
-}
-
-function agentClarificationFromPayload(value: unknown): AgentClarification | undefined {
-  const payload = record(value);
-  const question = sanitizeProgressText(readString(payload.question));
-  const options = Array.isArray(payload.options) ? payload.options.flatMap((item, index) => {
-    const option = record(item);
-    const label = sanitizeProgressText(readString(option.label));
-    if (!label) return [];
-    const detail = sanitizeProgressText(readString(option.detail) || readString(option.description));
-    return [{
-      id: readString(option.id) || `option_${index + 1}`,
-      label,
-      detail,
-      recommended: option.recommended === true
-    }];
-  }).slice(0, 3) : [];
-  if (!question || options.length < 2 || options.length > 3) return undefined;
-  if (options.filter((option) => option.recommended).length !== 1) return undefined;
-  return {
-    question,
-    options,
-    status: "pending",
-    source: "agent"
-  };
-}
-
-function clarificationNodeContent(locale: GenerateRequest["locale"], clarification: AgentClarification) {
-  const label = locale === "zh"
-    ? { heading: "澄清确认", status: "状态", pending: "等待选择", question: "问题", options: "选项", recommended: "推荐", detail: "详情" }
-    : { heading: "Clarification", status: "Status", pending: "Waiting for choice", question: "Question", options: "Options", recommended: "Recommended", detail: "Detail" };
-  return [
-    `# ${label.heading}`,
-    "",
-    `- ${label.status}: ${label.pending}`,
-    `- ${label.question}: ${clarification.question}`,
-    "",
-    `## ${label.options}`,
-    ...clarification.options.map((option) => {
-      const suffix = [
-        option.recommended ? label.recommended : "",
-        option.detail ? `${label.detail}: ${option.detail}` : ""
-      ].filter(Boolean).join("; ");
-      return `- ${option.label}${suffix ? ` (${suffix})` : ""}`;
-    })
-  ].join("\n");
 }
 
 function commitProgressiveBodyCheckpointDelivery(input: {

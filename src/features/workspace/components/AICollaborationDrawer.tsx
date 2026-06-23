@@ -112,7 +112,6 @@ export function AICollaborationDrawer({
   agentCards,
   canvasWriteRequests,
   canvasWriteSuggestions,
-  canvasNodes,
   collapsed,
   inputDraft,
   mindChainContext,
@@ -138,7 +137,6 @@ export function AICollaborationDrawer({
   onResetContext,
   onApplyWriteText,
   onRejectWriteRequest,
-  onUpdateCanvasNode,
   onInputDraftConsumed,
   onMindChainContextConsumed,
   onRemoveMindChainContext,
@@ -174,7 +172,7 @@ export function AICollaborationDrawer({
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [contextResetNotice, setContextResetNotice] = useState(false);
   const [clarificationBusy, setClarificationBusy] = useState(false);
-  const [locallyAnsweredAgentClarificationNodeIds, setLocallyAnsweredAgentClarificationNodeIds] = useState<string[]>([]);
+  const [locallyAnsweredAgentClarificationIds, setLocallyAnsweredAgentClarificationIds] = useState<string[]>([]);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const drawerTransition = reduceMotion ? { duration: 0 } : { type: "spring" as const, stiffness: 300, damping: 32 };
 
@@ -185,14 +183,7 @@ export function AICollaborationDrawer({
   const hasWriteProposal = Boolean(writeDraft || pendingWriteRequest || annotations.length);
   const timeline = useMemo(() => buildPlanTimeline(messages, plans), [messages, plans]);
   const pendingClarificationPlan = plans.find((plan) => plan.status === "awaiting_user" && plan.clarification?.status === "pending");
-  const answeredAgentClarificationNodeIds = useMemo(() => {
-    const ids = new Set(locallyAnsweredAgentClarificationNodeIds);
-    for (const node of canvasNodes) {
-      if (node.kind === "clarification" && isAnsweredAgentClarificationNode(node)) ids.add(node.id);
-    }
-    return [...ids];
-  }, [canvasNodes, locallyAnsweredAgentClarificationNodeIds]);
-  const pendingAgentClarification = useMemo(() => latestPendingAgentClarification(messages, answeredAgentClarificationNodeIds), [answeredAgentClarificationNodeIds, messages]);
+  const pendingAgentClarification = useMemo(() => latestPendingAgentClarification(messages, locallyAnsweredAgentClarificationIds), [locallyAnsweredAgentClarificationIds, messages]);
 
   useEffect(() => {
     setThinkingChoice(modelSettingsToThinkingChoice(modelSettings));
@@ -217,7 +208,7 @@ export function AICollaborationDrawer({
   }, [messages, isSending]);
 
   useEffect(() => setContextResetNotice(false), [currentThreadId]);
-  useEffect(() => setLocallyAnsweredAgentClarificationNodeIds([]), [currentThreadId]);
+  useEffect(() => setLocallyAnsweredAgentClarificationIds([]), [currentThreadId]);
 
   useEffect(() => {
     if (skillPickerOpen) onRequestSkillCatalog();
@@ -376,28 +367,10 @@ export function AICollaborationDrawer({
     if (!option) return;
     setClarificationBusy(true);
     try {
-      const node = canvasNodes.find((item) => item.id === clarification.nodeId);
-      const nextClarification = {
-        question: clarification.question,
-        options: clarification.options,
-        status: "answered" as const,
-        selectedOptionId: option.id,
-        source: "agent"
-      };
-      if (node) {
-        await onUpdateCanvasNode(node.id, {
-          content: agentClarificationAnsweredCanvasContent(locale, nextClarification),
-          metadata: {
-            ...(node.metadata && typeof node.metadata === "object" && !Array.isArray(node.metadata) ? node.metadata as Record<string, unknown> : {}),
-            clarification: nextClarification
-          },
-          includeInProjectContext: true
-        });
-      }
-      setLocallyAnsweredAgentClarificationNodeIds((current) => current.includes(clarification.nodeId) ? current : [...current, clarification.nodeId]);
+      setLocallyAnsweredAgentClarificationIds((current) => current.includes(clarification.clarificationId) ? current : [...current, clarification.clarificationId]);
       await onSend(option.label, undefined, {
         agentClarification: {
-          nodeId: clarification.nodeId,
+          clarificationId: clarification.clarificationId,
           question: clarification.question,
           option
         }
@@ -884,7 +857,7 @@ function streamingStatusLabel(message: CollaborationMessage, fallback: string) {
 }
 
 type AgentClarificationPrompt = {
-  nodeId: string;
+  clarificationId: string;
   question: string;
   options: Array<{ id: string; label: string; detail: string; recommended: boolean }>;
 };
@@ -925,18 +898,20 @@ function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "
   );
 }
 
-function latestPendingAgentClarification(messages: CollaborationMessage[], ignoredNodeIds: string[]): AgentClarificationPrompt | undefined {
-  const ignored = new Set(ignoredNodeIds);
+function latestPendingAgentClarification(messages: CollaborationMessage[], ignoredClarificationIds: string[]): AgentClarificationPrompt | undefined {
+  const ignored = new Set(ignoredClarificationIds);
   const events = messages.flatMap((message) => message.timeline ?? []);
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
-    if (event?.payload?.eventType !== "canvas_delivery_clarification_committed") continue;
-    if (event.payload.status && event.payload.status !== "committed") continue;
-    const nodeId = readString(event.payload.nodeId);
-    if (ignored.has(nodeId)) continue;
-    const question = readString(event.payload.question);
-    const options = readClarificationOptions(event.payload.options);
-    if (nodeId && question && options.length >= 2) return { nodeId, question, options };
+    const payload = event?.payload;
+    if (!payload) continue;
+    const eventType = readString(payload.eventType) || readString(payload.type);
+    if (eventType !== "agent_backend_agent_clarification_requested" && eventType !== "agent_clarification_requested") continue;
+    const clarificationId = readString(payload.toolCallId) || readString(payload.clarificationId) || event.id;
+    if (!clarificationId || ignored.has(clarificationId)) continue;
+    const question = readString(payload.question);
+    const options = readClarificationOptions(payload.options);
+    if (question && options.length >= 2) return { clarificationId, question, options };
   }
   return undefined;
 }
@@ -955,45 +930,6 @@ function readClarificationOptions(value: unknown): AgentClarificationPrompt["opt
       recommended: record.recommended === true
     }];
   }).slice(0, 3);
-}
-
-function agentClarificationAnsweredContent(locale: "en" | "zh", clarification: {
-  question: string;
-  options: AgentClarificationPrompt["options"];
-  selectedOptionId: string;
-}) {
-  const option = clarification.options.find((item) => item.id === clarification.selectedOptionId);
-  return [
-    `# ${locale === "zh" ? "澄清确认" : "Clarification"}`,
-    "",
-    `- ${locale === "zh" ? "问题" : "Question"}: ${clarification.question}`,
-    `- ${locale === "zh" ? "选择" : "Choice"}: ${option?.label ?? ""}`,
-    option?.detail ? `- ${locale === "zh" ? "详情" : "Detail"}: ${option.detail}` : ""
-  ].filter(Boolean).join("\n");
-}
-void agentClarificationAnsweredContent;
-
-function agentClarificationAnsweredCanvasContent(locale: "en" | "zh", clarification: {
-  question: string;
-  options: AgentClarificationPrompt["options"];
-  selectedOptionId: string;
-}) {
-  const option = clarification.options.find((item) => item.id === clarification.selectedOptionId);
-  return [
-    `# ${locale === "zh" ? "澄清确认" : "Clarification"}`,
-    "",
-    `- ${locale === "zh" ? "问题" : "Question"}: ${clarification.question}`,
-    `- ${locale === "zh" ? "选择" : "Choice"}: ${option?.label ?? ""}`,
-    option?.detail ? `- ${locale === "zh" ? "详情" : "Detail"}: ${option.detail}` : ""
-  ].filter(Boolean).join("\n");
-}
-
-function isAnsweredAgentClarificationNode(node: CanvasNode) {
-  const metadata = node.metadata;
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
-  const clarification = (metadata as Record<string, unknown>).clarification;
-  if (!clarification || typeof clarification !== "object" || Array.isArray(clarification)) return false;
-  return (clarification as Record<string, unknown>).status === "answered";
 }
 
 function readString(value: unknown) {

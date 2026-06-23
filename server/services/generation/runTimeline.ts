@@ -66,6 +66,16 @@ export function toolEventToTimelineEvent(builder: RunTimelineBuilder, event: Too
   const payload = record(event.payload);
   const toolName = string(payload.toolName) || string(payload.tool) || "tool";
   const label = toolLabel(toolName, builder.locale);
+  const payloadType = string(payload.type) || string(payload.eventType);
+  if (/agent_clarification_requested$/.test(event.eventType) || payloadType === "agent_clarification_requested") {
+    const question = string(payload.question);
+    const options = clarificationOptions(payload.options);
+    return builder.event("decision", "waiting", builder.locale === "zh" ? "需要补充信息" : "Clarification needed", question || (builder.locale === "zh" ? "需要用户选择后继续。" : "Waiting for the user to choose an option."), {
+      ...payload,
+      eventType: "agent_backend_agent_clarification_requested",
+      options
+    });
+  }
   if (/^canvas_delivery_/.test(event.eventType)) {
     if (event.eventType === "canvas_delivery_clarification_committed") {
       return builder.event("canvas_node_committed", "waiting", string(payload.displayTitle) || (builder.locale === "zh" ? "交互确认" : "Clarification"), string(payload.question) || (builder.locale === "zh" ? "需要用户选择后继续。" : "Waiting for the user to choose an option."), payload);
@@ -138,6 +148,30 @@ function toolLabel(toolName: string, locale: GenerateRequest["locale"]) {
   if (toolName === "canvas_write") return locale === "zh" ? "Canvas 写入" : "Canvas write";
   if (toolName === "artifact_stage") return locale === "zh" ? "产物暂存" : "Artifact staging";
   return toolName.replace(/[_-]+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function clarificationOptions(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const options = value.flatMap((item, index) => {
+    if (typeof item === "string") {
+      const label = string(item);
+      return label ? [{ id: `option_${index + 1}`, label, detail: "", recommended: false }] : [];
+    }
+    const option = record(item);
+    const label = string(option.label) || string(option.title);
+    if (!label) return [];
+    return [{
+      id: string(option.id) || `option_${index + 1}`,
+      label,
+      detail: string(option.detail) || string(option.description),
+      recommended: option.recommended === true
+    }];
+  }).slice(0, 3);
+  const recommendedCount = options.filter((option) => option.recommended).length;
+  if (recommendedCount > 1) return [];
+  return recommendedCount === 0
+    ? options.map((option, index) => ({ ...option, recommended: index === 0 }))
+    : options;
 }
 
 function record(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }

@@ -32,6 +32,19 @@ test("pending Plan clarification is rendered as the composer form", async () => 
   assert.match(source, /disabled=\{Boolean\(pendingClarificationPlan \|\| pendingAgentClarification\)\}/);
 });
 
+test("Agent clarification timeline events render the composer choice card", async () => {
+  const source = await readFile("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
+  assert.match(source, /latestPendingAgentClarification\(messages, locallyAnsweredAgentClarificationIds\)/);
+  assert.match(source, /agent_backend_agent_clarification_requested/);
+  assert.match(source, /agent_clarification_requested/);
+  assert.match(source, /clarificationId/);
+  assert.match(source, /function AgentClarificationChoiceCard/);
+  assert.match(source, /clarification\.options\.map/);
+  assert.match(source, /onAnswer=\{\(optionId\) => answerAgentClarification\(pendingAgentClarification, optionId\)\}/);
+  assert.doesNotMatch(source, /onUpdateCanvasNode\(node\.id/);
+  assert.doesNotMatch(source, /agentClarificationAnsweredCanvasContent/);
+});
+
 test("clarification option clicks inject the selected option detail into Plan context", async () => {
   const source = await readFile("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
   assert.match(source, /option: \{ id: option\.id, label: option\.label, description: option\.description, recommended: option\.recommended \}/);

@@ -588,6 +588,24 @@ test("maps ask_clarification tool calls into structured Agent clarification even
   assert.equal(result.text, "");
 });
 
+test("maps native ask_clarification string options into structured Agent clarification events", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_clarify_strings","name":"ask_clarification","args":{"question":"Which scope should I use?","clarification_type":"approach_choice","options":["Focused review","Broad review","Fast scan"]}}]}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body);
+  const clarification = result.events.find((event) => event.eventType === "agent_backend_agent_clarification_requested");
+
+  assert.ok(clarification);
+  assert.equal(clarification.payload.toolCallId, "call_clarify_strings");
+  assert.deepEqual(clarification.payload.options, [
+    { id: "option_1", label: "Focused review", detail: "", recommended: true },
+    { id: "option_2", label: "Broad review", detail: "", recommended: false },
+    { id: "option_3", label: "Fast scan", detail: "", recommended: false }
+  ]);
+  assert.equal(result.text, "");
+});
+
 test("maps structured Canvas envelopes from bridged tool results", async () => {
   const envelope = JSON.stringify({ content: "Committed.", event: { tool: "canvas_write", eventType: "canvas_mutation_committed", nodeId: "node_1", projectId: "project_1", status: "committed" } });
   const body = `event: messages\ndata: [{"type":"tool","name":"canvas_write","tool_call_id":"call_canvas","content":${JSON.stringify(`Committed.\n__FACETWRITE_EVENT__${envelope}`)}}]\n\n`;

@@ -1107,9 +1107,10 @@ test("progressive Canvas ignores ask_clarification events during ordinary long t
   assert.equal(events.some((event) => event.eventType === "agent_backend_runtime_failed"), false);
 });
 
-test("progressive Canvas creates a clarification node from structured Agent clarification events", async () => {
+test("progressive Canvas emits waiting clarification timeline without creating a Canvas node", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const timelineEvents: Array<{ status: string; payload?: Record<string, unknown> }> = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
     modelRuntime: fakeModelRuntime,
     agentBackend: {
@@ -1146,23 +1147,78 @@ test("progressive Canvas creates a clarification node from structured Agent clar
     contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
     toolState: { web_search: true }
   }, {
-    onToolEvent: (event) => events.push(event as typeof events[number])
+    onToolEvent: (event) => events.push(event as typeof events[number]),
+    onTimelineEvent: (event) => timelineEvents.push(event)
   });
 
   assert.match(result.text, /Document ready|Literature review summary/);
   assert.equal(records.length, 1);
-  const clarification = canvasNodes.find((node) => node.kind === "clarification");
-  assert.ok(clarification);
-  assert.equal(clarification.title, "Clarification");
-  assert.ok(String(clarification.content).includes("Which review scope should I use?"));
-  assert.equal((clarification.metadata as { clarification?: { status?: string } } | undefined)?.clarification?.status, "pending");
+  assert.equal(canvasNodes.some((node) => node.kind === "clarification"), false);
   const body = canvasNodes.find((node) => node.title === "Body");
   assert.ok(body);
   assert.ok(String(body.content).includes("Final synthesized summary"));
   assert.equal(String(body.content).includes("Which review scope should I use?"), false);
-  assert.ok(events.some((event) => event.eventType === "canvas_delivery_clarification_committed"));
+  assert.ok(events.some((event) => event.eventType === "agent_backend_agent_clarification_requested"));
+  assert.equal(events.some((event) => event.eventType === "canvas_delivery_clarification_committed"), false);
+  const clarificationTimeline = timelineEvents.find((event) => event.payload?.eventType === "agent_backend_agent_clarification_requested");
+  assert.equal(clarificationTimeline?.status, "waiting");
+  assert.equal(clarificationTimeline?.payload?.question, "Which review scope should I use?");
   assert.equal(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"), false);
   assert.equal(events.some((event) => event.eventType === "agent_backend_runtime_failed"), false);
+});
+
+test("progressive Canvas maps native string option clarification into waiting timeline", async () => {
+  const { storage, canvasNodes } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const timelineEvents: Array<{ status: string; payload?: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_agent_clarification_requested",
+          payload: {
+            type: "agent_clarification_requested",
+            toolCallId: "call_clarify",
+            question: "Which review scope should I use?",
+            status: "pending",
+            options: ["Focused review", "Broad review", "Fast scan"]
+          }
+        });
+        return {
+          text: "# Literature review summary\n\nFinal synthesized summary after choosing the default scope.",
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent agent literature and produce a literature review",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+    toolState: { web_search: true }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number]),
+    onTimelineEvent: (event) => timelineEvents.push(event)
+  });
+
+  assert.equal(canvasNodes.some((node) => node.kind === "clarification"), false);
+  const clarificationTimeline = timelineEvents.find((event) => event.payload?.eventType === "agent_backend_agent_clarification_requested");
+  assert.equal(clarificationTimeline?.status, "waiting");
+  const payload = clarificationTimeline?.payload as { options?: Array<{ label: string; recommended: boolean }> } | undefined;
+  assert.deepEqual(payload?.options?.map((option) => ({ label: option.label, recommended: option.recommended })), [
+    { label: "Focused review", recommended: true },
+    { label: "Broad review", recommended: false },
+    { label: "Fast scan", recommended: false }
+  ]);
+  assert.ok(events.some((event) => event.eventType === "agent_backend_agent_clarification_requested"));
+  assert.equal(events.some((event) => event.eventType === "canvas_delivery_clarification_committed"), false);
 });
 
 test("progressive Canvas filters raw tool output from progress and final body nodes", async () => {

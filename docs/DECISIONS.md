@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-06-23: Agent Runtime Clarifications Use Composer State
+
+Decision: Treat Agent Runtime `ask_clarification` as pending conversation input, not Canvas delivery. The AgentBackend adapter emits `agent_backend_agent_clarification_requested`, the run timeline mirrors it as `status:"waiting"`, and the right composer renders the existing choice-card UI from that structured timeline payload.
+
+Reason: Blocking clarification asks the user for missing information before work can continue. Writing that prompt as a Canvas node made process UI look like deliverable content and could leave the Agent apparently stopped without an actionable composer choice.
+
+Impact: Structured Agent clarification events must not create `kind:"clarification"` Canvas nodes or `canvas_delivery_clarification_committed` events. The frontend tracks answered Agent clarifications by `clarificationId` / `toolCallId` and continues the run with `requestContext.agentClarification`. The existing Canvas `clarification` node kind remains renderable for historical/manual nodes only.
+
 ## 2026-06-23: Progressive Body Drafts Use Separate Canvas Nodes
 
 Decision: Progressive long-task checkpoints update a stable `正文草稿` / `Body draft` document node instead of reusing the final `正文` / `Body` node. Final synthesis writes to the separate final Body node only when a real deliverable is available. `canvas_delivery_body_checkpoint_committed` includes the committed node snapshot in `payload.node`.

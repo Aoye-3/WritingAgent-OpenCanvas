@@ -98,9 +98,9 @@ The content and function kinds have distinct product/runtime semantics:
 - `role`: workflow control node. It stores `metadata.workflowRole` and affects content only through directed edges.
 - `plan`: server-controlled read-only projection of a persisted PlanRun.
 - `file_document`: compact entry point for a Markdown file under `/mnt/user-data/outputs/*.md`. It stores file metadata in `metadata.fileDocument`, keeps only a short summary in `content`, defaults to `includeInProjectContext:false`, and opens the full Markdown through the preview API.
-- `clarification`: choice-oriented Agent clarification node. It stores the question, options, status, and selected answer in `metadata.clarification`; pending nodes show all options, answered nodes show only the chosen answer and detail.
+- `clarification`: compatibility/manual choice node. Historical nodes may store a question, options, status, and selected answer in `metadata.clarification`; the renderer remains available so existing boards do not break. Agent Runtime `ask_clarification` no longer creates this node kind.
 
-Ordinary content nodes can be converted between `document`, `note`, `reference`, and `role` through Canvas node actions that call the existing node PATCH path. Conversion preserves title, content, geometry, metadata, and connections. Server-controlled `plan` nodes are read-only projections. `file_document` and `clarification` have dedicated renderers and may be created only when their metadata contract can be satisfied.
+Ordinary content nodes can be converted between `document`, `note`, `reference`, and `role` through Canvas node actions that call the existing node PATCH path. Conversion preserves title, content, geometry, metadata, and connections. Server-controlled `plan` nodes are read-only projections. `file_document` has a dedicated renderer and is server-created only when its metadata contract can be satisfied. `clarification` has a dedicated renderer for manual or historical nodes, but structured Agent Runtime clarification is conversation state, not Canvas content.
 
 Canvas V2 intentionally does not add `form` nodes yet. Future node kinds should be added in this order:
 
@@ -138,7 +138,7 @@ Generic long-task progressive delivery writes stable Overview, Body draft, and f
 
 If a run uses `write_file` or `present_files` for `/mnt/user-data/outputs/*.md`, progressive delivery must create or update the stable `file_document` node for that virtual path. `present_files` marks the node as ready to preview. If a medium/long progressive run finishes without Runtime file tools, backend finalization writes the final Markdown to the current thread outputs directory and creates the same compact node. Multiple writes to the same Markdown file update one node instead of creating duplicates.
 
-Canvas delivery is gated by the server-owned `TaskHandlingPolicy`. Only `long_task`, `plan_execution`, and `explicit_canvas` requests may create or update Canvas nodes. `simple_chat` and `plan_intake` remain conversation-only even when Skills or thinking mode are enabled; short answers and Plan clarification acknowledgements must not create `Overview`, `Body`, progress, or final-body nodes.
+Canvas delivery is gated by the server-owned `TaskHandlingPolicy`. Only `long_task`, `plan_execution`, and `explicit_canvas` requests may create or update Canvas nodes. `simple_chat` and `plan_intake` remain conversation-only even when Skills or thinking mode are enabled; short answers and Plan clarification acknowledgements must not create `Overview`, `Body`, progress, or final-body nodes. Structured Agent Runtime `ask_clarification` events are also excluded from Canvas delivery: they become waiting run timeline events consumed by the right composer choice card. Only non-structured process clarification text may create a recoverable `reference` note explaining that no final deliverable was available.
 
 ## Node Markdown Rendering
 Canvas content nodes render Markdown in read-only mode. Editing still uses the raw Markdown textarea so users can revise the source text directly.
@@ -290,7 +290,7 @@ Important class roles:
 - `.canvas-node-link-port`: common top-right punched-hole link control.
 - `.canvas-node-link-handle`: source/target React Flow handles inside the common link port.
 - `.canvas-file-document-node`: compact `file_document` card content.
-- `.canvas-clarification-node`: choice-oriented `clarification` card content.
+- `.canvas-clarification-node`: legacy/manual `clarification` card content.
 - `.markdown-document-preview`: floating Markdown preview panel for output files.
 
 Use `nodrag` on inputs and buttons that should not drag the node. Use `nopan` on resize controls so pane pan does not steal pointer events.
@@ -313,7 +313,7 @@ Before claiming Canvas work is complete, verify:
 - `npm.cmd run test:e2e:canvas`
 - Lightweight frontend tests cover API client errors, Canvas action state transitions, and React Flow mapping without starting a dev server.
 - Canvas renders in the workspace.
-- Background right-click menu creates `document`, `note`, `reference`, `role`, and `clarification` nodes.
+- Background right-click menu creates manual `document`, `note`, `reference`, `role`, and `clarification` nodes.
 - Node drag persists `x/y`; multi-selected node drag uses the batch position endpoint and remains undoable as one operation.
 - Node resize uses draggable edges, not point handles, and persists `x/y/width/height`.
 - Title/content edit persists after blur.

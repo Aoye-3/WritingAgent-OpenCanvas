@@ -622,6 +622,11 @@ function readAgentClarification(args: Record<string, unknown>) {
   const question = readSourceString(source.question);
   const rawOptions = Array.isArray(source.options) ? source.options : [];
   const options = rawOptions.flatMap((item, index) => {
+    if (typeof item === "string") {
+      const label = readSourceString(item);
+      if (!label) return [];
+      return [{ id: `option_${index + 1}`, label: label.slice(0, 160), detail: "", recommended: false }];
+    }
     if (!isRecord(item)) return [];
     const id = readSourceString(item.id) || `option_${index + 1}`;
     const label = readSourceString(item.label) || readSourceString(item.title);
@@ -629,8 +634,12 @@ function readAgentClarification(args: Record<string, unknown>) {
     if (!label) return [];
     return [{ id, label: label.slice(0, 160), detail: detail.slice(0, 500), recommended: item.recommended === true }];
   }).slice(0, 3);
-  if (!question || options.length < 2 || options.length > 3 || options.filter((option) => option.recommended).length !== 1) return undefined;
-  return { question: question.slice(0, 500), options };
+  const recommendedCount = options.filter((option) => option.recommended).length;
+  if (!question || options.length < 2 || options.length > 3 || recommendedCount > 1) return undefined;
+  const normalizedOptions = recommendedCount === 0
+    ? options.map((option, index) => ({ ...option, recommended: index === 0 }))
+    : options;
+  return { question: question.slice(0, 500), options: normalizedOptions };
 }
 
 function safeToolResult(toolName: string, content: unknown) {
