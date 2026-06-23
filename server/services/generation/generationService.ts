@@ -1534,6 +1534,7 @@ function commitProgressiveResearchDelivery(input: {
   if (!isProgressiveEvidenceTool(toolName)) return [];
   const entryDraft = progressiveEvidenceEntry(input.payload.locale, toolName, payload);
   if (!entryDraft) return [];
+  if (!hasLinkedResearchSources(entryDraft)) return [];
   const sequence = input.nextSequence();
   const entry: ProgressiveEvidenceEntry = { ...entryDraft, sequence };
   if (!entry.diagnostic) input.onEvidenceEntry?.(entry);
@@ -1881,6 +1882,10 @@ function progressiveEvidenceEntry(locale: GenerateRequest["locale"], toolName: s
     };
   }
   return entry;
+}
+
+function hasLinkedResearchSources(entry: Pick<ProgressiveEvidenceEntry, "sources">) {
+  return entry.sources.length > 0;
 }
 
 function researchNoteMarkdown(input: ProgressiveEvidenceEntry) {

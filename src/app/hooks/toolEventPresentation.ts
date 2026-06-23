@@ -1,4 +1,5 @@
 import type { Locale } from "../../features/i18n/types";
+import type { CanvasNode, CanvasNodeKind } from "../../features/agents/types";
 
 export type LiveToolEvent = {
   eventType: string;
@@ -57,10 +58,69 @@ export function shouldRefreshThreadStateForToolEvent(event: LiveToolEvent) {
     || /(?:^|_)agent_clarification_requested$/.test(event.eventType);
 }
 
+export function readLiveCanvasNodeSnapshot(event: LiveToolEvent): CanvasNode | undefined {
+  if (!/^canvas_delivery_.*_committed$/.test(event.eventType)) return undefined;
+  const node = readRecord(event.payload?.node);
+  const id = readNonEmptyString(node.id);
+  const projectId = readNonEmptyString(node.projectId);
+  const kind = readCanvasNodeKind(node.kind);
+  const title = readNonEmptyString(node.title);
+  const content = typeof node.content === "string" ? node.content : undefined;
+  const x = readFiniteNumber(node.x);
+  const y = readFiniteNumber(node.y);
+  const width = readFiniteNumber(node.width);
+  const height = readFiniteNumber(node.height);
+  const includeInProjectContext = typeof node.includeInProjectContext === "boolean" ? node.includeInProjectContext : undefined;
+  const createdAt = readNonEmptyString(node.createdAt);
+  const updatedAt = readNonEmptyString(node.updatedAt);
+  if (!id || !projectId || !kind || !title || content === undefined || x === undefined || y === undefined || width === undefined || height === undefined || includeInProjectContext === undefined || !createdAt || !updatedAt) {
+    return undefined;
+  }
+  return {
+    id,
+    projectId,
+    kind,
+    title,
+    content,
+    x,
+    y,
+    width,
+    height,
+    metadata: node.metadata,
+    includeInProjectContext,
+    createdAt,
+    updatedAt
+  };
+}
+
 function readToolName(payload: Record<string, unknown>) {
   return typeof payload.toolName === "string"
     ? payload.toolName
     : typeof payload.tool === "string" ? payload.tool : "";
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function readNonEmptyString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function readFiniteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readCanvasNodeKind(value: unknown): CanvasNodeKind | undefined {
+  return value === "document"
+    || value === "note"
+    || value === "reference"
+    || value === "role"
+    || value === "plan"
+    || value === "file_document"
+    || value === "clarification"
+    ? value
+    : undefined;
 }
 
 function buildToolStatusLabel(toolName: string, eventType: string, count: number, locale: Locale) {

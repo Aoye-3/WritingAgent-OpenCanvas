@@ -6,7 +6,7 @@ Decision: Progressive long-task checkpoints update a stable `正文草稿` / `Bo
 
 Reason: The timeline can show `正文草稿 N` while the Canvas node title and content remain `正文`, which makes users think no draft node exists or that the final Body node is stale. Separating draft and final nodes makes recoverable work visible without blurring it with final deliverables.
 
-Impact: Debugging progressive delivery should inspect the stable Body draft node for intermediate checkpoints and the final Body node for completed output. Body draft count remains informational and does not force final synthesis. Frontend refresh logic may use `payload.node` from delivery events for immediate visible updates, then reconcile against thread state after the run.
+Impact: Debugging progressive delivery should inspect the stable Body draft node for intermediate checkpoints and the final Body node for completed output. Body draft count remains informational and does not force final synthesis. Frontend refresh logic applies valid `payload.node` snapshots from committed delivery events immediately by node id, then reconciles against thread state after the run.
 
 ## 2026-06-23: Long Markdown Deliverables Use File Document Nodes
 

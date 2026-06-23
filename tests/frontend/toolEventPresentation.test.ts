@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createLiveToolEventState,
+  readLiveCanvasNodeSnapshot,
   reduceLiveToolEvent,
   shouldRefreshThreadStateForToolEvent
 } from "../../src/app/hooks/toolEventPresentation";
@@ -58,7 +59,43 @@ test("Canvas and artifact lifecycle events request live thread-state refresh", (
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_tool_completed", payload: { toolName: "web_search" } }), false);
 });
 
+test("Canvas delivery committed events expose a valid live node snapshot", () => {
+  const node = canvasNode("body_draft", "Working draft 2");
+  assert.deepEqual(readLiveCanvasNodeSnapshot({
+    eventType: "canvas_delivery_body_checkpoint_committed",
+    payload: { node }
+  }), node);
+
+  assert.equal(readLiveCanvasNodeSnapshot({
+    eventType: "canvas_delivery_synthesis_started",
+    payload: { node }
+  }), undefined);
+
+  assert.equal(readLiveCanvasNodeSnapshot({
+    eventType: "canvas_delivery_body_checkpoint_committed",
+    payload: { node: { id: "body_draft", title: "Body draft" } }
+  }), undefined);
+});
+
 test("reasoning stream blocks leaked Agent Runtime DSML", () => {
   assert.equal(looksUnsafeForReasoningStream('< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">'), true);
   assert.equal(looksUnsafeForReasoningStream("I will summarize the gathered sources next."), false);
 });
+
+function canvasNode(id: string, content: string) {
+  return {
+    id,
+    projectId: "project_1",
+    kind: "document" as const,
+    title: "Body draft",
+    content,
+    x: 10,
+    y: 20,
+    width: 620,
+    height: 520,
+    metadata: { phase: "body_draft" },
+    includeInProjectContext: true,
+    createdAt: "2026-06-23T00:00:00.000Z",
+    updatedAt: "2026-06-23T00:00:01.000Z"
+  };
+}

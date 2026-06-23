@@ -325,6 +325,7 @@ function AppContent() {
     onFetchAndApplyThreadState: fetchThreadState,
     onApplyThreadState: applyThreadState,
     onApplyLiveThreadState: applyLiveThreadState,
+    onApplyLiveCanvasNode: canvasState.applyLiveCanvasNode,
     onApproveCanvasWriteRequest: async (requestId) => { await canvasState.handleApproveCanvasWriteRequest(requestId); },
     getPendingCanvasWriteRequestIds: () => canvasState.canvasWriteRequests.map((request) => request.id),
     onRefreshProjectSurfaces: refreshProjectSurfaces,

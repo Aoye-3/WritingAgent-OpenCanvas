@@ -479,6 +479,46 @@ test("streaming direct Canvas delivery commits a research note after each search
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_research_committed"));
 });
 
+test("streaming direct Canvas delivery skips research notes when search has no linked sources", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "web_search",
+            query: "LLM agent survey 2025",
+            summary: "Search completed, but no displayable source URLs were returned."
+          }
+        });
+        throw new Error("Recursion limit of 100 reached without hitting a stop condition.");
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => service.generateAndRecordStream({
+      mode: "chat",
+      locale: "zh",
+      agentCardId: "chat-agent",
+      chatInstruction: "\u9605\u8bfb\u6280\u672f\u6587\u6863\uff0c\u628a\u6bcf\u8f6e\u641c\u7d22\u548c\u67e5\u627e\u7684\u7ed3\u679c\u5b58\u5230\u753b\u5e03\uff0c\u6700\u540e\u751f\u6210\u6574\u4f53\u6982\u8ff0\u8282\u70b9",
+      toolState: { web_search: true }
+    }, {
+      onToolEvent: (event) => events.push(event as typeof events[number])
+    }),
+    /Recursion limit of 100 reached/
+  );
+
+  assert.equal(records.length, 0);
+  assert.equal(canvasNodes.some((node) => node.title === "\u7814\u7a76\u6458\u5f55 1"), false);
+  assert.equal(events.some((event) => event.eventType === "canvas_delivery_research_committed"), false);
+  assert.equal(events.some((event) => event.eventType === "canvas_delivery_body_checkpoint_committed"), false);
+});
+
 test("streaming skill long task creates Canvas progress without explicit Canvas wording", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
@@ -498,8 +538,10 @@ test("streaming skill long task creates Canvas progress without explicit Canvas 
         input.onToolEvent?.({
           eventType: "agent_backend_tool_completed",
           payload: {
-            toolName: "bash",
-            command: "parallel-cli search completed with 10 candidate papers"
+            toolName: "web_search",
+            query: "parallel-cli candidate papers",
+            summary: "parallel-cli search completed with 10 candidate papers",
+            sources: [{ title: "Candidate papers", url: "https://example.com/candidate-papers" }]
           }
         });
         throw new Error("Recursion limit of 100 reached without hitting a stop condition.");
@@ -528,7 +570,8 @@ test("streaming skill long task creates Canvas progress without explicit Canvas 
   assert.ok(canvasNodes.some((node) => node.title === "正文"));
   assert.equal(canvasNodes.some((node) => String(node.content).includes("literature-review/SKILL.md")), false);
   assert.equal(canvasNodes.some((node) => String(node.content).includes("/mnt/skills/")), false);
-  assert.ok(canvasNodes.some((node) => node.title === "进度摘录 2" && String(node.content).includes("parallel-cli search completed")));
+  assert.equal(canvasNodes.some((node) => node.title === "进度摘录 2"), false);
+  assert.ok(canvasNodes.some((node) => node.title === "进度摘录 1" && String(node.content).includes("parallel-cli search completed")));
   assert.ok(canvasNodes.some((node) => node.title === "运行失败" && String(node.content).includes("Recursion limit of 100 reached")));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_outline_committed"));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_research_committed"));
@@ -582,7 +625,8 @@ test("streaming generic long task creates Canvas progress from evidence tools", 
           payload: {
             toolName: "web_fetch",
             url: "https://example.com/runtime-notes",
-            snippet: "Fetched runtime notes with useful implementation details."
+            snippet: "Fetched runtime notes with useful implementation details.",
+            sources: [{ title: "Runtime notes", url: "https://example.com/runtime-notes" }]
           }
         });
         throw new Error("Recursion limit of 100 reached without hitting a stop condition.");
@@ -627,7 +671,8 @@ test("progressive Canvas keeps body drafts until evidence budget and finalizes B
             payload: {
               toolName: "web_fetch",
               url: `https://example.com/source-${index}`,
-              snippet: `Evidence ${index}`
+              snippet: `Evidence ${index}`,
+              sources: [{ title: `Source ${index}`, url: `https://example.com/source-${index}` }]
             }
           });
         }

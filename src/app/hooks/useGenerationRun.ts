@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentCard, CanvasWriteSuggestion, PlanRun, RunTimelineEvent, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
+import type { AgentCard, CanvasNode, CanvasWriteSuggestion, PlanRun, RunTimelineEvent, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
 import { generateText, generateTextStream } from "../../features/generation/generationClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../../features/generation/types";
 import type { Locale } from "../../features/i18n/types";
@@ -14,6 +14,7 @@ import {
 } from "./streamingTypewriter";
 import {
   createLiveToolEventState,
+  readLiveCanvasNodeSnapshot,
   reduceLiveToolEvent,
   shouldRefreshThreadStateForToolEvent
 } from "./toolEventPresentation";
@@ -33,6 +34,7 @@ type UseGenerationRunOptions = {
   onFetchAndApplyThreadState: (threadId: string) => Promise<ThreadStateResponse>;
   onApplyThreadState: (state: ThreadStateResponse) => void;
   onApplyLiveThreadState: (state: ThreadStateResponse) => void;
+  onApplyLiveCanvasNode: (node: CanvasNode) => void;
   onApproveCanvasWriteRequest: (requestId: string) => Promise<void>;
   onRefreshProjectSurfaces: () => Promise<void>;
   getPendingCanvasWriteRequestIds: () => string[];
@@ -206,6 +208,8 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     }
 
     if (shouldRefreshThreadStateForToolEvent(liveEvent)) {
+      const liveNode = readLiveCanvasNodeSnapshot(liveEvent);
+      if (liveNode) options.onApplyLiveCanvasNode(liveNode);
       refreshLiveThreadState(threadId, operationId);
     }
   };

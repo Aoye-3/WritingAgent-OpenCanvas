@@ -60,6 +60,10 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces, undoD
     setSelectedCanvasNodeId((current) => current && canvas.nodes.some((node) => node.id === current) ? current : canvas.nodes[0]?.id);
   };
 
+  const applyLiveCanvasNode = (node: CanvasNode) => {
+    setCanvasNodes((current) => upsertCanvasNodeSnapshot(current, node));
+  };
+
   const canvasActions = useCanvasActions({
     canvasEdges,
     canvasNodes,
@@ -97,9 +101,16 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces, undoD
     setSelectedCanvasNodeId,
     resetCanvas,
     applyCanvasState,
+    applyLiveCanvasNode,
     refreshCanvas,
     ...canvasActions
   };
+}
+
+export function upsertCanvasNodeSnapshot(nodes: CanvasNode[], node: CanvasNode) {
+  const existingIndex = nodes.findIndex((candidate) => candidate.id === node.id);
+  if (existingIndex < 0) return [...nodes, node];
+  return nodes.map((candidate, index) => index === existingIndex ? node : candidate);
 }
 
 function createDefaultCanvasWorkflow(): CanvasWorkflow {
