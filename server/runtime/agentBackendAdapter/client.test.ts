@@ -574,6 +574,46 @@ test("sends progressive Canvas evidence controls for skill long tasks", () => {
   assert.deepEqual(request.context.facetwrite_evidence_tools, ["web_search", "web_fetch", "read_file", "bash"]);
 });
 
+test("preserves progressive Canvas budget after an answered skill clarification", () => {
+  const card = getAgentCard("summary");
+  const request = buildRunRequest({
+    threadId: "thread_skill_long_task_answered",
+    projectId: "project_canvas",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings: defaultAgentSettings(card),
+    messages: [{ role: "user", content: "Review recent agent literature\n\nSelected clarification: Recent review" }],
+    prompt: "Review recent agent literature\n\nSelected clarification: Recent review",
+    chatInstruction: "Review recent agent literature\n\nSelected clarification: Recent review",
+    allowedToolRefs: [...card.toolRefs, "ask_clarification"],
+    contextValues: {
+      agentClarification: {
+        clarificationId: "skill_clarification_1",
+        selectedOptionId: "recent",
+        answer: "Recent review"
+      },
+      progressiveCanvasDelivery: {
+        enabled: true,
+        runtimeBudgetProfile: "medium",
+        recursionLimit: 140,
+        modelCallLimit: 32,
+        evidenceToolLimit: 16,
+        bodyDraftWriteLimit: 4,
+        synthesisReserveSteps: 28,
+        forceSynthesisAfterEvidence: true,
+        evidenceTools: ["web_search", "web_fetch", "read_file", "bash"]
+      }
+    },
+    toolState: { web_search: true }
+  }, { enabled: true, baseUrl: "http://127.0.0.1:8000", assistantId: "lead_agent" });
+
+  assert.equal(request.config.recursion_limit, 140);
+  assert.equal(request.context.facetwrite_progressive_canvas_delivery_enabled, true);
+  assert.equal(request.context.facetwrite_runtime_budget_profile, "medium");
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("web_search"), true);
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("write_file"), true);
+});
+
 test("skill clarification guard exposes only ask_clarification even with progressive Canvas context", () => {
   const card = getAgentCard("summary");
   const request = buildRunRequest({

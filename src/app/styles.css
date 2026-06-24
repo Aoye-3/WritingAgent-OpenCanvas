@@ -3084,6 +3084,38 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   background: rgba(37, 99, 235, 0.12);
 }
 
+.budget-continuation-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: var(--radius-md);
+  background: #f8fbff;
+  color: var(--text-secondary);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.budget-continuation-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.budget-continuation-chip button {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+}
+
 .drawer-chat-composer .button {
   justify-self: end;
 }

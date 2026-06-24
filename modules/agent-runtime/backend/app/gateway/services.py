@@ -166,6 +166,22 @@ def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, An
                 configurable.setdefault(key, context[key])
             if isinstance(runtime_context, dict):
                 runtime_context.setdefault(key, context[key])
+    sync_recursion_limit_from_context(config, context)
+
+
+def sync_recursion_limit_from_context(config: dict[str, Any], context: Mapping[str, Any] | None) -> None:
+    """Let FacetWrite's progressive budget drive LangGraph's top-level limit.
+
+    Middleware reads ``facetwrite_recursion_limit`` from runtime context, but
+    LangGraph enforces the top-level ``recursion_limit``.  When callers omit
+    the top-level value and the default remains 100, mirror the validated
+    context value so both layers share the same budget.
+    """
+    if not context:
+        return
+    recursion_limit = context.get("facetwrite_recursion_limit")
+    if type(recursion_limit) is int and recursion_limit > 0 and config.get("recursion_limit", 100) == 100:
+        config["recursion_limit"] = recursion_limit
 
 
 def inject_authenticated_user_context(config: dict[str, Any], request: Request) -> None:
@@ -251,6 +267,8 @@ def build_run_config(
                 config[k] = v
     else:
         config["configurable"] = {"thread_id": thread_id}
+    if isinstance(config.get("context"), Mapping):
+        sync_recursion_limit_from_context(config, config["context"])
 
     # Inject custom agent name when the caller specified a non-default assistant.
     # Honour an explicit agent_name in the active runtime options container.

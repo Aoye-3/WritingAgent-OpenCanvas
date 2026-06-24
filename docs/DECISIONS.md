@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-06-24: Skill Clarification Continuation Preserves Runtime Budget
+
+Decision: Skill scope clarification continuation must carry an effective runtime budget and Canvas workflow across the two-phase guard. The guard `resumeContext` records the resolved `runtimeBudgetProfile` from either the request override or Project runtime settings, plus the original Canvas workflow. If Runtime returns a partial `resumeContext`, the Node generation service fills missing original instruction, Skill refs, disabled Skill refs, runtime budget, and Canvas workflow instead of trusting the partial payload as complete.
+
+Reason: The composer may display the default medium budget without sending an explicit `runtimeBudgetProfile`, and Runtime may emit a structured clarification event with only partial resume metadata. If the selected clarification answer resumes without `batch_delivery` Canvas workflow or effective budget, progressive delivery can fail to set LangGraph's top-level `recursion_limit` and the run falls back to the default 100-step clamp.
+
+Impact: The adapter and Gateway must keep FacetWrite budget context and LangGraph's enforced `config.recursion_limit` aligned. `facetwrite_recursion_limit` from progressive delivery context is mirrored to the top-level run config when the top-level value is still the default. A recursion-limit failure remains a real failed run with recoverable Canvas progress; the composer may offer a "continue" draft action, but that recovery path must preserve the same clarification answer, Skills, Canvas workflow, and budget semantics.
+
 ## 2026-06-24: Skill Scope Guard Uses Two-Phase Clarification And Structured Runtime Artifacts
 
 Decision: Research-scope Skill guard runs as a two-phase protocol. Phase one is a clarification-only Runtime pass: FacetWrite exposes only `ask_clarification`, disables provider thinking/reasoning controls for this forced-tool call, removes Canvas/progressive/file/evidence delivery context, and requires a structured `agent_backend_agent_clarification_requested` event. After the user answers, phase two sends the original task plus the selected answer, restores normal Skill tools, thinking settings, runtime budget, and long-task progressive delivery eligibility.

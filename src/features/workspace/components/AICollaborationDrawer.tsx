@@ -184,6 +184,7 @@ export function AICollaborationDrawer({
   const timeline = useMemo(() => buildPlanTimeline(messages, plans), [messages, plans]);
   const pendingClarificationPlan = plans.find((plan) => plan.status === "awaiting_user" && plan.clarification?.status === "pending");
   const pendingAgentClarification = useMemo(() => latestPendingAgentClarification(messages, locallyAnsweredAgentClarificationIds), [locallyAnsweredAgentClarificationIds, messages]);
+  const budgetLimitFailure = useMemo(() => latestBudgetLimitFailure(messages), [messages]);
 
   useEffect(() => {
     setThinkingChoice(modelSettingsToThinkingChoice(modelSettings));
@@ -342,6 +343,12 @@ export function AICollaborationDrawer({
     setAnnotations((current) => current.filter((annotation) => annotation.id !== id));
   };
 
+  const fillBudgetContinuation = () => {
+    setInput(locale === "zh"
+      ? "继续完成上一步任务，沿用已有澄清选择、技能和 Canvas 进度；不要重复已经完成的检索，优先收束并补全最终内容。"
+      : "Continue the previous task using the existing clarification choice, skills, and Canvas progress. Do not repeat completed research; prioritize synthesis and complete the final content.");
+  };
+
   const answerClarification = async (plan: PlanRun, answer: { optionId?: string; customAnswer?: string }) => {
     setClarificationBusy(true);
     try {
@@ -370,6 +377,7 @@ export function AICollaborationDrawer({
     const resume = clarification.resumeContext;
     const transientSkillRefs = resume?.transientSkillRefs.length ? resume.transientSkillRefs : enabledSkillRefs;
     const resumeDisabledSkillRefs = resume?.disabledSkillRefs.length ? resume.disabledSkillRefs : disabledSkillRefs;
+    const resumeRuntimeBudgetProfile = resume?.runtimeBudgetProfile ?? runtimeBudgetChoice ?? runtimeBudgetProfile ?? "medium";
     const selectedText = `${option.label}${option.detail ? ` - ${option.detail}` : ""}`;
     const instructionText = resume?.originalInstruction
       ? `${resume.originalInstruction}\n\nSelected clarification: ${selectedText}`
@@ -380,7 +388,7 @@ export function AICollaborationDrawer({
       await onSend(instructionText, undefined, {
         ...(transientSkillRefs.length ? { transientSkillRefs } : {}),
         ...(resumeDisabledSkillRefs.length ? { disabledSkillRefs: resumeDisabledSkillRefs } : {}),
-        ...(resume?.runtimeBudgetProfile ? { runtimeBudgetProfile: resume.runtimeBudgetProfile } : {}),
+        runtimeBudgetProfile: resumeRuntimeBudgetProfile,
         ...(resume?.canvas && Object.keys(resume.canvas).length ? { canvas: resume.canvas } : {}),
         agentClarification: {
           clarificationId: clarification.clarificationId,
@@ -676,6 +684,14 @@ export function AICollaborationDrawer({
             </button>
           </div>
         ) : null}
+        {budgetLimitFailure && !pendingClarificationPlan && !pendingAgentClarification ? (
+          <div className="budget-continuation-chip">
+            <span>{locale === "zh" ? "上次运行达到步骤预算，可继续完成。" : "The last run reached its step budget."}</span>
+            <button type="button" onClick={fillBudgetContinuation}>
+              {locale === "zh" ? "填入继续" : "Draft continue"}
+            </button>
+          </div>
+        ) : null}
         <div
           aria-label={t("workspace.resizeMessageInput")}
           aria-orientation="horizontal"
@@ -870,6 +886,22 @@ function ReasoningStreamPanel({ message }: { message: CollaborationMessage }) {
 
 function streamingStatusLabel(message: CollaborationMessage, fallback: string) {
   return message.statusLabel || fallback;
+}
+
+function latestBudgetLimitFailure(messages: CollaborationMessage[]) {
+  const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant" && (message.text.trim() || message.timeline?.length));
+  if (!latestAssistant) return false;
+  const haystack = [
+    latestAssistant.text,
+    latestAssistant.statusLabel,
+    ...(latestAssistant.timeline ?? []).flatMap((event) => [
+      event.title,
+      event.summary,
+      String(event.payload?.error ?? ""),
+      String(event.payload?.message ?? "")
+    ])
+  ].join("\n");
+  return /Recursion limit of \d+ reached|GRAPH_RECURSION_LIMIT/i.test(haystack);
 }
 
 type AgentClarificationPrompt = {

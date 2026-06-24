@@ -690,8 +690,64 @@ test("skill scope guard lets AgentBackend ask clarification before vague Chinese
   assert.equal(resumeContext?.originalInstruction, originalInstruction);
   assert.deepEqual(resumeContext?.transientSkillRefs, ["database-lookup", "literature-review"]);
   assert.equal(resumeContext?.runtimeBudgetProfile, "high");
+  assert.deepEqual((resumeContext?.canvas as { workflow?: unknown } | undefined)?.workflow, { mode: "batch_delivery" });
   const timelineClarification = timelineEvents.find((event) => event.payload?.eventType === "agent_backend_agent_clarification_requested");
   assert.equal(timelineClarification?.status, "waiting");
+});
+
+test("skill scope guard fills default budget and Canvas resume context when runtime sends a partial resume", async () => {
+  const { storage } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const originalInstruction = "Find recent Agent literature and write a review.";
+  const clarificationEvent: ToolEventRecord = {
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      clarificationId: "runtime_partial_resume",
+      question: "Which Agent literature scope should I review?",
+      options: [
+        { id: "recent_review", label: "Recent review", detail: "Focus on 2025-2026 papers.", recommended: true },
+        { id: "broad_scan", label: "Broad scan", detail: "Cover a wider time range." }
+      ],
+      resumeContext: {
+        canvas: { runtimeMarker: true }
+      }
+    }
+  };
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.(clarificationEvent);
+        return {
+          text: "",
+          finishReason: "clarification_required",
+          events: [clarificationEvent]
+        };
+      }
+    }
+  });
+
+  await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: originalInstruction,
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
+    toolState: { web_search: true }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
+
+  const clarification = events.find((event) => event.eventType === "agent_backend_agent_clarification_requested");
+  const resumeContext = clarification?.payload.resumeContext as Record<string, unknown> | undefined;
+  assert.equal(resumeContext?.originalInstruction, originalInstruction);
+  assert.deepEqual(resumeContext?.transientSkillRefs, ["database-lookup", "literature-review"]);
+  assert.equal(resumeContext?.runtimeBudgetProfile, "medium");
+  assert.deepEqual((resumeContext?.canvas as { workflow?: unknown } | undefined)?.workflow, { mode: "batch_delivery" });
+  assert.equal((resumeContext?.canvas as { runtimeMarker?: boolean } | undefined)?.runtimeMarker, true);
 });
 
 test("skill scope guard rejects plain text clarification without creating Canvas nodes", async () => {

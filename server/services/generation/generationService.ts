@@ -109,8 +109,9 @@ export function createGenerationService(
     const threadId = safeId(payload.threadId) ?? randomThreadId();
     payload = withOrchestrationPolicy(withCanvasAction(payload, threadId, storage));
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
+    const projectRuntimeSettings = storage.getProjectRuntimeSettings(selection.projectId);
     payload = withPlanGeneration(payload, threadId, storage);
-    payload = withSkillClarificationGuard(payload, threadId);
+    payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     payload = withTaskHandlingPolicy(payload, context);
     payload = withRuntimeContext(payload, context.canvasDeliveryContract);
@@ -228,12 +229,13 @@ export function createGenerationService(
     const threadId = safeId(payload.threadId) ?? randomThreadId();
     payload = withOrchestrationPolicy(withCanvasAction(payload, threadId, storage));
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
+    const projectRuntimeSettings = storage.getProjectRuntimeSettings(selection.projectId);
     payload = withPlanGeneration(payload, threadId, storage);
-    payload = withSkillClarificationGuard(payload, threadId);
+    payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     payload = withTaskHandlingPolicy(payload, context);
     payload = withRuntimeContext(payload, context.canvasDeliveryContract);
-    payload = withProgressiveCanvasDeliveryContext(payload, context, storage.getProjectRuntimeSettings(selection.projectId));
+    payload = withProgressiveCanvasDeliveryContext(payload, context, projectRuntimeSettings);
     const agentCard = context.runtimeConfig.agentCard;
     let textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
@@ -814,11 +816,12 @@ function skillUsageTimelineEvent(
   );
 }
 
-function withSkillClarificationGuard(payload: GenerateRequest, threadId: string): GenerateRequest {
+function withSkillClarificationGuard(payload: GenerateRequest, threadId: string, projectSettings: ProjectRuntimeSettings): GenerateRequest {
   if (!needsSkillScopeClarification(payload)) return payload;
   const skillRefs = (payload.transientSkillRefs ?? []).map((skillRef) => skillRef.toLowerCase());
   const instruction = payload.chatInstruction ?? payload.freeTextPrompt ?? "";
   const clarificationId = `skill_clarification_${hashString(`${threadId}:${skillRefs.join("|")}:${instruction}`).toString(36)}`;
+  const budget = resolveRuntimeBudget(payload.runtimeBudgetProfile, projectSettings);
   return {
     ...payload,
     contextValues: {
@@ -830,7 +833,7 @@ function withSkillClarificationGuard(payload: GenerateRequest, threadId: string)
         originalInstruction: instruction,
         skillRefs: payload.transientSkillRefs ?? [],
         disabledSkillRefs: payload.disabledSkillRefs ?? [],
-        runtimeBudgetProfile: payload.runtimeBudgetProfile,
+        runtimeBudgetProfile: budget.runtimeBudgetProfile,
         canvas: record(payload.contextValues?.canvas),
         instruction: payload.locale === "zh"
           ? "当前文献/数据库类任务缺少范围。你必须先依据已加载 Skill 的要求调用 ask_clarification，且参数必须包含 question 和 2-3 个 options；每个 option 必须有 id、label、detail 或 description，最多一个 recommended:true。不要输出普通澄清话术、Markdown 选项列表或以冒号结尾的自然语言问题；如果无法调用工具，只能输出完整 JSON 对象 {\"type\":\"agent_clarification_requested\",\"question\":\"...\",\"options\":[...]}，不能包含任何额外文本。在用户回答前不要调用 web_search、web_fetch、knowledge_base、write_file、present_files 或其他证据工具。"
@@ -881,22 +884,37 @@ function hasAnsweredSkillClarification(payload: GenerateRequest) {
 function withSkillClarificationResumeContext(event: ToolEventRecord, payload: GenerateRequest): ToolEventRecord {
   if (!isSkillClarificationGuarded(payload) || !isAgentClarificationEvent(event)) return event;
   const eventPayload = record(event.payload);
-  if (Object.keys(record(eventPayload.resumeContext)).length > 0) return event;
+  const existingResumeContext = record(eventPayload.resumeContext);
   const policy = record(payload.contextValues?.facetwrite_clarification_policy);
-  const runtimeBudgetProfile = readOptionalRuntimeBudgetProfile(policy.runtimeBudgetProfile);
+  const existingSkillRefs = readStringList(existingResumeContext.transientSkillRefs);
+  const existingDisabledSkillRefs = readStringList(existingResumeContext.disabledSkillRefs);
+  const existingCanvas = record(existingResumeContext.canvas);
+  const policyCanvas = record(policy.canvas);
+  const canvas = mergeSkillClarificationResumeCanvas(policyCanvas, existingCanvas);
+  const runtimeBudgetProfile = readOptionalRuntimeBudgetProfile(existingResumeContext.runtimeBudgetProfile)
+    ?? readOptionalRuntimeBudgetProfile(policy.runtimeBudgetProfile);
   return {
     ...event,
     payload: {
       ...eventPayload,
       resumeContext: {
-        originalInstruction: readString(policy.originalInstruction),
-        transientSkillRefs: readStringList(policy.skillRefs),
-        disabledSkillRefs: readStringList(policy.disabledSkillRefs),
+        ...existingResumeContext,
+        originalInstruction: readString(existingResumeContext.originalInstruction) || readString(policy.originalInstruction),
+        transientSkillRefs: existingSkillRefs.length ? existingSkillRefs : readStringList(policy.skillRefs),
+        disabledSkillRefs: existingDisabledSkillRefs.length ? existingDisabledSkillRefs : readStringList(policy.disabledSkillRefs),
         ...(runtimeBudgetProfile ? { runtimeBudgetProfile } : {}),
-        canvas: record(policy.canvas)
+        canvas
       }
     }
   };
+}
+
+function mergeSkillClarificationResumeCanvas(policyCanvas: Record<string, unknown>, existingCanvas: Record<string, unknown>) {
+  const canvas = { ...policyCanvas, ...existingCanvas };
+  const hasExistingWorkflow = Object.keys(record(existingCanvas.workflow)).length > 0;
+  const hasPolicyWorkflow = Object.keys(record(policyCanvas.workflow)).length > 0;
+  if (!hasExistingWorkflow && hasPolicyWorkflow) canvas.workflow = policyCanvas.workflow;
+  return canvas;
 }
 
 function readOptionalRuntimeBudgetProfile(value: unknown): GenerateRequest["runtimeBudgetProfile"] | undefined {
