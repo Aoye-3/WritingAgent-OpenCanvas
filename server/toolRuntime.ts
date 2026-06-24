@@ -5,6 +5,10 @@ import type { KnowledgeService } from "./knowledge/service.js";
 import { allowedToolDefinitions, toChatCompletionTool, toolCatalog, type ToolState } from "./tools/catalog.js";
 import { evaluateToolExecutionPolicy, isToolRef } from "./tools/toolPolicyGuard.js";
 import { extractSourceLinks } from "./services/generation/sourceLinks.js";
+import {
+  shortProgressCanvasWriteStableNodeId,
+  validateShortProgressCanvasWrite
+} from "./services/generation/canvasWriteScopePolicy.js";
 
 export type ToolExecutionContext = {
   threadId?: string;
@@ -28,7 +32,7 @@ export type ToolExecutionContext = {
     title: string;
     status: string;
   };
-  commitCanvasWrite?: (input: CanvasWriteRequestInput) => {
+  commitCanvasWrite?: (input: CanvasWriteRequestInput, options?: { shortProgressStableNodeId?: string }) => {
     id: string;
     projectId: string;
     kind: string;
@@ -210,6 +214,26 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
         payload: { tool: name, reason: "missing_content" }
       };
     }
+    const canvasWriteScope = readString(context.contextValues?.facetwrite_canvas_write_scope);
+    const shortProgressValidation = validateShortProgressCanvasWrite({
+      scope: canvasWriteScope,
+      operation,
+      nodeKind: readString(args.nodeKind),
+      title: readString(args.title),
+      content
+    });
+    if (!shortProgressValidation.ok) {
+      return {
+        ok: false,
+        content: `Canvas write request failed: ${shortProgressValidation.message}`,
+        payload: {
+          tool: name,
+          eventType: "canvas_mutation_failed",
+          reason: shortProgressValidation.reason,
+          canvasWriteScope
+        }
+      };
+    }
 
     try {
       const writeInput: CanvasWriteRequestInput = {
@@ -220,6 +244,9 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
         content,
         rationale: readString(args.rationale)
       };
+      const shortProgressStableNodeId = canvasWriteScope
+        ? shortProgressCanvasWriteStableNodeId(context.threadId, writeInput.title)
+        : undefined;
       const sources = extractSourceLinks({ text: content, limit: 40 });
       if (operation === "create" || operation === "append") {
         if (!context.commitCanvasWrite) {
@@ -229,7 +256,7 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
             payload: { tool: name, eventType: "canvas_mutation_failed", operation, reason: "direct_commit_unavailable" }
           };
         }
-        const node = context.commitCanvasWrite(writeInput);
+        const node = context.commitCanvasWrite(writeInput, { shortProgressStableNodeId });
         return {
           ok: true,
           content: `Canvas ${operation} committed successfully. Node id: ${node.id}.`,

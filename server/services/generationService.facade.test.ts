@@ -489,7 +489,7 @@ test("streaming direct Canvas delivery commits a research note after each search
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_research_committed"));
 });
 
-test("streaming direct Canvas delivery skips research notes when search has no linked sources", async () => {
+test("streaming direct Canvas delivery keeps research notes when search has no linked sources", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
@@ -524,9 +524,49 @@ test("streaming direct Canvas delivery skips research notes when search has no l
   );
 
   assert.equal(records.length, 0);
-  assert.equal(canvasNodes.some((node) => node.title === "\u7814\u7a76\u6458\u5f55 1"), false);
-  assert.equal(events.some((event) => event.eventType === "canvas_delivery_research_committed"), false);
-  assert.equal(events.some((event) => event.eventType === "canvas_delivery_body_checkpoint_committed"), false);
+  assert.ok(canvasNodes.some((node) => node.title === "\u7814\u7a76\u6458\u5f55 1" && String(node.content).includes("Search completed")));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_research_committed"));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_checkpoint_committed"));
+});
+
+test("streaming direct Canvas delivery dedupes repeated research evidence keys", async () => {
+  const { storage, canvasNodes } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        for (let index = 0; index < 2; index += 1) {
+          input.onToolEvent?.({
+            eventType: "agent_backend_tool_completed",
+            payload: {
+              toolName: "web_search",
+              query: "LLM agent survey 2025",
+              sources: [{ title: "Agent Survey", url: "https://example.com/agent-survey" }]
+            }
+          });
+        }
+        throw new Error("Recursion limit of 100 reached without hitting a stop condition.");
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => service.generateAndRecordStream({
+      mode: "chat",
+      locale: "zh",
+      agentCardId: "chat-agent",
+      chatInstruction: "\u9605\u8bfb\u6280\u672f\u6587\u6863\uff0c\u628a\u6bcf\u8f6e\u641c\u7d22\u548c\u67e5\u627e\u7684\u7ed3\u679c\u5b58\u5230\u753b\u5e03\uff0c\u6700\u540e\u751f\u6210\u6574\u4f53\u6982\u8ff0\u8282\u70b9",
+      toolState: { web_search: true }
+    }, {
+      onToolEvent: (event) => events.push(event as typeof events[number])
+    }),
+    /Recursion limit of 100 reached/
+  );
+
+  assert.equal(canvasNodes.filter((node) => String(node.title).startsWith("\u7814\u7a76\u6458\u5f55")).length, 1);
+  assert.equal(events.filter((event) => event.eventType === "canvas_delivery_research_committed").length, 1);
 });
 
 test("streaming skill long task creates Canvas progress without explicit Canvas wording", async () => {
@@ -1047,6 +1087,7 @@ test("progressive Canvas falls back to a Markdown file document after multiple w
       }
     });
 
+    const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
     const result = await service.generateAndRecordStream({
       mode: "chat",
       locale: "en",
@@ -1055,6 +1096,8 @@ test("progressive Canvas falls back to a Markdown file document after multiple w
       chatInstruction: "Review recent agent literature and write a detailed report",
       contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, agentClarification: answeredAgentClarification() },
       toolState: { web_search: true }
+    }, {
+      onToolEvent: (event) => events.push(event as typeof events[number])
     });
 
     const fileNodes = canvasNodes.filter((node) => node.kind === "file_document");
@@ -1071,6 +1114,9 @@ test("progressive Canvas falls back to a Markdown file document after multiple w
     assert.equal(result.text.includes("UNIQUE_TAIL_SHOULD_ONLY_BE_IN_FILE"), false);
     assert.ok(result.text.includes("/mnt/user-data/outputs/"));
     assert.ok(canvasEdges.some((edge) => edge.targetNodeId === fileNodes[0]?.id));
+    assert.ok(events.some((event) => event.eventType === "agent_backend_tool_completed" && event.payload.toolName === "write_file" && event.payload.source === "server_fallback"));
+    const fileNodeEvent = events.find((event) => event.eventType === "canvas_delivery_file_document_committed");
+    assert.ok(fileNodeEvent?.payload.node);
 
     const fileName = fileDocument?.path?.split("/").at(-1) ?? "";
     const saved = await readFile(path.resolve(process.cwd(), appRoot, "threads", "thread_md_fallback", "user-data", "outputs", fileName), "utf8");

@@ -59,7 +59,7 @@ export async function runProviderGeneration(input: ProviderRunnerInput, deps: Pr
       canvasAction: input.payload.canvasAction,
       knowledgeService: input.knowledgeService,
       createCanvasWriteRequest: (writeInput) => input.storage.createCanvasWriteRequest(projectIdForThread(input), writeInput),
-      commitCanvasWrite: (writeInput) => commitLowRiskCanvasWrite(input.storage, projectIdForThread(input), writeInput, input.payload.canvasAction?.id)
+      commitCanvasWrite: (writeInput, options) => commitLowRiskCanvasWrite(input.storage, projectIdForThread(input), writeInput, input.payload.canvasAction?.id, options?.shortProgressStableNodeId)
     },
     onToolEvent: input.onToolEvent
   });
@@ -105,7 +105,7 @@ export async function runProviderGenerationStream(
       canvasAction: input.payload.canvasAction,
       knowledgeService: input.knowledgeService,
       createCanvasWriteRequest: (writeInput) => input.storage.createCanvasWriteRequest(projectIdForThread(input), writeInput),
-      commitCanvasWrite: (writeInput) => commitLowRiskCanvasWrite(input.storage, projectIdForThread(input), writeInput, input.payload.canvasAction?.id)
+      commitCanvasWrite: (writeInput, options) => commitLowRiskCanvasWrite(input.storage, projectIdForThread(input), writeInput, input.payload.canvasAction?.id, options?.shortProgressStableNodeId)
     },
     onToolEvent: input.onToolEvent,
     onToken: input.onToken,
@@ -120,11 +120,25 @@ export async function runProviderGenerationStream(
   return run;
 }
 
-function commitLowRiskCanvasWrite(storage: ProviderRunnerInput["storage"], projectId: string, input: import("../../storage.js").CanvasWriteRequestInput, actionId?: string) {
+function commitLowRiskCanvasWrite(storage: ProviderRunnerInput["storage"], projectId: string, input: import("../../storage.js").CanvasWriteRequestInput, actionId?: string, shortProgressStableNodeId?: string) {
   if (input.operation === "create") {
-    const stableId = actionId ? `node_${actionId.replace(/[^A-Za-z0-9_-]/g, "_")}` : undefined;
+    const stableId = shortProgressStableNodeId || (actionId ? `node_${actionId.replace(/[^A-Za-z0-9_-]/g, "_")}` : undefined);
     const existing = stableId ? storage.listCanvasNodes(projectId).find((node) => node.id === stableId) : undefined;
-    return existing ?? storage.createCanvasNode(projectId, { id: stableId, kind: input.nodeKind ?? "document", title: input.title, content: input.content });
+    if (existing && shortProgressStableNodeId) {
+      const updated = storage.updateCanvasNode(projectId, existing.id, {
+        kind: input.nodeKind ?? existing.kind,
+        title: input.title,
+        content: input.content
+      });
+      if (updated) return updated;
+    }
+    return existing ?? storage.createCanvasNode(projectId, {
+      id: stableId,
+      kind: input.nodeKind ?? "document",
+      title: input.title,
+      content: input.content,
+      ...(shortProgressStableNodeId ? { metadata: { canvasWriteScope: "short_progress_nodes" }, includeInProjectContext: true } : {})
+    });
   }
   if (input.operation === "append" && input.targetNodeId) {
     const existing = storage.listCanvasNodes(projectId).find((node) => node.id === input.targetNodeId);

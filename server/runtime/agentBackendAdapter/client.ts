@@ -11,6 +11,12 @@ import { resolvePlanRequestPolicy } from "../../services/generation/planRequestP
 import { resolveCanvasAction } from "../../services/generation/canvasActionPolicy.js";
 import type { CanvasAction } from "../../services/generation/canvasActionPolicy.js";
 import { isDirectCanvasDeliveryIntent } from "../../services/generation/canvasDeliveryIntent.js";
+import {
+  SHORT_PROGRESS_CANVAS_WRITE_POLICY,
+  applyCanvasWriteToolExposure,
+  applyCanvasWriteToolState,
+  canvasWriteScopeForRun
+} from "../../services/generation/canvasWriteScopePolicy.js";
 
 export type AgentBackendRunInput = {
   threadId: string;
@@ -76,6 +82,8 @@ type AgentBackendRunContext = {
   facetwrite_evidence_tools?: string[];
   facetwrite_markdown_file_delivery_policy?: string;
   facetwrite_markdown_file_delivery_required?: boolean;
+  facetwrite_canvas_write_scope?: "short_progress_nodes";
+  facetwrite_canvas_write_policy?: typeof SHORT_PROGRESS_CANVAS_WRITE_POLICY;
   facetwrite_task_completion_policy?: string;
   facetwrite_clarification_policy?: string | Record<string, unknown>;
   facetwrite_clarification_phase?: "clarification_guard";
@@ -139,20 +147,36 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
       instruction: input.chatInstruction,
       selectedCanvasNodeId: input.selectedCanvasNodeId
     });
+  const effectiveRuntimeContext = canvasAction?.requiresTool
+    ? { ...runtimeContext, facetwrite_canvas_write_scope: undefined, facetwrite_canvas_write_policy: undefined }
+    : runtimeContext;
   const baseAllowedToolRefs = skillScopeGuard
     ? ["ask_clarification"]
     : canvasAction?.requiresTool
     ? [...new Set([...(input.allowedToolRefs ?? input.agentCard.toolRefs), "canvas_write"])]
     : input.allowedToolRefs ?? input.agentCard.toolRefs;
-  const chatAllowedToolRefs = baseAllowedToolRefs;
-  const allowedToolRefs = !skillScopeGuard && runtimeContext.facetwrite_markdown_file_delivery_required
+  const chatAllowedToolRefs = applyCanvasWriteToolExposure(baseAllowedToolRefs, {
+    skillScopeGuard,
+    progressiveCanvasDeliveryEnabled: effectiveRuntimeContext.facetwrite_progressive_canvas_delivery_enabled === true,
+    canvasActionRequiresTool: canvasAction?.requiresTool === true
+  });
+  const allowedToolRefs = !skillScopeGuard && effectiveRuntimeContext.facetwrite_markdown_file_delivery_required
     ? [...new Set([...chatAllowedToolRefs, "write_file", "present_files"])]
     : chatAllowedToolRefs;
-  const toolState = skillScopeGuard
+  const baseToolState = skillScopeGuard
     ? { ask_clarification: true }
     : canvasAction?.requiresTool
     ? { ...(input.toolState ?? {}), canvas_write: true }
     : input.toolState ?? {};
+  const toolState = applyCanvasWriteToolState(baseToolState, {
+    skillScopeGuard,
+    progressiveCanvasDeliveryEnabled: effectiveRuntimeContext.facetwrite_progressive_canvas_delivery_enabled === true,
+    canvasActionRequiresTool: canvasAction?.requiresTool === true
+  });
+  const scopedContextValues = {
+    ...(input.contextValues ?? {}),
+    ...(effectiveRuntimeContext.facetwrite_canvas_write_scope ? { facetwrite_canvas_write_scope: effectiveRuntimeContext.facetwrite_canvas_write_scope } : {})
+  };
   return {
     assistant_id: config.assistantId,
     input: {
@@ -163,10 +187,10 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
     },
     metadata: buildAgentBackendRuntimeMetadata(input.agentCard, input.settings),
     config: {
-      ...(runtimeContext.facetwrite_recursion_limit ? { recursion_limit: runtimeContext.facetwrite_recursion_limit } : {}),
+      ...(effectiveRuntimeContext.facetwrite_recursion_limit ? { recursion_limit: effectiveRuntimeContext.facetwrite_recursion_limit } : {}),
       configurable: {
         thread_id: input.threadId,
-        ...runtimeContext
+        ...effectiveRuntimeContext
       }
     },
     context: {
@@ -174,11 +198,11 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
       facetwrite_allowed_tool_refs: allowedToolRefs,
       facetwrite_tool_state: toolState,
       facetwrite_selected_canvas_node_id: input.selectedCanvasNodeId,
-      facetwrite_context_values: input.contextValues ?? {},
+      facetwrite_context_values: scopedContextValues,
       facetwrite_chat_instruction: input.chatInstruction ?? input.prompt,
       facetwrite_canvas_action: canvasAction,
       facetwrite_canvas_delivery_contract: input.contextValues?.canvasDeliveryContract,
-      ...runtimeContext
+      ...effectiveRuntimeContext
     },
     stream_mode: ["messages-tuple", "custom", "values"],
     stream_subgraphs: true,
@@ -209,7 +233,9 @@ function withoutProgressiveDeliveryContext(context: AgentBackendRunContext): Age
     facetwrite_force_synthesis_after_evidence: undefined,
     facetwrite_evidence_tools: undefined,
     facetwrite_markdown_file_delivery_policy: undefined,
-    facetwrite_markdown_file_delivery_required: undefined
+    facetwrite_markdown_file_delivery_required: undefined,
+    facetwrite_canvas_write_scope: undefined,
+    facetwrite_canvas_write_policy: undefined
   };
 }
 
@@ -258,11 +284,14 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     ? progressiveDelivery.runtimeBudgetProfile
     : progressiveDelivery?.runtimeBudgetProfile === "medium" ? "medium" : undefined;
   const forceSynthesisAfterEvidence = progressiveDelivery?.forceSynthesisAfterEvidence === true ? true : undefined;
+  const canvasWriteScope = canvasWriteScopeForRun({
+    progressiveCanvasDeliveryEnabled: progressiveCanvasDeliveryEnabled === true
+  });
   const markdownFileDeliveryRequired = progressiveCanvasDeliveryEnabled && !isDirectCanvasDeliveryIntent(input.chatInstruction ?? "")
     ? true
     : undefined;
   const markdownFileDeliveryPolicy = progressiveCanvasDeliveryEnabled
-    ? "For medium or long text deliverables, especially if you perform two or more web_search calls or use a complex writing/research skill, first draft the complete user deliverable, then write that full Markdown report to /mnt/user-data/outputs/*.md with write_file and call present_files. The file content must contain the actual report, summary tables, findings, and references when applicable. Never write a delivery note, skill-loading note, clarification question, or file-save status as the Markdown file content. Keep the final chat response concise only after the full file is saved and presented; the Canvas body should contain a readable summary, while the full document lives in the Markdown file."
+    ? "For medium or long text deliverables, especially if you perform two or more web_search calls or use a complex writing/research skill, first draft the complete user deliverable, then write that full Markdown report to /mnt/user-data/outputs/*.md with write_file and call present_files. The file content must contain the actual report, summary tables, findings, and references when applicable. Never write a delivery note, skill-loading note, clarification question, or file-save status as the Markdown file content. Use canvas_write only for short progressive nodes such as summaries, overviews, progress/reference notes, and references; never use canvas_write for the body, final body, full report, or full document. Keep the final chat response concise only after the full file is saved and presented; the Canvas body should contain a readable summary, while the full document lives in the Markdown file."
     : undefined;
   const taskCompletionPolicy = planPolicy.phase === "chat"
     ? "Complete the user's task directly when reasonable defaults are enough. If a selected skill genuinely needs missing information before continuing, ask exactly one structured multiple-choice clarification with 2-3 mutually exclusive options and one recommended option. Do not ask open-ended questions, and do not write clarification text into final deliverables or Markdown files."
@@ -299,6 +328,8 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
       facetwrite_evidence_tools: evidenceTools,
       facetwrite_markdown_file_delivery_policy: markdownFileDeliveryPolicy,
       facetwrite_markdown_file_delivery_required: markdownFileDeliveryRequired,
+      facetwrite_canvas_write_scope: canvasWriteScope,
+      facetwrite_canvas_write_policy: canvasWriteScope ? SHORT_PROGRESS_CANVAS_WRITE_POLICY : undefined,
       facetwrite_task_completion_policy: taskCompletionPolicy,
       facetwrite_clarification_policy: clarificationPolicy
     };
@@ -329,6 +360,8 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     facetwrite_evidence_tools: evidenceTools,
     facetwrite_markdown_file_delivery_policy: markdownFileDeliveryPolicy,
     facetwrite_markdown_file_delivery_required: markdownFileDeliveryRequired,
+    facetwrite_canvas_write_scope: canvasWriteScope,
+    facetwrite_canvas_write_policy: canvasWriteScope ? SHORT_PROGRESS_CANVAS_WRITE_POLICY : undefined,
     facetwrite_task_completion_policy: taskCompletionPolicy,
     facetwrite_clarification_policy: clarificationPolicy,
     ...(memoryContent ? { facetwrite_memory_content: memoryContent } : {})
@@ -699,11 +732,11 @@ function safeToolArgs(toolName: string, args: Record<string, unknown>) {
     return command ? { command } : {};
   }
   if (toolName === "write_file") {
-    const path = readSourceString(args.path ?? args.file_path ?? args.filePath).slice(0, 500);
+    const path = readSourceString(args.path ?? args.file_path ?? args.filePath ?? args.filepath).slice(0, 500);
     return path ? { path } : {};
   }
   if (toolName === "present_files") {
-    const filepaths = readStringArray(args.filepaths ?? args.file_paths ?? args.paths)
+    const filepaths = readStringArray(args.filepaths ?? args.file_paths ?? args.paths ?? args.files)
       .map((path) => path.slice(0, 500))
       .filter(Boolean)
       .slice(0, 20);

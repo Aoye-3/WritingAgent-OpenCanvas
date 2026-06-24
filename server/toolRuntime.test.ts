@@ -232,6 +232,125 @@ test("canvas_write commits low-risk create operations and returns the real node 
   assert.equal(result.payload.status, "committed");
 });
 
+test("canvas_write commits short progressive summary nodes with a stable node id", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_short_progress",
+      type: "function",
+      function: {
+        name: "canvas_write",
+        arguments: JSON.stringify({
+          operation: "create",
+          nodeKind: "document",
+          title: "Overview",
+          content: "# Overview\n- Key finding\n- Next step"
+        })
+      }
+    },
+    {
+      threadId: "thread_short_progress",
+      contextValues: { facetwrite_canvas_write_scope: "short_progress_nodes" },
+      commitCanvasWrite(input, options) {
+        assert.equal(input.operation, "create");
+        assert.equal(input.nodeKind, "document");
+        assert.match(options?.shortProgressStableNodeId ?? "", /^node_short_progress_thread_short_progress_/);
+        return { id: options?.shortProgressStableNodeId ?? "node_overview", projectId: "project_1", kind: "document", title: input.title ?? "Overview" };
+      }
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.eventType, "canvas_mutation_committed");
+});
+
+test("canvas_write rejects oversized progressive short nodes", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_short_progress_long",
+      type: "function",
+      function: {
+        name: "canvas_write",
+        arguments: JSON.stringify({
+          operation: "create",
+          nodeKind: "document",
+          title: "Summary",
+          content: "Long paragraph. ".repeat(220)
+        })
+      }
+    },
+    {
+      threadId: "thread_short_progress",
+      contextValues: { facetwrite_canvas_write_scope: "short_progress_nodes" },
+      commitCanvasWrite() {
+        throw new Error("oversized short node must not commit");
+      }
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.payload.reason, "short_progress_content_too_long");
+  assert.match(result.content, /write_file/i);
+});
+
+test("canvas_write rejects body or full-report titles in progressive short scope", async () => {
+  for (const title of ["Body", "Final body", "完整报告"]) {
+    const result = await executeToolCall(
+      {
+        id: `call_reject_${title}`,
+        type: "function",
+        function: {
+          name: "canvas_write",
+          arguments: JSON.stringify({
+            operation: "create",
+            nodeKind: "document",
+            title,
+            content: "# Summary\nShort text"
+          })
+        }
+      },
+      {
+        threadId: "thread_short_progress",
+        contextValues: { facetwrite_canvas_write_scope: "short_progress_nodes" },
+        commitCanvasWrite() {
+          throw new Error("long-form title must not commit");
+        }
+      }
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(result.payload.reason, "short_progress_long_form_title");
+    assert.match(result.content, /present_files/i);
+  }
+});
+
+test("canvas_write rejects file_document node kind in progressive short scope", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_file_document",
+      type: "function",
+      function: {
+        name: "canvas_write",
+        arguments: JSON.stringify({
+          operation: "create",
+          nodeKind: "file_document",
+          title: "Document file",
+          content: "File entry"
+        })
+      }
+    },
+    {
+      threadId: "thread_short_progress",
+      contextValues: { facetwrite_canvas_write_scope: "short_progress_nodes" },
+      commitCanvasWrite() {
+        throw new Error("file_document must not commit through canvas_write");
+      }
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.payload.reason, "short_progress_node_kind_not_allowed");
+});
+
 test("canvas_write committed payload includes sources extracted from content", async () => {
   const result = await executeToolCall(
     {

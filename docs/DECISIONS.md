@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-06-24: Progressive CanvasWrite Is Scoped To Short Nodes
+
+Decision: Progressive long-task delivery exposes `canvas_write` as a scoped short-node tool instead of disabling it completely. The runtime context carries `facetwrite_canvas_write_scope:"short_progress_nodes"` plus a policy contract. In that scope, `canvas_write` may create or append only short summaries, overviews, progress/research notes, and references. Full Body, Final Body, full reports, full documents, and oversized content must go through `write_file` followed by `present_files`, which creates or updates the server-owned `file_document` preview node.
+
+Reason: Disabling `canvas_write` in progressive runs removed the Agent's ability to write useful intermediate Canvas nodes. Leaving it unrestricted caused a different failure: models could try to write long report bodies into ordinary Canvas nodes, compete with server-owned progressive delivery, repeat Canvas writes, and hit runtime recursion limits before final file delivery.
+
+Impact: `server/services/generation/canvasWriteScopePolicy.ts` is the shared policy source for AgentBackend request exposure and local bridge enforcement. `agentBackendRunner` and `agentBackendAdapter` must not maintain separate CanvasWrite allow/deny rules. `toolRuntime` enforces the scope at execution time: invalid operations, `file_document` node kinds, long-form titles, and content over the short-node limit fail with guidance to use file delivery. Low-risk commit paths use stable ids for scoped short nodes so repeated same-title writes update instead of duplicating cards. Skill scope guard remains stricter: its first phase exposes only `ask_clarification` and carries no CanvasWrite scope.
+
 ## 2026-06-24: Skill Clarification Continuation Preserves Runtime Budget
 
 Decision: Skill scope clarification continuation must carry an effective runtime budget and Canvas workflow across the two-phase guard. The guard `resumeContext` records the resolved `runtimeBudgetProfile` from either the request override or Project runtime settings, plus the original Canvas workflow. If Runtime returns a partial `resumeContext`, the Node generation service fills missing original instruction, Skill refs, disabled Skill refs, runtime budget, and Canvas workflow instead of trusting the partial payload as complete.

@@ -46,7 +46,7 @@ test("forwards enabled stage-specific Plan tools even when Agent settings hide t
   assert.ok(allowedToolRefs.includes("plan_clarification_submit"));
 });
 
-test("forwards file delivery tools for progressive Canvas runs", async () => {
+test("forwards file delivery tools and scoped canvas_write for progressive Canvas runs", async () => {
   let allowedToolRefs: string[] = [];
   await runAgentBackendGeneration({
     payload: {
@@ -74,7 +74,7 @@ test("forwards file delivery tools for progressive Canvas runs", async () => {
       toolCallMode: "auto",
       maxToolCalls: 20
     },
-    runtimeConfig: { enabledTools: ["web_search"], agentCard: {}, settings: {} } as never,
+    runtimeConfig: { enabledTools: ["web_search", "canvas_write"], agentCard: {}, settings: {} } as never,
     messages: [],
     prompt: "prompt"
   }, {
@@ -92,6 +92,55 @@ test("forwards file delivery tools for progressive Canvas runs", async () => {
   assert.ok(allowedToolRefs.includes("write_file"));
   assert.ok(allowedToolRefs.includes("present_files"));
   assert.ok(allowedToolRefs.includes("ask_clarification"));
+  assert.equal(allowedToolRefs.includes("canvas_write"), true);
+});
+
+test("keeps canvas_write for progressive Canvas runs when a Canvas action requires the tool", async () => {
+  let allowedToolRefs: string[] = [];
+  await runAgentBackendGeneration({
+    payload: {
+      mode: "chat",
+      locale: "en",
+      threadId: "thread_1",
+      chatInstruction: "Create one Canvas node",
+      contextValues: {
+        progressiveCanvasDelivery: { enabled: true }
+      },
+      canvasAction: { id: "canvas_action_1", operation: "create", risk: "low", requiresTool: true }
+    },
+    threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "model_1",
+    modelSettings: {
+      configuredModelApiId: "model_1",
+      providerId: "deepseek",
+      model: "deepseek-chat",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: true,
+      toolCallMode: "auto",
+      maxToolCalls: 20
+    },
+    runtimeConfig: { enabledTools: ["web_search", "canvas_write"], agentCard: {}, settings: {} } as never,
+    messages: [],
+    prompt: "prompt"
+  }, {
+    getRuntimeConfig: () => ({ enabled: true } as never),
+    runAgent: async (input) => {
+      allowedToolRefs = input.allowedToolRefs ?? [];
+      return {
+        text: "Done",
+        finishReason: "agent_backend_completed",
+        events: []
+      };
+    }
+  });
+
+  assert.ok(allowedToolRefs.includes("canvas_write"));
+  assert.ok(allowedToolRefs.includes("write_file"));
 });
 
 test("forwards ask_clarification for transient skill runs", async () => {

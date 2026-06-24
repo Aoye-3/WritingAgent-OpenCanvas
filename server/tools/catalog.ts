@@ -132,7 +132,7 @@ export const toolCatalog: ToolDefinition[] = [
     group: "chat",
     label: "Canvas Write",
     description: "Create or append Canvas content directly; destructive replacements remain pending until user approval.",
-    promptHint: "Use canvas_write when the user explicitly asks to create or append Canvas content. Claim success only when the tool returns status committed and a nodeId.",
+    promptHint: "Use canvas_write when the user explicitly asks to create or append Canvas content. During progressive delivery, use it only for short summaries, overviews, progress/reference notes, and references; write full bodies, full reports, or final documents with write_file followed by present_files. Claim success only when the tool returns status committed and a nodeId.",
     schema: {
       type: "object",
       properties: {

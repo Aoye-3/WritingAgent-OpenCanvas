@@ -1049,6 +1049,40 @@ function finalizeProgressiveCanvasDelivery(input: {
     : undefined;
   const deliveryFilePaths = fallbackFilePath ? [fallbackFilePath] : existingFileMarkdown.map((entry) => entry.filePath);
   let finalFileDocumentSequence = 100;
+  if (fallbackFilePath) {
+    const syntheticWriteEvent: ToolEventRecord = {
+      eventType: "agent_backend_tool_completed",
+      payload: {
+        type: "tool_completed",
+        toolName: "write_file",
+        path: fallbackFilePath,
+        source: "server_fallback"
+      }
+    };
+    events.push(syntheticWriteEvent);
+    const fileDocumentEvents = commitProgressiveFileDocumentDelivery({
+      payload: input.payload,
+      projectId: input.projectId,
+      storage: input.storage,
+      deliveryId: input.deliveryId,
+      event: syntheticWriteEvent,
+      nextSequence: () => {
+        finalFileDocumentSequence += 1;
+        return finalFileDocumentSequence;
+      }
+    });
+    for (const fileDocumentEvent of fileDocumentEvents) {
+      events.push(fileDocumentEvent);
+      const fileDocumentPayload = record(fileDocumentEvent.payload);
+      emit(timeline.event(
+        "canvas_node_committed",
+        "completed",
+        readString(fileDocumentPayload.title) || (input.payload.locale === "zh" ? "文档节点" : "Document file"),
+        input.payload.locale === "zh" ? "Markdown 文档已写入 Canvas。" : "Markdown document was written to Canvas.",
+        fileDocumentPayload
+      ));
+    }
+  }
   for (const event of input.events) {
     const fileDocumentEvents = commitProgressiveFileDocumentDelivery({
       payload: input.payload,
@@ -1240,6 +1274,7 @@ function requiresMarkdownFileDelivery(input: {
   if (!isProgressiveCanvasDeliveryEnabled(input.payload)) return false;
   if (isDirectCanvasDeliveryIntent(input.payload.chatInstruction ?? input.payload.freeTextPrompt ?? "")) return false;
   if (input.existingFilePaths.length > 0) return true;
+  if (isLikelyDeliverableMarkdown(input.text)) return true;
   if (completedToolCount(input.events, "web_search") >= 2) return true;
   if (hasLongFormSkill(input.payload.transientSkillRefs)) return true;
   return input.text.trim().length >= 3000;
@@ -1630,7 +1665,9 @@ function commitProgressiveResearchDelivery(input: {
   if (!isProgressiveEvidenceTool(toolName)) return [];
   const entryDraft = progressiveEvidenceEntry(input.payload.locale, toolName, payload);
   if (!entryDraft) return [];
-  if (!hasLinkedResearchSources(entryDraft)) return [];
+  if (!entryDraft.sources.length && toolName !== "web_search" && !entryDraft.query && !entryDraft.url && !entryDraft.path && !entryDraft.command) return [];
+  const evidenceKey = progressiveEvidenceKey(entryDraft);
+  if (evidenceKey && hasCommittedProgressiveEvidence(input.storage, input.projectId, input.deliveryId, evidenceKey)) return [];
   const sequence = input.nextSequence();
   const entry: ProgressiveEvidenceEntry = { ...entryDraft, sequence };
   if (!entry.diagnostic) input.onEvidenceEntry?.(entry);
@@ -1653,7 +1690,7 @@ function commitProgressiveResearchDelivery(input: {
       y: 720 + sequence * 80,
       width: 560,
       height: 300,
-      metadata: { deliveryId: input.deliveryId, phase: "research", researchIndex: sequence, toolName }
+      metadata: { deliveryId: input.deliveryId, phase: "research", researchIndex: sequence, toolName, ...(evidenceKey ? { evidenceKey } : {}) }
     }],
     edges: []
   };
@@ -1675,7 +1712,7 @@ function commitProgressiveFileDocumentDelivery(input: {
   const toolName = readString(payload.toolName) || readString(payload.tool);
   const documents = fileDocumentEntries(input.payload.locale, toolName, payload);
   if (!documents.length) return [];
-  const committed: Array<{ nodeId: string; title: string; path: string }> = [];
+  const committed: Array<{ nodeId: string; title: string; path: string; node?: unknown }> = [];
   for (const document of documents) {
     const sequence = input.nextSequence();
     const nodeId = stableFileDocumentNodeId(input.deliveryId, document.path);
@@ -1697,8 +1734,9 @@ function commitProgressiveFileDocumentDelivery(input: {
       },
       includeInProjectContext: false
     };
+    let committedNode: unknown;
     if (existing) {
-      input.storage.updateCanvasNode(input.projectId, nodeId, {
+      committedNode = input.storage.updateCanvasNode(input.projectId, nodeId, {
         kind: node.kind,
         title: node.title,
         content: node.content,
@@ -1710,9 +1748,9 @@ function commitProgressiveFileDocumentDelivery(input: {
         includeInProjectContext: node.includeInProjectContext
       });
     } else {
-      input.storage.createCanvasNode(input.projectId, node);
+      committedNode = input.storage.createCanvasNode(input.projectId, node);
     }
-    committed.push({ nodeId, title: document.title, path: document.path });
+    committed.push({ nodeId, title: document.title, path: document.path, node: committedNode });
   }
   return committed.map((item) => canvasDeliveryEvent("canvas_delivery_file_document_committed", input.deliveryId, input.payload.locale, item, {
     displayTitle: input.payload.locale === "zh" ? "文档节点" : "Document file"
@@ -1865,10 +1903,6 @@ function progressiveEvidenceEntry(locale: GenerateRequest["locale"], toolName: s
   return entry;
 }
 
-function hasLinkedResearchSources(entry: Pick<ProgressiveEvidenceEntry, "sources">) {
-  return entry.sources.length > 0;
-}
-
 function researchNoteMarkdown(input: ProgressiveEvidenceEntry) {
   const label = input.locale === "zh"
     ? { tool: "工具", query: "查询", url: "URL", path: "路径", command: "命令", summary: "摘要", snippet: "摘录", sources: "来源", snippets: "来源摘录" }
@@ -1939,8 +1973,8 @@ function fileDocumentEntries(locale: GenerateRequest["locale"], toolName: string
   if (toolName !== "write_file" && toolName !== "present_files") return [];
   const status = toolName === "present_files" ? "presented" : "written";
   const paths = toolName === "present_files"
-    ? readStringList(payload.filepaths)
-    : [readString(payload.path)];
+    ? readStringList(payload.filepaths ?? payload.file_paths ?? payload.paths ?? payload.files)
+    : [readString(payload.path) || readString(payload.file_path) || readString(payload.filePath) || readString(payload.filepath)];
   return uniqueStrings(paths)
     .map(normalizeOutputMarkdownPath)
     .filter((path): path is string => Boolean(path))
@@ -2047,6 +2081,19 @@ function redactSecretLikeText(value: string) {
   return value
     .replace(/\b[A-Za-z0-9_]*(?:api[_-]?key|authorization|token|password|secret|cookie)\s*[:=]\s*\S+/gi, "[redacted credential]")
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "[redacted credential]");
+}
+
+function progressiveEvidenceKey(input: Omit<ProgressiveEvidenceEntry, "sequence">) {
+  const sourceUrl = input.sources[0]?.url;
+  const key = sourceUrl || input.url || input.query || input.path || input.command;
+  return key ? `${input.toolName}:${key.trim().toLowerCase().replace(/\s+/g, " ").slice(0, 240)}` : "";
+}
+
+function hasCommittedProgressiveEvidence(storage: SQLiteStorageRepository, projectId: string, deliveryId: string, evidenceKey: string) {
+  return storage.listCanvasNodes(projectId).some((node) => {
+    const metadata = record(node.metadata);
+    return metadata.deliveryId === deliveryId && metadata.phase === "research" && metadata.evidenceKey === evidenceKey;
+  });
 }
 
 function readResearchSources(value: unknown): Array<{ title: string; url: string; snippet?: string }> {

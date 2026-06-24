@@ -6,6 +6,7 @@ import { runAgentBackendAgent } from "../../runtime/agentBackendAdapter/client.j
 import type { ChatMessage } from "../../providerRuntime.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { StreamStatus } from "../../agentRunLoop.js";
+import { applyCanvasWriteToolExposure } from "./canvasWriteScopePolicy.js";
 
 export type AgentBackendRunnerInput = {
   payload: GenerateRequest;
@@ -73,7 +74,12 @@ function allowedToolsForRequest(input: AgentBackendRunnerInput) {
   for (const tool of ["plan_clarification_submit", "plan_revision_submit", "artifact_stage"] as const) {
     if (input.payload.toolState?.[tool]) allowed.add(tool);
   }
-  if (input.payload.canvasAction?.requiresTool) allowed.add("canvas_write");
+  const exposed = applyCanvasWriteToolExposure([...allowed], {
+    progressiveCanvasDeliveryEnabled: isProgressiveMarkdownFileDelivery(input.payload),
+    canvasActionRequiresTool: input.payload.canvasAction?.requiresTool === true
+  });
+  allowed.clear();
+  for (const tool of exposed) allowed.add(tool);
   if (isProgressiveMarkdownFileDelivery(input.payload)) {
     allowed.add("write_file");
     allowed.add("present_files");

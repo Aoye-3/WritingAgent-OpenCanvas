@@ -14,6 +14,18 @@ For a stuck Plan run, verify model sync, Gateway HTTP/run status, the bridge env
 
 Repository maintenance must use the current `F:\.FinalProject` checkout and a normal branch. Do not create Git worktrees or project copies on another drive.
 
+## Progressive CanvasWrite Diagnostics
+
+Progressive long-task runs should expose all three delivery surfaces together:
+
+- `canvas_write` with `facetwrite_canvas_write_scope:"short_progress_nodes"` for short summary, overview, progress/reference, and references nodes.
+- `write_file` for the full Markdown deliverable under `/mnt/user-data/outputs/*.md`.
+- `present_files` so FacetWrite can mark the matching `file_document` node as preview-ready.
+
+Do not debug missing final documents by removing `canvas_write`; that also removes the Agent's short-node delivery path. Instead, confirm the request context includes `facetwrite_canvas_write_policy`, and inspect bridge failures for `short_progress_content_too_long`, `short_progress_long_form_title`, or `short_progress_node_kind_not_allowed`. Those failures mean the Agent tried to use CanvasWrite for long-form or file-document content and must switch to `write_file` plus `present_files`.
+
+Skill scope guard is the exception: its first pass must expose only `ask_clarification`, with no progressive delivery, file tools, evidence tools, or CanvasWrite scope. After the user answers, the resumed run restores progressive delivery and the short-node CanvasWrite scope.
+
 This historical path is kept for compatibility. The maintained runbook is now [`AGENT_RUNTIME_RUNBOOK.md`](AGENT_RUNTIME_RUNBOOK.md).
 # FacetWrite Model Config Synchronization (2026-06-11)
 
