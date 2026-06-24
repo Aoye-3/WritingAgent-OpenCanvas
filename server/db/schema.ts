@@ -614,6 +614,28 @@ export function migrateStorageSchema(db: DatabaseSync) {
       INSERT INTO schema_version (version, applied_at) VALUES (12, datetime('now'));
     `);
   }
+
+  const version13 = db.prepare(`SELECT version FROM schema_version WHERE version = 13`).get();
+  if (!version13) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_clarifications (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        question TEXT NOT NULL,
+        options_json TEXT NOT NULL,
+        resume_context_json TEXT NOT NULL,
+        selected_option_id TEXT,
+        selected_option_label TEXT,
+        answer TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_clarifications_thread_status ON agent_clarifications(thread_id, status, updated_at);
+      INSERT INTO schema_version (version, applied_at) VALUES (13, datetime('now'));
+    `);
+  }
 }
 
 function columnExists(db: DatabaseSync, table: string, column: string) {

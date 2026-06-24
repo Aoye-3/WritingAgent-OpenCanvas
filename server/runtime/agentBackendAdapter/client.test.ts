@@ -205,6 +205,119 @@ test("reads AgentBackend stream text and task events", async () => {
   assert.equal(runHeaders.get("X-CSRF-Token"), "csrf");
 });
 
+test("surfaces AgentBackend heartbeat comments as runtime liveness status", async () => {
+  const statuses: string[] = [];
+  const signals: string[] = [];
+  const result = await runWithBody(": heartbeat\n\n", {
+    onStatus: (status) => statuses.push(status.label),
+    onRuntimeSignal: (signal) => signals.push(signal.type)
+  });
+
+  assert.equal(result.events.length, 0);
+  assert.deepEqual(signals, ["heartbeat"]);
+  assert.ok(statuses.includes("Agent Runtime is still working..."));
+});
+
+test("does not let heartbeat overwrite an Agent clarification waiting state", async () => {
+  const statuses: string[] = [];
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_clarify","name":"ask_clarification","args":{"question":"Which scope?","options":[{"id":"focused","label":"Focused"},{"id":"broad","label":"Broad"}]}}]}]\n\n',
+    ': heartbeat\n\n'
+  ].join("");
+
+  const result = await runWithBody(body, {
+    onStatus: (status) => statuses.push(status.label)
+  });
+
+  assert.equal(result.events.some((event) => event.eventType === "agent_backend_agent_clarification_requested"), true);
+  assert.equal(statuses.includes("Agent Runtime is still working..."), false);
+});
+
+test("surfaces Runtime interrupt values as waiting status without tool events", async () => {
+  const statuses: string[] = [];
+  const signals: string[] = [];
+  const body = [
+    'event: values\ndata: {"__interrupt__":[{"value":"Need a choice"}]}\n\n',
+    ': heartbeat\n\n'
+  ].join("");
+
+  const result = await runWithBody(body, {
+    onStatus: (status) => statuses.push(status.label),
+    onRuntimeSignal: (signal) => signals.push(signal.type)
+  });
+
+  assert.equal(result.events.length, 0);
+  assert.deepEqual(signals, ["waiting_for_user"]);
+  assert.ok(statuses.includes("Waiting for your clarification choice."));
+  assert.equal(statuses.includes("Agent Runtime is still working..."), false);
+});
+
+test("surfaces llm_retry custom events without creating tool events", async () => {
+  const statuses: string[] = [];
+  const signals: string[] = [];
+  const body = [
+    'event: custom\ndata: {"type":"llm_retry","attempt":2,"max_attempts":3,"delay_seconds":600,"status_code":429}\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"Recovered"}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body, {
+    onStatus: (status) => statuses.push(status.label),
+    onRuntimeSignal: (signal) => signals.push(signal.type)
+  });
+
+  assert.equal(result.text, "Recovered");
+  assert.equal(result.events.length, 0);
+  assert.deepEqual(signals, ["llm_retry"]);
+  assert.ok(statuses.some((label) => label.includes("Model request retry 2/3")));
+  assert.ok(statuses.some((label) => label.includes("600s")));
+});
+
+test("surfaces LLM provider lifecycle custom events without creating tool events", async () => {
+  const statuses: string[] = [];
+  const signals: string[] = [];
+  const body = [
+    'event: custom\ndata: {"type":"llm_call_start","attempt":1,"max_attempts":3,"phase":"provider_call"}\n\n',
+    'event: custom\ndata: {"type":"llm_call_end","attempt":1,"max_attempts":3,"elapsed_ms":1200,"phase":"provider_call"}\n\n',
+    'event: custom\ndata: {"type":"synthesis_gate","phase":"budget_synthesis","reason":"model returned tools after budget synthesis notice","second_handler":true}\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"Done"}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body, {
+    onStatus: (status) => statuses.push(status.label),
+    onRuntimeSignal: (signal) => signals.push(signal.type)
+  });
+
+  assert.equal(result.text, "Done");
+  assert.equal(result.events.length, 0);
+  assert.deepEqual(signals, ["llm_call_start", "llm_call_end", "synthesis_gate"]);
+  assert.ok(statuses.includes("Waiting for model response..."));
+  assert.ok(statuses.includes("Model response received."));
+  assert.ok(statuses.includes("Forcing final synthesis..."));
+});
+
+test("surfaces stream chunk timeout retry metadata without creating tool events", async () => {
+  const statuses: string[] = [];
+  const signals: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+  const body = [
+    'event: custom\ndata: {"type":"llm_call_error","attempt":1,"max_attempts":3,"phase":"provider_call","reason":"stream_chunk_timeout","error_type":"StreamChunkTimeoutError","model":"deepseek-v4-flash","provider_class":"PatchedChatDeepSeek","base_url_host":"api.siliconflow.cn","timeout_s":180,"stream_chunk_timeout_s":45,"max_retries":2}\n\n',
+    'event: custom\ndata: {"type":"llm_retry","attempt":1,"max_attempts":3,"wait_ms":1000,"reason":"stream_chunk_timeout","model":"deepseek-v4-flash","provider_class":"PatchedChatDeepSeek","base_url_host":"api.siliconflow.cn","timeout_s":180,"stream_chunk_timeout_s":45,"max_retries":2}\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"Recovered"}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body, {
+    onStatus: (status) => statuses.push(status.label),
+    onRuntimeSignal: (signal) => signals.push(signal)
+  });
+
+  assert.equal(result.text, "Recovered");
+  assert.equal(result.events.length, 0);
+  assert.deepEqual(signals.map((signal) => signal.type), ["llm_call_error", "llm_retry"]);
+  assert.ok(statuses.includes("Model stream produced no content before timeout."));
+  assert.ok(statuses.some((label) => label.includes("Model stream produced no content; retry 1/3.")));
+  assert.equal(signals[0].payload?.stream_chunk_timeout_s, 45);
+  assert.equal(signals[1].payload?.timeout_s, 180);
+});
+
 test("maps AgentBackend tool calls and results into FacetWrite tool events", async () => {
   const body = [
     'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_1","name":"web_search","args":{"query":"OpenAI official homepage"}}]}]\n\n',
@@ -254,6 +367,53 @@ test("maps AgentBackend tool calls and results into FacetWrite tool events", asy
   assert.equal(result.events[1]?.payload?.toolCallId, "call_1");
   assert.deepEqual(result.events[1]?.payload?.sources, [{ title: "OpenAI", url: "https://openai.com", snippet: "AI research and products" }]);
   assert.equal(result.text, "Search complete");
+});
+
+test("treats AgentBackend end event as business completion even when stream stays open", async () => {
+  let canceled = false;
+  const body = [
+    'event: values\ndata: {"messages":[{"type":"human","content":"Say hello"},{"type":"ai","content":"Hello from end"}]}\n\n',
+    'event: end\ndata: null\n\n',
+    ': heartbeat\n\n'
+  ].join("");
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+    },
+    cancel() {
+      canceled = true;
+    }
+  });
+  const fetchImpl = async (url: string | URL | Request) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) return Response.json({ needs_setup: false });
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, { headers });
+    }
+    return new Response(stream, { status: 200 });
+  };
+
+  const result = await runAgentBackendAgent({
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    config: {
+      enabled: true,
+      baseUrl: "http://AgentBackend.local",
+      assistantId: "lead_agent",
+      auth: { email: "admin@example.com", password: "strong-password", autoSetup: false, timeoutMs: 5000 }
+    },
+    threadId: "thread_1",
+    agentCard: getAgentCard("summary"),
+    messages: [{ role: "user", content: "Say hello" }],
+    prompt: "Say hello",
+    fetchImpl
+  });
+
+  assert.equal(result.text, "Hello from end");
+  assert.equal(canceled, true);
 });
 
 test("maps web fetch and read file tool results into sanitized progress payloads", async () => {
@@ -987,7 +1147,15 @@ test("maps committed artifacts as a separate structured event", async () => {
   assert.ok(result.events.some((event) => event.eventType === "agent_backend_artifact_committed"));
 });
 
-async function runWithBody(body: string) {
+type RunWithBodyCallbacks = {
+  onReasoningToken?: Parameters<typeof runAgentBackendAgent>[0]["onReasoningToken"];
+  onRuntimeSignal?: Parameters<typeof runAgentBackendAgent>[0]["onRuntimeSignal"];
+  onStatus?: Parameters<typeof runAgentBackendAgent>[0]["onStatus"];
+  onToken?: Parameters<typeof runAgentBackendAgent>[0]["onToken"];
+  onToolEvent?: Parameters<typeof runAgentBackendAgent>[0]["onToolEvent"];
+};
+
+async function runWithBody(body: string, callbacks: RunWithBodyCallbacks = {}) {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(new TextEncoder().encode(body));
@@ -1018,6 +1186,7 @@ async function runWithBody(body: string) {
     agentCard: getAgentCard("summary"),
     messages: [{ role: "user", content: "Plan research" }],
     prompt: "Plan research",
-    fetchImpl
+    fetchImpl,
+    ...callbacks
   });
 }

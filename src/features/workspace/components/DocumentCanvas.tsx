@@ -363,6 +363,18 @@ function DocumentCanvasInner({
   }, [selectedEdgeId, selectedNodeIds, selectedObjectIds]);
 
   useEffect(() => {
+    const handleUndoShortcut = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "z" || event.altKey || event.shiftKey || !(event.ctrlKey || event.metaKey)) return;
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || (event.target instanceof HTMLElement && event.target.isContentEditable)) return;
+      if (!canUndo) return;
+      event.preventDefault();
+      void onUndo();
+    };
+    window.addEventListener("keydown", handleUndoShortcut);
+    return () => window.removeEventListener("keydown", handleUndoShortcut);
+  }, [canUndo, onUndo]);
+
+  useEffect(() => {
     const isEditable = (target: EventTarget | null) => target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable);
     const copy = (event: ClipboardEvent) => {
       if (isEditable(event.target)) return;

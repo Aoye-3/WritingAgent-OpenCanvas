@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, LightbulbIcon, ModelConfigIcon, SearchIcon, SendIcon, StopIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
-import type { AgentCard, CanvasNode, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
+import type { AgentCard, AgentClarification, CanvasNode, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
 import type { CanvasNodePatch } from "../../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
 import { useI18n } from "../../i18n/I18nProvider";
@@ -47,6 +47,7 @@ type AICollaborationDrawerProps = {
   agentCards: AgentCard[];
   canvasWriteRequests: CanvasWriteRequest[];
   canvasWriteSuggestions: CanvasWriteSuggestion[];
+  agentClarifications: AgentClarification[];
   canvasNodes: CanvasNode[];
   collapsed: boolean;
   inputDraft: string;
@@ -112,6 +113,7 @@ export function AICollaborationDrawer({
   agentCards,
   canvasWriteRequests,
   canvasWriteSuggestions,
+  agentClarifications,
   collapsed,
   inputDraft,
   mindChainContext,
@@ -172,7 +174,7 @@ export function AICollaborationDrawer({
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [contextResetNotice, setContextResetNotice] = useState(false);
   const [clarificationBusy, setClarificationBusy] = useState(false);
-  const [locallyAnsweredAgentClarificationIds, setLocallyAnsweredAgentClarificationIds] = useState<string[]>([]);
+  const [submittedAgentClarificationKeys, setSubmittedAgentClarificationKeys] = useState<Set<string>>(() => new Set());
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const drawerTransition = reduceMotion ? { duration: 0 } : { type: "spring" as const, stiffness: 300, damping: 32 };
 
@@ -183,7 +185,23 @@ export function AICollaborationDrawer({
   const hasWriteProposal = Boolean(writeDraft || pendingWriteRequest || annotations.length);
   const timeline = useMemo(() => buildPlanTimeline(messages, plans), [messages, plans]);
   const pendingClarificationPlan = plans.find((plan) => plan.status === "awaiting_user" && plan.clarification?.status === "pending");
-  const pendingAgentClarification = useMemo(() => latestPendingAgentClarification(messages, locallyAnsweredAgentClarificationIds), [locallyAnsweredAgentClarificationIds, messages]);
+  const answeredAgentClarificationKeys = useMemo(
+    () => agentClarifications.reduce((keys, clarification) => {
+      if (clarification.status === "answered") {
+        for (const key of agentClarificationAnsweredKeys(clarification)) keys.add(key);
+      }
+      return keys;
+    }, new Set(submittedAgentClarificationKeys)),
+    [agentClarifications, submittedAgentClarificationKeys]
+  );
+  const pendingAgentClarification = useMemo(
+    () => agentClarificationFromRecord(agentClarifications.find((clarification) => clarification.status === "pending" && !isAgentClarificationRecordAnswered(clarification, answeredAgentClarificationKeys)), answeredAgentClarificationKeys) ?? latestPendingAgentClarification(messages, answeredAgentClarificationKeys),
+    [agentClarifications, answeredAgentClarificationKeys, messages]
+  );
+  const missingAgentClarificationPayload = useMemo(
+    () => !pendingAgentClarification && hasUnresolvedAgentClarificationTrace(messages, answeredAgentClarificationKeys),
+    [answeredAgentClarificationKeys, messages, pendingAgentClarification]
+  );
   const budgetLimitFailure = useMemo(() => latestBudgetLimitFailure(messages), [messages]);
 
   useEffect(() => {
@@ -209,7 +227,7 @@ export function AICollaborationDrawer({
   }, [messages, isSending]);
 
   useEffect(() => setContextResetNotice(false), [currentThreadId]);
-  useEffect(() => setLocallyAnsweredAgentClarificationIds([]), [currentThreadId]);
+  useEffect(() => setSubmittedAgentClarificationKeys(new Set()), [currentThreadId]);
 
   useEffect(() => {
     if (skillPickerOpen) onRequestSkillCatalog();
@@ -264,6 +282,7 @@ export function AICollaborationDrawer({
     event.preventDefault();
     const text = input.trim();
     if (!text) return;
+    if (pendingAgentClarification) return;
     setInput("");
     if (isWriteConfirmation(text)) {
       if (pendingWriteSuggestion) {
@@ -349,6 +368,12 @@ export function AICollaborationDrawer({
       : "Continue the previous task using the existing clarification choice, skills, and Canvas progress. Do not repeat completed research; prioritize synthesis and complete the final content.");
   };
 
+  const fillClarificationRecovery = () => {
+    setInput(locale === "zh"
+      ? "\u4e0a\u4e00\u8f6e\u5728\u7b49\u5f85\u8865\u5145\u4fe1\u606f\uff0c\u4f46\u6ca1\u6709\u53ef\u9009\u9009\u9879\u53ef\u7528\u3002\u8bf7\u57fa\u4e8e\u539f\u59cb\u4efb\u52a1\u7ee7\u7eed\uff0c\u5982\u679c\u8fd8\u9700\u8981\u786e\u8ba4\uff0c\u8bf7\u91cd\u65b0\u7ed9\u51fa\u5b8c\u6574\u9009\u9879\u3002"
+      : "The last run is waiting for clarification, but no actionable options are available. Continue the original task, or ask again with complete choices if confirmation is still required.");
+  };
+
   const answerClarification = async (plan: PlanRun, answer: { optionId?: string; customAnswer?: string }) => {
     setClarificationBusy(true);
     try {
@@ -377,19 +402,24 @@ export function AICollaborationDrawer({
     const resume = clarification.resumeContext;
     const transientSkillRefs = resume?.transientSkillRefs.length ? resume.transientSkillRefs : enabledSkillRefs;
     const resumeDisabledSkillRefs = resume?.disabledSkillRefs.length ? resume.disabledSkillRefs : disabledSkillRefs;
-    const resumeRuntimeBudgetProfile = resume?.runtimeBudgetProfile ?? runtimeBudgetChoice ?? runtimeBudgetProfile ?? "medium";
+    const resumeRuntimeContext = resume
+      ? {
+        runtimeBudgetProfile: resume.runtimeBudgetProfile ?? runtimeBudgetChoice ?? runtimeBudgetProfile ?? "medium",
+        ...(Object.keys(resume.canvas).length ? { canvas: resume.canvas } : {})
+      }
+      : { runtimeBudgetProfile: runtimeBudgetChoice ?? runtimeBudgetProfile ?? "medium" };
     const selectedText = `${option.label}${option.detail ? ` - ${option.detail}` : ""}`;
     const instructionText = resume?.originalInstruction
       ? `${resume.originalInstruction}\n\nSelected clarification: ${selectedText}`
       : option.label;
+    const submittedKeys = agentClarificationSubmittedKeys(clarification);
     setClarificationBusy(true);
+    setSubmittedAgentClarificationKeys((current) => new Set([...current, ...submittedKeys]));
     try {
-      setLocallyAnsweredAgentClarificationIds((current) => current.includes(clarification.clarificationId) ? current : [...current, clarification.clarificationId]);
       await onSend(instructionText, undefined, {
         ...(transientSkillRefs.length ? { transientSkillRefs } : {}),
         ...(resumeDisabledSkillRefs.length ? { disabledSkillRefs: resumeDisabledSkillRefs } : {}),
-        runtimeBudgetProfile: resumeRuntimeBudgetProfile,
-        ...(resume?.canvas && Object.keys(resume.canvas).length ? { canvas: resume.canvas } : {}),
+        ...resumeRuntimeContext,
         agentClarification: {
           clarificationId: clarification.clarificationId,
           question: clarification.question,
@@ -399,6 +429,13 @@ export function AICollaborationDrawer({
           ...(resume?.originalInstruction ? { originalInstruction: resume.originalInstruction } : {})
         }
       });
+    } catch (error) {
+      setSubmittedAgentClarificationKeys((current) => {
+        const next = new Set(current);
+        for (const key of submittedKeys) next.delete(key);
+        return next;
+      });
+      throw error;
     } finally {
       setClarificationBusy(false);
     }
@@ -684,7 +721,15 @@ export function AICollaborationDrawer({
             </button>
           </div>
         ) : null}
-        {budgetLimitFailure && !pendingClarificationPlan && !pendingAgentClarification ? (
+        {missingAgentClarificationPayload && !pendingClarificationPlan ? (
+          <div className="budget-continuation-chip">
+            <span>{locale === "zh" ? "\u7b49\u5f85\u8865\u5145\u4fe1\u606f\uff0c\u4f46\u7f3a\u5c11\u53ef\u64cd\u4f5c\u9009\u9879\u3002" : "Clarification is waiting, but no choices were saved."}</span>
+            <button type="button" onClick={fillClarificationRecovery}>
+              {locale === "zh" ? "\u586b\u5165\u6062\u590d" : "Draft recovery"}
+            </button>
+          </div>
+        ) : null}
+        {budgetLimitFailure && !pendingClarificationPlan && !pendingAgentClarification && !missingAgentClarificationPayload ? (
           <div className="budget-continuation-chip">
             <span>{locale === "zh" ? "上次运行达到步骤预算，可继续完成。" : "The last run reached its step budget."}</span>
             <button type="button" onClick={fillBudgetContinuation}>
@@ -904,7 +949,7 @@ function latestBudgetLimitFailure(messages: CollaborationMessage[]) {
   return /Recursion limit of \d+ reached|GRAPH_RECURSION_LIMIT/i.test(haystack);
 }
 
-type AgentClarificationPrompt = {
+export type AgentClarificationPrompt = {
   clarificationId: string;
   question: string;
   options: Array<{ id: string; label: string; detail: string; recommended: boolean }>;
@@ -955,23 +1000,70 @@ function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "
   );
 }
 
-function latestPendingAgentClarification(messages: CollaborationMessage[], ignoredClarificationIds: string[]): AgentClarificationPrompt | undefined {
-  const ignored = new Set(ignoredClarificationIds);
-  const events = messages.flatMap((message) => message.timeline ?? []);
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
+export function agentClarificationFromRecord(clarification?: AgentClarification, answeredKeys: ReadonlySet<string> = new Set()): AgentClarificationPrompt | undefined {
+  if (!clarification || clarification.status !== "pending" || clarification.options.length < 2) return undefined;
+  if (isAgentClarificationRecordAnswered(clarification, answeredKeys)) return undefined;
+  const resumeContext = readAgentClarificationResumeContext(clarification.resumeContext);
+  return {
+    clarificationId: clarification.id,
+    question: clarification.question,
+    options: clarification.options,
+    ...(resumeContext ? { resumeContext } : {})
+  };
+}
+
+export function latestPendingAgentClarification(messages: CollaborationMessage[], answeredKeys: ReadonlySet<string> = new Set()): AgentClarificationPrompt | undefined {
+  let latestPrompt: AgentClarificationPrompt | undefined;
+  for (const event of timelineEventsAfterLastUserMessage(messages)) {
+    if (latestPrompt && event.status !== "waiting") latestPrompt = undefined;
     const payload = event?.payload;
     if (!payload) continue;
     const eventType = readString(payload.eventType) || readString(payload.type);
-    if (eventType !== "agent_backend_agent_clarification_requested" && eventType !== "agent_clarification_requested") continue;
+    if (eventType !== "agent_backend_agent_clarification_requested" && eventType !== "agent_clarification_requested") {
+      continue;
+    }
     const clarificationId = readString(payload.toolCallId) || readString(payload.clarificationId) || event.id;
-    if (!clarificationId || ignored.has(clarificationId)) continue;
+    if (!clarificationId) continue;
     const question = readString(payload.question);
     const options = readClarificationOptions(payload.options);
     const resumeContext = readAgentClarificationResumeContext(payload.resumeContext);
-    if (question && options.length >= 2) return { clarificationId, question, options, ...(resumeContext ? { resumeContext } : {}) };
+    if (question && options.length >= 2) {
+      const prompt = { clarificationId, question, options, ...(resumeContext ? { resumeContext } : {}) };
+      latestPrompt = isAgentClarificationPromptAnswered(prompt, answeredKeys) ? undefined : prompt;
+    } else {
+      latestPrompt = undefined;
+    }
   }
-  return undefined;
+  return latestPrompt;
+}
+
+export function hasUnresolvedAgentClarificationTrace(messages: CollaborationMessage[], answeredKeys: ReadonlySet<string> = new Set()) {
+  let unresolved = false;
+  for (const event of timelineEventsAfterLastUserMessage(messages)) {
+    if (event.status !== "waiting") {
+      if (unresolved) unresolved = false;
+      continue;
+    }
+    const payload = readRecord(event.payload);
+    const eventType = readString(payload.eventType) || readString(payload.type);
+    if (eventType !== "agent_backend_agent_clarification_requested" && eventType !== "agent_clarification_requested") continue;
+    const clarificationId = readString(payload.toolCallId) || readString(payload.clarificationId) || event.id;
+    const question = readString(payload.question);
+    const options = readClarificationOptions(payload.options);
+    unresolved = Boolean(question && options.length < 2 && !agentClarificationTraceKeys(clarificationId, question, options).some((key) => answeredKeys.has(key)));
+  }
+  return unresolved;
+}
+
+function timelineEventsAfterLastUserMessage(messages: CollaborationMessage[]) {
+  let startIndex = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "user") {
+      startIndex = index + 1;
+      break;
+    }
+  }
+  return messages.slice(startIndex).flatMap((message) => message.timeline ?? []);
 }
 
 function readClarificationOptions(value: unknown): AgentClarificationPrompt["options"] {
@@ -992,6 +1084,58 @@ function readClarificationOptions(value: unknown): AgentClarificationPrompt["opt
 
 function readString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+export function agentClarificationRecordKeys(clarification: AgentClarification) {
+  return agentClarificationKeys(clarification.id, clarification.question, clarification.options);
+}
+
+export function agentClarificationAnsweredKeys(clarification: AgentClarification) {
+  return agentClarificationTraceKeys(clarification.id, clarification.question, clarification.options);
+}
+
+function agentClarificationPromptKeys(clarification: AgentClarificationPrompt) {
+  return agentClarificationKeys(clarification.clarificationId, clarification.question, clarification.options);
+}
+
+function agentClarificationSubmittedKeys(clarification: AgentClarificationPrompt) {
+  return agentClarificationTraceKeys(clarification.clarificationId, clarification.question, clarification.options);
+}
+
+function isAgentClarificationRecordAnswered(clarification: AgentClarification, answeredKeys: ReadonlySet<string>) {
+  return agentClarificationRecordKeys(clarification).some((key) => answeredKeys.has(key));
+}
+
+function isAgentClarificationPromptAnswered(clarification: AgentClarificationPrompt, answeredKeys: ReadonlySet<string>) {
+  return agentClarificationPromptKeys(clarification).some((key) => answeredKeys.has(key));
+}
+
+function agentClarificationKeys(id: string, question: string, options: Array<{ id: string; label: string }>) {
+  const keys = [];
+  const normalizedId = id.trim();
+  if (normalizedId) keys.push(`id:${normalizedId}`);
+  const fingerprint = agentClarificationFingerprint(question, options);
+  if (fingerprint) keys.push(`fingerprint:${fingerprint}`);
+  return keys;
+}
+
+function agentClarificationTraceKeys(id: string, question: string, options: Array<{ id: string; label: string }>) {
+  const keys = agentClarificationKeys(id, question, options);
+  const questionKey = agentClarificationQuestionKey(question);
+  if (questionKey) keys.push(questionKey);
+  return keys;
+}
+
+function agentClarificationFingerprint(question: string, options: Array<{ id: string; label: string }>) {
+  const normalizedQuestion = question.trim().replace(/\s+/g, " ").toLowerCase();
+  if (!normalizedQuestion) return "";
+  const optionSignature = options.map((option) => `${option.id.trim().toLowerCase()}:${option.label.trim().toLowerCase()}`).join("|");
+  return `${normalizedQuestion}|${optionSignature}`;
+}
+
+function agentClarificationQuestionKey(question: string) {
+  const normalizedQuestion = question.trim().replace(/\s+/g, " ").toLowerCase();
+  return normalizedQuestion ? `question:${normalizedQuestion}` : "";
 }
 
 function readAgentClarificationResumeContext(value: unknown): AgentClarificationResumeContext | undefined {

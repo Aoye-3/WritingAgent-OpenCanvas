@@ -5,6 +5,7 @@ import type { ConversationModelRuntimeSettings } from "../agentCards.js";
 import type { GenerateRequest } from "../contracts/generation.js";
 import type { ChatMessage } from "../providerRuntime.js";
 import type { ToolEventRecord } from "../toolRuntime.js";
+import type { AgentBackendRuntimeSignal } from "./agentBackendAdapter/client.js";
 
 export type AgentRuntimeRunInput = {
   payload: GenerateRequest;
@@ -20,6 +21,7 @@ export type AgentRuntimeRunInput = {
   onToken?: (token: string) => void;
   onReasoningToken?: (token: string) => void;
   onStatus?: (status: StreamStatus) => void;
+  onRuntimeSignal?: (signal: AgentBackendRuntimeSignal) => void;
 };
 
 export type AgentRuntimeRunResult = {

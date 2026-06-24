@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import urlparse
 
 from langchain.chat_models import BaseChatModel
 
@@ -45,6 +46,38 @@ def _enable_stream_usage_by_default(model_use_path: str, model_settings_from_con
         return
     if "base_url" in model_settings_from_config or "openai_api_base" in model_settings_from_config:
         model_settings_from_config["stream_usage"] = True
+
+
+def _safe_model_debug_metadata(model: BaseChatModel) -> dict:
+    metadata = {"provider_class": model.__class__.__name__}
+    model_name = _safe_string_attr(model, "model_name") or _safe_string_attr(model, "model")
+    if model_name:
+        metadata["model"] = model_name
+    base_url = _safe_string_attr(model, "openai_api_base") or _safe_string_attr(model, "api_base") or _safe_string_attr(model, "base_url")
+    if base_url:
+        parsed = urlparse(base_url)
+        metadata["base_url_host"] = parsed.netloc or parsed.path.split("/", 1)[0]
+    for source, target in (
+        ("timeout", "timeout_s"),
+        ("request_timeout", "timeout_s"),
+        ("stream_chunk_timeout", "stream_chunk_timeout_s"),
+        ("max_retries", "max_retries"),
+    ):
+        value = getattr(model, source, None)
+        if isinstance(value, (int, float)) and target not in metadata:
+            metadata[target] = value
+    return metadata
+
+
+def _safe_string_attr(value: object, attr: str) -> str:
+    raw = getattr(value, attr, None)
+    if raw is None or hasattr(raw, "get_secret_value"):
+        return ""
+    text = str(raw).strip()
+    lowered = text.lower()
+    if any(marker in lowered for marker in ("api_key", "apikey", "authorization", "token", "password", "secret")):
+        return ""
+    return text
 
 
 def create_chat_model(name: str | None = None, thinking_enabled: bool = False, *, app_config: AppConfig | None = None, **kwargs) -> BaseChatModel:
@@ -148,6 +181,7 @@ def create_chat_model(name: str | None = None, thinking_enabled: bool = False, *
             model_settings_from_config["stream_usage"] = True
 
     model_instance = model_class(**kwargs, **model_settings_from_config)
+    logger.info("Created chat model with effective timeout metadata: %s", _safe_model_debug_metadata(model_instance))
 
     callbacks = build_tracing_callbacks()
     if callbacks:

@@ -215,6 +215,23 @@ export type StoredToolEvent = {
   createdAt: string;
 };
 
+export type AgentClarificationOption = { id: string; label: string; detail: string; recommended: boolean };
+export type AgentClarificationStatus = "pending" | "answered";
+export type StoredAgentClarification = {
+  id: string;
+  threadId: string;
+  runId: string;
+  status: AgentClarificationStatus;
+  question: string;
+  options: AgentClarificationOption[];
+  resumeContext: JsonValue;
+  selectedOptionId?: string;
+  selectedOptionLabel?: string;
+  answer?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CanvasNodeKind = "document" | "note" | "reference" | "role" | "plan" | "file_document" | "clarification";
 export type CanvasWriteOperation = "create" | "replace" | "append" | "replace_range" | "delete";
 export type CanvasWriteRequestStatus = "pending" | "approved" | "rejected" | "stale";

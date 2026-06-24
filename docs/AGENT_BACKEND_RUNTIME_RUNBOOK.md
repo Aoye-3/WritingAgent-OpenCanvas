@@ -14,6 +14,21 @@ For a stuck Plan run, verify model sync, Gateway HTTP/run status, the bridge env
 
 Repository maintenance must use the current `F:\.FinalProject` checkout and a normal branch. Do not create Git worktrees or project copies on another drive.
 
+## Agent Clarification Stall Diagnostics
+
+Agent Runtime clarification is a durable conversation state, not just a timeline rendering side effect. A valid `ask_clarification` event with no final deliverable should leave:
+
+- a `runs.status` value of `waiting` with finish reason `clarification_required`;
+- one pending row in `agent_clarifications` for the Thread/run/question;
+- a structured `agent_backend_agent_clarification_requested` tool event for audit and timeline fallback;
+- no final `run_completed` timeline event unless final assistant content or a final structured deliverable exists.
+
+If the UI trace says clarification is waiting but no option card appears, inspect `agent_clarifications` before inspecting frontend state. A pending row with 2-3 options should render the composer card even when Runtime reused a previous `toolCallId`. Do not reintroduce frontend-local "already answered" filtering by raw `toolCallId`; use the persisted `pending`/`answered` status and question-specific stable id instead.
+
+If no pending row exists, verify that the Runtime payload has `type:"agent_clarification_requested"`, a non-empty `question`, and 2-3 structured `options`. Invalid payloads should surface as diagnostics, not hidden buttons. A waiting trace without an actionable payload should show a recovery draft affordance so the user is not trapped in a dead composer state.
+
+When a clarification answer resumes a task, confirm `requestContext.agentClarification` includes the stored clarification id and selected option, and that the next runtime request restores the original instruction, transient Skills, disabled Skills, runtime budget, and Canvas workflow from `resumeContext`. For long Skill tasks, the resumed run should re-enter progressive Canvas delivery and emit/update progress, outline, or body-draft nodes before finalization when evidence tools run.
+
 ## Progressive CanvasWrite Diagnostics
 
 Progressive long-task runs should expose all three delivery surfaces together:

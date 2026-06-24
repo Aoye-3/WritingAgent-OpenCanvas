@@ -1,5 +1,5 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
-import type { AgentCard, CanvasNode, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
+import type { AgentCard, AgentClarification, CanvasNode, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
 import type { CanvasNodePatch } from "../../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
 import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain";
@@ -12,6 +12,7 @@ type AICollaborationPanelProps = {
   agentCards: AgentCard[];
   canvasWriteRequests: CanvasWriteRequest[];
   canvasWriteSuggestions: CanvasWriteSuggestion[];
+  agentClarifications: AgentClarification[];
   canvasNodes: CanvasNode[];
   collapsed: boolean;
   inputDraft: string;

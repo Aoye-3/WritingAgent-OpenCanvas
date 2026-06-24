@@ -9,6 +9,7 @@ import time
 from collections.abc import Awaitable, Callable
 from email.utils import parsedate_to_datetime
 from typing import Any, override
+from urllib.parse import urlparse
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
@@ -147,6 +148,8 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
             return False, "auth"
 
         exc_name = exc.__class__.__name__
+        if exc_name == "StreamChunkTimeoutError" or "stream_chunk_timeout" in lowered or "no streaming chunk received" in lowered:
+            return True, "stream_chunk_timeout"
         if exc_name in {
             "APITimeoutError",
             "APIConnectionError",
@@ -171,7 +174,7 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
 
     def _build_retry_message(self, attempt: int, wait_ms: int, reason: str) -> str:
         seconds = max(1, round(wait_ms / 1000))
-        reason_text = "provider is busy" if reason == "busy" else "provider request failed temporarily"
+        reason_text = "model stream produced no content" if reason == "stream_chunk_timeout" else "provider is busy" if reason == "busy" else "provider request failed temporarily"
         return f"LLM request retry {attempt}/{self.retry_max_attempts}: {reason_text}. Retrying in {seconds}s."
 
     def _build_circuit_breaker_message(self) -> str:
@@ -183,27 +186,46 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
             return "The configured LLM provider rejected the request because the account is out of quota, billing is unavailable, or usage is restricted. Please fix the provider account and try again."
         if reason == "auth":
             return "The configured LLM provider rejected the request because authentication or access is invalid. Please check the provider credentials and try again."
-        if reason in {"busy", "transient"}:
+        if reason in {"busy", "transient", "stream_chunk_timeout"}:
             return "The configured LLM provider is temporarily unavailable after multiple retries. Please wait a moment and continue the conversation."
         return f"LLM request failed: {detail}"
 
-    def _emit_retry_event(self, attempt: int, wait_ms: int, reason: str) -> None:
+    def _emit_retry_event(self, attempt: int, wait_ms: int, reason: str, request: ModelRequest | None = None) -> None:
+        payload = {
+            "type": "llm_retry",
+            "attempt": attempt,
+            "max_attempts": self.retry_max_attempts,
+            "wait_ms": wait_ms,
+            "reason": reason,
+            "message": self._build_retry_message(attempt, wait_ms, reason),
+            **_safe_model_metadata(request),
+        }
+        self._emit_runtime_event(payload, "llm_retry")
+
+    def _emit_model_event(self, event_type: str, *, attempt: int, request: ModelRequest | None = None, elapsed_ms: int | None = None, reason: str | None = None, error_type: str | None = None) -> None:
+        payload: dict[str, Any] = {
+            "type": event_type,
+            "phase": "provider_call",
+            "attempt": attempt,
+            "max_attempts": self.retry_max_attempts,
+            **_safe_model_metadata(request),
+        }
+        if elapsed_ms is not None:
+            payload["elapsed_ms"] = elapsed_ms
+        if reason:
+            payload["reason"] = reason
+        if error_type:
+            payload["error_type"] = error_type
+        self._emit_runtime_event(payload, event_type)
+
+    def _emit_runtime_event(self, payload: dict[str, Any], event_name: str) -> None:
         try:
             from langgraph.config import get_stream_writer
 
             writer = get_stream_writer()
-            writer(
-                {
-                    "type": "llm_retry",
-                    "attempt": attempt,
-                    "max_attempts": self.retry_max_attempts,
-                    "wait_ms": wait_ms,
-                    "reason": reason,
-                    "message": self._build_retry_message(attempt, wait_ms, reason),
-                }
-            )
+            writer(payload)
         except Exception:
-            logger.debug("Failed to emit llm_retry event", exc_info=True)
+            logger.debug("Failed to emit %s event", event_name, exc_info=True)
 
     @override
     def wrap_model_call(
@@ -216,8 +238,11 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
 
         attempt = 1
         while True:
+            started_at = time.monotonic()
+            self._emit_model_event("llm_call_start", attempt=attempt, request=request)
             try:
                 response = handler(request)
+                self._emit_model_event("llm_call_end", attempt=attempt, request=request, elapsed_ms=int((time.monotonic() - started_at) * 1000))
                 self._record_success()
                 return response
             except GraphBubbleUp:
@@ -228,6 +253,14 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
                 raise
             except Exception as exc:
                 retriable, reason = self._classify_error(exc)
+                self._emit_model_event(
+                    "llm_call_error",
+                    attempt=attempt,
+                    request=request,
+                    elapsed_ms=int((time.monotonic() - started_at) * 1000),
+                    reason=reason,
+                    error_type=exc.__class__.__name__,
+                )
                 if retriable and attempt < self.retry_max_attempts:
                     wait_ms = self._build_retry_delay_ms(attempt, exc)
                     logger.warning(
@@ -237,7 +270,7 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
                         wait_ms,
                         _extract_error_detail(exc),
                     )
-                    self._emit_retry_event(attempt, wait_ms, reason)
+                    self._emit_retry_event(attempt, wait_ms, reason, request)
                     time.sleep(wait_ms / 1000)
                     attempt += 1
                     continue
@@ -262,8 +295,11 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
 
         attempt = 1
         while True:
+            started_at = time.monotonic()
+            self._emit_model_event("llm_call_start", attempt=attempt, request=request)
             try:
                 response = await handler(request)
+                self._emit_model_event("llm_call_end", attempt=attempt, request=request, elapsed_ms=int((time.monotonic() - started_at) * 1000))
                 self._record_success()
                 return response
             except GraphBubbleUp:
@@ -274,6 +310,14 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
                 raise
             except Exception as exc:
                 retriable, reason = self._classify_error(exc)
+                self._emit_model_event(
+                    "llm_call_error",
+                    attempt=attempt,
+                    request=request,
+                    elapsed_ms=int((time.monotonic() - started_at) * 1000),
+                    reason=reason,
+                    error_type=exc.__class__.__name__,
+                )
                 if retriable and attempt < self.retry_max_attempts:
                     wait_ms = self._build_retry_delay_ms(attempt, exc)
                     logger.warning(
@@ -283,7 +327,7 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
                         wait_ms,
                         _extract_error_detail(exc),
                     )
-                    self._emit_retry_event(attempt, wait_ms, reason)
+                    self._emit_retry_event(attempt, wait_ms, reason, request)
                     await asyncio.sleep(wait_ms / 1000)
                     attempt += 1
                     continue
@@ -300,6 +344,61 @@ class LLMErrorHandlingMiddleware(AgentMiddleware[AgentState]):
 
 def _matches_any(detail: str, patterns: tuple[str, ...]) -> bool:
     return any(pattern in detail for pattern in patterns)
+
+
+def _safe_model_metadata(request: ModelRequest | None) -> dict[str, Any]:
+    model = getattr(request, "model", None)
+    if model is None:
+        return {}
+    metadata: dict[str, Any] = {
+        "provider_class": model.__class__.__name__,
+    }
+    model_name = _string_attr(model, "model_name") or _string_attr(model, "model")
+    if model_name:
+        metadata["model"] = model_name
+    base_url = _string_attr(model, "openai_api_base") or _string_attr(model, "api_base") or _string_attr(model, "base_url")
+    host = _host_from_url(base_url)
+    if host:
+        metadata["base_url_host"] = host
+    timeout = _number_attr(model, "timeout") or _number_attr(model, "request_timeout")
+    if timeout is not None:
+        metadata["timeout_s"] = timeout
+    stream_chunk_timeout = _number_attr(model, "stream_chunk_timeout")
+    if stream_chunk_timeout is not None:
+        metadata["stream_chunk_timeout_s"] = stream_chunk_timeout
+    max_retries = _number_attr(model, "max_retries")
+    if max_retries is not None:
+        metadata["max_retries"] = int(max_retries)
+    return metadata
+
+
+def _string_attr(value: object, attr: str) -> str:
+    raw = getattr(value, attr, None)
+    if raw is None:
+        return ""
+    if hasattr(raw, "get_secret_value"):
+        return ""
+    text = str(raw).strip()
+    return "" if _looks_secret_like(text) else text
+
+
+def _number_attr(value: object, attr: str) -> float | None:
+    raw = getattr(value, attr, None)
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    return None
+
+
+def _host_from_url(value: str) -> str:
+    if not value:
+        return ""
+    parsed = urlparse(value)
+    return parsed.netloc or parsed.path.split("/", 1)[0]
+
+
+def _looks_secret_like(value: str) -> bool:
+    lowered = value.lower()
+    return any(marker in lowered for marker in ("api_key", "apikey", "authorization", "token", "password", "secret"))
 
 
 def _extract_error_code(exc: BaseException) -> Any:

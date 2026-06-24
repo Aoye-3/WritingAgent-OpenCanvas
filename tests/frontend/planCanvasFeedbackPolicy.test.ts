@@ -34,7 +34,9 @@ test("pending Plan clarification is rendered as the composer form", async () => 
 
 test("Agent clarification timeline events render the composer choice card", async () => {
   const source = await readFile("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
-  assert.match(source, /latestPendingAgentClarification\(messages, locallyAnsweredAgentClarificationIds\)/);
+  assert.match(source, /agentClarificationFromRecord\(agentClarifications\.find/);
+  assert.match(source, /latestPendingAgentClarification\(messages(?:, answeredAgentClarificationKeys)?\)/);
+  assert.doesNotMatch(source, /locallyAnsweredAgentClarificationIds/);
   assert.match(source, /agent_backend_agent_clarification_requested/);
   assert.match(source, /agent_clarification_requested/);
   assert.match(source, /clarificationId/);

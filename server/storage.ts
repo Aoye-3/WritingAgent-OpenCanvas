@@ -388,6 +388,7 @@ export class SQLiteStorageRepository {
         this.db.prepare(`DELETE FROM plan_artifacts WHERE plan_run_id IN (SELECT id FROM plan_runs WHERE thread_id = ?)`).run(threadId);
         this.db.prepare(`DELETE FROM plan_steps WHERE plan_run_id IN (SELECT id FROM plan_runs WHERE thread_id = ?)`).run(threadId);
         this.db.prepare(`DELETE FROM plan_runs WHERE thread_id = ?`).run(threadId);
+        this.db.prepare(`DELETE FROM agent_clarifications WHERE thread_id = ?`).run(threadId);
         this.db.prepare(`DELETE FROM tool_events WHERE thread_id = ?`).run(threadId);
         this.db.prepare(`DELETE FROM output_versions WHERE thread_id = ?`).run(threadId);
         this.db.prepare(`DELETE FROM prompt_versions WHERE thread_id = ?`).run(threadId);
@@ -437,6 +438,7 @@ export class SQLiteStorageRepository {
       this.db.prepare(`DELETE FROM plan_artifacts WHERE plan_run_id IN (SELECT id FROM plan_runs WHERE thread_id = ?)`).run(threadId);
       this.db.prepare(`DELETE FROM plan_steps WHERE plan_run_id IN (SELECT id FROM plan_runs WHERE thread_id = ?)`).run(threadId);
       this.db.prepare(`DELETE FROM plan_runs WHERE thread_id = ?`).run(threadId);
+      this.db.prepare(`DELETE FROM agent_clarifications WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM tool_events WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM output_versions WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM prompt_versions WHERE thread_id = ?`).run(threadId);
@@ -660,6 +662,14 @@ export class SQLiteStorageRepository {
 
   listToolEvents(threadId: string) {
     return this.runs.listToolEvents(threadId);
+  }
+
+  listAgentClarifications(threadId: string) {
+    return this.runs.listAgentClarifications(threadId);
+  }
+
+  answerAgentClarification(threadId: string, clarificationId: string, input: { selectedOptionId?: string; selectedOptionLabel?: string; answer?: string }) {
+    return this.runs.answerAgentClarification(threadId, clarificationId, input);
   }
 
   recordToolEvent(threadId: string, runId: string, eventType: string, payload: JsonValue, createdAt = nowIso()) {

@@ -1,5 +1,21 @@
 # FacetWrite Technical Decisions
 
+## 2026-06-24: Agent Runtime Uses Split LLM Timeout Controls
+
+Decision: Agent Runtime provider calls keep the total request timeout and the stream chunk timeout as separate controls. The validated local runtime baseline is `timeout:300.0`, `stream_chunk_timeout:45.0`, and unchanged `max_retries:2`.
+
+Reason: Progressive Canvas delivery was not the blocking component in the repeated post-node stalls. After nodes such as Body draft or Progress note were committed, the Runtime entered the next model decision and the provider stream could remain open without yielding effective chunks. With `timeout:600.0`, that looked like near 10-minute silence; with `timeout:180.0`, the same symptom shortened to about three minutes. Adding a 45-second stream chunk timeout while keeping a 300-second total request stop completed the full workflow in about five minutes without observed negative impact.
+
+Impact: Future silent-gap debugging should inspect `llm_call_start`, `llm_call_error`, `llm_retry`, `llm_call_end`, `timeout_s`, and `stream_chunk_timeout_s` before changing Canvas delivery or WebSearch behavior. WebSearch loop limits, tool event payloads, progressive delivery policy, and Agent clarification contracts are not timeout tuning levers. If long synthesis is cut off too aggressively, try `stream_chunk_timeout:60.0` or `90.0` with measured evidence before returning to 120/180/600-second waits.
+
+## 2026-06-24: Agent Clarifications Are Durable Run State
+
+Decision: Agent Runtime `ask_clarification` is persisted as thread/run/question state in `agent_clarifications`, with explicit `pending` and `answered` statuses, stable clarification ids, structured options, selected answer metadata, and `resumeContext`. A run that emits a valid Agent clarification without final deliverable content is recorded as waiting/`clarification_required`; it must not append a misleading final `run_completed` lifecycle event. Runtime events from live streaming and normalized final output are deduplicated by stable event shape, including event type, tool call id, clarification id, and question.
+
+Reason: The `New conversation222` reproduction showed that clarification was still partly inferred from timeline side effects. Repeated clarification events could reuse `toolCallId`, the frontend could locally hide an already-answered id, and the backend could record the run as completed even though the trace said more information was required. That combination made the composer choice UI disappear while the run stayed stuck in a waiting trace.
+
+Impact: Thread state now includes persisted Agent clarifications. The collaboration drawer derives the actionable choice card from pending persisted clarification state first, with timeline inference only as fallback. Answering a choice marks the stored clarification answered and resumes with the original instruction, Skill refs, disabled Skill refs, runtime budget, and Canvas/progressive delivery context. Manual composer submit is blocked while an actionable Agent clarification is pending, so "continue" cannot silently become ordinary chat. A waiting trace without a valid payload shows a recovery draft affordance instead of a dead state.
+
 ## 2026-06-24: Progressive CanvasWrite Is Scoped To Short Nodes
 
 Decision: Progressive long-task delivery exposes `canvas_write` as a scoped short-node tool instead of disabling it completely. The runtime context carries `facetwrite_canvas_write_scope:"short_progress_nodes"` plus a policy contract. In that scope, `canvas_write` may create or append only short summaries, overviews, progress/research notes, and references. Full Body, Final Body, full reports, full documents, and oversized content must go through `write_file` followed by `present_files`, which creates or updates the server-owned `file_document` preview node.
@@ -41,6 +57,8 @@ Decision: Treat Agent Runtime `ask_clarification` as pending conversation input,
 Reason: Blocking clarification asks the user for missing information before work can continue. Writing that prompt as a Canvas node made process UI look like deliverable content and could leave the Agent apparently stopped without an actionable composer choice.
 
 Impact: Structured Agent clarification events must not create `kind:"clarification"` Canvas nodes or `canvas_delivery_clarification_committed` events. The frontend tracks answered Agent clarifications by `clarificationId` / `toolCallId` and continues the run with `requestContext.agentClarification`. The existing Canvas `clarification` node kind remains renderable for historical/manual nodes only.
+
+Update 2026-06-24: Timeline rendering remains the fallback, but the maintained source of truth is now `agent_clarifications`. Frontend-local hiding by raw `toolCallId` is no longer allowed because Runtime may reuse a tool-call id across distinct clarification questions.
 
 ## 2026-06-23: Progressive Body Drafts Use Separate Canvas Nodes
 

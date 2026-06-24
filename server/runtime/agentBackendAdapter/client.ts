@@ -39,6 +39,7 @@ export type AgentBackendRunInput = {
   onToken?: (token: string) => void;
   onReasoningToken?: (token: string) => void;
   onStatus?: (status: StreamStatus) => void;
+  onRuntimeSignal?: (signal: AgentBackendRuntimeSignal) => void;
 };
 
 export type AgentBackendRunResult = {
@@ -46,6 +47,12 @@ export type AgentBackendRunResult = {
   finishReason: string;
   usage?: unknown;
   events: ToolEventRecord[];
+};
+
+export type AgentBackendRuntimeSignal = {
+  type: "heartbeat" | "llm_retry" | "llm_call_start" | "llm_call_end" | "llm_call_error" | "synthesis_gate" | "waiting_for_user";
+  label: string;
+  payload?: Record<string, unknown>;
 };
 
 const streamLabels = {
@@ -118,7 +125,8 @@ export async function runAgentBackendAgent(input: AgentBackendRunInput): Promise
     onToolEvent: input.onToolEvent,
     onToken: input.onToken,
     onReasoningToken: input.onReasoningToken,
-    onStatus: input.onStatus
+    onStatus: input.onStatus,
+    onRuntimeSignal: input.onRuntimeSignal
   });
 }
 
@@ -381,6 +389,7 @@ async function readAgentBackendStream(
     onToken?: (token: string) => void;
     onReasoningToken?: (token: string) => void;
     onStatus?: (status: StreamStatus) => void;
+    onRuntimeSignal?: (signal: AgentBackendRuntimeSignal) => void;
   } = {}
 ): Promise<AgentBackendRunResult> {
   const reader = body.getReader();
@@ -394,6 +403,8 @@ async function readAgentBackendStream(
   let finalValuesText: string | undefined;
   let usage: unknown;
   let buffer = "";
+  let sawWaitingForUser = false;
+  let sawRuntimeEnd = false;
 
   while (true) {
     const { value, done } = await reader.read();
@@ -404,12 +415,20 @@ async function readAgentBackendStream(
         const complete = buffer.slice(0, splitAt + 2);
         buffer = buffer.slice(splitAt + 2);
         handleEvents(parseSseChunk(complete));
+        if (sawRuntimeEnd) break;
       }
     }
-    if (done) break;
+    if (done || sawRuntimeEnd) break;
+  }
+  if (sawRuntimeEnd) {
+    try {
+      await reader.cancel();
+    } catch {
+      // The runtime has already sent its business-level end event.
+    }
   }
 
-  if (buffer.trim()) {
+  if (!sawRuntimeEnd && buffer.trim()) {
     handleEvents(parseSseChunk(buffer));
   }
 
@@ -424,6 +443,27 @@ async function readAgentBackendStream(
     for (const parsed of parsedEvents) {
       const runtimeError = extractRuntimeError(parsed.event, parsed.data);
       if (runtimeError) throw new Error(runtimeError);
+      if (parsed.event === "end") {
+        sawRuntimeEnd = true;
+        continue;
+      }
+      const runtimeSignal = runtimeSignalFromSseEvent(parsed.event, parsed.data);
+      if (runtimeSignal) {
+        if (runtimeSignal.type === "waiting_for_user") {
+          sawWaitingForUser = true;
+          callbacks.onStatus?.({ phase: "finalizing", label: runtimeSignal.label });
+          callbacks.onRuntimeSignal?.(runtimeSignal);
+        } else if (runtimeSignal.type === "heartbeat") {
+          if (!sawWaitingForUser) {
+            callbacks.onStatus?.({ phase: "thinking", label: runtimeSignal.label });
+            callbacks.onRuntimeSignal?.(runtimeSignal);
+          }
+          continue;
+        } else {
+          callbacks.onStatus?.({ phase: "thinking", label: runtimeSignal.label });
+          callbacks.onRuntimeSignal?.(runtimeSignal);
+        }
+      }
       const messageId = extractMessageId(parsed.event, parsed.data);
       const reasoningText = extractReasoningText(parsed.event, parsed.data);
       if (reasoningText) {
@@ -462,14 +502,131 @@ async function readAgentBackendStream(
         if (key && emittedToolEventKeys.has(key)) continue;
         if (key) emittedToolEventKeys.add(key);
         events.push(event);
+        if (isAgentClarificationToolEvent(event)) sawWaitingForUser = true;
         callbacks.onStatus?.(statusFromToolEvent(event));
         callbacks.onToolEvent?.(event);
       }
 
       const nextUsage = extractUsage(parsed.data);
       if (nextUsage) usage = nextUsage;
+      if (sawRuntimeEnd) break;
     }
   }
+}
+
+function runtimeSignalFromSseEvent(event: string, data: unknown): AgentBackendRuntimeSignal | undefined {
+  if (event === "comment") {
+    const comment = typeof data === "string" ? data.trim().toLowerCase() : "";
+    if (comment === "heartbeat") {
+      return {
+        type: "heartbeat",
+        label: "Agent Runtime is still working...",
+        payload: { comment }
+      };
+    }
+    return undefined;
+  }
+  if (event === "interrupt" || event === "waiting_for_user") {
+    return {
+      type: "waiting_for_user",
+      label: "Waiting for your clarification choice.",
+      payload: sanitizeRuntimeSignalPayload(isRecord(data) ? data : { event })
+    };
+  }
+  if (event === "values") return waitingForUserSignalFromValues(data);
+  if (event !== "custom" || !isRecord(data)) return undefined;
+  const type = readSourceString(data.type) || readSourceString(data.event);
+  if (isWaitingForUserType(type)) {
+    return {
+      type: "waiting_for_user",
+      label: "Waiting for your clarification choice.",
+      payload: sanitizeRuntimeSignalPayload(data)
+    };
+  }
+  if (type === "llm_retry" || type === "llm_call_retry") {
+    return {
+      type: "llm_retry",
+      label: llmRetryStatusLabel(data),
+      payload: sanitizeRuntimeSignalPayload(data)
+    };
+  }
+  if (type === "llm_call_start" || type === "llm_call_end" || type === "llm_call_error" || type === "synthesis_gate") {
+    return {
+      type,
+      label: runtimeCustomStatusLabel(type, data),
+      payload: sanitizeRuntimeSignalPayload(data)
+    };
+  }
+  return undefined;
+}
+
+function waitingForUserSignalFromValues(data: unknown): AgentBackendRuntimeSignal | undefined {
+  if (!isRecord(data)) return undefined;
+  const interrupt = data.__interrupt__ ?? data.interrupt ?? data.interrupts;
+  if (interrupt !== undefined) {
+    return {
+      type: "waiting_for_user",
+      label: "Waiting for your clarification choice.",
+      payload: sanitizeRuntimeSignalPayload({ type: "runtime_interrupt", interrupt })
+    };
+  }
+  const next = Array.isArray(data.next) ? data.next.join(",") : readSourceString(data.next);
+  const status = readSourceString(data.status) || readSourceString(data.state);
+  if (isWaitingForUserType(status) || /interrupt|wait/i.test(next)) {
+    return {
+      type: "waiting_for_user",
+      label: "Waiting for your clarification choice.",
+      payload: sanitizeRuntimeSignalPayload({ type: "runtime_waiting", status, next })
+    };
+  }
+  return undefined;
+}
+
+function isWaitingForUserType(type: string) {
+  return /^(?:interrupt|waiting_for_user|wait_for_user|waiting-for-user|user_input_required|clarification_required)$/.test(type);
+}
+
+function llmRetryStatusLabel(data: Record<string, unknown>) {
+  const delaySeconds = readPositiveNumber(data.delay_seconds ?? data.delaySeconds ?? data.retry_after ?? data.retryAfter)
+    ?? secondsFromMs(data.wait_ms ?? data.waitMs);
+  const attempt = readPositiveInteger(data.attempt);
+  const maxAttempts = readPositiveInteger(data.max_attempts ?? data.maxAttempts);
+  const reason = readSourceString(data.reason);
+  const prefix = reason === "stream_chunk_timeout"
+    ? attempt && maxAttempts
+      ? `Model stream produced no content; retry ${attempt}/${maxAttempts}.`
+      : "Model stream produced no content; retry scheduled."
+    : attempt && maxAttempts ? `Model request retry ${attempt}/${maxAttempts}.` : "Model request retry scheduled.";
+  const suffix = delaySeconds ? ` Waiting ${delaySeconds}s before retry.` : " Waiting before retry.";
+  return `${prefix}${suffix}`;
+}
+
+function secondsFromMs(value: unknown) {
+  const ms = readPositiveNumber(value);
+  return ms ? Math.max(1, Math.round(ms / 1000)) : undefined;
+}
+
+function sanitizeRuntimeSignalPayload(data: Record<string, unknown>) {
+  const allowed = ["type", "event", "phase", "attempt", "max_attempts", "maxAttempts", "elapsed_ms", "elapsedMs", "delay_seconds", "delaySeconds", "retry_after", "retryAfter", "wait_ms", "waitMs", "reason", "error_type", "errorType", "status_code", "statusCode", "status", "state", "next", "interrupt", "model", "provider_class", "providerClass", "base_url_host", "baseUrlHost", "timeout_s", "timeoutS", "stream_chunk_timeout_s", "streamChunkTimeoutS", "max_retries", "maxRetries", "completed_evidence_tools", "completedEvidenceTools", "evidence_limit", "evidenceLimit", "model_limit", "modelLimit", "model_calls", "modelCalls", "recursion_limit", "recursionLimit", "estimated_steps_used", "estimatedStepsUsed", "file_delivery_required", "fileDeliveryRequired", "second_handler", "secondHandler", "entered_second_handler", "enteredSecondHandler"];
+  return Object.fromEntries(allowed.filter((key) => key in data).map((key) => [key, data[key]]));
+}
+
+function runtimeCustomStatusLabel(type: "llm_call_start" | "llm_call_end" | "llm_call_error" | "synthesis_gate", data: Record<string, unknown>) {
+  if (type === "llm_call_start") return "Waiting for model response...";
+  if (type === "llm_call_end") return "Model response received.";
+  if (type === "llm_call_error") {
+    const reason = readSourceString(data.reason);
+    if (reason === "stream_chunk_timeout") return "Model stream produced no content before timeout.";
+    const errorType = readSourceString(data.error_type ?? data.errorType);
+    return errorType ? `Model request failed: ${errorType}.` : "Model request failed.";
+  }
+  const secondHandler = data.second_handler === true || data.secondHandler === true;
+  return secondHandler ? "Forcing final synthesis..." : "Runtime budget synthesis started.";
+}
+
+function isAgentClarificationToolEvent(event: ToolEventRecord) {
+  const type = readSourceString(event.payload?.type) || readSourceString(event.payload?.eventType);
+  return /agent_clarification_requested$/.test(event.eventType) || type === "agent_clarification_requested";
 }
 
 function shouldSuppressAssistantText(events: ToolEventRecord[]) {
@@ -495,6 +652,9 @@ function extractMessageId(event: string, data: unknown) {
 }
 
 function statusFromToolEvent(event: ToolEventRecord): StreamStatus {
+  if (isAgentClarificationToolEvent(event)) {
+    return { phase: "finalizing", label: "Waiting for your clarification choice." };
+  }
   if (/search|tool|started/i.test(String(event.payload?.type ?? event.eventType))) {
     return { phase: "searching", label: streamLabels.searching };
   }
@@ -923,6 +1083,11 @@ function readStringArray(value: unknown) {
 function readPositiveInteger(value: unknown) {
   const number = typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : 0;
   return Number.isInteger(number) && number > 0 ? number : undefined;
+}
+
+function readPositiveNumber(value: unknown) {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number.parseFloat(value) : 0;
+  return Number.isFinite(number) && number > 0 ? number : undefined;
 }
 
 function readToolContentText(content: unknown) {

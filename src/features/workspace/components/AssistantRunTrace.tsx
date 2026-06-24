@@ -8,11 +8,17 @@ type AssistantRunTraceProps = {
 };
 
 export function deriveAssistantRunTraceState(input: {
-  events: Array<Pick<RunTimelineEvent, "status">>;
+  events: Array<Pick<RunTimelineEvent, "status" | "eventType" | "sequence">>;
   userExpanded?: boolean;
 }) {
-  const failed = input.events.some((event) => event.status === "failed");
-  const running = input.events.some((event) => event.status === "running" || event.status === "waiting");
+  const ordered = [...input.events].sort((left, right) => left.sequence - right.sequence);
+  const latestTerminal = [...ordered].reverse().find((event) => /run_(?:completed|failed|waiting)$/.test(event.eventType));
+  const failed = latestTerminal
+    ? latestTerminal.status === "failed"
+    : ordered.some((event) => event.status === "failed");
+  const running = latestTerminal
+    ? latestTerminal.status === "running" || latestTerminal.status === "waiting"
+    : ordered.some((event) => event.status === "running" || event.status === "waiting");
   return {
     expanded: input.userExpanded ?? (failed || running),
     failed,

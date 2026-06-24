@@ -223,6 +223,22 @@ export type StoredToolEvent = {
   createdAt: string;
 };
 
+export type AgentClarificationOption = { id: string; label: string; detail: string; recommended: boolean };
+export type AgentClarification = {
+  id: string;
+  threadId: string;
+  runId: string;
+  status: "pending" | "answered";
+  question: string;
+  options: AgentClarificationOption[];
+  resumeContext?: Record<string, unknown>;
+  selectedOptionId?: string;
+  selectedOptionLabel?: string;
+  answer?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type RunTimelineEvent = {
   id: string;
   threadId?: string;
@@ -367,6 +383,7 @@ export type ThreadStateResponse = {
   taskBrief: StoredBrief<TaskBrief>;
   outputVersions: StoredOutputVersion[];
   toolEvents: StoredToolEvent[];
+  agentClarifications?: AgentClarification[];
   runTimelineEvents?: RunTimelineEvent[];
   canvasNodes?: CanvasNode[];
   canvasEdges?: CanvasEdge[];

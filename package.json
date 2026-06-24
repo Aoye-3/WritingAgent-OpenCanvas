@@ -25,8 +25,8 @@
     "agent-backend:status": "npm run agent-runtime:status",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
-    "test": "node --import tsx --test server/**/*.test.ts tests/frontend/**/*.test.ts",
-    "test:frontend": "node --import tsx --test tests/frontend/**/*.test.ts",
+    "test": "node --import tsx --test server/**/*.test.ts tests/frontend/**/*.test.ts tests/frontend/**/*.test.tsx",
+    "test:frontend": "node --import tsx --test tests/frontend/**/*.test.ts tests/frontend/**/*.test.tsx",
     "test:e2e": "playwright test",
     "test:e2e:canvas": "playwright test tests/e2e/canvas.spec.ts",
     "typecheck": "tsc -b"

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentCard, CanvasNode, CanvasWriteSuggestion, PlanRun, RunTimelineEvent, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
+import type { AgentCard, AgentClarification, CanvasNode, CanvasWriteSuggestion, PlanRun, RunTimelineEvent, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
 import { generateText, generateTextStream } from "../../features/generation/generationClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../../features/generation/types";
 import type { Locale } from "../../features/i18n/types";
@@ -49,6 +49,7 @@ type LiveThreadStateRefreshRequest = {
   currentOperationId: () => number;
   fetchAndApply: (threadId: string) => Promise<ThreadStateResponse>;
   apply: (state: ThreadStateResponse) => void;
+  onSettled?: () => void;
 };
 
 export function createLiveThreadStateRefreshScheduler() {
@@ -66,6 +67,7 @@ export function createLiveThreadStateRefreshScheduler() {
         console.warn("Live thread state refresh failed", error instanceof Error ? error.message : "Unknown error");
       })
       .finally(() => {
+        request.onSettled?.();
         if (runGeneration !== generation) return;
         if (inFlight === refresh) inFlight = null;
         const next = pending;
@@ -99,6 +101,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const [toolEvents, setToolEvents] = useState<StoredToolEvent[]>([]);
   const [runTimelineEvents, setRunTimelineEvents] = useState<RunTimelineEvent[]>([]);
   const [plans, setPlans] = useState<PlanRun[]>([]);
+  const [agentClarifications, setAgentClarifications] = useState<AgentClarification[]>([]);
   const [canvasWriteSuggestions, setCanvasWriteSuggestions] = useState<CanvasWriteSuggestion[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string | undefined>();
   const [isGenerating, setIsGenerating] = useState(false);
@@ -146,6 +149,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     setToolEvents([]);
     setRunTimelineEvents([]);
     setPlans([]);
+    setAgentClarifications([]);
     setCanvasWriteSuggestions([]);
     setActiveVersionId(undefined);
   };
@@ -165,13 +169,14 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     setIsChatSending(false);
   };
 
-  const refreshLiveThreadState = (threadId: string, operationId: number) => {
+  const refreshLiveThreadState = (threadId: string, operationId: number, onSettled?: () => void) => {
     liveStateRefreshRef.current.request({
       threadId,
       operationId,
       currentOperationId: () => operationIdRef.current,
       fetchAndApply: options.onFetchAndApplyThreadState,
-      apply: options.onApplyLiveThreadState
+      apply: options.onApplyLiveThreadState,
+      onSettled
     });
   };
 
@@ -212,7 +217,18 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     if (shouldRefreshThreadStateForToolEvent(liveEvent)) {
       const liveNode = readLiveCanvasNodeSnapshot(liveEvent);
       if (liveNode) options.onApplyLiveCanvasNode(liveNode);
-      refreshLiveThreadState(threadId, operationId);
+      if (activeMessageId) {
+        updateStreamingMessage(activeMessageId, {
+          status: "writing",
+          statusLabel: canvasSyncingLabel(options.locale)
+        });
+      }
+      refreshLiveThreadState(threadId, operationId, activeMessageId ? () => {
+        if (operationId !== operationIdRef.current) return;
+        updateStreamingMessage(activeMessageId, {
+          statusLabel: canvasSyncedLabel(options.locale)
+        });
+      } : undefined);
     }
   };
 
@@ -350,6 +366,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     const timelineMessages = [...messagesWithTimeline, ...activityMessages].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     setCollaborationMessages((current) => reconcileCollaborationMessages(current, timelineMessages));
     setPlans(state.plans ?? []);
+    setAgentClarifications(state.agentClarifications ?? []);
     setRunTimelineEvents(state.runTimelineEvents ?? []);
   };
 
@@ -555,6 +572,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     stopChatGeneration,
     outputVersions,
     plans,
+    agentClarifications,
     canvasWriteSuggestions,
     runTimelineEvents,
     toolEvents,
@@ -566,6 +584,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     setToolEvents,
     setRunTimelineEvents,
     setPlans,
+    setAgentClarifications,
     setCanvasWriteSuggestions,
     resetGeneration,
     applyCollaborationMessagesFromThreadState,
@@ -607,6 +626,14 @@ function eventStatusPhase(eventType: string): CollaborationMessage["status"] {
   if (eventType === "canvas_delivery_synthesis_started" || eventType === "canvas_delivery_body_final_committed") return "finalizing";
   if (/(?:^|_)tool_(?:started|completed)$/.test(eventType)) return "searching";
   return "writing";
+}
+
+function canvasSyncingLabel(locale: Locale) {
+  return locale === "zh" ? "Canvas update received; syncing state..." : "Canvas update received; syncing state...";
+}
+
+function canvasSyncedLabel(locale: Locale) {
+  return locale === "zh" ? "Canvas state synced." : "Canvas state synced.";
 }
 
 function recoverableGenerationError(message: string, locale: Locale) {

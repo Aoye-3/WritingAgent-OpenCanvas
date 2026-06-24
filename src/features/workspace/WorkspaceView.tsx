@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
 import { Topbar } from "../../shared/Topbar";
-import type { AgentCard, BriefSaveStatus, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, ProjectBrief, SkillCatalogItem, SkillFolderItem, StoredOutputVersion, StoredThread, TaskBrief } from "../agents/types";
+import type { AgentCard, AgentClarification, BriefSaveStatus, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, ProjectBrief, SkillCatalogItem, SkillFolderItem, StoredOutputVersion, StoredThread, TaskBrief } from "../agents/types";
 import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasNodePositionUpdate, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../generation/types";
 import { useI18n } from "../i18n/I18nProvider";
@@ -36,6 +36,7 @@ type WorkspaceViewProps = {
   canvasObjects: CanvasObject[];
   canvasWriteRequests: CanvasWriteRequest[];
   canvasWriteSuggestions: CanvasWriteSuggestion[];
+  agentClarifications: AgentClarification[];
   canvasWorkflow?: CanvasWorkflow;
   canvasWorkflowSuggestions: CanvasWorkflowSuggestion[];
   selectedCanvasNodeId?: string;
@@ -113,6 +114,7 @@ export function WorkspaceView({
   canvasObjects,
   canvasWriteRequests,
   canvasWriteSuggestions,
+  agentClarifications,
   canvasWorkflow,
   canvasWorkflowSuggestions,
   selectedCanvasNodeId,
@@ -400,6 +402,7 @@ export function WorkspaceView({
           agentCards={agentCards}
           canvasWriteRequests={canvasWriteRequests}
           canvasWriteSuggestions={canvasWriteSuggestions}
+          agentClarifications={agentClarifications}
           canvasNodes={canvasNodes}
           collapsed={rightCollapsed}
           isSending={isChatSending}

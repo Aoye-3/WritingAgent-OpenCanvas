@@ -60,7 +60,6 @@ export function shouldRefreshThreadStateForToolEvent(event: LiveToolEvent) {
 
 export function readLiveCanvasNodeSnapshot(event: LiveToolEvent): CanvasNode | undefined {
   if (!/^canvas_delivery_.*_committed$/.test(event.eventType)) return undefined;
-  if (event.eventType === "canvas_delivery_body_checkpoint_committed") return undefined;
   const node = readRecord(event.payload?.node);
   const id = readNonEmptyString(node.id);
   const projectId = readNonEmptyString(node.projectId);

@@ -16,14 +16,20 @@ function parseBlock(block: string): ParsedSseEvent | undefined {
 
   let event = "message";
   const dataLines: string[] = [];
+  const commentLines: string[] = [];
   for (const line of lines) {
     if (line.startsWith("event:")) {
       event = line.slice("event:".length).trim() || "message";
     } else if (line.startsWith("data:")) {
       dataLines.push(line.slice("data:".length).trimStart());
+    } else if (line.startsWith(":")) {
+      commentLines.push(line.slice(1).trim());
     }
   }
 
+  if (dataLines.length === 0 && commentLines.length > 0) {
+    return { event: "comment", data: commentLines.join("\n") };
+  }
   if (dataLines.length === 0) return undefined;
   const rawData = dataLines.join("\n");
   return { event, data: parseData(rawData) };
