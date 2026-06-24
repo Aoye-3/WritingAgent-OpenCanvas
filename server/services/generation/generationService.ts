@@ -1776,7 +1776,7 @@ function commitProgressiveResearchDelivery(input: {
   if (!isProgressiveEvidenceTool(toolName)) return [];
   const entryDraft = progressiveEvidenceEntry(input.payload.locale, toolName, payload);
   if (!entryDraft) return [];
-  if (!entryDraft.sources.length && toolName !== "web_search" && !entryDraft.query && !entryDraft.url && !entryDraft.path && !entryDraft.command) return [];
+  if (!entryDraft.sources.length) return [];
   const evidenceKey = progressiveEvidenceKey(entryDraft);
   if (evidenceKey && hasCommittedProgressiveEvidence(input.storage, input.projectId, input.deliveryId, evidenceKey)) return [];
   const sequence = input.nextSequence();
@@ -2018,25 +2018,14 @@ function progressiveEvidenceEntry(locale: GenerateRequest["locale"], toolName: s
 
 function researchNoteMarkdown(input: ProgressiveEvidenceEntry) {
   const label = input.locale === "zh"
-    ? { tool: "工具", query: "查询", url: "URL", path: "路径", command: "命令", summary: "摘要", snippet: "摘录", sources: "来源", snippets: "来源摘录" }
-    : { tool: "Tool", query: "Query", url: "URL", path: "Path", command: "Command", summary: "Summary", snippet: "Snippet", sources: "Sources", snippets: "Source snippets" };
+    ? { sources: "来源" }
+    : { sources: "Sources" };
   const lines = [
     `# ${input.locale === "zh" ? "进度摘录" : "Progress note"}`,
-    `- ${label.tool}: ${input.toolName}`,
-    input.query ? `- ${label.query}: ${input.query}` : "",
-    input.url ? `- ${label.url}: ${input.url}` : "",
-    input.path ? `- ${label.path}: ${input.path}` : "",
-    input.command ? `- ${label.command}: ${input.command}` : "",
-    input.summary ? `- ${label.summary}: ${input.summary}` : "",
-    input.snippet ? `- ${label.snippet}: ${input.snippet}` : ""
-  ].filter(Boolean);
-  if (input.sources.length) {
-    lines.push("", `## ${label.sources}`, formatSourceLinks(input.sources));
-    const snippets = input.sources.filter((source) => source.snippet);
-    if (snippets.length) {
-      lines.push("", `## ${label.snippets}`, ...snippets.map((source) => `- ${source.title}: ${source.snippet}`));
-    }
-  }
+    "",
+    `## ${label.sources}`,
+    formatSourceLinks(input.sources)
+  ];
   return lines.join("\n");
 }
 

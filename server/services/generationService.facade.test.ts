@@ -483,7 +483,7 @@ test("streaming direct Canvas delivery keeps progressive placeholders when Agent
   assert.ok(events.some((event) => event.eventType === "agent_backend_runtime_failed" && event.payload.fallback === "none"));
 });
 
-test("streaming direct Canvas delivery commits a research note after each search completion before final failure", async () => {
+test("streaming direct Canvas delivery commits a link-only research reference after search sources", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
@@ -518,8 +518,14 @@ test("streaming direct Canvas delivery commits a research note after each search
   );
 
   assert.equal(records.length, 0);
-  assert.ok(canvasNodes.some((node) => node.title === "\u7814\u7a76\u6458\u5f55 1" && String(node.content).includes("LLM agent survey 2025")));
-  assert.ok(canvasNodes.some((node) => node.title === "\u7814\u7a76\u6458\u5f55 1" && String(node.content).includes("https://example.com/agent-survey")));
+  const researchNode = canvasNodes.find((node) => node.title === "\u7814\u7a76\u6458\u5f55 1");
+  assert.ok(researchNode);
+  assert.ok(String(researchNode.content).includes("[Agent Survey](https://example.com/agent-survey)"));
+  assert.equal(String(researchNode.content).includes("LLM agent survey 2025"), false);
+  assert.equal(String(researchNode.content).includes("\u5de5\u5177"), false);
+  assert.equal(String(researchNode.content).includes("\u67e5\u8be2"), false);
+  assert.equal(String(researchNode.content).includes("URL:"), false);
+  assert.equal(String(researchNode.content).includes("A survey of LLM agents."), false);
   const bodyNode = canvasNodes.find((node) => node.title === "\u6b63\u6587\u8349\u7a3f");
   assert.ok(bodyNode);
   assert.ok(String(bodyNode.content).includes("\u5de5\u4f5c\u6b63\u6587\u8349\u7a3f"));
@@ -528,7 +534,7 @@ test("streaming direct Canvas delivery commits a research note after each search
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_research_committed"));
 });
 
-test("streaming direct Canvas delivery keeps research notes when search has no linked sources", async () => {
+test("streaming direct Canvas delivery skips research references when search has no linked sources", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
@@ -563,9 +569,10 @@ test("streaming direct Canvas delivery keeps research notes when search has no l
   );
 
   assert.equal(records.length, 0);
-  assert.ok(canvasNodes.some((node) => node.title === "\u7814\u7a76\u6458\u5f55 1" && String(node.content).includes("Search completed")));
-  assert.ok(events.some((event) => event.eventType === "canvas_delivery_research_committed"));
-  assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_checkpoint_committed"));
+  assert.equal(canvasNodes.some((node) => node.title === "\u7814\u7a76\u6458\u5f55 1"), false);
+  assert.equal(canvasNodes.some((node) => String(node.content).includes("Search completed")), false);
+  assert.equal(events.some((event) => event.eventType === "canvas_delivery_research_committed"), false);
+  assert.equal(events.some((event) => event.eventType === "canvas_delivery_body_checkpoint_committed"), false);
 });
 
 test("streaming direct Canvas delivery dedupes repeated research evidence keys", async () => {
@@ -660,7 +667,12 @@ test("streaming skill long task creates Canvas progress without explicit Canvas 
   assert.equal(canvasNodes.some((node) => String(node.content).includes("literature-review/SKILL.md")), false);
   assert.equal(canvasNodes.some((node) => String(node.content).includes("/mnt/skills/")), false);
   assert.equal(canvasNodes.some((node) => node.title === "进度摘录 2"), false);
-  assert.ok(canvasNodes.some((node) => node.title === "进度摘录 1" && String(node.content).includes("parallel-cli search completed")));
+  const progressNode = canvasNodes.find((node) => node.title === "进度摘录 1");
+  assert.ok(progressNode);
+  assert.ok(String(progressNode.content).includes("[Candidate papers](https://example.com/candidate-papers)"));
+  assert.equal(String(progressNode.content).includes("parallel-cli search completed"), false);
+  assert.equal(String(progressNode.content).includes("Tool:"), false);
+  assert.equal(String(progressNode.content).includes("Query:"), false);
   assert.ok(canvasNodes.some((node) => node.title === "运行失败" && String(node.content).includes("Recursion limit of 100 reached")));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_outline_committed"));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_research_committed"));
@@ -1087,10 +1099,58 @@ test("streaming generic long task creates Canvas progress from evidence tools", 
   assert.equal(records.length, 0);
   assert.ok(canvasNodes.some((node) => node.title === "Overview"));
   assert.ok(canvasNodes.some((node) => node.title === "Body draft" && String(node.content).includes("Working body draft")));
-  assert.ok(canvasNodes.some((node) => node.title === "Progress note 1" && String(node.content).includes("https://example.com/runtime-notes")));
+  const progressNode = canvasNodes.find((node) => node.title === "Progress note 1");
+  assert.ok(progressNode);
+  assert.ok(String(progressNode.content).includes("[Runtime notes](https://example.com/runtime-notes)"));
+  assert.equal(String(progressNode.content).includes("Fetched runtime notes"), false);
+  assert.equal(String(progressNode.content).includes("Tool:"), false);
+  assert.equal(String(progressNode.content).includes("URL:"), false);
   assert.ok(canvasNodes.some((node) => node.title === "Run failed" && String(node.content).includes("Recursion limit of 100 reached")));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_research_committed"));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_checkpoint_committed"));
+  assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
+});
+
+test("streaming generic long task skips web fetch references without linked sources", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "web_fetch",
+            url: "https://example.com/runtime-notes",
+            snippet: "Fetched runtime notes with useful implementation details."
+          }
+        });
+        throw new Error("Recursion limit of 100 reached without hitting a stop condition.");
+      }
+    }
+  });
+
+  await assert.rejects(
+    () => service.generateAndRecordStream({
+      mode: "chat",
+      locale: "en",
+      agentCardId: "chat-agent",
+      chatInstruction: "Audit dependency risks and report what you find",
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+    }, {
+      onToolEvent: (event) => events.push(event as typeof events[number])
+    }),
+    /Recursion limit of 100 reached/
+  );
+
+  assert.equal(records.length, 0);
+  assert.ok(canvasNodes.some((node) => node.title === "Overview"));
+  assert.equal(canvasNodes.some((node) => node.title === "Progress note 1"), false);
+  assert.equal(canvasNodes.some((node) => String(node.content).includes("Fetched runtime notes")), false);
+  assert.equal(events.some((event) => event.eventType === "canvas_delivery_research_committed"), false);
+  assert.equal(events.some((event) => event.eventType === "canvas_delivery_body_checkpoint_committed"), false);
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
 });
 
