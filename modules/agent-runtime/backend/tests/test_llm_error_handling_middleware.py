@@ -77,7 +77,19 @@ def test_async_model_call_retries_busy_provider_then_succeeds(
     assert result.content == "ok"
     assert attempts == 3
     assert waits == [0.025, 0.025]
-    assert [event["type"] for event in events] == ["llm_retry", "llm_retry"]
+    assert [event["type"] for event in events] == [
+        "llm_call_start",
+        "llm_call_error",
+        "llm_retry",
+        "llm_call_start",
+        "llm_call_error",
+        "llm_retry",
+        "llm_call_start",
+        "llm_call_end",
+    ]
+    assert all("prompt" not in event and "messages" not in event and "content" not in event for event in events)
+    assert events[1]["error_type"] == "FakeError"
+    assert events[-1]["elapsed_ms"] >= 0
 
 
 def test_async_model_call_returns_user_message_for_quota_errors() -> None:
@@ -316,6 +328,13 @@ _ReadError.__name__ = "ReadError"
 _RemoteProtocolError.__name__ = "RemoteProtocolError"
 
 
+class _StreamChunkTimeoutError(Exception):
+    """Local stand-in for langchain_openai StreamChunkTimeoutError."""
+
+
+_StreamChunkTimeoutError.__name__ = "StreamChunkTimeoutError"
+
+
 def test_classify_error_read_error_is_retriable() -> None:
     middleware = _build_middleware()
     exc = _ReadError("Connection dropped mid-stream")
@@ -332,6 +351,68 @@ def test_classify_error_remote_protocol_error_is_retriable() -> None:
     retriable, reason = middleware._classify_error(exc)
     assert retriable is True
     assert reason == "transient"
+
+
+def test_classify_error_stream_chunk_timeout_is_retriable() -> None:
+    middleware = _build_middleware()
+    exc = _StreamChunkTimeoutError("No streaming chunk received for 45.0s")
+    exc.__class__.__name__ = "StreamChunkTimeoutError"
+    retriable, reason = middleware._classify_error(exc)
+    assert retriable is True
+    assert reason == "stream_chunk_timeout"
+
+
+@pytest.mark.anyio
+async def test_async_stream_chunk_timeout_emits_retry_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    middleware = _build_middleware(retry_max_attempts=2, retry_base_delay_ms=10, retry_cap_delay_ms=10)
+    waits: list[float] = []
+    events: list[dict] = []
+    attempts = 0
+    model = SimpleNamespace(
+        model_name="deepseek-v4-flash",
+        openai_api_base="https://api.siliconflow.cn/v1",
+        timeout=180.0,
+        stream_chunk_timeout=45.0,
+        max_retries=2,
+        api_key="sk-secret",
+    )
+
+    async def fake_sleep(delay: float) -> None:
+        waits.append(delay)
+
+    def fake_writer():
+        return events.append
+
+    async def handler(_request) -> AIMessage:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise _StreamChunkTimeoutError("No streaming chunk received for 45.0s")
+        return AIMessage(content="ok")
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr("langgraph.config.get_stream_writer", fake_writer)
+
+    result = await middleware.awrap_model_call(SimpleNamespace(model=model), handler)
+
+    assert result.content == "ok"
+    assert waits == [0.01]
+    assert [event["type"] for event in events] == [
+        "llm_call_start",
+        "llm_call_error",
+        "llm_retry",
+        "llm_call_start",
+        "llm_call_end",
+    ]
+    retry = events[2]
+    assert retry["reason"] == "stream_chunk_timeout"
+    assert retry["model"] == "deepseek-v4-flash"
+    assert retry["provider_class"] == "SimpleNamespace"
+    assert retry["base_url_host"] == "api.siliconflow.cn"
+    assert retry["timeout_s"] == 180.0
+    assert retry["stream_chunk_timeout_s"] == 45.0
+    assert retry["max_retries"] == 2
+    assert all("api_key" not in event and "prompt" not in event and "messages" not in event and "content" not in event for event in events)
 
 
 def test_sync_read_error_triggers_retry_loop(monkeypatch: pytest.MonkeyPatch) -> None:

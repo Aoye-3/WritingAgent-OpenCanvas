@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-06-24: Agent Runtime Uses Split LLM Timeout Controls
+
+Decision: Agent Runtime provider calls keep the total request timeout and the stream chunk timeout as separate controls. The validated local runtime baseline is `timeout:300.0`, `stream_chunk_timeout:45.0`, and unchanged `max_retries:2`.
+
+Reason: Progressive Canvas delivery was not the blocking component in the repeated post-node stalls. After nodes such as Body draft or Progress note were committed, the Runtime entered the next model decision and the provider stream could remain open without yielding effective chunks. With `timeout:600.0`, that looked like near 10-minute silence; with `timeout:180.0`, the same symptom shortened to about three minutes. Adding a 45-second stream chunk timeout while keeping a 300-second total request stop completed the full workflow in about five minutes without observed negative impact.
+
+Impact: Future silent-gap debugging should inspect `llm_call_start`, `llm_call_error`, `llm_retry`, `llm_call_end`, `timeout_s`, and `stream_chunk_timeout_s` before changing Canvas delivery or WebSearch behavior. WebSearch loop limits, tool event payloads, progressive delivery policy, and Agent clarification contracts are not timeout tuning levers. If long synthesis is cut off too aggressively, try `stream_chunk_timeout:60.0` or `90.0` with measured evidence before returning to 120/180/600-second waits.
+
 ## 2026-06-24: Agent Clarifications Are Durable Run State
 
 Decision: Agent Runtime `ask_clarification` is persisted as thread/run/question state in `agent_clarifications`, with explicit `pending` and `answered` statuses, stable clarification ids, structured options, selected answer metadata, and `resumeContext`. A run that emits a valid Agent clarification without final deliverable content is recorded as waiting/`clarification_required`; it must not append a misleading final `run_completed` lifecycle event. Runtime events from live streaming and normalized final output are deduplicated by stable event shape, including event type, tool call id, clarification id, and question.

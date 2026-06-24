@@ -101,6 +101,7 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
   };
   return {
     records,
+    agentClarifications,
     canvasWriteRequests,
     canvasNodes,
     canvasEdges,
@@ -892,6 +893,103 @@ test("answered Agent clarification preserves resume context for follow-up clarif
   assert.deepEqual(resumeContext?.transientSkillRefs, ["database-lookup", "literature-review"]);
   assert.equal(resumeContext?.runtimeBudgetProfile, "high");
   assert.deepEqual((resumeContext?.canvas as { workflow?: unknown } | undefined)?.workflow, { mode: "batch_delivery" });
+});
+
+test("answered Agent clarification falls back to matching pending question when ids differ", async () => {
+  const { storage, agentClarifications } = fakeStorage();
+  agentClarifications.push({
+    id: "agent_clarification_stable_hash",
+    status: "pending",
+    question: "Which time range should the review cover?",
+    options: [
+      { id: "recent_3", label: "Recent 3 years", detail: "2023-2026", recommended: true },
+      { id: "recent_5", label: "Recent 5 years", detail: "2021-2026", recommended: false }
+    ],
+    resumeContext: {}
+  });
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: "Continuing with the selected scope.",
+        finishReason: "agent_backend_completed",
+        events: []
+      })
+    }
+  });
+
+  await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "Continue the review",
+    contextValues: {
+      agentClarification: {
+        clarificationId: "call_from_live_timeline",
+        question: "Which time range should the review cover?",
+        selectedOptionId: "recent_3",
+        answer: "Recent 3 years",
+        option: { id: "recent_3", label: "Recent 3 years", detail: "2023-2026", recommended: true }
+      }
+    }
+  });
+
+  assert.equal(agentClarifications[0]?.status, "answered");
+  assert.equal(agentClarifications[0]?.selectedOptionId, "recent_3");
+});
+
+test("streaming generation suppresses Canvas active heartbeat after Agent clarification waiting", async () => {
+  const { storage } = fakeStorage();
+  const timelineEvents: Array<{ title: string; status: string; payload?: Record<string, unknown> }> = [];
+  const clarificationEvent: ToolEventRecord = {
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      toolCallId: "call_clarify",
+      question: "Which time range should the review cover?",
+      options: [
+        { id: "recent_3", label: "Recent 3 years", detail: "2023-2026", recommended: true },
+        { id: "recent_5", label: "Recent 5 years", detail: "2021-2026" }
+      ]
+    }
+  };
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "canvas_delivery_body_checkpoint_committed",
+          payload: { type: "canvas_delivery_body_checkpoint_committed", status: "committed" }
+        });
+        input.onToolEvent?.(clarificationEvent);
+        input.onRuntimeSignal?.({ type: "heartbeat", label: "Agent Runtime is still working...", payload: { comment: "heartbeat" } });
+        return {
+          text: "",
+          finishReason: "clarification_required",
+          events: [clarificationEvent]
+        };
+      }
+    }
+  });
+
+  await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent Agent literature",
+    transientSkillRefs: ["literature-review"],
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, agentClarification: answeredAgentClarification() },
+    toolState: { web_search: true }
+  }, {
+    onTimelineEvent: (event) => timelineEvents.push(event)
+  });
+
+  assert.equal(timelineEvents.some((event) => event.payload?.signal === "heartbeat" || /Agent Runtime active|仍在运行/.test(event.title)), false);
+  assert.equal(timelineEvents.some((event) => event.payload?.eventType === "agent_backend_agent_clarification_requested" && event.status === "waiting"), true);
 });
 
 test("skill scope guard fills default budget and Canvas resume context when runtime sends a partial resume", async () => {

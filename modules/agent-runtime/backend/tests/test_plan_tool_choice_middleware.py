@@ -207,6 +207,39 @@ def test_forces_final_answer_after_evidence_budget_reached():
     assert "stop calling tools now" in captured["request"].messages[-1].content
 
 
+def test_emits_synthesis_gate_event_after_evidence_budget_reached(monkeypatch: pytest.MonkeyPatch):
+    middleware = PlanToolChoiceMiddleware()
+    events = []
+    messages = [
+        HumanMessage(content="Review agent literature"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+    ]
+
+    monkeypatch.setattr("langgraph.config.get_stream_writer", lambda: events.append)
+
+    middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            allowed_tool_refs=["web_search", "web_fetch", "read_file", "canvas_write"],
+            tool_state={"web_search": True, "web_fetch": True, "read_file": True, "canvas_write": True},
+            evidence_tool_limit=1,
+            evidence_tools=["web_search", "web_fetch", "read_file"],
+            progressive_enabled=True,
+            force_synthesis_after_evidence=True,
+        ),
+        lambda model_request: AIMessage(content="Final answer"),
+    )
+
+    assert events[0]["type"] == "synthesis_gate"
+    assert events[0]["reason"] == "evidence budget reached"
+    assert events[0]["completed_evidence_tools"] == 1
+    assert events[0]["evidence_limit"] == 1
+    assert events[0]["model_calls"] == 0
+    assert events[0]["entered_second_handler"] is False
+    assert events[0]["second_handler"] is False
+
+
 def test_forces_final_answer_near_model_call_budget():
     middleware = PlanToolChoiceMiddleware()
     captured = {}
@@ -442,9 +475,10 @@ def test_does_not_force_another_artifact_after_artifact_stage_returns():
     assert captured["request"].tool_choice is None
 
 
-def test_budget_retry_forces_final_answer_when_model_keeps_requesting_tools():
+def test_budget_retry_forces_final_answer_when_model_keeps_requesting_tools(monkeypatch: pytest.MonkeyPatch):
     middleware = PlanToolChoiceMiddleware()
     calls = []
+    events = []
     messages = [
         HumanMessage(content="Research this"),
         ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
@@ -461,6 +495,7 @@ def test_budget_retry_forces_final_answer_when_model_keeps_requesting_tools():
             }])
         return AIMessage(content="Final answer from existing evidence")
 
+    monkeypatch.setattr("langgraph.config.get_stream_writer", lambda: events.append)
     result = middleware.wrap_model_call(
         request(
             phase="chat",
@@ -475,6 +510,8 @@ def test_budget_retry_forces_final_answer_when_model_keeps_requesting_tools():
 
     assert calls == [[], []]
     assert result.content == "Final answer from existing evidence"
+    assert [event["second_handler"] for event in events if event["type"] == "synthesis_gate"] == [False, True, True]
+    assert [event["entered_second_handler"] for event in events if event["type"] == "synthesis_gate"] == [False, True, True]
 
 
 def test_budget_retry_fails_if_model_still_requests_tools():

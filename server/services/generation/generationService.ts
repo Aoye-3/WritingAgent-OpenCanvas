@@ -5,6 +5,7 @@ import type { ProjectRuntimeSettings, SQLiteStorageRepository } from "../../stor
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { KnowledgeService } from "../../knowledge/service.js";
 import type { AgentRuntimePort } from "../../runtime/agentRuntimePort.js";
+import type { AgentBackendRuntimeSignal } from "../../runtime/agentBackendAdapter/client.js";
 import type { AgentRuntimeMemoryService } from "../agentRuntimeMemoryService.js";
 import { createAgentBackendRuntimePort } from "../../runtime/agentBackendAdapter/index.js";
 import { randomThreadId, safeId } from "../../utils/ids.js";
@@ -275,6 +276,9 @@ export function createGenerationService(
     let bodyDraftWriteCount = 0;
     let progressiveDeliveryStarted = false;
     let progressiveSynthesisStarted = false;
+    let lastCanvasCommitAt: number | undefined;
+    let runtimeHeartbeatTimelineEmitted = false;
+    let runtimeWaitingForUser = false;
     const progressiveEvidenceEntries: ProgressiveEvidenceEntry[] = [];
     const publicReasoning = createPublicReasoningEmitter(payload.locale, callbacks.onReasoningToken);
     const emitTimeline = (event: RunTimelineEvent) => {
@@ -286,6 +290,54 @@ export function createGenerationService(
       callbacks.onToolEvent?.(event);
       publicReasoning.fromToolEvent(event);
       emitTimeline(timelineEventFromToolEvent(event) ?? toolEventToTimelineEvent(timeline, event));
+    };
+    const observeRuntimeSignal = (signal: AgentBackendRuntimeSignal) => {
+      if (signal.type === "waiting_for_user") {
+        runtimeWaitingForUser = true;
+        lastCanvasCommitAt = undefined;
+        runtimeHeartbeatTimelineEmitted = false;
+        emitTimeline(timeline.event(
+          "decision",
+          "waiting",
+          payload.locale === "zh" ? "等待用户选择" : "Waiting for your choice",
+          signal.label,
+          { signal: signal.type, ...(signal.payload ?? {}) }
+        ));
+        return;
+      }
+      if (signal.type === "heartbeat") {
+        if (runtimeWaitingForUser) return;
+        if (lastCanvasCommitAt && !runtimeHeartbeatTimelineEmitted) {
+          runtimeHeartbeatTimelineEmitted = true;
+          emitTimeline(timeline.event(
+            "decision",
+            "running",
+            payload.locale === "zh" ? "Agent Runtime 仍在运行" : "Agent Runtime active",
+            payload.locale === "zh" ? "Canvas 已更新，正在等待下一次模型决策或工具调用。" : "Canvas is updated; waiting for the next model decision or tool call.",
+            { signal: signal.type, elapsedMsSinceCanvasCommit: Date.now() - lastCanvasCommitAt }
+          ));
+        }
+        return;
+      }
+      const signalReason = typeof signal.payload?.reason === "string" ? signal.payload.reason : "";
+      const activeTitle = signal.type === "llm_call_start"
+        ? (payload.locale === "zh" ? "等待模型返回" : "Waiting for model response")
+        : signal.type === "llm_call_end"
+          ? (payload.locale === "zh" ? "模型已返回" : "Model response received")
+          : signal.type === "llm_call_error"
+            ? signalReason === "stream_chunk_timeout"
+              ? (payload.locale === "zh" ? "模型流式超时" : "Model stream timeout")
+              : (payload.locale === "zh" ? "模型请求异常" : "Model request error")
+            : signal.type === "synthesis_gate"
+              ? (payload.locale === "zh" ? "最终综合中" : "Final synthesis")
+              : (payload.locale === "zh" ? "模型请求重试" : "Model request retry");
+      emitTimeline(timeline.event(
+        "decision",
+        signal.type === "llm_call_end" ? "completed" : "waiting",
+        activeTitle,
+        signal.label,
+        { signal: signal.type, ...(signal.payload ?? {}) }
+      ));
     };
     const ensureProgressiveDeliveryStarted = () => {
       if (progressiveDeliveryStarted || !isProgressiveCanvasDeliveryEnabled(payload)) return;
@@ -306,6 +358,26 @@ export function createGenerationService(
       const observed = withAgentClarificationResumeContext(event, payload);
       if (!runtimeEvents.includes(observed)) runtimeEvents.push(observed);
       emitRuntimeToolEvent(observed);
+      if (isAgentClarificationEvent(observed)) {
+        runtimeWaitingForUser = true;
+        lastCanvasCommitAt = undefined;
+        runtimeHeartbeatTimelineEmitted = false;
+      }
+      if (isCanvasCommitEvent(observed)) {
+        lastCanvasCommitAt = Date.now();
+        runtimeHeartbeatTimelineEmitted = false;
+      }
+      if (lastCanvasCommitAt && /(?:^|_)tool_started$/.test(observed.eventType)) {
+        emitTimeline(timeline.event(
+          "decision",
+          "completed",
+          payload.locale === "zh" ? "下一轮工具调用开始" : "Next tool call started",
+          payload.locale === "zh" ? "Canvas 更新后的静默间隔已结束。" : "The quiet interval after the Canvas update ended.",
+          { elapsedMsSinceCanvasCommit: Date.now() - lastCanvasCommitAt }
+        ));
+        lastCanvasCommitAt = undefined;
+        runtimeHeartbeatTimelineEmitted = false;
+      }
       if (isProgressiveToolCompletion(observed)) ensureProgressiveDeliveryStarted();
       const researchEvents = commitProgressiveResearchDelivery({
         payload,
@@ -386,7 +458,8 @@ export function createGenerationService(
         onToolEvent: observeToolEvent,
         onToken: textGate.push,
         onReasoningToken: callbacks.onReasoningToken,
-        onStatus: callbacks.onStatus
+        onStatus: callbacks.onStatus,
+        onRuntimeSignal: observeRuntimeSignal
       }, executionRuntime);
 
       if (agentBackendRun) {
@@ -924,11 +997,16 @@ function markAnsweredAgentClarification(storage: SQLiteStorageRepository, thread
   const clarificationId = readString(clarification.clarificationId);
   if (!clarificationId) return;
   const option = record(clarification.option);
-  storage.answerAgentClarification(threadId, clarificationId, {
+  const answer = {
     selectedOptionId: readString(clarification.selectedOptionId) || readString(option.id),
     selectedOptionLabel: readString(option.label) || readString(clarification.answer),
     answer: readString(clarification.answer) || readString(option.label)
-  });
+  };
+  if (storage.answerAgentClarification(threadId, clarificationId, answer)) return;
+  const question = readString(clarification.question);
+  if (!question) return;
+  const matchingPending = storage.listAgentClarifications(threadId).find((item) => item.status === "pending" && item.question === question);
+  if (matchingPending) storage.answerAgentClarification(threadId, matchingPending.id, answer);
 }
 
 function isBlockingAgentClarificationRun(events: ToolEventRecord[], text: string, finishReason?: string) {
@@ -2057,6 +2135,12 @@ function progressiveBodyCheckpointMarkdown(locale: GenerateRequest["locale"], en
 
 function isProgressiveToolCompletion(event: ToolEventRecord) {
   return /(?:^|_)tool_completed$/.test(event.eventType);
+}
+
+function isCanvasCommitEvent(event: ToolEventRecord) {
+  return /^canvas_delivery_.*_committed$/.test(event.eventType)
+    || /(?:^|_)canvas_mutation_committed$/.test(event.eventType)
+    || /(?:^|_)canvas_node_committed$/.test(event.eventType);
 }
 
 function isProgressiveEvidenceTool(toolName: string) {

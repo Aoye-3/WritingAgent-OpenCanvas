@@ -48,6 +48,29 @@ test("live thread-state refresh queues one follow-up refresh while a refresh is 
   assert.deepEqual(applied.map((state) => state.canvasNodes[0]?.content), ["placeholder", "working body draft"]);
 });
 
+test("live thread-state refresh notifies when a slow refresh settles", async () => {
+  const scheduler = createLiveThreadStateRefreshScheduler();
+  const settled: string[] = [];
+  let resolveRefresh: (state: ThreadStateResponse) => void = () => undefined;
+
+  scheduler.request({
+    threadId: "thread_1",
+    operationId: 7,
+    currentOperationId: () => 7,
+    fetchAndApply: async () => new Promise<ThreadStateResponse>((resolve) => {
+      resolveRefresh = resolve;
+    }),
+    apply: () => undefined,
+    onSettled: () => settled.push("done")
+  });
+
+  assert.deepEqual(settled, []);
+  resolveRefresh(threadState("synced body"));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(settled, ["done"]);
+});
+
 test("live Canvas node snapshots replace matching nodes without reordering the board", () => {
   const overview = canvasNode("overview", "Overview");
   const draft = canvasNode("body_draft", "Draft 1");

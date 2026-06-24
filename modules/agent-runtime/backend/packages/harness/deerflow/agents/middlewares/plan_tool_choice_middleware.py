@@ -3,7 +3,7 @@
 import json
 import re
 from collections.abc import Awaitable, Callable
-from typing import override
+from typing import Any, override
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
@@ -131,6 +131,20 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             return request
 
         reason = "evidence budget reached" if evidence_exhausted else "model budget nearly exhausted" if model_exhausting else "runtime step reserve reached"
+        PlanToolChoiceMiddleware._emit_synthesis_event({
+            "type": "synthesis_gate",
+            "phase": "budget_synthesis",
+            "reason": reason,
+            "completed_evidence_tools": completed_evidence_tools,
+            "evidence_limit": evidence_limit,
+            "model_limit": model_limit,
+            "model_calls": model_calls,
+            "recursion_limit": recursion_limit,
+            "estimated_steps_used": estimated_steps_used,
+            "file_delivery_required": context.get("facetwrite_markdown_file_delivery_required") is True,
+            "second_handler": False,
+            "entered_second_handler": False,
+        })
         file_delivery_required = context.get("facetwrite_markdown_file_delivery_required") is True
         file_presented = PlanToolChoiceMiddleware._has_tool_result(request, "present_files")
         if file_delivery_required and not file_presented:
@@ -190,6 +204,16 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             additional_kwargs={"hide_from_ui": True, "facetwrite_budget_notice": True},
         ))
         return request.override(messages=messages, tools=[], tool_choice=None)
+
+    @staticmethod
+    def _emit_synthesis_event(payload: dict[str, Any]) -> None:
+        try:
+            from langgraph.config import get_stream_writer
+
+            writer = get_stream_writer()
+            writer(payload)
+        except Exception:
+            pass
 
     @staticmethod
     def _positive_int(value: object) -> int | None:
@@ -324,7 +348,21 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             PlanToolChoiceMiddleware._contains_tool_call(result)
             or PlanToolChoiceMiddleware._contains_internal_runtime_protocol(result)
         ):
+            PlanToolChoiceMiddleware._emit_synthesis_event({
+                "type": "synthesis_gate",
+                "phase": "budget_synthesis",
+                "reason": "model returned tools after budget synthesis notice",
+                "second_handler": True,
+                "entered_second_handler": True,
+            })
             retry = handler(PlanToolChoiceMiddleware._budget_retry_request(prepared))
+            PlanToolChoiceMiddleware._emit_synthesis_event({
+                "type": "synthesis_gate",
+                "phase": "budget_synthesis",
+                "reason": "second handler completed",
+                "second_handler": True,
+                "entered_second_handler": True,
+            })
             if (
                 PlanToolChoiceMiddleware._contains_tool_call(retry)
                 or PlanToolChoiceMiddleware._contains_internal_runtime_protocol(retry)
@@ -345,7 +383,21 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             PlanToolChoiceMiddleware._contains_tool_call(result)
             or PlanToolChoiceMiddleware._contains_internal_runtime_protocol(result)
         ):
+            PlanToolChoiceMiddleware._emit_synthesis_event({
+                "type": "synthesis_gate",
+                "phase": "budget_synthesis",
+                "reason": "model returned tools after budget synthesis notice",
+                "second_handler": True,
+                "entered_second_handler": True,
+            })
             retry = await handler(PlanToolChoiceMiddleware._budget_retry_request(prepared))
+            PlanToolChoiceMiddleware._emit_synthesis_event({
+                "type": "synthesis_gate",
+                "phase": "budget_synthesis",
+                "reason": "second handler completed",
+                "second_handler": True,
+                "entered_second_handler": True,
+            })
             if (
                 PlanToolChoiceMiddleware._contains_tool_call(retry)
                 or PlanToolChoiceMiddleware._contains_internal_runtime_protocol(retry)

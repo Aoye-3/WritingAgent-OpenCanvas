@@ -631,6 +631,40 @@ def test_openai_compatible_provider_respects_explicit_stream_usage(monkeypatch):
     assert captured.get("stream_usage") is False
 
 
+def test_openai_compatible_provider_passes_timeout_knobs(monkeypatch):
+    model = ModelConfig(
+        name="facetwrite-provider",
+        display_name="FacetWrite Provider",
+        description=None,
+        use="deerflow.models.patched_deepseek:PatchedChatDeepSeek",
+        model="deepseek-v4-flash",
+        api_base="https://api.siliconflow.cn/v1",
+        api_key="test-key",
+        timeout=180.0,
+        stream_chunk_timeout=45.0,
+        max_retries=2,
+        supports_thinking=True,
+        supports_vision=False,
+    )
+    cfg = _make_app_config([model])
+    _patch_factory(monkeypatch, cfg)
+
+    captured: dict = {}
+
+    class CapturingModel(FakeChatModel):
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            BaseChatModel.__init__(self, **kwargs)
+
+    monkeypatch.setattr(factory_module, "resolve_class", lambda path, base: CapturingModel)
+
+    factory_module.create_chat_model(name="facetwrite-provider")
+
+    assert captured.get("timeout") == 180.0
+    assert captured.get("stream_chunk_timeout") == 45.0
+    assert captured.get("max_retries") == 2
+
+
 def test_openai_compatible_provider_enables_stream_usage_for_openai_api_base(monkeypatch):
     """openai_api_base should trigger stream_usage default for ChatOpenAI."""
     model = ModelConfig(

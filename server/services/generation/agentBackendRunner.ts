@@ -3,6 +3,7 @@ import type { ConversationModelRuntimeSettings } from "../../agentCards.js";
 import type { GenerateRequest } from "../../contracts/generation.js";
 import { getAgentBackendRuntimeConfig, type AgentBackendRuntimeConfig } from "../../runtime/agentBackendAdapter/config.js";
 import { runAgentBackendAgent } from "../../runtime/agentBackendAdapter/client.js";
+import type { AgentBackendRuntimeSignal } from "../../runtime/agentBackendAdapter/client.js";
 import type { ChatMessage } from "../../providerRuntime.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { StreamStatus } from "../../agentRunLoop.js";
@@ -22,6 +23,7 @@ export type AgentBackendRunnerInput = {
   onToken?: (token: string) => void;
   onReasoningToken?: (token: string) => void;
   onStatus?: (status: StreamStatus) => void;
+  onRuntimeSignal?: (signal: AgentBackendRuntimeSignal) => void;
 };
 
 export type AgentBackendRunnerDeps = {
@@ -52,7 +54,8 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     onToolEvent: input.onToolEvent,
     onToken: input.onToken,
     onReasoningToken: input.onReasoningToken,
-    onStatus: input.onStatus
+    onStatus: input.onStatus,
+    onRuntimeSignal: input.onRuntimeSignal
   });
 
   if (isSkillClarificationGuarded(input.payload) && !hasAgentClarificationEvent(run.events)) {

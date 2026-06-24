@@ -75,6 +75,26 @@ npm.cmd run acceptance:local-runtime
 
 It starts from `start-opencanvas-shell.vbs`, requires Docker and port `2026` to remain absent, and verifies five UI generations with `provider:"agent-backend"` and `usedMock:false`. It then verifies a Skill-driven `read_file` followed by live `web_search`, Agent Runtime `memory.json` persistence, visible tool start/completion events, low-risk Canvas commits, and destructive Canvas approval.
 
+## LLM Timeout And Silent Gap Diagnostics
+
+Progressive Canvas delivery can update `Body draft` or `Progress note` nodes before the next model decision. If the right trace then shows no new tool call for minutes, first inspect the LLM timeout path rather than WebSearch limits or Canvas writes.
+
+The validated local runtime split is:
+
+```yaml
+timeout: 300.0
+stream_chunk_timeout: 45.0
+max_retries: 2
+```
+
+`timeout` is the total provider request safety stop. `stream_chunk_timeout` is the no-effective-model-chunk recovery threshold and is the main control for the post-Canvas silent gap. The previous `timeout: 600.0` allowed near 10-minute waits when the provider stream stayed open without useful chunks. A `timeout: 300.0` plus `stream_chunk_timeout: 45.0` completed the observed full progressive research workflow in about five minutes without negative regression.
+
+Runtime status and timeline events should expose `llm_call_start`, `llm_call_end`, `llm_call_error`, and `llm_retry`. Safe timeout metadata includes `model`, `provider_class`, `base_url_host`, `timeout_s`, `stream_chunk_timeout_s`, and `max_retries`; it must not include prompts, tool results, generated content, or API keys. A `stream_chunk_timeout` should appear to users as a model stream timeout followed by retry, not as unexplained silence.
+
+Do not fix this class of stall by reducing WebSearch loop limits, changing `agent_backend_tool_started` or `agent_backend_tool_completed` payloads, disabling progressive Canvas delivery, or relaxing Agent clarification contracts. If `45.0` interrupts legitimate long synthesis, test `60.0` or `90.0` next; do not jump back to 120/180/600 without measured evidence.
+
+After changing timeout config or AgentBackend middleware, restart the Runtime with `npm.cmd run agent-runtime:up` or restart the app shell so the source/config fingerprint can refresh the managed Gateway.
+
 ## Troubleshooting
 
 - `uv`/Node/npm/npx missing: run `npm.cmd run agent-runtime:doctor` and install the reported prerequisite.
