@@ -203,6 +203,7 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
       taskBrief: storage.getTaskBrief(request.params.threadId),
       outputVersions,
       toolEvents,
+      agentClarifications: storage.listAgentClarifications(request.params.threadId),
       runTimelineEvents: runTimelineSourceEvents.map(timelineEventFromToolEvent).filter((event): event is NonNullable<typeof event> => Boolean(event)),
       canvasNodes: storage.listCanvasNodes(projectId),
       canvasEdges: storage.listCanvasEdges(projectId),

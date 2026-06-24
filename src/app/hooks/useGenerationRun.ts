@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentCard, CanvasNode, CanvasWriteSuggestion, PlanRun, RunTimelineEvent, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
+import type { AgentCard, AgentClarification, CanvasNode, CanvasWriteSuggestion, PlanRun, RunTimelineEvent, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
 import { generateText, generateTextStream } from "../../features/generation/generationClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../../features/generation/types";
 import type { Locale } from "../../features/i18n/types";
@@ -99,6 +99,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const [toolEvents, setToolEvents] = useState<StoredToolEvent[]>([]);
   const [runTimelineEvents, setRunTimelineEvents] = useState<RunTimelineEvent[]>([]);
   const [plans, setPlans] = useState<PlanRun[]>([]);
+  const [agentClarifications, setAgentClarifications] = useState<AgentClarification[]>([]);
   const [canvasWriteSuggestions, setCanvasWriteSuggestions] = useState<CanvasWriteSuggestion[]>([]);
   const [activeVersionId, setActiveVersionId] = useState<string | undefined>();
   const [isGenerating, setIsGenerating] = useState(false);
@@ -146,6 +147,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     setToolEvents([]);
     setRunTimelineEvents([]);
     setPlans([]);
+    setAgentClarifications([]);
     setCanvasWriteSuggestions([]);
     setActiveVersionId(undefined);
   };
@@ -350,6 +352,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     const timelineMessages = [...messagesWithTimeline, ...activityMessages].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     setCollaborationMessages((current) => reconcileCollaborationMessages(current, timelineMessages));
     setPlans(state.plans ?? []);
+    setAgentClarifications(state.agentClarifications ?? []);
     setRunTimelineEvents(state.runTimelineEvents ?? []);
   };
 
@@ -555,6 +558,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     stopChatGeneration,
     outputVersions,
     plans,
+    agentClarifications,
     canvasWriteSuggestions,
     runTimelineEvents,
     toolEvents,
@@ -566,6 +570,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     setToolEvents,
     setRunTimelineEvents,
     setPlans,
+    setAgentClarifications,
     setCanvasWriteSuggestions,
     resetGeneration,
     applyCollaborationMessagesFromThreadState,

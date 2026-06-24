@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { sanitizeVisibleText } from "../services/generation/outputNormalizer.js";
-import type { JsonValue, RunRecordInput, StoredMessage, StoredOutputVersion, StoredToolEvent } from "../storageTypes.js";
+import type { AgentClarificationOption, JsonValue, RunRecordInput, StoredAgentClarification, StoredMessage, StoredOutputVersion, StoredToolEvent } from "../storageTypes.js";
 import { nowIso, parseJson, randomId } from "./storageRepositoryUtils.js";
 import { sanitizeToolEventPayload } from "../services/generation/toolEventSanitizer.js";
 
@@ -18,6 +19,9 @@ export class RunRepository {
     const promptVersionId = randomId("prompt");
     const outputVersionId = randomId("output");
     const now = nowIso();
+    const status = input.finishReason === "clarification_required" ? "waiting" : input.errorMessage ? "failed" : "completed";
+    const lifecycleEventType = status === "waiting" ? "run_waiting" : status === "failed" ? "run_failed" : "run_completed";
+    const events = dedupeToolEvents(input.events ?? []);
 
     this.deps.withTransaction(() => {
       this.db
@@ -25,7 +29,7 @@ export class RunRepository {
           `INSERT INTO runs (id, thread_id, agent_card_id, configured_model_api_id, model_id, mode, provider, used_mock, status, error_message, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(runId, input.threadId, input.agentCardId, input.configuredModelApiId ?? null, input.modelId ?? null, input.mode, input.provider, input.usedMock ? 1 : 0, "completed", input.errorMessage ?? null, now);
+        .run(runId, input.threadId, input.agentCardId, input.configuredModelApiId ?? null, input.modelId ?? null, input.mode, input.provider, input.usedMock ? 1 : 0, status, input.errorMessage ?? null, now);
 
       if (input.userMessage) {
         this.addMessage(input.threadId, "user", input.userMessage, false, now);
@@ -39,7 +43,7 @@ export class RunRepository {
         .prepare(`INSERT INTO output_versions (id, thread_id, run_id, content, created_at) VALUES (?, ?, ?, ?, ?)`)
         .run(outputVersionId, input.threadId, runId, input.output, now);
 
-      this.recordToolEvent(input.threadId, runId, "run_completed", {
+      this.recordToolEvent(input.threadId, runId, lifecycleEventType, {
         mode: input.mode,
         provider: input.provider,
         configuredModelApiId: input.configuredModelApiId,
@@ -55,8 +59,9 @@ export class RunRepository {
         this.recordToolEvent(input.threadId, runId, "tool_state_applied", input.toolState, now);
       }
 
-      for (const event of input.events ?? []) {
-        this.recordToolEvent(input.threadId, runId, event.eventType, event.payload, now);
+      for (const event of events) {
+        this.recordToolEvent(input.threadId, runId, event.eventType, event.payload as JsonValue, now);
+        this.recordAgentClarificationFromEvent(input.threadId, runId, event, now);
       }
 
       this.deps.touchThread(input.threadId, now);
@@ -146,9 +151,141 @@ export class RunRepository {
       .run(randomId("tool"), threadId, runId, eventType, JSON.stringify(sanitizeToolEventPayload(payload)), createdAt);
   }
 
+  listAgentClarifications(threadId: string) {
+    type Row = Omit<StoredAgentClarification, "options" | "resumeContext"> & { optionsJson: string; resumeContextJson: string };
+    const rows = this.db
+      .prepare(
+        `SELECT id,
+                thread_id as threadId,
+                run_id as runId,
+                status,
+                question,
+                options_json as optionsJson,
+                resume_context_json as resumeContextJson,
+                selected_option_id as selectedOptionId,
+                selected_option_label as selectedOptionLabel,
+                answer,
+                created_at as createdAt,
+                updated_at as updatedAt
+         FROM agent_clarifications
+         WHERE thread_id = ?
+         ORDER BY updated_at DESC`
+      )
+      .all(threadId) as Row[];
+
+    return rows.map((row) => ({
+      id: row.id,
+      threadId: row.threadId,
+      runId: row.runId,
+      status: row.status,
+      question: row.question,
+      options: readAgentClarificationOptions(parseJson(row.optionsJson)),
+      resumeContext: parseJson(row.resumeContextJson),
+      ...(row.selectedOptionId ? { selectedOptionId: row.selectedOptionId } : {}),
+      ...(row.selectedOptionLabel ? { selectedOptionLabel: row.selectedOptionLabel } : {}),
+      ...(row.answer ? { answer: row.answer } : {}),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
+  }
+
+  answerAgentClarification(threadId: string, clarificationId: string, input: { selectedOptionId?: string; selectedOptionLabel?: string; answer?: string }) {
+    const now = nowIso();
+    const result = this.db
+      .prepare(
+        `UPDATE agent_clarifications
+         SET status = 'answered',
+             selected_option_id = ?,
+             selected_option_label = ?,
+             answer = ?,
+             updated_at = ?
+         WHERE thread_id = ? AND id = ?`
+      )
+      .run(input.selectedOptionId ?? null, input.selectedOptionLabel ?? null, input.answer ?? input.selectedOptionLabel ?? null, now, threadId, clarificationId);
+    if (result.changes > 0) this.deps.touchThread(threadId, now);
+    return result.changes > 0;
+  }
+
   private addMessage(threadId: string, role: "user" | "assistant", text: string, usedMock: boolean, createdAt = nowIso()) {
     this.db
       .prepare(`INSERT INTO messages (id, thread_id, role, text, used_mock, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
       .run(randomId("msg"), threadId, role, text, usedMock ? 1 : 0, createdAt);
   }
+
+  private recordAgentClarificationFromEvent(threadId: string, runId: string, event: { eventType: string; payload: unknown }, createdAt: string) {
+    const payload = readRecord(event.payload);
+    const type = readString(payload.type) || readString(payload.eventType);
+    if (!/agent_clarification_requested$/.test(event.eventType) && type !== "agent_clarification_requested") return;
+    const question = readString(payload.question);
+    const options = readAgentClarificationOptions(payload.options);
+    if (!question || options.length < 2) return;
+    const id = stableAgentClarificationId(threadId, payload, question);
+    const existing = this.db.prepare(`SELECT status FROM agent_clarifications WHERE id = ?`).get(id) as { status?: string } | undefined;
+    if (existing?.status === "answered") return;
+    const resumeContext = readRecord(payload.resumeContext);
+    const existingCreatedAt = this.db.prepare(`SELECT created_at as createdAt FROM agent_clarifications WHERE id = ?`).get(id) as { createdAt?: string } | undefined;
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO agent_clarifications (
+           id, thread_id, run_id, status, question, options_json, resume_context_json,
+           selected_option_id, selected_option_label, answer, created_at, updated_at
+         ) VALUES (?, ?, ?, 'pending', ?, ?, ?, NULL, NULL, NULL, ?, ?)`
+      )
+      .run(id, threadId, runId, question, JSON.stringify(options), JSON.stringify(resumeContext), existingCreatedAt?.createdAt ?? createdAt, createdAt);
+  }
+}
+
+function dedupeToolEvents(events: Array<{ eventType: string; payload: unknown }>) {
+  const seen = new Set<string>();
+  return events.filter((event) => {
+    const key = toolEventDedupeKey(event);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function toolEventDedupeKey(event: { eventType: string; payload: unknown }) {
+  const payload = readRecord(event.payload);
+  const question = readString(payload.question);
+  const toolCallId = readString(payload.toolCallId);
+  const clarificationId = readString(payload.clarificationId);
+  if (/agent_clarification/.test(event.eventType) || question) {
+    return [event.eventType, toolCallId, clarificationId, question].join("|");
+  }
+  return `${event.eventType}|${JSON.stringify(sanitizeToolEventPayload(event.payload as JsonValue))}`;
+}
+
+function stableAgentClarificationId(threadId: string, payload: Record<string, unknown>, question: string) {
+  const explicit = readString(payload.clarificationId);
+  const toolCallId = readString(payload.toolCallId);
+  const basis = `${threadId}:${explicit || toolCallId}:${question}`;
+  return `agent_clarification_${createHash("sha1").update(basis).digest("hex").slice(0, 16)}`;
+}
+
+function readAgentClarificationOptions(value: unknown): AgentClarificationOption[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    if (typeof item === "string") {
+      const label = readString(item);
+      return label ? [{ id: `option_${index + 1}`, label, detail: "", recommended: index === 0 }] : [];
+    }
+    const record = readRecord(item);
+    const label = readString(record.label) || readString(record.title);
+    if (!label) return [];
+    return [{
+      id: readString(record.id) || `option_${index + 1}`,
+      label,
+      detail: readString(record.detail) || readString(record.description),
+      recommended: record.recommended === true || index === 0 && !value.some((candidate) => readRecord(candidate).recommended === true)
+    }];
+  }).slice(0, 3);
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }

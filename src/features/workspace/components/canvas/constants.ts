@@ -1,6 +1,6 @@
 import type { CanvasNodeKind, CanvasWorkflowMode, CanvasWorkflowStage } from "../../../agents/types";
 
-export const MIN_ZOOM = 0.25;
+export const MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 3;
 
 export const MIN_NODE_SIZE: Record<CanvasNodeKind, { width: number; height: number }> = {

@@ -59,12 +59,12 @@ test("Canvas and artifact lifecycle events request live thread-state refresh", (
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_tool_completed", payload: { toolName: "web_search" } }), false);
 });
 
-test("Canvas delivery committed events expose live node snapshots only for final nodes", () => {
+test("Canvas delivery committed events expose live node snapshots for checkpoint and final nodes", () => {
   const node = canvasNode("body_draft", "Working draft 2");
-  assert.equal(readLiveCanvasNodeSnapshot({
+  assert.deepEqual(readLiveCanvasNodeSnapshot({
     eventType: "canvas_delivery_body_checkpoint_committed",
     payload: { node }
-  }), undefined);
+  }), node);
 
   assert.deepEqual(readLiveCanvasNodeSnapshot({
     eventType: "canvas_delivery_body_final_committed",

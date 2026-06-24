@@ -65,6 +65,8 @@ Knowledge Base vector stores and uploads are created under:
   - Generated output versions connected to runs.
 - `tool_events`
   - Tool and run events stored as JSON payloads. `web_search` events may include sanitized `sources` arrays with title and URL only; raw search result payloads and secrets must not be persisted.
+- `agent_clarifications`
+  - Durable Agent Runtime clarification state per Thread/run/question. Pending rows drive the composer choice card; answered rows preserve selected option metadata so follow-up runs can mark the question resolved and retain resume context.
 - `settings`
   - Generic settings key/value table.
 - `agent_settings`
@@ -149,6 +151,8 @@ File uploads are stored outside the main database under `.facetwrite/knowledge/u
 Schema version 3 intentionally clears legacy workspace data to complete the physical Project migration. Model Config, Agent definitions, and knowledge-base data are retained.
 Schema version 4 adds `threads.context_reset_at` without deleting history.
 Schema version 12 drops legacy `project_agent_inputs` data and creates Agent-independent Project and Thread Brief tables.
+
+Schema version 13 creates `agent_clarifications`. It stores Agent Runtime `ask_clarification` state separately from Plan clarification JSON: stable id, Thread/run ids, `pending` or `answered` status, question, structured options, selected option/answer fields, and `resume_context_json`. Do not infer this state only from `tool_events` or run timeline events; those remain audit and fallback surfaces.
 
 Schema version 6 adds `plan_runs.clarification_json`. It stores the structured intake question, options, answer status, selected option, and optional custom answer while preserving the existing Plan ID through revision and execution.
 
