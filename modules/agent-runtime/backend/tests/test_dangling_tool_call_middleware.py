@@ -99,6 +99,67 @@ class TestBuildPatchedMessagesPatching:
         assert len(synthetic) == 1
         assert synthetic[0].tool_call_id == "call_2"
 
+    def test_invalid_tool_call_is_patched_when_valid_call_responded(self):
+        mw = DanglingToolCallMiddleware()
+        msgs = [
+            AIMessage(
+                content="",
+                tool_calls=[_tc("web_search", "call_valid")],
+                invalid_tool_calls=[
+                    {
+                        "id": "call_invalid",
+                        "name": "web_search",
+                        "args": '{"query":',
+                        "error": "invalid json",
+                    }
+                ],
+            ),
+            _tool_msg("call_valid", "web_search"),
+        ]
+
+        patched = mw._build_patched_messages(msgs)
+
+        assert patched is not None
+        synthetic = [m for m in patched if isinstance(m, ToolMessage) and m.status == "error"]
+        assert len(synthetic) == 1
+        assert synthetic[0].tool_call_id == "call_invalid"
+        assert synthetic[0].name == "web_search"
+
+    def test_patched_invalid_tool_call_serializes_with_tool_response(self):
+        from langchain_openai import ChatOpenAI
+
+        mw = DanglingToolCallMiddleware()
+        msgs = [
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "web_search", "args": {"query": "ok"}, "id": "call_valid"}],
+                invalid_tool_calls=[
+                    {
+                        "id": "call_invalid",
+                        "name": "web_search",
+                        "args": '{"query":',
+                        "error": "invalid json",
+                    }
+                ],
+            ),
+            _tool_msg("call_valid", "web_search"),
+        ]
+        patched = mw._build_patched_messages(msgs)
+
+        payload = ChatOpenAI(api_key="sk-test", model="gpt-test")._get_request_payload(patched)
+        assistant_tool_ids = {
+            tool_call["id"]
+            for tool_call in payload["messages"][0]["tool_calls"]
+        }
+        following_tool_ids = {
+            message["tool_call_id"]
+            for message in payload["messages"][1:]
+            if message["role"] == "tool"
+        }
+
+        assert assistant_tool_ids == {"call_valid", "call_invalid"}
+        assert assistant_tool_ids.issubset(following_tool_ids)
+
     def test_multiple_ai_messages_each_patched(self):
         mw = DanglingToolCallMiddleware()
         msgs = [

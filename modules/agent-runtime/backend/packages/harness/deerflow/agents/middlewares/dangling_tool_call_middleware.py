@@ -37,12 +37,26 @@ class DanglingToolCallMiddleware(AgentMiddleware[AgentState]):
     @staticmethod
     def _message_tool_calls(msg) -> list[dict]:
         """Return normalized tool calls from structured fields or raw provider payloads."""
+        normalized: list[dict] = []
+
         tool_calls = getattr(msg, "tool_calls", None) or []
         if tool_calls:
-            return list(tool_calls)
+            normalized.extend(list(tool_calls))
+
+        invalid_tool_calls = getattr(msg, "invalid_tool_calls", None) or []
+        for invalid_tc in invalid_tool_calls:
+            if not isinstance(invalid_tc, dict):
+                continue
+            args = invalid_tc.get("args", {})
+            normalized.append(
+                {
+                    "id": invalid_tc.get("id"),
+                    "name": invalid_tc.get("name") or "unknown",
+                    "args": args if isinstance(args, dict) else {},
+                }
+            )
 
         raw_tool_calls = (getattr(msg, "additional_kwargs", None) or {}).get("tool_calls") or []
-        normalized: list[dict] = []
         for raw_tc in raw_tool_calls:
             if not isinstance(raw_tc, dict):
                 continue

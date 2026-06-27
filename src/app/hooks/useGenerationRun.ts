@@ -431,16 +431,18 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     activeChatMessageIdRef.current = assistantMessageId;
     blockedReasoningMessageIdsRef.current.delete(assistantMessageId);
     const startedAt = new Date().toISOString();
+    const suppressUserMessage = hasAgentClarificationContext(requestContext);
+    const userMessage: CollaborationMessage = {
+      id: userMessageId,
+      role: "user",
+      text,
+      usedMock: false,
+      createdAt: startedAt
+    };
     let streamedText = "";
     setCollaborationMessages((current) => [
       ...current,
-      {
-        id: userMessageId,
-        role: "user",
-        text,
-        usedMock: false,
-        createdAt: startedAt
-      },
+      ...(suppressUserMessage ? [] : [userMessage]),
       {
         id: assistantMessageId,
         role: "assistant",
@@ -615,6 +617,11 @@ function omitSkillOverrideRefs(requestContext?: Record<string, unknown>) {
 
 function readRuntimeBudgetProfile(value: unknown): GenerateRequest["runtimeBudgetProfile"] | undefined {
   return value === "low" || value === "medium" || value === "high" ? value : undefined;
+}
+
+function hasAgentClarificationContext(requestContext?: Record<string, unknown>) {
+  const clarification = requestContext?.agentClarification;
+  return Boolean(clarification && typeof clarification === "object" && !Array.isArray(clarification));
 }
 
 function isAbortError(error: unknown) {

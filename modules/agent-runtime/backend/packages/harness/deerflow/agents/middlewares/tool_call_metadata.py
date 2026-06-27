@@ -28,6 +28,12 @@ def clone_ai_message_with_tool_calls(
     if content is not None:
         update["content"] = content
 
+    invalid_tool_calls = getattr(message, "invalid_tool_calls", None) or []
+    update["invalid_tool_calls"] = [
+        invalid_tc for invalid_tc in invalid_tool_calls
+        if _raw_tool_call_id(invalid_tc) in kept_ids
+    ]
+
     additional_kwargs = dict(getattr(message, "additional_kwargs", {}) or {})
     raw_tool_calls = additional_kwargs.get("tool_calls")
     if isinstance(raw_tool_calls, list):

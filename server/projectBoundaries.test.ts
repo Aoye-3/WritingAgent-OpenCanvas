@@ -4,12 +4,12 @@ import { DatabaseSync } from "node:sqlite";
 import { migrateStorageSchema } from "./db/schema.js";
 import { createStorage } from "./storage.js";
 
-test("schema v13 uses independent Project and Thread Brief tables plus Agent clarifications", () => {
+test("schema v14 uses independent Project data domains plus Claim candidates", () => {
   const db = new DatabaseSync(":memory:");
   migrateStorageSchema(db);
 
   const version = db.prepare(`SELECT MAX(version) as version FROM schema_version`).get() as { version: number };
-  assert.equal(version.version, 13);
+  assert.equal(version.version, 14);
   assert.equal(tableExists(db, "plan_runs"), true);
   assert.equal(tableExists(db, "plan_executions"), true);
   assert.equal(tableExists(db, "run_activities"), true);
@@ -26,6 +26,12 @@ test("schema v13 uses independent Project and Thread Brief tables plus Agent cla
   assert.equal(tableExists(db, "project_briefs"), true);
   assert.equal(tableExists(db, "thread_task_briefs"), true);
   assert.equal(tableExists(db, "agent_clarifications"), true);
+  assert.equal(tableExists(db, "claim_candidates"), true);
+  assert.equal(columnNames(db, "claim_candidates").includes("project_id"), true);
+  assert.equal(columnNames(db, "claim_candidates").includes("thread_id"), true);
+  assert.equal(columnNames(db, "claim_candidates").includes("source_node_id"), true);
+  assert.equal(columnNames(db, "claim_candidates").includes("status"), true);
+  assert.equal(columnNames(db, "claim_candidates").includes("canvas_node_id"), true);
   assert.equal(columnNames(db, "agent_clarifications").includes("resume_context_json"), true);
   assert.equal(columnNames(db, "agent_clarifications").includes("status"), true);
   assert.equal(columnNames(db, "threads").includes("agent_card_id"), false);

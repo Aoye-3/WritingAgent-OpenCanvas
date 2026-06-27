@@ -362,6 +362,7 @@ class LoopDetectionMiddleware(AgentMiddleware[AgentState]):
         """Clear tool-call metadata so forced-stop messages serialize as plain assistant text."""
         update = {
             "tool_calls": [],
+            "invalid_tool_calls": [],
             "content": content,
         }
 

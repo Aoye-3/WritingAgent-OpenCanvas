@@ -17,6 +17,8 @@ import type { CanvasMindChainContext } from "../../../shared/canvasMindChain";
 import type { AgentBackendRuntimeStatus, ConfiguredModelApiSummary } from "../settings/types";
 import { createSkillFolder, deleteSkillFolder, fetchSkillCatalogState, moveSkillToFolder, renameSkillFolder } from "../agents/agentClient";
 import { isSkillRefSelected } from "./components/SkillFolderPicker";
+import { ClaimReviewPanel } from "./claims/ClaimReviewPanel";
+import { useClaimReview } from "./claims/useClaimReview";
 
 const RIGHT_DRAWER_MIN_WIDTH = 360;
 const RIGHT_DRAWER_MAX_WIDTH = 720;
@@ -278,6 +280,16 @@ export function WorkspaceView({
     setRightCollapsed(false);
   }, [activeAgent.skillRefs]);
 
+  const claimReview = useClaimReview({
+    threadId: currentThreadId,
+    selectedModelConfigId,
+    onCreateCanvasNode,
+    onSendToChat: (text) => {
+      setComposerDraft(text);
+      setRightCollapsed(false);
+    }
+  });
+
   const startRightDrawerResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     const startX = event.clientX;
@@ -394,6 +406,29 @@ export function WorkspaceView({
           onUpdateNodeWorkflow={onUpdateCanvasNodeWorkflow}
           onUpdateWorkflow={onUpdateCanvasWorkflow}
           onToolChange={setActiveCanvasTool}
+          claimSourceFocus={claimReview.sourceFocusClaim}
+          onClaimDocumentPreviewChange={claimReview.activateDocument}
+          onCreateClaimFromSelection={claimReview.createFromSelection}
+          onExtractClaims={claimReview.extractActiveDocumentClaims}
+          claimPanel={
+            <ClaimReviewPanel
+              activeDocumentFileName={claimReview.activeDocument?.fileName}
+              claims={claimReview.claims}
+              error={claimReview.error}
+              extracting={claimReview.extracting}
+              loading={claimReview.loading}
+              locale={locale}
+              onAccept={(claim) => claimReview.setClaimStatus(claim, "accepted")}
+              onCreateNode={claimReview.createNodeFromClaim}
+              onCreateNodesFromAccepted={claimReview.createNodesFromAccepted}
+              onEdit={claimReview.editClaim}
+              onExtract={claimReview.extractActiveDocumentClaims}
+              onReject={(claim) => claimReview.setClaimStatus(claim, "rejected")}
+              onSendToChat={claimReview.sendClaimsToChat}
+              onSetStatus={claimReview.setClaimStatus}
+              onShowSource={(claim) => claimReview.setSourceFocusClaim(claim)}
+            />
+          }
         />
 
         <AICollaborationPanel

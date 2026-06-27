@@ -5,6 +5,7 @@ import type { AgentCard, AgentSettings } from "./agentCards.js";
 import { createFacetWriteDatabase, runSqliteTransaction } from "./db/sqlite.js";
 import { AgentSettingsRepository } from "./repositories/agentSettingsRepository.js";
 import { CanvasRepository } from "./repositories/canvasRepository.js";
+import { ClaimReviewRepository } from "./repositories/claimReviewRepository.js";
 import { KnowledgeRepository } from "./repositories/knowledgeRepository.js";
 import { RunRepository } from "./repositories/runRepository.js";
 import { ProjectRepository } from "./repositories/projectRepository.js";
@@ -28,6 +29,7 @@ import type {
   CanvasWorkflowSuggestionInput,
   CanvasWriteRequestInput,
   CanvasWriteRequestStatus,
+  CreateClaimFromSelectionInput,
   JsonValue,
   ProjectRuntimeSettings,
   ProjectBrief,
@@ -58,6 +60,11 @@ export type {
   CanvasWriteRequest,
   CanvasWriteRequestInput,
   CanvasWriteRequestStatus,
+  ClaimCandidate,
+  ClaimSourceAnchor,
+  ClaimStatus,
+  CreateClaimFromSelectionInput,
+  ExtractClaimsInput,
   JsonValue,
   ProjectSummary,
   ProjectRuntimeSettings,
@@ -88,6 +95,7 @@ export class SQLiteStorageRepository {
   private projects: ProjectRepository;
   private agentSettings: AgentSettingsRepository;
   private canvas: CanvasRepository;
+  private claims: ClaimReviewRepository;
   private knowledge: KnowledgeRepository;
   private runs: RunRepository;
   private plans: PlanRepository;
@@ -99,6 +107,9 @@ export class SQLiteStorageRepository {
     this.agentSettings = new AgentSettingsRepository(this.db, (work) => this.withTransaction(work));
     this.canvas = new CanvasRepository(this.db, {
       withTransaction: (work) => this.withTransaction(work),
+      touchProject: (projectId, updatedAt) => this.touchProject(projectId, updatedAt)
+    });
+    this.claims = new ClaimReviewRepository(this.db, {
       touchProject: (projectId, updatedAt) => this.touchProject(projectId, updatedAt)
     });
     this.knowledge = new KnowledgeRepository(this.db, {
@@ -153,6 +164,17 @@ export class SQLiteStorageRepository {
   listCanvasWriteSuggestions(threadId: string) { return this.canvas.listWriteSuggestions(threadId); }
   acceptCanvasWriteSuggestion(threadId: string, suggestionId: string) { return this.canvas.acceptWriteSuggestion(threadId, suggestionId); }
   dismissCanvasWriteSuggestion(threadId: string, suggestionId: string) { return this.canvas.dismissWriteSuggestion(threadId, suggestionId); }
+
+  listClaims(threadId: string, sourceNodeId?: string) { return this.claims.listClaims(threadId, sourceNodeId); }
+  createClaim(projectId: string, threadId: string, input: Omit<CreateClaimFromSelectionInput, "selectedText" | "surroundingContext"> & { claimText: string; evidenceText: string; createdBy: "ai" | "user_selection"; extractionRunId?: string }) {
+    return this.claims.createClaim(projectId, threadId, input);
+  }
+  updateClaim(threadId: string, claimId: string, input: import("../shared/claimReview.js").UpdateClaimInput) {
+    return this.claims.updateClaim(threadId, claimId, input);
+  }
+  setClaimCanvasNode(threadId: string, claimId: string, canvasNodeId: string) {
+    return this.claims.setClaimCanvasNode(threadId, claimId, canvasNodeId);
+  }
 
   createProject(projectId: string, title: unknown, summary = "") {
     validateId(projectId, "projectId");
@@ -395,6 +417,7 @@ export class SQLiteStorageRepository {
         this.db.prepare(`DELETE FROM runs WHERE thread_id = ?`).run(threadId);
         this.db.prepare(`DELETE FROM messages WHERE thread_id = ?`).run(threadId);
       }
+      this.db.prepare(`DELETE FROM claim_candidates WHERE project_id = ?`).run(projectId);
       for (const table of ["canvas_edges", "canvas_objects", "canvas_workflow_suggestions", "canvas_workflows", "canvas_write_requests", "canvas_nodes"]) {
         this.db.prepare(`DELETE FROM ${table} WHERE project_id = ?`).run(projectId);
       }
@@ -439,6 +462,7 @@ export class SQLiteStorageRepository {
       this.db.prepare(`DELETE FROM plan_steps WHERE plan_run_id IN (SELECT id FROM plan_runs WHERE thread_id = ?)`).run(threadId);
       this.db.prepare(`DELETE FROM plan_runs WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM agent_clarifications WHERE thread_id = ?`).run(threadId);
+      this.db.prepare(`DELETE FROM claim_candidates WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM tool_events WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM output_versions WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM prompt_versions WHERE thread_id = ?`).run(threadId);

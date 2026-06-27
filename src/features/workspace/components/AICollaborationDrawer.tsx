@@ -175,6 +175,7 @@ export function AICollaborationDrawer({
   const [contextResetNotice, setContextResetNotice] = useState(false);
   const [clarificationBusy, setClarificationBusy] = useState(false);
   const [submittedAgentClarificationKeys, setSubmittedAgentClarificationKeys] = useState<Set<string>>(() => new Set());
+  const [optimisticAgentClarifications, setOptimisticAgentClarifications] = useState<AgentClarification[]>([]);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const drawerTransition = reduceMotion ? { duration: 0 } : { type: "spring" as const, stiffness: 300, damping: 32 };
 
@@ -183,16 +184,23 @@ export function AICollaborationDrawer({
   const proposalFullText = writeDraft?.text || pendingWriteRequest?.content || "";
   const annotatedText = annotations.map((annotation) => annotation.text).join("\n\n");
   const hasWriteProposal = Boolean(writeDraft || pendingWriteRequest || annotations.length);
-  const timeline = useMemo(() => buildPlanTimeline(messages, plans), [messages, plans]);
+  const visibleAgentClarifications = useMemo(
+    () => mergeAgentClarificationDisplayRecords(agentClarifications, optimisticAgentClarifications),
+    [agentClarifications, optimisticAgentClarifications]
+  );
+  const timeline = useMemo(
+    () => buildAgentClarificationTimeline(buildPlanTimeline(messages, plans), visibleAgentClarifications),
+    [messages, plans, visibleAgentClarifications]
+  );
   const pendingClarificationPlan = plans.find((plan) => plan.status === "awaiting_user" && plan.clarification?.status === "pending");
   const answeredAgentClarificationKeys = useMemo(
-    () => agentClarifications.reduce((keys, clarification) => {
+    () => visibleAgentClarifications.reduce((keys, clarification) => {
       if (clarification.status === "answered") {
         for (const key of agentClarificationAnsweredKeys(clarification)) keys.add(key);
       }
       return keys;
     }, new Set(submittedAgentClarificationKeys)),
-    [agentClarifications, submittedAgentClarificationKeys]
+    [visibleAgentClarifications, submittedAgentClarificationKeys]
   );
   const pendingAgentClarification = useMemo(
     () => agentClarificationFromRecord(agentClarifications.find((clarification) => clarification.status === "pending" && !isAgentClarificationRecordAnswered(clarification, answeredAgentClarificationKeys)), answeredAgentClarificationKeys) ?? latestPendingAgentClarification(messages, answeredAgentClarificationKeys),
@@ -227,7 +235,10 @@ export function AICollaborationDrawer({
   }, [messages, isSending]);
 
   useEffect(() => setContextResetNotice(false), [currentThreadId]);
-  useEffect(() => setSubmittedAgentClarificationKeys(new Set()), [currentThreadId]);
+  useEffect(() => {
+    setSubmittedAgentClarificationKeys(new Set());
+    setOptimisticAgentClarifications([]);
+  }, [currentThreadId]);
 
   useEffect(() => {
     if (skillPickerOpen) onRequestSkillCatalog();
@@ -413,8 +424,24 @@ export function AICollaborationDrawer({
       ? `${resume.originalInstruction}\n\nSelected clarification: ${selectedText}`
       : option.label;
     const submittedKeys = agentClarificationSubmittedKeys(clarification);
+    const answeredAt = new Date().toISOString();
+    const optimisticClarification: AgentClarification = {
+      id: clarification.clarificationId,
+      threadId: currentThreadId,
+      runId: "pending",
+      status: "answered",
+      question: clarification.question,
+      options: clarification.options,
+      ...(resume ? { resumeContext: resume } : {}),
+      selectedOptionId: option.id,
+      selectedOptionLabel: option.label,
+      answer: option.label,
+      createdAt: answeredAt,
+      updatedAt: answeredAt
+    };
     setClarificationBusy(true);
     setSubmittedAgentClarificationKeys((current) => new Set([...current, ...submittedKeys]));
+    setOptimisticAgentClarifications((current) => [...current, optimisticClarification]);
     try {
       await onSend(instructionText, undefined, {
         ...(transientSkillRefs.length ? { transientSkillRefs } : {}),
@@ -426,6 +453,7 @@ export function AICollaborationDrawer({
           selectedOptionId: option.id,
           answer: option.label,
           option,
+          ...(resume ? { resumeContext: resume } : {}),
           ...(resume?.originalInstruction ? { originalInstruction: resume.originalInstruction } : {})
         }
       });
@@ -435,6 +463,7 @@ export function AICollaborationDrawer({
         for (const key of submittedKeys) next.delete(key);
         return next;
       });
+      setOptimisticAgentClarifications((current) => current.filter((item) => item !== optimisticClarification));
       throw error;
     } finally {
       setClarificationBusy(false);
@@ -562,6 +591,9 @@ export function AICollaborationDrawer({
           </div>
         ) : null}
         {timeline.map((entry) => {
+          if (entry.kind === "agentClarification") {
+            return <AgentClarificationAnswerCard clarification={entry.value} key={`agent-clarification:${entry.value.id}`} locale={locale} />;
+          }
           if (entry.kind === "plan") {
             const plan = entry.value;
             if (plan.clarification && plan.status === "awaiting_user") {
@@ -964,6 +996,40 @@ type AgentClarificationResumeContext = {
   canvas: Record<string, unknown>;
 };
 
+type PlanTimelineEntry =
+  | { kind: "message"; value: CollaborationMessage }
+  | { kind: "plan"; value: PlanRun };
+
+type DrawerTimelineEntry =
+  | PlanTimelineEntry
+  | { kind: "agentClarification"; value: AgentClarification };
+
+function buildAgentClarificationTimeline(entries: PlanTimelineEntry[], clarifications: AgentClarification[]): DrawerTimelineEntry[] {
+  const remaining = clarifications
+    .filter((clarification) => clarification.status === "answered")
+    .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+  const result: DrawerTimelineEntry[] = [];
+  for (const entry of entries) {
+    const entryTime = entry.value.createdAt;
+    while (entryTime && remaining[0] && remaining[0].updatedAt <= entryTime) {
+      result.push({ kind: "agentClarification", value: remaining.shift()! });
+    }
+    result.push(entry);
+  }
+  for (const clarification of remaining) result.push({ kind: "agentClarification", value: clarification });
+  return result;
+}
+
+export function mergeAgentClarificationDisplayRecords(records: AgentClarification[], optimisticRecords: AgentClarification[]) {
+  const persistedAnsweredKeys = new Set(records
+    .filter((record) => record.status === "answered")
+    .flatMap(agentClarificationRecordKeys));
+  const optimistic = optimisticRecords.filter((record) => (
+    !agentClarificationRecordKeys(record).some((key) => persistedAnsweredKeys.has(key))
+  ));
+  return [...records, ...optimistic];
+}
+
 function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "message", onAnswer }: {
   clarification: AgentClarificationPrompt;
   busy: boolean;
@@ -996,6 +1062,52 @@ function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "
           </button>
         ))}
       </div>
+    </section>
+  );
+}
+
+function AgentClarificationAnswerCard({ clarification, locale }: {
+  clarification: AgentClarification;
+  locale: "en" | "zh";
+}) {
+  const selectedLabel = clarification.selectedOptionLabel || clarification.answer || "";
+  const selectedOption = clarification.options.find((option) => (
+    option.id === clarification.selectedOptionId || option.label === selectedLabel
+  ));
+  return (
+    <section className="plan-clarification-card plan-clarification-card-message" data-status="answered">
+      <div className="plan-clarification-heading">
+        <strong>{locale === "zh" ? "\u5df2\u9009\u62e9" : "Choice saved"}</strong>
+        <span>{locale === "zh" ? "\u8865\u5145\u4fe1\u606f" : "Clarification answered"}</span>
+      </div>
+      <p>{clarification.question}</p>
+      <div className="plan-clarification-options" role="group" aria-label={clarification.question}>
+        {clarification.options.map((option) => {
+          const selected = option.id === selectedOption?.id;
+          return (
+            <button
+              aria-label={`${option.label}${option.detail ? `: ${option.detail}` : ""}`}
+              className={selected ? "is-selected" : ""}
+              disabled
+              key={option.id}
+              title={option.detail}
+              type="button"
+            >
+              <span>
+                <strong>{option.label}</strong>
+                {selected ? <em>{locale === "zh" ? "\u5df2\u9009" : "Selected"}</em> : null}
+                {option.detail ? <b className="plan-clarification-detail" title={option.detail}>?</b> : null}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {!selectedOption && selectedLabel ? (
+        <div className="plan-clarification-custom-answer">
+          <strong>{locale === "zh" ? "\u5df2\u9009" : "Selected"}</strong>
+          <small>{selectedLabel}</small>
+        </div>
+      ) : null}
     </section>
   );
 }

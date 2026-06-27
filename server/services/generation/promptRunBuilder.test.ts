@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveModelSettings, resolveResponseLocale } from "./promptRunBuilder.js";
+import { resolveModelSettings, resolveResponseLocale, userMessageForRun } from "./promptRunBuilder.js";
 
 test("model settings require an explicitly resolved Model Config", async () => {
   await assert.rejects(() => resolveModelSettings(undefined), /select an enabled project model/i);
@@ -75,4 +75,25 @@ test("response locale follows the user's instruction language before UI locale",
   assert.equal(resolveResponseLocale({
     locale: "zh"
   }), "zh");
+});
+
+test("clarification resume runs do not persist synthetic chat instructions as user messages", () => {
+  assert.equal(userMessageForRun({
+    mode: "chat",
+    locale: "en",
+    chatInstruction: "Review recent Agent literature.\n\nSelected clarification: Multi-Agent systems",
+    contextValues: {
+      agentClarification: {
+        clarificationId: "clarification_1",
+        selectedOptionId: "multi_agent",
+        answer: "Multi-Agent systems"
+      }
+    }
+  }, "ChatAgent"), undefined);
+
+  assert.equal(userMessageForRun({
+    mode: "chat",
+    locale: "en",
+    chatInstruction: "Review recent Agent literature."
+  }, "ChatAgent"), "Review recent Agent literature.");
 });

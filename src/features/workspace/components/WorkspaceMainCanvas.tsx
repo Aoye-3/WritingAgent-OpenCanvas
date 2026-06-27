@@ -1,9 +1,12 @@
+import type { ReactNode } from "react";
 import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../agents/types";
 import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasNodePositionUpdate, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../../canvas/canvasClient";
 import { DocumentCanvas } from "./DocumentCanvas";
 import type { CanvasTool } from "./canvas/toolState";
 import type { CanvasClipboardPayload } from "../../../../shared/canvasClipboard";
 import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain";
+import type { ClaimCandidate, CreateClaimFromSelectionInput } from "../../../../shared/claimReview";
+import type { ClaimReviewDocument } from "../claims/useClaimReview";
 
 type WorkspaceMainCanvasProps = {
   activeTool: CanvasTool;
@@ -44,6 +47,11 @@ type WorkspaceMainCanvasProps = {
   onUpdateNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflow["stage"]; roles?: string[] }) => Promise<unknown>;
   onUpdateWorkflow: (patch: { mode?: CanvasWorkflow["mode"]; stage?: CanvasWorkflow["stage"]; roles?: CanvasWorkflow["roles"] }) => Promise<unknown>;
   onToolChange: (tool: CanvasTool) => void;
+  claimSourceFocus?: ClaimCandidate | null;
+  onClaimDocumentPreviewChange?: (document: ClaimReviewDocument | null) => void;
+  onCreateClaimFromSelection?: (input: Omit<CreateClaimFromSelectionInput, "sourceNodeId" | "sourceDocumentPath" | "sourceFileName">) => Promise<unknown>;
+  onExtractClaims?: () => Promise<unknown>;
+  claimPanel?: ReactNode;
 };
 
 export function WorkspaceMainCanvas(props: WorkspaceMainCanvasProps) {
@@ -88,6 +96,11 @@ export function WorkspaceMainCanvas(props: WorkspaceMainCanvasProps) {
         onUpdateNodeWorkflow={props.onUpdateNodeWorkflow}
         onUpdateWorkflow={props.onUpdateWorkflow}
         onToolChange={props.onToolChange}
+        claimSourceFocus={props.claimSourceFocus}
+        onClaimDocumentPreviewChange={props.onClaimDocumentPreviewChange}
+        onCreateClaimFromSelection={props.onCreateClaimFromSelection}
+        onExtractClaims={props.onExtractClaims}
+        claimPanel={props.claimPanel}
       />
     </main>
   );

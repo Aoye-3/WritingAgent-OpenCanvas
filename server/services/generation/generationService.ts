@@ -355,7 +355,7 @@ export function createGenerationService(
       }
     };
     const observeToolEvent = (event: ToolEventRecord) => {
-      const observed = withAgentClarificationResumeContext(event, payload);
+      const observed = withAgentClarificationResumeContext(event, payload, deliveryId);
       if (!runtimeEvents.includes(observed)) runtimeEvents.push(observed);
       emitRuntimeToolEvent(observed);
       if (isAgentClarificationEvent(observed)) {
@@ -494,7 +494,7 @@ export function createGenerationService(
           textGate.flush();
           callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
           publicReasoning.emit("finalize", payload.locale === "zh" ? "正在整理最终回答，并校准 Canvas 节点内容。" : "Organizing the final answer and reconciling Canvas nodes.");
-          const baseEvents = dedupeToolEvents([...runtimeEvents, ...(normalized.events ?? []).map((event) => withAgentClarificationResumeContext(event, payload))]);
+          const baseEvents = dedupeToolEvents([...runtimeEvents, ...(normalized.events ?? []).map((event) => withAgentClarificationResumeContext(event, payload, deliveryId))]);
           if (isBlockingAgentClarificationRun(baseEvents, normalized.text, agentBackendRun.finishReason)) {
             textGate.flush();
             callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
@@ -802,10 +802,22 @@ function planPhaseEvents(payload: GenerateRequest): ToolEventRecord[] {
 function record(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function readString(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
 
-function stableCanvasDeliveryId(threadId: string, payload: GenerateRequest, storage: SQLiteStorageRepository) {
+export function stableCanvasDeliveryId(threadId: string, payload: GenerateRequest, storage: SQLiteStorageRepository) {
+  const resumeDeliveryId = readAgentClarificationResumeDeliveryId(threadId, payload);
+  if (resumeDeliveryId) return resumeDeliveryId;
   const sequence = storage.listMessages(threadId).length + 1;
   const actionId = payload.canvasAction?.id ?? "direct";
   return `delivery_${threadId}_${sequence}_${actionId}`;
+}
+
+function readAgentClarificationResumeDeliveryId(threadId: string, payload: GenerateRequest) {
+  const clarification = record(payload.contextValues?.agentClarification);
+  if (!Object.keys(clarification).length) return "";
+  const resumeContext = record(clarification.resumeContext);
+  const resumeCanvas = record(resumeContext.canvas);
+  const contextCanvas = record(payload.contextValues?.canvas);
+  const deliveryId = readString(resumeCanvas.deliveryId) || readString(contextCanvas.deliveryId);
+  return deliveryId.startsWith(`delivery_${threadId}_`) ? deliveryId : "";
 }
 
 function withTaskHandlingPolicy(payload: GenerateRequest, context: Awaited<ReturnType<typeof buildGenerationRunContext>>): GenerateRequest {
@@ -1039,7 +1051,7 @@ function toolEventDedupeKey(event: ToolEventRecord) {
   return `${event.eventType}|${JSON.stringify(event.payload)}`;
 }
 
-function withAgentClarificationResumeContext(event: ToolEventRecord, payload: GenerateRequest): ToolEventRecord {
+export function withAgentClarificationResumeContext(event: ToolEventRecord, payload: GenerateRequest, deliveryId?: string): ToolEventRecord {
   if (!isAgentClarificationEvent(event)) return event;
   const eventPayload = record(event.payload);
   const existingResumeContext = record(eventPayload.resumeContext);
@@ -1051,7 +1063,10 @@ function withAgentClarificationResumeContext(event: ToolEventRecord, payload: Ge
   const payloadCanvas = record(payload.contextValues?.canvas);
   const policyCanvas = isSkillClarificationGuarded(payload) ? record(policy.canvas) : {};
   const canvas = mergeSkillClarificationResumeCanvas(policyCanvas, existingCanvas);
-  const mergedCanvas = Object.keys(canvas).length ? canvas : payloadCanvas;
+  const mergedCanvas = {
+    ...(Object.keys(canvas).length ? canvas : payloadCanvas),
+    ...(deliveryId ? { deliveryId } : {})
+  };
   const runtimeBudgetProfile = readOptionalRuntimeBudgetProfile(existingResumeContext.runtimeBudgetProfile)
     ?? readOptionalRuntimeBudgetProfile(policy.runtimeBudgetProfile)
     ?? payload.runtimeBudgetProfile;

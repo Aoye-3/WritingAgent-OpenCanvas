@@ -480,6 +480,51 @@ class TestHardStopWithListContent:
         assert "function_call" not in msg.additional_kwargs
         assert msg.response_metadata["finish_reason"] == "stop"
 
+    def test_hard_stop_clears_invalid_tool_calls(self):
+        """Forced-stop messages must not retain invalid tool calls provider serializers can replay."""
+        mw = LoopDetectionMiddleware(warn_threshold=2, hard_limit=4)
+        runtime = _make_runtime()
+        call = [_bash_call("ls")]
+
+        def _make_invalid_state():
+            return {
+                "messages": [
+                    AIMessage(
+                        content="thinking...",
+                        tool_calls=call,
+                        invalid_tool_calls=[
+                            {
+                                "id": "call_invalid",
+                                "name": "web_search",
+                                "args": '{"query":',
+                                "error": "invalid json",
+                            }
+                        ],
+                        additional_kwargs={
+                            "tool_calls": [
+                                {
+                                    "id": "call_ls",
+                                    "type": "function",
+                                    "function": {"name": "bash", "arguments": '{"command":"ls"}'},
+                                }
+                            ]
+                        },
+                        response_metadata={"finish_reason": "tool_calls"},
+                    )
+                ]
+            }
+
+        for _ in range(3):
+            mw._apply(_make_invalid_state(), runtime)
+
+        result = mw._apply(_make_invalid_state(), runtime)
+        assert result is not None
+        msg = result["messages"][0]
+        assert msg.tool_calls == []
+        assert msg.invalid_tool_calls == []
+        assert "tool_calls" not in msg.additional_kwargs
+        assert msg.response_metadata["finish_reason"] == "stop"
+
 
 class TestToolFrequencyDetection:
     """Tests for per-tool-type frequency detection (Layer 2).

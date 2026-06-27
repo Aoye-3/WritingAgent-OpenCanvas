@@ -5,7 +5,8 @@ import {
   agentClarificationRecordKeys,
   agentClarificationFromRecord,
   hasUnresolvedAgentClarificationTrace,
-  latestPendingAgentClarification
+  latestPendingAgentClarification,
+  mergeAgentClarificationDisplayRecords
 } from "../../src/features/workspace/components/AICollaborationDrawer";
 import type { AgentClarification } from "../../src/features/agents/types";
 import type { CollaborationMessage } from "../../src/features/generation/types";
@@ -84,6 +85,71 @@ test("answered Agent clarification records suppress matching pending records and
 
   assert.equal(agentClarificationFromRecord(pending, answeredKeys), undefined);
   assert.equal(latestPendingAgentClarification(messages, answeredKeys), undefined);
+});
+
+test("optimistic answered Agent clarification remains visible until persisted answered record replaces it", () => {
+  const pending: AgentClarification = {
+    id: "agent_clarification_scope",
+    threadId: "thread_1",
+    runId: "run_1",
+    status: "pending",
+    question: "Which Agent scope?",
+    options: [
+      { id: "multi_agent", label: "Multi-agent systems", detail: "Coordination", recommended: true },
+      { id: "agent_frameworks", label: "Agent frameworks", detail: "Runtime tooling", recommended: false }
+    ],
+    createdAt: "2026-06-24T00:00:00.000Z",
+    updatedAt: "2026-06-24T00:00:00.000Z"
+  };
+  const optimistic: AgentClarification = {
+    ...pending,
+    runId: "pending",
+    status: "answered",
+    selectedOptionId: "multi_agent",
+    selectedOptionLabel: "Multi-agent systems",
+    answer: "Multi-agent systems",
+    updatedAt: "2026-06-24T00:00:01.000Z"
+  };
+  const persisted: AgentClarification = {
+    ...optimistic,
+    runId: "run_1",
+    updatedAt: "2026-06-24T00:00:02.000Z"
+  };
+
+  assert.deepEqual(
+    mergeAgentClarificationDisplayRecords([pending], [optimistic]).filter((item) => item.status === "answered").map((item) => item.answer),
+    ["Multi-agent systems"]
+  );
+  assert.deepEqual(
+    mergeAgentClarificationDisplayRecords([persisted], [optimistic]).filter((item) => item.status === "answered").map((item) => item.runId),
+    ["run_1"]
+  );
+});
+
+test("answering one Agent clarification does not suppress a later different clarification", () => {
+  const answered: AgentClarification = {
+    id: "agent_clarification_scope",
+    threadId: "thread_1",
+    runId: "run_1",
+    status: "answered",
+    question: "Which Agent scope?",
+    options: [
+      { id: "multi_agent", label: "Multi-agent systems", detail: "Coordination", recommended: true },
+      { id: "agent_frameworks", label: "Agent frameworks", detail: "Runtime tooling", recommended: false }
+    ],
+    selectedOptionId: "multi_agent",
+    answer: "Multi-agent systems",
+    createdAt: "2026-06-24T00:00:00.000Z",
+    updatedAt: "2026-06-24T00:00:01.000Z"
+  };
+  const messages = [assistantWithTimeline([
+    clarificationEvent(1, "call_format", "Which citation format?", [
+      { id: "apa", label: "APA", detail: "APA 7th edition", recommended: true },
+      { id: "mla", label: "MLA", detail: "MLA 9th edition", recommended: false }
+    ])
+  ])];
+
+  assert.equal(latestPendingAgentClarification(messages, new Set(agentClarificationAnsweredKeys(answered)))?.question, "Which citation format?");
 });
 
 test("waiting Agent clarification trace without options is detected as recoverable", () => {

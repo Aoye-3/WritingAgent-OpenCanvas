@@ -281,8 +281,14 @@ async function buildKnowledgeContext(input: {
 
 export function userMessageForRun(payload: GenerateRequest, agentTitle: string) {
   if (isChatMode(payload.mode)) {
+    if (isAgentClarificationResume(payload)) return undefined;
     return payload.chatInstruction ?? payload.freeTextPrompt;
   }
 
   return `Structured generation with ${agentTitle}`;
+}
+
+function isAgentClarificationResume(payload: GenerateRequest) {
+  const clarification = payload.contextValues?.agentClarification;
+  return Boolean(clarification && typeof clarification === "object" && !Array.isArray(clarification));
 }

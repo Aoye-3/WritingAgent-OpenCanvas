@@ -1,4 +1,5 @@
 import type { CanvasWorkflowMode, CanvasWorkflowRole, CanvasWorkflowStage, CanvasWorkflowSuggestionStatus } from "../shared/canvasWorkflow.js";
+import type { ClaimCandidate, ClaimSourceAnchor, ClaimStatus, CreateClaimFromSelectionInput, ExtractClaimsInput, UpdateClaimInput } from "../shared/claimReview.js";
 import type { Provider } from "./types.js";
 import type { ToolEventRecord } from "./toolRuntime.js";
 
@@ -388,4 +389,13 @@ export type CanvasWorkflowSuggestionInput = {
 export type CanvasSuggestionToNodeInput = {
   kind?: CanvasNodeKind;
   title?: string;
+};
+
+export type {
+  ClaimCandidate,
+  ClaimSourceAnchor,
+  ClaimStatus,
+  CreateClaimFromSelectionInput,
+  ExtractClaimsInput,
+  UpdateClaimInput
 };

@@ -8,9 +8,11 @@ import { KnowledgeService } from "./knowledge/service.js";
 import { AgentRuntimeMemoryService } from "./services/agentRuntimeMemoryService.js";
 import { createStorage } from "./storage.js";
 import { createCanvasDomainService } from "./domains/canvas/index.js";
+import { createClaimReviewDomainService } from "./domains/claim-review/index.js";
 import { registerAgentRoutes } from "./routes/agentRoutes.js";
 import { registerCatalogRoutes } from "./routes/catalogRoutes.js";
 import { registerCanvasRoutes } from "./routes/canvasRoutes.js";
+import { registerClaimReviewRoutes } from "./routes/claimReviewRoutes.js";
 import { registerAgentBackendRoutes } from "./routes/agentBackendRoutes.js";
 import { registerAgentRuntimeRoutes } from "./routes/agentRuntimeRoutes.js";
 import { registerGenerationRoutes } from "./routes/generationRoutes.js";
@@ -33,6 +35,7 @@ export async function createApp() {
   const knowledgeService = new KnowledgeService(storage);
   const memoryService = new AgentRuntimeMemoryService();
   const canvasService = createCanvasDomainService(storage);
+  const claimReviewService = createClaimReviewDomainService(storage, { readMarkdownOutputPreview });
   const generationService = createGenerationService(storage, agentRuntime, { agentRuntime: executionRuntime, knowledge: knowledgeService, memory: memoryService });
   const planExecutor = new PlanExecutor(storage, (payload) => generationService.generateAndRecord(payload));
 
@@ -55,6 +58,7 @@ export async function createApp() {
   registerPlanRoutes(app, storage, planExecutor);
   registerProjectRoutes(app, { storage, agentRuntime });
   registerCanvasRoutes(app, { canvasService, readMarkdownOutputPreview });
+  registerClaimReviewRoutes(app, claimReviewService);
   registerSettingsRoutes(app, { storage });
   registerGenerationRoutes(app, { generationService, canvasService });
   storage.listRunnablePlanExecutions().forEach(({ threadId, planId }) => planExecutor.wake(threadId, planId));

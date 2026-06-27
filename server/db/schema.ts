@@ -636,6 +636,35 @@ export function migrateStorageSchema(db: DatabaseSync) {
       INSERT INTO schema_version (version, applied_at) VALUES (13, datetime('now'));
     `);
   }
+
+  const version14 = db.prepare(`SELECT version FROM schema_version WHERE version = 14`).get();
+  if (!version14) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS claim_candidates (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL,
+        source_node_id TEXT NOT NULL,
+        source_document_path TEXT NOT NULL,
+        source_file_name TEXT NOT NULL,
+        claim_text TEXT NOT NULL,
+        original_claim_text TEXT,
+        evidence_text TEXT NOT NULL,
+        source_anchor_json TEXT NOT NULL DEFAULT '{}',
+        citation_urls_json TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        extraction_run_id TEXT,
+        canvas_node_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_claim_candidates_thread_source_status ON claim_candidates(thread_id, source_node_id, status);
+      CREATE INDEX IF NOT EXISTS idx_claim_candidates_project_updated ON claim_candidates(project_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_claim_candidates_source_path ON claim_candidates(source_document_path);
+      INSERT INTO schema_version (version, applied_at) VALUES (14, datetime('now'));
+    `);
+  }
 }
 
 function columnExists(db: DatabaseSync, table: string, column: string) {

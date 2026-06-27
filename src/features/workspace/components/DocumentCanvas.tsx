@@ -1,6 +1,6 @@
 import "@xyflow/react/dist/style.css";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   MarkerType,
@@ -19,7 +19,6 @@ import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkfl
 import { fetchMarkdownOutputPreview, type CanvasEdgeDraft, type CanvasNodeDraft, type CanvasNodePatch, type CanvasNodePositionUpdate, type CanvasObjectDraft, type CanvasObjectPatch, type CanvasRangeRewriteDraft, type MarkdownOutputPreview } from "../../canvas/canvasClient";
 import { useI18n } from "../../i18n/I18nProvider";
 import { ResetIcon, ZoomInIcon, ZoomOutIcon } from "../../../shared/icons";
-import { MarkdownText } from "../../../shared/MarkdownText";
 import { CanvasCurveEdge } from "./canvas/CanvasCurveEdge";
 import { CanvasNodeFrame } from "./canvas/CanvasNodeFrame";
 import { CanvasContextMenu, CanvasSelectedNodeWorkflow, CanvasSelectionBar, type CanvasMenuState } from "./canvas/CanvasChrome";
@@ -37,6 +36,10 @@ import { createCanvasNodeDraft, getCanvasCreationSize, isPreviewCreationTool, po
 import { CANVAS_CLIPBOARD_MIME, createCanvasClipboardPayload, type CanvasClipboardPayload, type ClipboardNodeDraft } from "../../../../shared/canvasClipboard";
 import { createSplitCanvasNodeDraft, isSplittableCanvasNodeKind } from "../../../app/hooks/canvasActions/split";
 import type { CanvasTextSelection } from "./canvas/types";
+import type { ClaimCandidate, CreateClaimFromSelectionInput } from "../../../../shared/claimReview";
+import { SourceMarkdownText } from "./canvas/renderers/SourceMarkdownText";
+import { readSourceTextSelection, type SourceTextSelection } from "./canvas/renderers/sourceSelection";
+import type { ClaimReviewDocument } from "../claims/useClaimReview";
 
 type DocumentCanvasProps = {
   activeTool: CanvasTool;
@@ -77,6 +80,11 @@ type DocumentCanvasProps = {
   onUpdateNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflowStage; roles?: string[] }) => Promise<unknown>;
   onUpdateWorkflow: (patch: { mode?: CanvasWorkflowMode; stage?: CanvasWorkflowStage; roles?: CanvasWorkflow["roles"] }) => Promise<unknown>;
   onToolChange: (tool: CanvasTool) => void;
+  claimSourceFocus?: ClaimCandidate | null;
+  onClaimDocumentPreviewChange?: (document: ClaimReviewDocument | null) => void;
+  onCreateClaimFromSelection?: (input: Omit<CreateClaimFromSelectionInput, "sourceNodeId" | "sourceDocumentPath" | "sourceFileName">) => Promise<unknown>;
+  onExtractClaims?: () => Promise<unknown>;
+  claimPanel?: ReactNode;
 };
 
 const canvasNodeTypes = {
@@ -134,7 +142,12 @@ function DocumentCanvasInner({
   onUploadAsset,
   onUpdateNodeWorkflow,
   onUpdateWorkflow,
-  onToolChange
+  onToolChange,
+  claimSourceFocus,
+  onClaimDocumentPreviewChange,
+  onCreateClaimFromSelection,
+  onExtractClaims,
+  claimPanel
 }: DocumentCanvasProps) {
   const { locale, t } = useI18n();
   const reduceMotion = useReducedMotion();
@@ -244,8 +257,19 @@ function DocumentCanvasInner({
       if (!path) return;
       setDocumentPreview({ path, nodeTitle: node.title, status: "loading" });
       void fetchMarkdownOutputPreview(threadId, path)
-        .then((document) => setDocumentPreview({ path, nodeTitle: node.title, status: "ready", document }))
-        .catch((error) => setDocumentPreview({ path, nodeTitle: node.title, status: "failed", error: error instanceof Error ? error.message : "Unable to load Markdown preview" }));
+        .then((document) => {
+          setDocumentPreview({ path, nodeTitle: node.title, status: "ready", document });
+          onClaimDocumentPreviewChange?.({
+            sourceNodeId: node.id,
+            path: document.path,
+            fileName: document.fileName,
+            content: document.content
+          });
+        })
+        .catch((error) => {
+          setDocumentPreview({ path, nodeTitle: node.title, status: "failed", error: error instanceof Error ? error.message : "Unable to load Markdown preview" });
+          onClaimDocumentPreviewChange?.(null);
+        });
     },
     onRejectWriteRequest: (requestId: string) => actionRef.current.onRejectWriteRequest(requestId),
     onRequestNodeMenu: requestNodeMenu,
@@ -253,7 +277,7 @@ function DocumentCanvasInner({
     onTextSelectionChange: handleTextSelectionChange,
     onResizeStateChange: handleResizeStateChange,
     onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => actionRef.current.onUpdateNode(nodeId, patch)
-  }), [clearCreationPreview, handleResizeStateChange, handleTextSelectionChange, requestNodeMenu, threadId]);
+  }), [clearCreationPreview, handleResizeStateChange, handleTextSelectionChange, onClaimDocumentPreviewChange, requestNodeMenu, threadId]);
 
   useEffect(() => {
     setFlowNodes((current) => {
@@ -661,9 +685,24 @@ function DocumentCanvasInner({
         />
         {documentPreview ? (
           <MarkdownDocumentPreviewPanel
+            claimSourceFocus={claimSourceFocus}
+            claimPanel={claimPanel}
             locale={locale}
             preview={documentPreview}
-            onClose={() => setDocumentPreview(null)}
+            onClose={() => {
+              setDocumentPreview(null);
+              onClaimDocumentPreviewChange?.(null);
+            }}
+            onCreateClaimFromSelection={onCreateClaimFromSelection}
+            onCreateExcerptNode={(text) => actionRef.current.onCreateNode({
+              kind: "note",
+              title: locale === "zh" ? "摘录" : "Excerpt",
+              content: text,
+              width: 320,
+              height: 180
+            })}
+            onExtractClaims={onExtractClaims}
+            onSendSelectionToChat={onSendMindChainToChat}
           />
         ) : null}
       </div>
@@ -687,12 +726,76 @@ function isBlankCanvasPoint(clientX: number, clientY: number) {
   return Boolean(document.elementFromPoint(clientX, clientY)?.closest(".react-flow__pane"));
 }
 
-function MarkdownDocumentPreviewPanel({ locale, preview, onClose }: {
+function MarkdownDocumentPreviewPanel({
+  claimSourceFocus,
+  claimPanel,
+  locale,
+  preview,
+  onClose,
+  onCreateClaimFromSelection,
+  onCreateExcerptNode,
+  onExtractClaims,
+  onSendSelectionToChat
+}: {
+  claimSourceFocus?: ClaimCandidate | null;
+  claimPanel?: ReactNode;
   locale: "en" | "zh";
   preview: { path: string; nodeTitle: string; status: "loading" | "ready" | "failed"; document?: MarkdownOutputPreview; error?: string };
   onClose: () => void;
+  onCreateClaimFromSelection?: (input: Omit<CreateClaimFromSelectionInput, "sourceNodeId" | "sourceDocumentPath" | "sourceFileName">) => Promise<unknown>;
+  onCreateExcerptNode: (text: string) => Promise<unknown>;
+  onExtractClaims?: () => Promise<unknown>;
+  onSendSelectionToChat: (text: string) => void;
 }) {
   const title = preview.document?.fileName ?? preview.nodeTitle;
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [selectionAction, setSelectionAction] = useState<(SourceTextSelection & { x: number; y: number }) | null>(null);
+
+  useEffect(() => {
+    const root = bodyRef.current;
+    if (!root) return;
+    root.querySelectorAll(".claim-source-highlight").forEach((element) => element.classList.remove("claim-source-highlight"));
+    if (!claimSourceFocus || !preview.document) return;
+    const anchor = claimSourceFocus.sourceAnchor;
+    const highlighted = highlightAnchor(root, anchor?.startOffset, anchor?.endOffset);
+    const fallback = highlighted ?? highlightTextFallback(root, claimSourceFocus.evidenceText);
+    fallback?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [claimSourceFocus?.id, preview.document?.content]);
+
+  const captureSelection = () => {
+    if (!preview.document) return;
+    window.setTimeout(() => {
+      const sourceSelection = readSourceTextSelection(bodyRef.current, preview.document!.content);
+      if (!sourceSelection) {
+        setSelectionAction(null);
+        return;
+      }
+      setSelectionAction({
+        ...sourceSelection,
+        x: sourceSelection.rect.left + sourceSelection.rect.width / 2,
+        y: sourceSelection.rect.top
+      });
+    }, 0);
+  };
+
+  const clearSelection = () => {
+    setSelectionAction(null);
+    window.getSelection()?.removeAllRanges();
+  };
+
+  const createClaim = async () => {
+    if (!selectionAction) return;
+    await onCreateClaimFromSelection?.({
+      selectedText: selectionAction.text,
+      surroundingContext: contextExcerpt(preview.document?.content ?? "", selectionAction.rangeStart, selectionAction.rangeEnd),
+      sourceAnchor: {
+        startOffset: selectionAction.rangeStart,
+        endOffset: selectionAction.rangeEnd,
+        textFingerprint: fingerprint(selectionAction.text)
+      }
+    });
+    clearSelection();
+  };
   return (
     <div className="markdown-document-preview-backdrop nodrag nopan" role="presentation">
       <aside className="markdown-document-preview" aria-label={locale === "zh" ? "Markdown 文档预览" : "Markdown document preview"}>
@@ -701,16 +804,65 @@ function MarkdownDocumentPreviewPanel({ locale, preview, onClose }: {
             <strong>{title}</strong>
             <span>{preview.document?.path ?? preview.path}</span>
           </div>
+          <button className="button button-secondary button-small" type="button" disabled={preview.status !== "ready"} onClick={() => void onExtractClaims?.()}>
+            {locale === "zh" ? "抽取 Claims" : "Extract Claims"}
+          </button>
           <button className="icon-button" type="button" onClick={onClose} aria-label={locale === "zh" ? "关闭预览" : "Close preview"}>×</button>
         </header>
-        <div className="markdown-document-preview-body">
+        <div className="markdown-document-preview-content" data-has-claims={claimPanel ? "true" : "false"}>
+          <div className="markdown-document-preview-body" ref={bodyRef} onMouseUp={captureSelection} onKeyUp={captureSelection}>
           {preview.status === "loading" ? <p>{locale === "zh" ? "正在读取 Markdown 文档..." : "Loading Markdown document..."}</p> : null}
           {preview.status === "failed" ? <p className="markdown-document-preview-error">{preview.error ?? (locale === "zh" ? "无法读取文档。" : "Unable to read document.")}</p> : null}
-          {preview.status === "ready" && preview.document ? <MarkdownText text={preview.document.content} /> : null}
+            {preview.status === "ready" && preview.document ? <SourceMarkdownText text={preview.document.content} /> : null}
+          </div>
+          {claimPanel ? <aside className="markdown-document-claims-panel">{claimPanel}</aside> : null}
         </div>
+        {selectionAction ? (
+          <div className="markdown-selection-menu" style={{ left: selectionAction.x, top: selectionAction.y }}>
+            <button type="button" onClick={() => void createClaim()}>{locale === "zh" ? "创建 Claim 候选" : "Create Claim candidate"}</button>
+            <button type="button" onClick={() => {
+              void onCreateExcerptNode(selectionAction.text);
+              clearSelection();
+            }}>{locale === "zh" ? "创建摘录节点" : "Create excerpt node"}</button>
+            <button type="button" onClick={() => {
+              onSendSelectionToChat(selectionAction.text);
+              clearSelection();
+            }}>{locale === "zh" ? "发送到聊天" : "Send selection to chat"}</button>
+          </div>
+        ) : null}
       </aside>
     </div>
   );
+}
+
+function highlightAnchor(root: HTMLElement, start?: number, end?: number) {
+  if (start === undefined || end === undefined || end <= start) return null;
+  const spans = [...root.querySelectorAll<HTMLElement>("[data-source-start]")];
+  let first: HTMLElement | null = null;
+  for (const span of spans) {
+    const spanStart = Number(span.dataset.sourceStart);
+    const spanEnd = spanStart + (span.textContent?.length ?? 0);
+    if (spanEnd <= start || spanStart >= end) continue;
+    span.classList.add("claim-source-highlight");
+    first ??= span;
+  }
+  return first;
+}
+
+function highlightTextFallback(root: HTMLElement, text: string) {
+  const needle = text.trim().replace(/\s+/g, " ").slice(0, 80);
+  if (!needle) return null;
+  const target = [...root.querySelectorAll<HTMLElement>("p, li, td, th")].find((element) => element.textContent?.replace(/\s+/g, " ").includes(needle));
+  target?.classList.add("claim-source-highlight");
+  return target ?? null;
+}
+
+function contextExcerpt(content: string, start: number, end: number) {
+  return content.slice(Math.max(0, start - 240), Math.min(content.length, end + 240)).trim();
+}
+
+function fingerprint(text: string) {
+  return text.trim().replace(/\s+/g, " ").slice(0, 120);
 }
 
 function readFileDocumentPath(node: CanvasNode) {
