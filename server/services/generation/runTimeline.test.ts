@@ -113,3 +113,18 @@ test("run timeline includes invalid clarification reason in the summary", () => 
   assert.equal(event.status, "failed");
   assert.equal(event.summary, "Agent clarification payload was invalid: missing_options");
 });
+
+test("run timeline includes Plan tool failure reason in the summary", () => {
+  const builder = createRunTimelineBuilder({ threadId: "thread_1", runId: "pending", locale: "en" });
+  const event = toolEventToTimelineEvent(builder, {
+    eventType: "agent_backend_tool_failed",
+    payload: {
+      toolName: "plan_clarification_submit",
+      reason: "invalid_clarification"
+    }
+  });
+
+  assert.equal(event.eventType, "tool_completed");
+  assert.equal(event.status, "failed");
+  assert.equal(event.summary, "Plan Clarification Submit failed: invalid_clarification");
+});

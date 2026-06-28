@@ -38,8 +38,11 @@ export class PlanOrchestrator {
         summary: "Preparing one key question"
       });
     }
-    if (resolvePlanRequestPolicy(payload).stage === "revise" && awaitingPlanId) {
-      this.storage.recordPlanActivity(threadId, awaitingPlanId, {
+    const planPolicy = resolvePlanRequestPolicy(payload);
+    const preflightPlanId = payload.planGeneration?.phase === "preflight" ? payload.planGeneration.planId : "";
+    const planningPlanId = planPolicy.stage === "preflight" ? preflightPlanId : awaitingPlanId;
+    if ((planPolicy.stage === "revise" && awaitingPlanId) || (planPolicy.stage === "preflight" && planningPlanId)) {
+      this.storage.recordPlanActivity(threadId, planningPlanId, {
         type: "plan_preparing",
         status: "running",
         summary: "Preparing an approval-ready plan"
@@ -101,8 +104,10 @@ export class PlanOrchestrator {
       return;
     }
 
-    if (generation.phase === "revise") {
-      if (plan.status !== "awaiting_approval" || plan.approval !== "pending" || plan.steps.length === 0) {
+    if (generation.phase === "revise" || generation.phase === "preflight") {
+      const waitingForPlanClarification = plan.status === "awaiting_user" && plan.clarification?.status === "pending";
+      const approvalReady = plan.status === "awaiting_approval" && plan.approval === "pending" && plan.steps.length >= 2 && plan.steps.length <= 5;
+      if (!waitingForPlanClarification && !approvalReady) {
         throw new Error("Plan revision phase completed without an approval-ready persisted Plan.");
       }
       return;

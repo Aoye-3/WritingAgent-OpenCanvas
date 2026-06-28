@@ -20,7 +20,7 @@ export type GenerateRequest = {
   transientSkillRefs?: string[];
   disabledSkillRefs?: string[];
   selectedCanvasNodeId?: string;
-  planPhase?: "intake" | "revise" | "execution";
+  planPhase?: "intake" | "revise" | "preflight" | "execution";
   planId?: string;
   stepId?: string;
 };

@@ -4,6 +4,7 @@ import {
   agentClarificationAnsweredKeys,
   agentClarificationRecordKeys,
   agentClarificationFromRecord,
+  buildAgentClarificationSubmission,
   hasUnresolvedAgentClarificationTrace,
   latestPendingAgentClarification,
   mergeAgentClarificationDisplayRecords
@@ -150,6 +151,57 @@ test("answering one Agent clarification does not suppress a later different clar
   ])];
 
   assert.equal(latestPendingAgentClarification(messages, new Set(agentClarificationAnsweredKeys(answered)))?.question, "Which citation format?");
+});
+
+test("custom Agent clarification answer builds an optimistic record and resume request without selecting a fixed option", () => {
+  const clarification = agentClarificationFromRecord({
+    id: "agent_clarification_scope",
+    threadId: "thread_1",
+    runId: "run_1",
+    status: "pending",
+    question: "Which scope should I use?",
+    options: [
+      { id: "recent", label: "Recent papers", detail: "2023-2026", recommended: true },
+      { id: "broad", label: "Broad survey", detail: "2018-2026", recommended: false }
+    ],
+    resumeContext: {
+      originalInstruction: "Review Agent literature.",
+      transientSkillRefs: ["literature-review"],
+      disabledSkillRefs: ["newsletter-generation"],
+      runtimeBudgetProfile: "high",
+      canvas: { workflow: { mode: "batch_delivery" } }
+    },
+    createdAt: "2026-06-24T00:00:00.000Z",
+    updatedAt: "2026-06-24T00:00:01.000Z"
+  });
+  assert.ok(clarification);
+
+  const submission = buildAgentClarificationSubmission({
+    clarification,
+    currentThreadId: "thread_1",
+    answerText: "Use 25 papers from 2022-2026, APA 7, with a methods table.",
+    enabledSkillRefs: [],
+    disabledSkillRefs: [],
+    runtimeBudgetProfile: "medium"
+  });
+
+  assert.equal(submission.optimisticClarification.selectedOptionId, "custom");
+  assert.equal(submission.optimisticClarification.selectedOptionLabel, "Custom answer");
+  assert.equal(submission.optimisticClarification.answer, "Use 25 papers from 2022-2026, APA 7, with a methods table.");
+  assert.match(submission.instructionText, /Selected clarification: Use 25 papers/);
+  assert.deepEqual(submission.requestContext.transientSkillRefs, ["literature-review"]);
+  assert.deepEqual(submission.requestContext.disabledSkillRefs, ["newsletter-generation"]);
+  assert.equal(submission.requestContext.runtimeBudgetProfile, "high");
+  assert.deepEqual(submission.requestContext.canvas, { workflow: { mode: "batch_delivery" } });
+  assert.deepEqual(submission.requestContext.agentClarification, {
+    clarificationId: "agent_clarification_scope",
+    question: "Which scope should I use?",
+    selectedOptionId: "custom",
+    answer: "Use 25 papers from 2022-2026, APA 7, with a methods table.",
+    option: { id: "custom", label: "Custom answer", detail: "Use 25 papers from 2022-2026, APA 7, with a methods table.", recommended: false },
+    resumeContext: clarification.resumeContext,
+    originalInstruction: "Review Agent literature."
+  });
 });
 
 test("waiting Agent clarification trace without options is detected as recoverable", () => {

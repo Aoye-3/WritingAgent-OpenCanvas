@@ -244,10 +244,9 @@ test("skill clarification guard only allows ask_clarification and accepts struct
   assert.equal(result.finishReason, "clarification_required");
 });
 
-test("skill clarification guard rejects plain text clarification without a structured event", async () => {
+test("skill clarification guard allows process narration for upstream Thinking classification", async () => {
   let allowedToolRefs: string[] = [];
-  await assert.rejects(
-    () => runAgentBackendGeneration({
+  const result = await runAgentBackendGeneration({
       payload: {
         mode: "chat",
         locale: "zh",
@@ -288,11 +287,11 @@ test("skill clarification guard rejects plain text clarification without a struc
           events: []
         };
       }
-    }),
-    /skill scope guard requires a structured ask_clarification response/i
-  );
+    });
 
   assert.deepEqual(allowedToolRefs, ["ask_clarification"]);
+  assert.ok(result);
+  assert.equal(result.text.length > 0, true);
 });
 
 test("rejects empty server-managed Canvas delivery", async () => {

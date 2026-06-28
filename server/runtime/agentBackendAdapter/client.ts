@@ -1,5 +1,6 @@
 import type { StreamStatus } from "../../agentRunLoop.js";
 import type { AgentCard, AgentSettings, ConversationModelRuntimeSettings } from "../../agentCards.js";
+import type { GenerateRequest } from "../../contracts/generation.js";
 import type { ChatMessage } from "../../providerRuntime.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { ToolState } from "../../toolRegistry.js";
@@ -30,6 +31,10 @@ export type AgentBackendRunInput = {
   allowedToolRefs?: string[];
   toolState?: ToolState;
   selectedCanvasNodeId?: string;
+  planPhase?: GenerateRequest["planPhase"];
+  planId?: string;
+  stepId?: string;
+  planGeneration?: GenerateRequest["planGeneration"];
   contextValues?: Record<string, unknown>;
   chatInstruction?: string;
   facetwriteMemoryContent?: string;
@@ -71,7 +76,7 @@ type AgentBackendRunContext = {
   facetwrite_project_id: string;
   facetwrite_mcp_refs: string[];
   facetwrite_plan_phase: "chat" | "planning" | "execution";
-  facetwrite_plan_stage: "chat" | "intake" | "revise" | "execution";
+  facetwrite_plan_stage: "chat" | "intake" | "revise" | "preflight" | "execution";
   facetwrite_plan_phase_attempt_id?: string;
   facetwrite_plan_id?: string;
   facetwrite_plan_step_id?: string;
@@ -257,17 +262,20 @@ function withClarificationGuardContext(context: AgentBackendRunContext, policy: 
   };
 }
 
-function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId" | "projectId" | "configuredModelApiId" | "modelSettings" | "settings" | "facetwriteMemoryContent" | "chatInstruction" | "contextValues" | "toolState">): AgentBackendRunContext {
+function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId" | "projectId" | "configuredModelApiId" | "modelSettings" | "settings" | "facetwriteMemoryContent" | "chatInstruction" | "contextValues" | "toolState" | "planPhase" | "planId" | "stepId" | "planGeneration">): AgentBackendRunContext {
   const memoryEnabled = false;
   const memoryContent = memoryEnabled ? input.facetwriteMemoryContent?.trim() : "";
   const planPolicy = resolvePlanRequestPolicy({
     chatInstruction: input.chatInstruction,
     contextValues: input.contextValues,
-    toolState: input.toolState
+    toolState: input.toolState,
+    planPhase: input.planPhase,
+    planId: input.planId,
+    stepId: input.stepId
   });
-  const planGeneration = input.contextValues?.planGeneration && isRecord(input.contextValues.planGeneration)
+  const planGeneration = input.planGeneration ?? (input.contextValues?.planGeneration && isRecord(input.contextValues.planGeneration)
     ? input.contextValues.planGeneration
-    : undefined;
+    : undefined);
   const researchToolLimit = isDirectCanvasDeliveryIntent(input.chatInstruction ?? "") ? 8 : undefined;
   const progressiveDelivery = isRecord(input.contextValues?.progressiveCanvasDelivery)
     ? input.contextValues.progressiveCanvasDelivery
@@ -308,8 +316,8 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
   const evidenceTools = Array.isArray(progressiveDelivery?.evidenceTools)
     ? progressiveDelivery.evidenceTools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0)
     : undefined;
-  const planId = planGeneration ? String(planGeneration.planId ?? "").trim() : "";
-  const planStepId = planGeneration ? String(planGeneration.stepId ?? "").trim() : "";
+  const planId = planGeneration ? String(planGeneration.planId ?? "").trim() : String(input.planId ?? "").trim();
+  const planStepId = planGeneration ? String(planGeneration.stepId ?? "").trim() : String(input.stepId ?? "").trim();
   const phaseAttemptId = planGeneration ? String(planGeneration.phaseAttemptId ?? "").trim() : "";
   const modelSettings = input.modelSettings;
   if (!modelSettings) {
@@ -434,7 +442,7 @@ async function readAgentBackendStream(
 
   return {
     text: (finalValuesText || (lastMessageId ? textByMessageId.get(lastMessageId)?.join("") : unkeyedText.join("")) || "").trim(),
-    finishReason: "agent_backend_completed",
+    finishReason: sawWaitingForUser ? "clarification_required" : "agent_backend_completed",
     usage,
     events
   };
@@ -639,10 +647,42 @@ function shouldSuppressAssistantText(events: ToolEventRecord[]) {
 
 function extractRuntimeError(event: string, data: unknown): string | undefined {
   if (event !== "error") return undefined;
-  if (typeof data === "string") return data.trim() || "AgentBackend runtime stream failed";
+  if (typeof data === "string") {
+    const message = data.trim() || "AgentBackend runtime stream failed";
+    if (isBudgetExhaustionMessage(message)) throw budgetExhaustedError({ message });
+    return message;
+  }
   if (!isRecord(data)) return "AgentBackend runtime stream failed";
   const message = readSourceString(data.message) || readSourceString(data.error) || readSourceString(data.detail);
+  if (isBudgetExhaustionPayload(data, message)) {
+    throw budgetExhaustedError({
+      message: message || "AgentBackend runtime step budget exhausted",
+      recursionLimit: readPositiveInteger(data.recursion_limit ?? data.recursionLimit),
+      estimatedStepsUsed: readPositiveInteger(data.estimated_steps_used ?? data.estimatedStepsUsed)
+    });
+  }
   return message || "AgentBackend runtime stream failed";
+}
+
+function budgetExhaustedError(input: { message: string; recursionLimit?: number; estimatedStepsUsed?: number }) {
+  return Object.assign(new Error(input.message), {
+    facetwriteBudgetStatus: {
+      status: "budget_exhausted",
+      canResume: true,
+      ...(input.recursionLimit ? { recursionLimit: input.recursionLimit } : {}),
+      ...(input.estimatedStepsUsed ? { estimatedStepsUsed: input.estimatedStepsUsed } : {})
+    }
+  });
+}
+
+function isBudgetExhaustionPayload(data: Record<string, unknown>, message: string | undefined) {
+  const status = readSourceString(data.status) || readSourceString(data.type) || readSourceString(data.code);
+  const name = readSourceString(data.name);
+  return status === "budget_exhausted" || name === "GraphRecursionError" || isBudgetExhaustionMessage(message ?? "");
+}
+
+function isBudgetExhaustionMessage(message: string) {
+  return /Recursion limit of \d+ reached|GRAPH_RECURSION_LIMIT|GraphRecursionError/i.test(message);
 }
 
 function extractMessageId(event: string, data: unknown) {

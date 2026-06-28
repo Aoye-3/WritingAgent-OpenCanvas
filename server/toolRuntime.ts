@@ -157,6 +157,9 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
     if (!plan || plan.approval !== "pending" || !context.revisePlanRun || !Array.isArray(args.steps)) {
       return { ok: false, content: "Only the specified pending Plan can be revised.", payload: { tool: name, reason: "plan_not_pending", planId } };
     }
+    if (args.steps.length < 2 || args.steps.length > 5) {
+      return { ok: false, content: "Plan revisions must contain 2-5 executable steps.", payload: { tool: name, reason: "invalid_step_count", planId, stepCount: args.steps.length } };
+    }
     const revised = context.revisePlanRun(planId, { title: args.title, goal: args.goal, steps: args.steps as Array<{ id?: string; title: unknown; detail?: unknown }> });
     return revised
       ? { ok: true, content: `Plan ${planId} is ready for approval.`, payload: { tool: name, eventType: "plan_updated", planId, status: revised.status } }

@@ -26,11 +26,11 @@ export type GenerateRequest = {
   transientSkillRefs?: string[];
   disabledSkillRefs?: string[];
   selectedCanvasNodeId?: string;
-  planPhase?: "intake" | "revise" | "execution";
+  planPhase?: "intake" | "revise" | "preflight" | "execution";
   planId?: string;
   stepId?: string;
   planGeneration?: {
-    phase: "intake" | "revise" | "execution";
+    phase: "intake" | "revise" | "preflight" | "execution";
     planId: string;
     stepId?: string;
     phaseAttemptId: string;
@@ -86,7 +86,7 @@ export function parseGenerateRequest(value: unknown): GenerateRequest {
     transientSkillRefs: readStringList(body.transientSkillRefs),
     disabledSkillRefs: readStringList(body.disabledSkillRefs),
     selectedCanvasNodeId: readString(body.selectedCanvasNodeId)
-    ,planPhase: body.planPhase === "intake" || body.planPhase === "revise" || body.planPhase === "execution" ? body.planPhase : undefined
+    ,planPhase: body.planPhase === "intake" || body.planPhase === "revise" || body.planPhase === "preflight" || body.planPhase === "execution" ? body.planPhase : undefined
     ,planId: readString(body.planId)
     ,stepId: readString(body.stepId)
     ,planGeneration: readPlanGeneration(body.planGeneration)
@@ -110,7 +110,7 @@ function readPlanGeneration(value: unknown): GenerateRequest["planGeneration"] {
   const phase = record?.phase;
   const planId = readString(record?.planId);
   const phaseAttemptId = readString(record?.phaseAttemptId);
-  if ((phase !== "intake" && phase !== "revise" && phase !== "execution") || !planId || !phaseAttemptId) return undefined;
+  if ((phase !== "intake" && phase !== "revise" && phase !== "preflight" && phase !== "execution") || !planId || !phaseAttemptId) return undefined;
   return {
     phase,
     planId,

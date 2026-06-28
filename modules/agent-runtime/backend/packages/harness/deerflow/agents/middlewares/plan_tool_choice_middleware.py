@@ -100,6 +100,8 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             allowed = {"plan_clarification_submit"}
         elif phase == "planning" and stage == "revise":
             allowed = {"plan_revision_submit"}
+        elif phase == "planning" and stage == "preflight":
+            allowed = {"plan_clarification_submit", "plan_revision_submit"}
         filtered = [
             tool for tool in request.tools
             if PlanToolChoiceMiddleware._tool_name(tool) in allowed

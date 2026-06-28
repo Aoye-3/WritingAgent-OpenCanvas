@@ -2,7 +2,7 @@ import type { GenerateRequest } from "../../contracts/generation.js";
 import type { ToolState } from "../../toolRegistry.js";
 
 export type PlanRequestPhase = "chat" | "planning" | "execution";
-export type PlanRequestStage = "chat" | "intake" | "revise" | "execution";
+export type PlanRequestStage = "chat" | "intake" | "revise" | "preflight" | "execution";
 
 export function resolvePlanRequestPolicy(payload: Pick<GenerateRequest, "chatInstruction" | "contextValues" | "toolState" | "planPhase" | "planId" | "stepId">) {
   const execution = record(payload.contextValues?.planExecution);
@@ -11,7 +11,7 @@ export function resolvePlanRequestPolicy(payload: Pick<GenerateRequest, "chatIns
   const orchestration = record(payload.contextValues?.orchestrationPolicy);
   const isPlanning = /^\s*\/plan\b/i.test(payload.chatInstruction ?? "") || Boolean(awaitingPlan.id) || orchestration.mode === "managed_plan";
   const explicitStage = payload.planPhase;
-  const phase: PlanRequestPhase = explicitStage === "execution" || executionStepId ? "execution" : explicitStage === "intake" || explicitStage === "revise" || isPlanning ? "planning" : "chat";
+  const phase: PlanRequestPhase = explicitStage === "execution" || executionStepId ? "execution" : explicitStage === "intake" || explicitStage === "revise" || explicitStage === "preflight" || isPlanning ? "planning" : "chat";
   const stage: PlanRequestStage = explicitStage ?? (phase === "execution" ? "execution" : phase === "planning" ? (string(awaitingPlan.id) ? "revise" : "intake") : "chat");
   return { phase, stage, executionStepId: payload.stepId ?? executionStepId, toolState: toolsForStage(payload.toolState ?? {}, stage) };
 }
@@ -24,11 +24,17 @@ export function planPhaseSystemPrompt(payload: Pick<GenerateRequest, "chatInstru
     return [
       "# Plan Phase Policy",
       "This request is planning-only. Do not search the web, browse, write Canvas content, or execute task steps.",
-      planId
+      policy.stage === "preflight"
+        ? `Create an approval-ready preflight plan for the existing plan ${planId}. Submit exactly one plan_revision_submit result for that same plan; never create a replacement plan.`
+        : planId
         ? `Continue planning on the existing plan ${planId}. Submit exactly one plan_revision_submit result for that same plan; never create a replacement plan.`
         : "Apply the brainstorming skill. Submit exactly one plan_clarification_submit result containing 2-3 mutually exclusive options and exactly one recommended option. Do not create an approval-ready plan yet.",
-      planId ? "Use the selected clarification answer from contextValues.awaitingPlan, including option.description when present." : "Do not repeat the clarification options as ordinary assistant prose; the product UI renders the options as a clickable form.",
-      planId ? "Apply the writing-plans skill and produce a short approval-ready sequential plan." : "Stop immediately after requesting input.",
+      policy.stage === "preflight"
+        ? "If essential information is missing, submit exactly one plan_clarification_submit result and stop; otherwise produce the plan now."
+        : planId ? "Use the selected clarification answer from contextValues.awaitingPlan, including option.description when present." : "Do not repeat the clarification options as ordinary assistant prose; the product UI renders the options as a clickable form.",
+      policy.stage === "preflight"
+        ? "The preflight plan must contain 2-5 short sequential executable steps sized to fit runtime budgets."
+        : planId ? "Apply the writing-plans skill and produce a short approval-ready sequential plan." : "Stop immediately after requesting input.",
       "Stop after requesting input or producing an approval-ready plan. User approval is required before execution."
     ].join("\n");
   }
@@ -46,15 +52,15 @@ export function planPhaseSystemPrompt(payload: Pick<GenerateRequest, "chatInstru
 }
 
 function toolsForStage(current: ToolState, stage: PlanRequestStage): ToolState {
-  if (stage === "intake" || stage === "revise") {
+  if (stage === "intake" || stage === "revise" || stage === "preflight") {
     return {
       web_search: false,
       artifact_stage: false,
       knowledge_base: false,
       clear_context: false,
       canvas_write: false,
-      plan_clarification_submit: stage === "intake",
-      plan_revision_submit: stage === "revise"
+      plan_clarification_submit: stage === "intake" || stage === "preflight",
+      plan_revision_submit: stage === "revise" || stage === "preflight"
     };
   }
   if (stage === "execution") {

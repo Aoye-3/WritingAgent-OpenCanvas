@@ -26,6 +26,20 @@ export function deriveAssistantRunTraceState(input: {
   };
 }
 
+export function formatAssistantRunTraceDetail(event: Pick<RunTimelineEvent, "status" | "payload">) {
+  if (event.status !== "failed") return "";
+  const payload = event.payload ?? {};
+  const detail = readPayloadString(payload.reason)
+    || readPayloadString(payload.error)
+    || readPayloadString(payload.message);
+  const diagnostics = [
+    readPayloadString(payload.optionCount) ? `options=${readPayloadString(payload.optionCount)}` : "",
+    readPayloadString(payload.optionShape) ? `shape=${readPayloadString(payload.optionShape)}` : "",
+    readPayloadString(payload.hasQuestion) ? `hasQuestion=${readPayloadString(payload.hasQuestion)}` : ""
+  ].filter(Boolean);
+  return [detail, ...diagnostics].filter(Boolean).join(" · ").slice(0, 220);
+}
+
 export function AssistantRunTrace({ events = [], onFocusNode }: AssistantRunTraceProps) {
   const { t } = useI18n();
   const [userExpanded, setUserExpanded] = useState<boolean | undefined>();
@@ -56,12 +70,14 @@ export function AssistantRunTrace({ events = [], onFocusNode }: AssistantRunTrac
         <div className="assistant-run-trace-list">
           {orderedEvents.map((event) => {
             const nodeId = typeof event.payload?.nodeId === "string" ? event.payload.nodeId : "";
+            const detail = formatAssistantRunTraceDetail(event);
             return (
               <article className="assistant-run-trace-item" key={event.id}>
                 <span className={event.status === "failed" ? "status-dot failed" : event.status === "completed" ? "status-dot" : "status-dot running"} aria-hidden="true" />
                 <div>
                   <strong>{event.title}</strong>
                   {event.summary ? <p>{event.summary}</p> : null}
+                  {detail ? <small>{detail}</small> : null}
                   {nodeId && onFocusNode ? (
                     <button type="button" onClick={() => onFocusNode(nodeId)}>
                       {t("workspace.focusNode")}
@@ -75,4 +91,10 @@ export function AssistantRunTrace({ events = [], onFocusNode }: AssistantRunTrac
       ) : null}
     </section>
   );
+}
+
+function readPayloadString(value: unknown) {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "";
 }

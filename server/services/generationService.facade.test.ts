@@ -249,6 +249,85 @@ test("generation facade records AgentBackend runs when AgentBackend is enabled",
   assert.equal((records[0] as { configuredModelApiId: string }).configuredModelApiId, "configured-test");
 });
 
+test("complex chat automatically enters preflight Plan generation", async () => {
+  const { storage, planState } = fakeStorage();
+  let observedPlanPhase = "";
+  let observedPlanId = "";
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        observedPlanPhase = input.planPhase ?? "";
+        observedPlanId = input.planId ?? "";
+        Object.assign(planState, {
+          status: "awaiting_approval",
+          approval: "pending",
+          steps: [
+            { id: "step_1", title: "Gather evidence", status: "pending" },
+            { id: "step_2", title: "Synthesize findings", status: "pending" }
+          ]
+        });
+        return { text: "Plan ready", finishReason: "agent_backend_completed", events: [] };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Research agent planning systems and write a report with sources."
+  });
+
+  assert.equal(result.provider, "agent-backend");
+  assert.equal(observedPlanPhase, "preflight");
+  assert.equal(observedPlanId, "plan_intake_test");
+  assert.equal(planState.status, "awaiting_approval");
+  assert.equal((planState.steps as unknown[]).length, 2);
+});
+
+test("slash Plan with research skills keeps Plan clarification ownership", async () => {
+  const { storage, planState } = fakeStorage();
+  let allowedToolRefs: string[] = [];
+  let observedPlanPhase = "";
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        allowedToolRefs = input.allowedToolRefs ?? [];
+        observedPlanPhase = input.planGeneration?.phase ?? "";
+        Object.assign(planState, {
+          status: "awaiting_user",
+          clarification: {
+            question: "Which literature scope should I use?",
+            options: [
+              { id: "recent", label: "Recent", description: "Focus on recent Agent papers.", recommended: true },
+              { id: "broad", label: "Broad", description: "Cover a broader Agent literature range.", recommended: false }
+            ],
+            status: "pending"
+          }
+        });
+        return { text: "Which literature scope should I use?", finishReason: "agent_backend_completed", events: [] };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "chat-agent",
+    chatInstruction: "/plan 帮我查找最近Agent相关的文献，并且做文献综述。",
+    transientSkillRefs: ["database-lookup", "literature-review"]
+  });
+
+  assert.equal(result.provider, "agent-backend");
+  assert.equal(observedPlanPhase, "intake");
+  assert.ok(allowedToolRefs.includes("plan_clarification_submit"));
+  assert.notDeepEqual(allowedToolRefs, ["ask_clarification"]);
+});
+
 test("generation accepts the selected conversation model without a project binding", async () => {
   const { storage } = fakeStorage();
   storage.getProjectModelBindings = () => [];
@@ -895,6 +974,233 @@ test("answered Agent clarification preserves resume context for follow-up clarif
   assert.deepEqual((resumeContext?.canvas as { workflow?: unknown } | undefined)?.workflow, { mode: "batch_delivery" });
 });
 
+test("answered intake clarification keeps research skills in clarification guard until scope is sufficient", async () => {
+  const { storage } = fakeStorage();
+  let allowedToolRefs: string[] = [];
+  let observedContextValues: Record<string, unknown> = {};
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        allowedToolRefs = input.allowedToolRefs ?? [];
+        observedContextValues = input.contextValues ?? {};
+        return {
+          text: "",
+          finishReason: "clarification_required",
+          events: [{
+            eventType: "agent_backend_agent_clarification_requested",
+            payload: {
+              type: "agent_clarification_requested",
+              toolCallId: "call_format",
+              question: "Which citation format should I use?",
+              options: [
+                { id: "apa", label: "APA 7", detail: "Use APA 7th edition.", recommended: true },
+                { id: "ieee", label: "IEEE", detail: "Use numeric IEEE citations." }
+              ]
+            }
+          }]
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent Agent literature\n\nSelected clarification: Multi-agent systems",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: {
+      canvas: { workflow: { mode: "batch_delivery" } },
+      agentClarification: {
+        clarificationId: "agent_clarification_scope",
+        question: "Which Agent scope?",
+        selectedOptionId: "multi_agent",
+        answer: "Multi-agent systems",
+        option: { id: "multi_agent", label: "Multi-agent systems", detail: "Coordination and workflows." }
+      }
+    },
+    toolState: { web_search: true, knowledge_base: true }
+  });
+
+  assert.equal(result.finishReason, "clarification_required");
+  assert.deepEqual(allowedToolRefs, ["ask_clarification"]);
+  const policy = observedContextValues.facetwrite_clarification_policy as Record<string, unknown>;
+  assert.equal(policy.mode, "skill_scope_guard");
+  assert.equal(policy.intakeState, "intake_collecting");
+  assert.equal(policy.intakeRound, 2);
+  assert.match(String(policy.answeredSummary), /Multi-agent systems/);
+});
+
+test("answered intake slot suppresses repeated citation-format clarification from backend", async () => {
+  const { storage, agentClarifications, records } = fakeStorage();
+  let observedContextValues: Record<string, unknown> = {};
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        observedContextValues = input.contextValues ?? {};
+        return {
+          text: "",
+          finishReason: "clarification_required",
+          events: [{
+            eventType: "agent_backend_agent_clarification_requested",
+            payload: {
+              type: "agent_clarification_requested",
+              toolCallId: "call_citation_repeat",
+              question: "Which citation style should I use?",
+              options: [
+                { id: "ieee", label: "IEEE", detail: "Use IEEE numeric citations." },
+                { id: "apa", label: "APA 7", detail: "Use APA 7th edition.", recommended: true },
+                { id: "nature", label: "Nature", detail: "Use Nature style." }
+              ]
+            }
+          }]
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "Prepare a bibliography about autonomous workflows.\n\nSelected clarification: APA 7",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: {
+      agentClarification: {
+        clarificationId: "agent_clarification_citation",
+        question: "Which citation format should the review use?",
+        selectedOptionId: "apa",
+        answer: "APA 7",
+        option: { id: "apa", label: "APA 7", detail: "Use APA 7th edition." },
+        resumeContext: {
+          intakeRound: 1,
+          answeredSummary: "Citation format: APA 7"
+        }
+      }
+    },
+    toolState: { web_search: true, knowledge_base: true }
+  });
+
+  const policy = observedContextValues.facetwrite_clarification_policy as Record<string, unknown>;
+  assert.deepEqual(policy.answeredSlots, ["citation_format"]);
+  assert.equal((policy.missingSlots as string[]).includes("citation format"), false);
+  assert.equal(result.finishReason, "clarification_required");
+  assert.equal(agentClarifications.length, 0);
+  const record = records[0] as { events?: Array<{ eventType: string; payload: Record<string, unknown> }> };
+  assert.ok(record.events?.some((event) => event.eventType === "agent_backend_duplicate_clarification_suppressed"));
+});
+
+test("research skill intake allows evidence tools after three answered clarification rounds", async () => {
+  const { storage } = fakeStorage();
+  let allowedToolRefs: string[] = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        allowedToolRefs = input.allowedToolRefs ?? [];
+        return {
+          text: "Continuing with the scoped literature review.",
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: [
+      "Review recent Agent literature.",
+      "",
+      "Selected clarification: Multi-agent systems",
+      "Selected clarification: 2023-2026",
+      "Selected clarification: 30 papers, APA format"
+    ].join("\n"),
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: {
+      agentClarification: {
+        clarificationId: "agent_clarification_format",
+        selectedOptionId: "format_apa",
+        answer: "30 papers, APA format",
+        resumeContext: {
+          intakeRound: 3,
+          answeredSummary: "Scope: Multi-agent systems; Time range: 2023-2026; Format: 30 papers, APA format"
+        }
+      }
+    },
+    toolState: { web_search: true, knowledge_base: true }
+  });
+
+  assert.equal(result.finishReason, "agent_backend_completed");
+  assert.ok(allowedToolRefs.includes("web_search"));
+  assert.ok(allowedToolRefs.includes("knowledge_base"));
+  assert.ok(allowedToolRefs.includes("ask_clarification"));
+});
+
+test("clarification process narration with appended sources is not recorded as assistant body text", async () => {
+  const { storage, records } = fakeStorage();
+  const clarificationEvent: ToolEventRecord = {
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      toolName: "ask_clarification",
+      toolCallId: "call_scope",
+      question: "Could you confirm the review scope?",
+      options: [
+        { id: "medium_20_apa", label: "20 papers, APA format", detail: "Moderate scope.", recommended: true },
+        { id: "full_30_apa", label: "30 papers, APA format", detail: "Fuller scope." }
+      ]
+    }
+  };
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            type: "tool_completed",
+            toolName: "web_search",
+            sources: [{ title: "Paper A", url: "https://example.com/a" }]
+          }
+        });
+        input.onToolEvent?.(clarificationEvent);
+        return {
+          text: "Now I have the full skill. Let me proceed with Phase 1 by clarifying the scope and format with the user.",
+          finishReason: "agent_backend_completed",
+          events: [clarificationEvent]
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent Agent literature",
+    transientSkillRefs: ["literature-review"],
+    contextValues: { agentClarification: answeredAgentClarification() },
+    toolState: { web_search: true }
+  });
+
+  assert.equal(result.finishReason, "clarification_required");
+  assert.equal(result.text, "");
+  assert.equal((records[0] as { output: string }).output, "");
+});
+
 test("answered Agent clarification falls back to matching pending question when ids differ", async () => {
   const { storage, agentClarifications } = fakeStorage();
   agentClarifications.push({
@@ -1047,7 +1353,7 @@ test("skill scope guard fills default budget and Canvas resume context when runt
   assert.equal((resumeContext?.canvas as { runtimeMarker?: boolean } | undefined)?.runtimeMarker, true);
 });
 
-test("skill scope guard rejects plain text clarification without creating Canvas nodes", async () => {
+test("skill scope guard routes process narration through Canvas recovery instead of assistant body", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
@@ -1062,8 +1368,7 @@ test("skill scope guard rejects plain text clarification without creating Canvas
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
+  const result = await service.generateAndRecordStream({
       mode: "chat",
       locale: "zh",
       agentCardId: "chat-agent",
@@ -1071,13 +1376,13 @@ test("skill scope guard rejects plain text clarification without creating Canvas
       transientSkillRefs: ["database-lookup", "literature-review"],
       contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
       toolState: { web_search: true }
-    }, { onToolEvent: (event) => events.push(event) }),
-    /skill scope guard requires a structured ask_clarification response/i
-  );
+    }, { onToolEvent: (event) => events.push(event) });
 
-  assert.equal(canvasNodes.length, 0);
-  assert.equal(records.length, 0);
-  assert.ok(events.some((event) => event.eventType === "agent_backend_runtime_failed"));
+  assert.equal(result.text.includes("\u9700\u8981\u5148\u660e\u786e"), false);
+  assert.ok(canvasNodes.length > 0);
+  assert.equal(canvasNodes.some((node) => String(node.content).includes("\u9700\u8981\u5148\u660e\u786e")), false);
+  assert.equal(records.length, 1);
+  assert.ok(events.some((event) => event.eventType.startsWith("canvas_")));
 });
 
 test("skill scope guard covers installed research skills beyond literature and database lookup", async () => {
@@ -1151,6 +1456,7 @@ test("skill scope guard does not block ordinary writing skills", async () => {
     agentCardId: "chat-agent",
     chatInstruction: "Research a topic and draft a blog post outline",
     transientSkillRefs: ["blog-post"],
+    contextValues: { autoPreflightPlan: { enabled: false } },
     toolState: { web_search: true }
   });
 
@@ -1187,7 +1493,7 @@ test("streaming generic long task creates Canvas progress from evidence tools", 
       locale: "en",
       agentCardId: "chat-agent",
       chatInstruction: "Audit dependency risks and report what you find",
-      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
     }, {
       onToolEvent: (event) => events.push(event as typeof events[number])
     }),
@@ -1236,7 +1542,7 @@ test("streaming generic long task skips web fetch references without linked sour
       locale: "en",
       agentCardId: "chat-agent",
       chatInstruction: "Audit dependency risks and report what you find",
-      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
     }, {
       onToolEvent: (event) => events.push(event as typeof events[number])
     }),
@@ -1285,7 +1591,7 @@ test("progressive Canvas keeps body drafts until evidence budget and finalizes B
     locale: "en",
     agentCardId: "chat-agent",
     chatInstruction: "Research and summarize agent runtime budgets",
-    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
   }, {
     onToolEvent: (event) => events.push(event as typeof events[number])
   });
@@ -1355,7 +1661,7 @@ test("progressive Canvas creates a file document node for Markdown output files"
       threadId: "thread_runtime_archive",
       agentCardId: "chat-agent",
       chatInstruction: "Research and write a detailed report",
-      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
     });
 
     const fileNodes = canvasNodes.filter((node) => node.kind === "file_document");
@@ -1417,7 +1723,7 @@ test("progressive Canvas does not create a file document node when runtime Markd
     threadId: "thread_runtime_archive_missing",
     agentCardId: "chat-agent",
     chatInstruction: "Research and write a detailed report",
-    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
   }, {
     onToolEvent: (event) => events.push(event as typeof events[number])
   });
@@ -2501,7 +2807,8 @@ test("streaming generation applies transient skills without saving them to Agent
     locale: "zh",
     agentCardId: "chat-agent",
     chatInstruction: "帮我总结一下",
-    transientSkillRefs: ["summary"]
+    transientSkillRefs: ["summary"],
+    contextValues: { autoPreflightPlan: { enabled: false } }
   }, {
     onTimelineEvent: (event) => timelineEvents.push(event)
   });

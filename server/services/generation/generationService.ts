@@ -31,7 +31,8 @@ import { extractSourceLinks, formatSourceLinks, type SourceLink } from "./source
 import {
   isCanvasEligibleTaskPolicy,
   isProcessClarificationText,
-  resolveTaskHandlingPolicy
+  resolveTaskHandlingPolicy,
+  shouldAutoPreflightPlan
 } from "./taskHandlingPolicy.js";
 import { isCanvasWorkflowMode, type CanvasWorkflowMode } from "../../../shared/canvasWorkflow.js";
 import { containsInternalRuntimeProtocol } from "../../../shared/internalRuntimeProtocol.js";
@@ -118,6 +119,7 @@ export function createGenerationService(
     payload = withOrchestrationPolicy(withCanvasAction(payload, threadId, storage));
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
     const projectRuntimeSettings = storage.getProjectRuntimeSettings(selection.projectId);
+    payload = withAutoPreflightPlan(payload, threadId, storage);
     payload = withPlanGeneration(payload, threadId, storage);
     payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
@@ -260,6 +262,7 @@ export function createGenerationService(
     payload = withOrchestrationPolicy(withCanvasAction(payload, threadId, storage));
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
     const projectRuntimeSettings = storage.getProjectRuntimeSettings(selection.projectId);
+    payload = withAutoPreflightPlan(payload, threadId, storage);
     payload = withPlanGeneration(payload, threadId, storage);
     payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
@@ -576,7 +579,7 @@ export function createGenerationService(
       }
     } catch (error) {
       planOrchestrator.fail(threadId, payload, error);
-      if (!isSkillClarificationGuarded(payload) && isProgressiveCanvasDeliveryEnabled(payload)) {
+      if (isProgressiveCanvasDeliveryEnabled(payload)) {
         ensureProgressiveDeliveryStarted();
         for (const failureEvent of commitProgressiveFailureDelivery({
           payload,
@@ -593,7 +596,7 @@ export function createGenerationService(
       const event = createRuntimeFallbackEvent("agent-backend", error, isMockFallbackEnabled(deps));
       runtimeEvents.push(event);
       observeToolEvent(event);
-      emitTimeline(timeline.event("run_failed", "failed", payload.locale === "zh" ? "运行失败" : "Run failed", safeRuntimeErrorMessage(error)));
+      emitTimeline(timeline.event("run_failed", "failed", payload.locale === "zh" ? "运行失败" : "Run failed", safeRuntimeErrorMessage(error), budgetStatusPayload(error)));
       textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     }
 
@@ -627,14 +630,31 @@ function hasBlockedInternalOutput(events?: ToolEventRecord[]) {
 function createRuntimeFallbackEvent(source: "agent-backend", error: unknown, mockFallbackEnabled: boolean): ToolEventRecord {
   const message = safeRuntimeErrorMessage(error);
   const planProtocolFailure = /^Plan (?:planning|revision|execution|phase)\b/i.test(message);
+  const budgetStatus = budgetStatusPayload(error);
   return {
     eventType: planProtocolFailure ? "agent_backend_plan_protocol_failed" : "agent_backend_runtime_failed",
     payload: {
       source,
       message,
+      ...(budgetStatus ? budgetStatus : {}),
       fallback: planProtocolFailure ? "none" : mockFallbackEnabled ? "mock" : "none"
     }
   };
+}
+
+function budgetStatusPayload(error: unknown): Record<string, unknown> | undefined {
+  const status = error && typeof error === "object" ? (error as { facetwriteBudgetStatus?: unknown }).facetwriteBudgetStatus : undefined;
+  if (status && typeof status === "object" && !Array.isArray(status)) return status as Record<string, unknown>;
+  const message = error instanceof Error ? error.message : "";
+  if (/Recursion limit of \d+ reached|GRAPH_RECURSION_LIMIT|GraphRecursionError/i.test(message)) {
+    const recursionLimit = Number.parseInt(message.match(/Recursion limit of (\d+) reached/i)?.[1] ?? "", 10);
+    return {
+      status: "budget_exhausted",
+      canResume: true,
+      ...(Number.isInteger(recursionLimit) ? { recursionLimit } : {})
+    };
+  }
+  return undefined;
 }
 
 function safeRuntimeErrorMessage(error: unknown) {
@@ -748,11 +768,40 @@ function canvasActionEvents(payload: GenerateRequest): ToolEventRecord[] {
   }];
 }
 
+function withAutoPreflightPlan(payload: GenerateRequest, threadId: string, storage: SQLiteStorageRepository): GenerateRequest {
+  if (skillScopeIntake(payload).needsClarification) return payload;
+  if (!shouldAutoPreflightPlan({
+    payload,
+    transientSkillCount: payload.transientSkillRefs?.length ?? 0,
+    thinkingMode: payload.modelOverrides?.thinkingMode
+  })) {
+    return payload;
+  }
+  const instruction = payload.chatInstruction || payload.freeTextPrompt || "Plan the task";
+  const plan = storage.createPlanIntake(threadId, {
+    title: "Task plan",
+    goal: instruction
+  });
+  return {
+    ...payload,
+    planPhase: "preflight",
+    planId: plan.id,
+    contextValues: {
+      ...payload.contextValues,
+      autoPreflightPlan: {
+        id: plan.id,
+        trigger: "complex_task",
+        requiresApproval: true
+      }
+    }
+  };
+}
+
 function withPlanGeneration(payload: GenerateRequest, threadId: string, storage: SQLiteStorageRepository): GenerateRequest {
   if (payload.planGeneration) return payload;
   const policy = resolvePlanRequestPolicy(payload);
   if (policy.phase === "chat") return payload;
-  const phase = policy.stage === "execution" ? "execution" : policy.stage === "revise" ? "revise" : "intake";
+  const phase = policy.stage === "execution" ? "execution" : policy.stage === "revise" ? "revise" : policy.stage === "preflight" ? "preflight" : "intake";
   const existingPlanId = payload.planId || readString(record(payload.contextValues?.awaitingPlan).id);
   const planId = existingPlanId || storage.createPlanIntake(threadId, {
     title: "Plan intake",
@@ -785,11 +834,11 @@ function withOrchestrationPolicy(payload: GenerateRequest): GenerateRequest {
 function planPhaseEvents(payload: GenerateRequest): ToolEventRecord[] {
   const phase = payload.planGeneration?.phase;
   if (!phase) return [];
-  const skill = phase === "intake" ? "brainstorming" : phase === "revise" ? "writing-plans" : undefined;
+  const skill = phase === "intake" ? "brainstorming" : phase === "revise" || phase === "preflight" ? "writing-plans" : undefined;
   return [{
     eventType: "agent_backend_plan_activity",
     payload: {
-      eventType: phase === "intake" ? "intent_recognized" : phase === "revise" ? "plan_preparing" : "step_started",
+      eventType: phase === "intake" ? "intent_recognized" : phase === "revise" || phase === "preflight" ? "plan_preparing" : "step_started",
       planId: payload.planGeneration?.planId,
       stepId: payload.planGeneration?.stepId,
       phase,
@@ -941,37 +990,78 @@ function skillUsageTimelineEvent(
 
 function withSkillClarificationGuard(payload: GenerateRequest, threadId: string, projectSettings: ProjectRuntimeSettings): GenerateRequest {
   if (!needsSkillScopeClarification(payload)) return payload;
+  const intake = skillScopeIntake(payload);
   const skillRefs = (payload.transientSkillRefs ?? []).map((skillRef) => skillRef.toLowerCase());
   const instruction = payload.chatInstruction ?? payload.freeTextPrompt ?? "";
   const clarificationId = `skill_clarification_${hashString(`${threadId}:${skillRefs.join("|")}:${instruction}`).toString(36)}`;
   const budget = resolveRuntimeBudget(payload.runtimeBudgetProfile, projectSettings);
+  const missingSlots = intake.missingSlots.length ? intake.missingSlots.join(", ") : "none";
+  const answeredSlots = intake.answeredSlots.length ? intake.answeredSlots.map(intakeSlotLabel).join(", ") : "none";
+  const answeredSummary = intake.answeredSummary || "No intake answers yet.";
   return {
     ...payload,
     contextValues: {
       ...payload.contextValues,
       facetwrite_clarification_policy: {
         mode: "skill_scope_guard",
+        intakeState: "intake_collecting",
+        intakeRound: intake.nextRound,
+        maxIntakeRounds: MAX_SKILL_INTAKE_ROUNDS,
+        answeredSummary,
+        answeredSlots: intake.answeredSlots,
+        missingSlots: intake.missingSlots,
+        allowEvidenceTools: false,
         source: "server_guard",
         clarificationId,
-        originalInstruction: instruction,
+        originalInstruction: stripSelectedClarificationInstruction(instruction),
         skillRefs: payload.transientSkillRefs ?? [],
         disabledSkillRefs: payload.disabledSkillRefs ?? [],
         runtimeBudgetProfile: budget.runtimeBudgetProfile,
         canvas: record(payload.contextValues?.canvas),
         instruction: payload.locale === "zh"
-          ? "当前文献/数据库类任务缺少范围。你必须先依据已加载 Skill 的要求调用 ask_clarification，且参数必须包含 question 和 2-3 个 options；每个 option 必须有 id、label、detail 或 description，最多一个 recommended:true。不要输出普通澄清话术、Markdown 选项列表或以冒号结尾的自然语言问题；如果无法调用工具，只能输出完整 JSON 对象 {\"type\":\"agent_clarification_requested\",\"question\":\"...\",\"options\":[...]}，不能包含任何额外文本。在用户回答前不要调用 web_search、web_fetch、knowledge_base、write_file、present_files 或其他证据工具。"
-          : "This literature/database task is underspecified. Use the loaded Skill instructions to call ask_clarification first, and the arguments must include question plus 2-3 options; every option must include id, label, and detail or description, with at most one recommended:true. Do not output ordinary clarification prose, Markdown option lists, or natural-language questions ending in a colon. If tool calling is unavailable, output only a complete JSON object {\"type\":\"agent_clarification_requested\",\"question\":\"...\",\"options\":[...]} with no surrounding text. Do not call web_search, web_fetch, knowledge_base, write_file, present_files, or other evidence tools until the user answers."
+          ? `当前文献/数据库类任务还处于搜索前 intake 阶段。你必须依据已加载 Skill 调用 ask_clarification，最多进行 ${MAX_SKILL_INTAKE_ROUNDS} 轮高价值澄清；当前是第 ${intake.nextRound} 轮。已回答摘要：${answeredSummary}。已回答槽位：${answeredSlots}。仍缺失：${missingSlots}。只能围绕仍缺失槽位提问，不要重复询问已回答槽位；若缺失槽位为 none，请继续执行任务而不是继续澄清。每轮只问一个最有价值的问题，参数必须包含 question 和 2-3 个 options；每个 option 必须有 id、label、detail 或 description，最多一个 recommended:true。不要输出普通澄清话术、Markdown 选项列表或自然语言阶段说明；如果无法调用工具，只能输出完整 JSON 对象 {"type":"agent_clarification_requested","question":"...","options":[...]}，不能包含任何额外文本。在用户回答前不要调用 web_search、web_fetch、knowledge_base、write_file、present_files 或其他证据工具。`
+          : `This literature/database task is still in the pre-search intake stage. Use the loaded Skill instructions to call ask_clarification, for up to ${MAX_SKILL_INTAKE_ROUNDS} high-value clarification rounds; this is round ${intake.nextRound}. Answers so far: ${answeredSummary}. Answered slots: ${answeredSlots}. Missing slots: ${missingSlots}. Ask only about the missing slots and do not repeat answered slots; if missing slots is none, continue the task instead of clarifying again. Ask only one highest-value question per round, and the arguments must include question plus 2-3 options; every option must include id, label, and detail or description, with at most one recommended:true. Do not output ordinary clarification prose, Markdown option lists, or phase narration. If tool calling is unavailable, output only a complete JSON object {"type":"agent_clarification_requested","question":"...","options":[...]} with no surrounding text. Do not call web_search, web_fetch, knowledge_base, write_file, present_files, or other evidence tools until intake is sufficient.`
       }
     }
   };
 }
 
 function needsSkillScopeClarification(payload: GenerateRequest) {
+  if (resolvePlanRequestPolicy(payload).phase === "planning" || payload.planGeneration) return false;
+  if (payload.planPhase === "preflight") return false;
+  return skillScopeIntake(payload).needsClarification;
+}
+
+const MAX_SKILL_INTAKE_ROUNDS = 3;
+
+function skillScopeIntake(payload: GenerateRequest) {
   const skillRefs = (payload.transientSkillRefs ?? []).map((skillRef) => skillRef.toLowerCase());
   const needsClarification = skillRefs.some(isClarificationSensitiveSkill);
   const instruction = payload.chatInstruction ?? payload.freeTextPrompt ?? "";
   const scopeSensitiveTask = /(?:literature|review|survey|paper|database|lookup|search|research|citation|bibliography|github|repo|repository|market|industry|competitive|competitor|newsletter|digest|roundup|news|briefing|文献|综述|调研|检索|搜索|查找|数据库|论文|引用|参考文献|市场|行业|竞品|竞争|简报|周报|新闻|仓库|开源项目)/i.test(instruction);
-  return needsClarification && scopeSensitiveTask && !hasAnsweredSkillClarification(payload);
+  if (!needsClarification || !scopeSensitiveTask) {
+    return { needsClarification: false, nextRound: 1, answeredSummary: "", answeredSlots: [] as string[], missingSlots: [] as string[] };
+  }
+  const currentAnswer = readCurrentAgentClarificationAnswer(payload);
+  const resumeContext = record(record(payload.contextValues?.agentClarification).resumeContext);
+  const priorRound = readPositiveInteger(resumeContext.intakeRound) ?? 0;
+  const nextRound = Math.min(MAX_SKILL_INTAKE_ROUNDS, priorRound + (currentAnswer ? 1 : 0) + (priorRound ? 0 : 1));
+  const answeredSummary = mergeIntakeAnsweredSummary(readString(resumeContext.answeredSummary), currentAnswer);
+  const assessmentText = [instruction, answeredSummary].filter(Boolean).join("\n");
+  const answeredSlots = intakeSlotIds(answeredSummary);
+  const missingSlots = missingIntakeSlots(assessmentText, new Set(answeredSlots));
+  const allowEvidenceTools = Boolean(currentAnswer) && (
+    priorRound >= MAX_SKILL_INTAKE_ROUNDS
+    || missingSlots.length === 0
+    || isExplicitContinueAnswer(currentAnswer)
+  );
+  return {
+    needsClarification: !allowEvidenceTools,
+    nextRound,
+    answeredSummary,
+    answeredSlots,
+    missingSlots
+  };
 }
 
 function isSkillClarificationGuarded(payload: GenerateRequest) {
@@ -993,15 +1083,55 @@ function isClarificationSensitiveSkill(skillRef: string) {
   return names.some((name) => skillRef === name || skillRef.endsWith(`:${name}`) || skillRef.endsWith(`/${name}`));
 }
 
-function hasAnsweredSkillClarification(payload: GenerateRequest) {
+function readCurrentAgentClarificationAnswer(payload: GenerateRequest) {
   const clarification = record(payload.contextValues?.agentClarification);
   const option = record(clarification.option);
-  return Boolean(
-    readString(clarification.answer)
-    || readString(clarification.selectedOptionId)
-    || readString(option.id)
-    || readString(option.label)
-  );
+  const label = readString(option.label);
+  const detail = readString(option.detail) || readString(option.description);
+  return readString(clarification.answer)
+    || [label, detail].filter(Boolean).join(" - ")
+    || readString(clarification.selectedOptionId);
+}
+
+function mergeIntakeAnsweredSummary(existing: string, current: string) {
+  const answers = existing
+    .split(/\r?\n|;\s*/)
+    .map((item) => item.replace(/^[-*\d.\s]+/, "").trim())
+    .filter(Boolean);
+  if (current && !answers.some((answer) => answer.toLowerCase() === current.toLowerCase())) answers.push(current);
+  return answers.join("; ");
+}
+
+const INTAKE_SLOT_DEFINITIONS = [
+  { id: "topic_subdomain", label: "topic/subdomain", pattern: /agent|multi-agent|mas|llm|workflow|framework|autonomous|协作|智能体|多智能体|代理/ },
+  { id: "time_range", label: "time range", pattern: /\b20\d{2}\b|\brecent\b|last\s+\d+\s+years|近|最近|年/ },
+  { id: "paper_count_depth", label: "paper count/depth", pattern: /\b\d+\s*(?:papers?|sources?|studies?)\b|focused|broad|comprehensive|survey|review|篇|论文|文献|综述/ },
+  { id: "citation_format", label: "citation format", pattern: /\bapa\b|\bieee\b|\bmla\b|\bnature\b|citation|format|style|参考文献|引用|格式/ },
+  { id: "output_structure", label: "output structure", pattern: /systematic|literature review|review|survey|table|section|structure|synthesis|综述|结构|表格|章节|输出/ }
+] as const;
+
+function intakeSlotIds(value: string) {
+  const text = value.toLowerCase();
+  return INTAKE_SLOT_DEFINITIONS.flatMap((slot) => slot.pattern.test(text) ? [slot.id] : []);
+}
+
+function intakeSlotLabel(slotId: string) {
+  return INTAKE_SLOT_DEFINITIONS.find((slot) => slot.id === slotId)?.label ?? slotId;
+}
+
+function missingIntakeSlots(value: string, answeredSlots = new Set<string>()) {
+  const text = value.toLowerCase();
+  return INTAKE_SLOT_DEFINITIONS.flatMap((slot) => (
+    answeredSlots.has(slot.id) || slot.pattern.test(text) ? [] : [slot.label]
+  ));
+}
+
+function isExplicitContinueAnswer(value: string) {
+  return /(?:continue|go ahead|start search|search now|use your judgment|proceed|开始搜索|继续|直接开始|你来决定|按你的判断)/i.test(value);
+}
+
+function readPositiveInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 function markAnsweredAgentClarification(storage: SQLiteStorageRepository, threadId: string, payload: GenerateRequest) {
@@ -1023,11 +1153,21 @@ function markAnsweredAgentClarification(storage: SQLiteStorageRepository, thread
 
 function isBlockingAgentClarificationRun(events: ToolEventRecord[], text: string, finishReason?: string) {
   if (!hasAgentClarificationEvent(events)) return false;
-  const visible = text.trim();
+  const visible = stripAppendedSources(text).trim();
   return finishReason === "clarification_required"
     || !visible
     || isProcessClarificationText(visible)
     || /(?:need(?:s|ed)?\s+(?:to\s+)?(?:confirm|clarif|supplement)|clarif(?:y|ication)|supplement(?:al)?\s+information|范围|确认|补充|澄清)/i.test(visible) && visible.length < 500;
+}
+
+function stripAppendedSources(text: string) {
+  return text.replace(/\n+##\s*(?:Sources|来源|鏉ユ簮)\s*\n[\s\S]*$/i, "").trim();
+}
+
+function stripSelectedClarificationInstruction(value: unknown) {
+  const text = readString(value);
+  if (!text) return "";
+  return text.replace(/\n+Selected clarification:[\s\S]*$/i, "").trim();
 }
 
 function dedupeToolEvents(events: ToolEventRecord[]) {
@@ -1057,6 +1197,19 @@ export function withAgentClarificationResumeContext(event: ToolEventRecord, payl
   const existingResumeContext = record(eventPayload.resumeContext);
   const policy = record(payload.contextValues?.facetwrite_clarification_policy);
   const answeredClarification = record(payload.contextValues?.agentClarification);
+  const repeatedSlots = repeatedAnsweredIntakeSlots(eventPayload, payload, policy);
+  if (repeatedSlots.length) {
+    return {
+      eventType: "agent_backend_duplicate_clarification_suppressed",
+      payload: {
+        source: "server_guard",
+        reason: "answered_intake_slot",
+        originalEventType: event.eventType,
+        originalQuestion: readString(eventPayload.question),
+        repeatedSlots
+      }
+    };
+  }
   const existingSkillRefs = readStringList(existingResumeContext.transientSkillRefs);
   const existingDisabledSkillRefs = readStringList(existingResumeContext.disabledSkillRefs);
   const existingCanvas = record(existingResumeContext.canvas);
@@ -1070,11 +1223,22 @@ export function withAgentClarificationResumeContext(event: ToolEventRecord, payl
   const runtimeBudgetProfile = readOptionalRuntimeBudgetProfile(existingResumeContext.runtimeBudgetProfile)
     ?? readOptionalRuntimeBudgetProfile(policy.runtimeBudgetProfile)
     ?? payload.runtimeBudgetProfile;
-  const originalInstruction = readString(existingResumeContext.originalInstruction)
-    || readString(policy.originalInstruction)
-    || readString(answeredClarification.originalInstruction)
-    || payload.chatInstruction
-    || payload.freeTextPrompt
+  const intakeRound = readPositiveInteger(existingResumeContext.intakeRound)
+    ?? readPositiveInteger(policy.intakeRound);
+  const maxIntakeRounds = readPositiveInteger(existingResumeContext.maxIntakeRounds)
+    ?? readPositiveInteger(policy.maxIntakeRounds);
+  const answeredSummary = readString(existingResumeContext.answeredSummary)
+    || readString(policy.answeredSummary);
+  const missingSlots = readStringList(existingResumeContext.missingSlots).length
+    ? readStringList(existingResumeContext.missingSlots)
+    : readStringList(policy.missingSlots);
+  const intakeState = readString(existingResumeContext.intakeState)
+    || readString(policy.intakeState);
+  const originalInstruction = stripSelectedClarificationInstruction(readString(existingResumeContext.originalInstruction))
+    || stripSelectedClarificationInstruction(policy.originalInstruction)
+    || stripSelectedClarificationInstruction(answeredClarification.originalInstruction)
+    || stripSelectedClarificationInstruction(payload.chatInstruction)
+    || stripSelectedClarificationInstruction(payload.freeTextPrompt)
     || "";
   return {
     ...event,
@@ -1086,10 +1250,46 @@ export function withAgentClarificationResumeContext(event: ToolEventRecord, payl
         transientSkillRefs: existingSkillRefs.length ? existingSkillRefs : readStringList(policy.skillRefs).length ? readStringList(policy.skillRefs) : payload.transientSkillRefs ?? [],
         disabledSkillRefs: existingDisabledSkillRefs.length ? existingDisabledSkillRefs : readStringList(policy.disabledSkillRefs).length ? readStringList(policy.disabledSkillRefs) : payload.disabledSkillRefs ?? [],
         ...(runtimeBudgetProfile ? { runtimeBudgetProfile } : {}),
+        ...(intakeState ? { intakeState } : {}),
+        ...(intakeRound ? { intakeRound } : {}),
+        ...(maxIntakeRounds ? { maxIntakeRounds } : {}),
+        ...(answeredSummary ? { answeredSummary } : {}),
+        ...(missingSlots.length ? { missingSlots } : {}),
         canvas: mergedCanvas
       }
     }
   };
+}
+
+function repeatedAnsweredIntakeSlots(eventPayload: Record<string, unknown>, payload: GenerateRequest, policy: Record<string, unknown>) {
+  const answeredSlots = new Set([
+    ...readStringList(policy.answeredSlots),
+    ...intakeSlotIds([
+      readString(policy.answeredSummary),
+      readCurrentAgentClarificationAnswer(payload)
+    ].filter(Boolean).join("; "))
+  ]);
+  if (answeredSlots.size === 0) return [];
+  const eventSlots = intakeSlotIds([
+    readString(eventPayload.question),
+    ...readClarificationOptionTexts(eventPayload.options)
+  ].filter(Boolean).join("; "));
+  if (eventSlots.length === 0) return [];
+  const uniqueEventSlots = [...new Set(eventSlots)];
+  if (!uniqueEventSlots.every((slot) => answeredSlots.has(slot))) return [];
+  return uniqueEventSlots;
+}
+
+function readClarificationOptionTexts(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const option = record(item);
+    return [
+      readString(option.label),
+      readString(option.detail),
+      readString(option.description)
+    ].filter(Boolean);
+  });
 }
 
 function mergeSkillClarificationResumeCanvas(policyCanvas: Record<string, unknown>, existingCanvas: Record<string, unknown>) {

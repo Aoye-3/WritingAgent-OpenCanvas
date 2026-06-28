@@ -500,7 +500,7 @@ test("plan_revision_submit revises only the specified pending Plan", async () =>
       planId: "plan_1",
       title: "Laptop comparison",
       goal: "Choose a laptop",
-      steps: [{ id: "compare", title: "Compare models" }]
+      steps: [{ id: "source", title: "Gather sources" }, { id: "compare", title: "Compare models" }]
     })
   } }, {
     allowedToolRefs: ["plan_revision_submit"],
@@ -515,6 +515,28 @@ test("plan_revision_submit revises only the specified pending Plan", async () =>
   assert.equal(result.ok, true);
   assert.equal(result.payload.eventType, "plan_updated");
   assert.equal(revisedPlanId, "plan_1");
+});
+
+test("plan_revision_submit rejects plans outside the 2-5 step contract", async () => {
+  const result = await executeToolCall({ id: "revision-contract", type: "function", function: {
+    name: "plan_revision_submit",
+    arguments: JSON.stringify({
+      planId: "plan_1",
+      title: "Laptop comparison",
+      goal: "Choose a laptop",
+      steps: [{ id: "compare", title: "Compare models" }]
+    })
+  } }, {
+    allowedToolRefs: ["plan_revision_submit"],
+    toolState: { plan_revision_submit: true },
+    getPlanRun: () => ({ id: "plan_1", approval: "pending", status: "draft", steps: [] }) as never,
+    revisePlanRun: () => {
+      throw new Error("invalid step count must not revise");
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.payload.reason, "invalid_step_count");
 });
 
 test("removed plan_update cannot mutate Plan state through Tool Runtime", async () => {

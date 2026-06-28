@@ -68,6 +68,22 @@ def _build_runtime_context(
     return runtime_ctx
 
 
+def _budget_exhausted_payload(exc: Exception, runnable_config: dict[str, Any]) -> dict[str, Any]:
+    name = type(exc).__name__
+    message = str(exc)
+    if name != "GraphRecursionError" and "GRAPH_RECURSION_LIMIT" not in message and "Recursion limit" not in message:
+        return {}
+    recursion_limit = runnable_config.get("recursion_limit")
+    if not isinstance(recursion_limit, int):
+        recursion_limit = None
+    return {
+        "type": "budget_exhausted",
+        "status": "budget_exhausted",
+        "can_resume": True,
+        **({"recursion_limit": recursion_limit} if recursion_limit else {}),
+    }
+
+
 @dataclass(frozen=True)
 class RunContext:
     """Infrastructure dependencies for a single agent run.
@@ -354,12 +370,14 @@ async def run_agent(
         error_msg = f"{exc}"
         logger.exception("Run %s failed: %s", run_id, error_msg)
         await run_manager.set_status(run_id, RunStatus.error, error=error_msg)
+        budget_payload = _budget_exhausted_payload(exc, runnable_config)
         await bridge.publish(
             run_id,
             "error",
             {
                 "message": error_msg,
                 "name": type(exc).__name__,
+                **budget_payload,
             },
         )
 

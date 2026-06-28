@@ -407,63 +407,30 @@ export function AICollaborationDrawer({
     }
   };
 
-  const answerAgentClarification = async (clarification: AgentClarificationPrompt, optionId: string) => {
-    const option = clarification.options.find((item) => item.id === optionId);
-    if (!option) return;
-    const resume = clarification.resumeContext;
-    const transientSkillRefs = resume?.transientSkillRefs.length ? resume.transientSkillRefs : enabledSkillRefs;
-    const resumeDisabledSkillRefs = resume?.disabledSkillRefs.length ? resume.disabledSkillRefs : disabledSkillRefs;
-    const resumeRuntimeContext = resume
-      ? {
-        runtimeBudgetProfile: resume.runtimeBudgetProfile ?? runtimeBudgetChoice ?? runtimeBudgetProfile ?? "medium",
-        ...(Object.keys(resume.canvas).length ? { canvas: resume.canvas } : {})
-      }
-      : { runtimeBudgetProfile: runtimeBudgetChoice ?? runtimeBudgetProfile ?? "medium" };
-    const selectedText = `${option.label}${option.detail ? ` - ${option.detail}` : ""}`;
-    const instructionText = resume?.originalInstruction
-      ? `${resume.originalInstruction}\n\nSelected clarification: ${selectedText}`
-      : option.label;
-    const submittedKeys = agentClarificationSubmittedKeys(clarification);
-    const answeredAt = new Date().toISOString();
-    const optimisticClarification: AgentClarification = {
-      id: clarification.clarificationId,
-      threadId: currentThreadId,
-      runId: "pending",
-      status: "answered",
-      question: clarification.question,
-      options: clarification.options,
-      ...(resume ? { resumeContext: resume } : {}),
-      selectedOptionId: option.id,
-      selectedOptionLabel: option.label,
-      answer: option.label,
-      createdAt: answeredAt,
-      updatedAt: answeredAt
-    };
+  const answerAgentClarification = async (clarification: AgentClarificationPrompt, answer: { optionId?: string; customAnswer?: string }) => {
+    const submission = buildAgentClarificationSubmission({
+      clarification,
+      currentThreadId,
+      optionId: answer.optionId,
+      answerText: answer.customAnswer,
+      enabledSkillRefs,
+      disabledSkillRefs,
+      runtimeBudgetChoice,
+      runtimeBudgetProfile
+    });
+    if (!submission) return;
     setClarificationBusy(true);
-    setSubmittedAgentClarificationKeys((current) => new Set([...current, ...submittedKeys]));
-    setOptimisticAgentClarifications((current) => [...current, optimisticClarification]);
+    setSubmittedAgentClarificationKeys((current) => new Set([...current, ...submission.submittedKeys]));
+    setOptimisticAgentClarifications((current) => [...current, submission.optimisticClarification]);
     try {
-      await onSend(instructionText, undefined, {
-        ...(transientSkillRefs.length ? { transientSkillRefs } : {}),
-        ...(resumeDisabledSkillRefs.length ? { disabledSkillRefs: resumeDisabledSkillRefs } : {}),
-        ...resumeRuntimeContext,
-        agentClarification: {
-          clarificationId: clarification.clarificationId,
-          question: clarification.question,
-          selectedOptionId: option.id,
-          answer: option.label,
-          option,
-          ...(resume ? { resumeContext: resume } : {}),
-          ...(resume?.originalInstruction ? { originalInstruction: resume.originalInstruction } : {})
-        }
-      });
+      await onSend(submission.instructionText, undefined, submission.requestContext);
     } catch (error) {
       setSubmittedAgentClarificationKeys((current) => {
         const next = new Set(current);
-        for (const key of submittedKeys) next.delete(key);
+        for (const key of submission.submittedKeys) next.delete(key);
         return next;
       });
-      setOptimisticAgentClarifications((current) => current.filter((item) => item !== optimisticClarification));
+      setOptimisticAgentClarifications((current) => current.filter((item) => item !== submission.optimisticClarification));
       throw error;
     } finally {
       setClarificationBusy(false);
@@ -738,7 +705,7 @@ export function AICollaborationDrawer({
             clarification={pendingAgentClarification}
             locale={locale}
             variant="composer"
-            onAnswer={(optionId) => answerAgentClarification(pendingAgentClarification, optionId)}
+            onAnswer={(answer) => answerAgentClarification(pendingAgentClarification, answer)}
           />
         ) : null}
         {mindChainContext ? (
@@ -974,11 +941,14 @@ function latestBudgetLimitFailure(messages: CollaborationMessage[]) {
     ...(latestAssistant.timeline ?? []).flatMap((event) => [
       event.title,
       event.summary,
+      String(event.payload?.status ?? ""),
+      String(event.payload?.type ?? ""),
+      String(event.payload?.canResume ?? ""),
       String(event.payload?.error ?? ""),
       String(event.payload?.message ?? "")
     ])
   ].join("\n");
-  return /Recursion limit of \d+ reached|GRAPH_RECURSION_LIMIT/i.test(haystack);
+  return /budget_exhausted|Recursion limit of \d+ reached|GRAPH_RECURSION_LIMIT/i.test(haystack);
 }
 
 export type AgentClarificationPrompt = {
@@ -993,8 +963,86 @@ type AgentClarificationResumeContext = {
   transientSkillRefs: string[];
   disabledSkillRefs: string[];
   runtimeBudgetProfile?: GenerateRequest["runtimeBudgetProfile"];
+  intakeState?: string;
+  intakeRound?: number;
+  maxIntakeRounds?: number;
+  answeredSummary?: string;
+  missingSlots?: string[];
   canvas: Record<string, unknown>;
 };
+
+type AgentClarificationSubmissionInput = {
+  clarification: AgentClarificationPrompt;
+  currentThreadId: string;
+  optionId?: string;
+  answerText?: string;
+  enabledSkillRefs: string[];
+  disabledSkillRefs: string[];
+  runtimeBudgetChoice?: RuntimeBudgetChoice;
+  runtimeBudgetProfile?: GenerateRequest["runtimeBudgetProfile"];
+};
+
+export function buildAgentClarificationSubmission(input: AgentClarificationSubmissionInput) {
+  const option = input.optionId ? input.clarification.options.find((item) => item.id === input.optionId) : undefined;
+  const customAnswer = (option ? "" : input.answerText ?? "").trim();
+  if (!option && !customAnswer) return undefined;
+  const selectedOption = option ?? {
+    id: "custom",
+    label: "Custom answer",
+    detail: customAnswer,
+    recommended: false
+  };
+  const resume = input.clarification.resumeContext;
+  const transientSkillRefs = resume?.transientSkillRefs.length ? resume.transientSkillRefs : input.enabledSkillRefs;
+  const resumeDisabledSkillRefs = resume?.disabledSkillRefs.length ? resume.disabledSkillRefs : input.disabledSkillRefs;
+  const resumeRuntimeContext = resume
+    ? {
+      runtimeBudgetProfile: resume.runtimeBudgetProfile ?? input.runtimeBudgetChoice ?? input.runtimeBudgetProfile ?? "medium",
+      ...(Object.keys(resume.canvas).length ? { canvas: resume.canvas } : {})
+    }
+    : { runtimeBudgetProfile: input.runtimeBudgetChoice ?? input.runtimeBudgetProfile ?? "medium" };
+  const selectedText = option
+    ? `${option.label}${option.detail ? ` - ${option.detail}` : ""}`
+    : customAnswer;
+  const answerValue = option ? option.label : customAnswer;
+  const instructionText = resume?.originalInstruction
+    ? `${resume.originalInstruction}\n\nSelected clarification: ${selectedText}`
+    : selectedText;
+  const answeredAt = new Date().toISOString();
+  const optimisticClarification: AgentClarification = {
+    id: input.clarification.clarificationId,
+    threadId: input.currentThreadId,
+    runId: "pending",
+    status: "answered",
+    question: input.clarification.question,
+    options: input.clarification.options,
+    ...(resume ? { resumeContext: resume } : {}),
+    selectedOptionId: selectedOption.id,
+    selectedOptionLabel: selectedOption.label,
+    answer: answerValue,
+    createdAt: answeredAt,
+    updatedAt: answeredAt
+  };
+  return {
+    instructionText,
+    submittedKeys: agentClarificationSubmittedKeys(input.clarification),
+    optimisticClarification,
+    requestContext: {
+      ...(transientSkillRefs.length ? { transientSkillRefs } : {}),
+      ...(resumeDisabledSkillRefs.length ? { disabledSkillRefs: resumeDisabledSkillRefs } : {}),
+      ...resumeRuntimeContext,
+      agentClarification: {
+        clarificationId: input.clarification.clarificationId,
+        question: input.clarification.question,
+        selectedOptionId: selectedOption.id,
+        answer: answerValue,
+        option: selectedOption,
+        ...(resume ? { resumeContext: resume } : {}),
+        ...(resume?.originalInstruction ? { originalInstruction: resume.originalInstruction } : {})
+      }
+    }
+  };
+}
 
 type PlanTimelineEntry =
   | { kind: "message"; value: CollaborationMessage }
@@ -1035,8 +1083,14 @@ function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "
   busy: boolean;
   locale: "en" | "zh";
   variant?: "message" | "composer";
-  onAnswer: (optionId: string) => Promise<void>;
+  onAnswer: (answer: { optionId?: string; customAnswer?: string }) => Promise<void>;
 }) {
+  const [customAnswer, setCustomAnswer] = useState("");
+  const submitCustomAnswer = () => {
+    const answer = customAnswer.trim();
+    if (!answer) return;
+    void onAnswer({ customAnswer: answer });
+  };
   return (
     <section className={`plan-clarification-card plan-clarification-card-${variant}`} data-status="pending">
       <div className="plan-clarification-heading">
@@ -1050,7 +1104,7 @@ function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "
             aria-label={`${option.label}${option.detail ? `: ${option.detail}` : ""}`}
             disabled={busy}
             key={option.id}
-            onClick={() => void onAnswer(option.id)}
+            onClick={() => void onAnswer({ optionId: option.id })}
             title={option.detail}
             type="button"
           >
@@ -1061,6 +1115,24 @@ function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "
             </span>
           </button>
         ))}
+      </div>
+      <div className="plan-clarification-custom-entry">
+        <label>
+          <span>{locale === "zh" ? "\u81ea\u7531\u8f93\u5165" : "Custom answer"}</span>
+          <textarea
+            disabled={busy}
+            onChange={(event) => setCustomAnswer(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.ctrlKey || event.metaKey) && event.key === "Enter") submitCustomAnswer();
+            }}
+            placeholder={locale === "zh" ? "\u8f93\u5165\u4f60\u81ea\u5df1\u7684\u7b54\u6848..." : "Type your own answer..."}
+            rows={2}
+            value={customAnswer}
+          />
+        </label>
+        <button disabled={busy || !customAnswer.trim()} onClick={submitCustomAnswer} type="button">
+          {locale === "zh" ? "\u63d0\u4ea4" : "Submit"}
+        </button>
       </div>
     </section>
   );
@@ -1256,8 +1328,13 @@ function readAgentClarificationResumeContext(value: unknown): AgentClarification
   const transientSkillRefs = readStringList(record.transientSkillRefs);
   const disabledSkillRefs = readStringList(record.disabledSkillRefs);
   const runtimeBudgetProfile = readRuntimeBudgetProfile(record.runtimeBudgetProfile);
+  const intakeState = readString(record.intakeState);
+  const intakeRound = readPositiveInteger(record.intakeRound);
+  const maxIntakeRounds = readPositiveInteger(record.maxIntakeRounds);
+  const answeredSummary = readString(record.answeredSummary);
+  const missingSlots = readStringList(record.missingSlots);
   const canvas = readRecord(record.canvas);
-  if (!originalInstruction && transientSkillRefs.length === 0 && disabledSkillRefs.length === 0 && !runtimeBudgetProfile && Object.keys(canvas).length === 0) {
+  if (!originalInstruction && transientSkillRefs.length === 0 && disabledSkillRefs.length === 0 && !runtimeBudgetProfile && !intakeState && !intakeRound && !maxIntakeRounds && !answeredSummary && missingSlots.length === 0 && Object.keys(canvas).length === 0) {
     return undefined;
   }
   return {
@@ -1265,6 +1342,11 @@ function readAgentClarificationResumeContext(value: unknown): AgentClarification
     transientSkillRefs,
     disabledSkillRefs,
     ...(runtimeBudgetProfile ? { runtimeBudgetProfile } : {}),
+    ...(intakeState ? { intakeState } : {}),
+    ...(intakeRound ? { intakeRound } : {}),
+    ...(maxIntakeRounds ? { maxIntakeRounds } : {}),
+    ...(answeredSummary ? { answeredSummary } : {}),
+    ...(missingSlots.length ? { missingSlots } : {}),
     canvas
   };
 }
@@ -1275,6 +1357,10 @@ function readRecord(value: unknown) {
 
 function readStringList(value: unknown) {
   return Array.isArray(value) ? value.map(readString).filter(Boolean) : [];
+}
+
+function readPositiveInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 function readRuntimeBudgetProfile(value: unknown): GenerateRequest["runtimeBudgetProfile"] | undefined {

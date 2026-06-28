@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deriveAssistantRunTraceState } from "../../src/features/workspace/components/AssistantRunTrace";
+import { deriveAssistantRunTraceState, formatAssistantRunTraceDetail } from "../../src/features/workspace/components/AssistantRunTrace";
 
 test("assistant run trace derives failed and running states from visible events", () => {
   assert.deepEqual(deriveAssistantRunTraceState({
@@ -17,4 +17,16 @@ test("assistant run trace derives failed and running states from visible events"
     ],
     userExpanded: undefined
   }), { expanded: true, failed: true, running: false });
+});
+
+test("assistant run trace exposes safe failed payload diagnostics", () => {
+  assert.equal(formatAssistantRunTraceDetail({
+    status: "failed",
+    payload: {
+      reason: "invalid_clarification",
+      optionCount: 2,
+      optionShape: "missing_recommended",
+      hasQuestion: true
+    }
+  }), "invalid_clarification · options=2 · shape=missing_recommended · hasQuestion=true");
 });

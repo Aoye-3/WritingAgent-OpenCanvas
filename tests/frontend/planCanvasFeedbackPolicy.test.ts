@@ -44,7 +44,8 @@ test("Agent clarification timeline events render the composer choice card", asyn
   assert.match(source, /readAgentClarificationResumeContext/);
   assert.match(source, /function AgentClarificationChoiceCard/);
   assert.match(source, /clarification\.options\.map/);
-  assert.match(source, /onAnswer=\{\(optionId\) => answerAgentClarification\(pendingAgentClarification, optionId\)\}/);
+  assert.match(source, /onAnswer=\{\(answer\) => answerAgentClarification\(pendingAgentClarification, answer\)\}/);
+  assert.match(source, /plan-clarification-custom-entry/);
   assert.doesNotMatch(source, /onUpdateCanvasNode\(node\.id/);
   assert.doesNotMatch(source, /agentClarificationAnsweredCanvasContent/);
 });
@@ -63,7 +64,9 @@ test("Agent clarification continuation preserves original task and skill overrid
   assert.match(source, /disabledSkillRefs: resumeDisabledSkillRefs/);
   assert.match(source, /runtimeBudgetProfile: resume\.runtimeBudgetProfile/);
   assert.match(source, /canvas: resume\.canvas/);
-  assert.match(source, /selectedOptionId: option\.id/);
+  assert.match(source, /buildAgentClarificationSubmission/);
+  assert.match(source, /selectedOptionId: selectedOption\.id/);
+  assert.match(source, /answerText/);
   assert.match(source, /isAgentClarificationRequired\(sendResult\)/);
   assert.doesNotMatch(source, /await onSend\(option\.label, undefined, \{\s*agentClarification/s);
 });

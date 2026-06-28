@@ -440,12 +440,22 @@ test("maps web fetch and read file tool results into sanitized progress payloads
 
 test("surfaces AgentBackend stream error events as runtime failures", async () => {
   const body = [
-    'event: error\ndata: {"message":"Recursion limit of 100 reached without hitting a stop condition."}\n\n'
+    'event: error\ndata: {"message":"Recursion limit of 100 reached without hitting a stop condition.","type":"budget_exhausted","recursion_limit":100,"estimated_steps_used":99}\n\n'
   ].join("");
 
   await assert.rejects(
     () => runWithBody(body),
-    /Recursion limit of 100 reached without hitting a stop condition/
+    (error) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /Recursion limit of 100 reached without hitting a stop condition/);
+      assert.deepEqual((error as Error & { facetwriteBudgetStatus?: unknown }).facetwriteBudgetStatus, {
+        status: "budget_exhausted",
+        canResume: true,
+        recursionLimit: 100,
+        estimatedStepsUsed: 99
+      });
+      return true;
+    }
   );
 });
 
@@ -1083,6 +1093,46 @@ test("marks an answered Plan as the revision planning stage", () => {
   });
 
   assert.equal(request.context.facetwrite_plan_stage, "revise");
+});
+
+test("marks auto preflight Plan requests as planning with Plan-only tools", () => {
+  const card = getAgentCard("summary");
+  const request = buildRunRequest({
+    threadId: "thread_plan",
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings: defaultAgentSettings(card),
+    messages: [{ role: "user", content: "Research agent planning systems and write a report" }],
+    prompt: "Research agent planning systems and write a report",
+    chatInstruction: "Research agent planning systems and write a report",
+    planPhase: "preflight",
+    planId: "plan_1",
+    allowedToolRefs: ["plan_clarification_submit", "plan_revision_submit", "web_search", "canvas_write"],
+    toolState: {
+      plan_clarification_submit: true,
+      plan_revision_submit: true,
+      web_search: false,
+      canvas_write: false
+    }
+  }, {
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8000",
+    assistantId: "lead_agent"
+  });
+
+  assert.equal(request.context.facetwrite_plan_phase, "planning");
+  assert.equal(request.context.facetwrite_plan_stage, "preflight");
+  assert.equal(request.context.facetwrite_plan_id, "plan_1");
+  assert.ok(Array.isArray(request.context.facetwrite_allowed_tool_refs));
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("plan_clarification_submit"), true);
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("plan_revision_submit"), true);
+  assert.deepEqual(request.context.facetwrite_tool_state, {
+    plan_clarification_submit: true,
+    plan_revision_submit: true,
+    web_search: false,
+    canvas_write: false
+  });
 });
 
 test("returns only the last visible AI message across a tool loop", async () => {

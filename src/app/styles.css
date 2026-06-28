@@ -7109,6 +7109,50 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   justify-content: center;
 }
 
+.plan-clarification-custom-entry {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+  margin-top: 10px;
+}
+
+.plan-clarification-custom-entry label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.plan-clarification-custom-entry label span {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.plan-clarification-custom-entry textarea {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.plan-clarification-custom-entry button {
+  border: 0;
+  border-radius: 8px;
+  background: #2864dc;
+  color: #fff;
+  padding: 9px 12px;
+  font-weight: 700;
+}
+
+.plan-clarification-custom-entry button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .plan-clarification-detail {
   display: inline-grid;
   width: 18px;
