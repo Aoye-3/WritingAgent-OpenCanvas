@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-06-28: Thinking And Forced Tool Choice Are Model-Capability Gated
+
+Decision: Treat provider thinking/reasoning controls and forced `tool_choice` as a model-capability-gated combination. Model config now carries `supports_tool_choice_with_thinking` as `true`, `false`, or `"unknown"`. DeepSeek starts as `false`; Kimi, Qwen, and Moonshot-style providers remain `"unknown"` until they pass local smoke tests. When a Plan, clarification, Canvas, or Skill guard phase requires a specific tool and the selected model is known incompatible, FacetWrite disables thinking only for that forced-tool model call, clears provider reasoning effort, preserves the forced tool protocol, and emits `thinking_disabled_for_tool_choice_compatibility`.
+
+Reason: DeepSeek-compatible thinking endpoints can reject requests that combine thinking mode with explicit `tool_choice`, producing a 400 before Plan clarification or other forced-tool phases can persist recovery state. The product cannot relax forced tools for Plan intake, Plan revision, approved Plan execution, Canvas write protocols, or structured clarification, because those phases depend on deterministic tool output rather than ordinary prose.
+
+Impact: Forced tool contracts remain the priority. Ordinary non-forced tool search can keep thinking enabled, and any provider-level incompatibility discovered later should update the model capability matrix instead of removing tools. `PatchedChatDeepSeek` also strips `tool_choice` as a provider-level safety net whenever thinking is still enabled, but orchestrated forced-tool phases should avoid that path by disabling thinking before the call. User-facing errors for this class must explain that the current model does not support thinking with forced tool calls and should suggest disabling thinking for the phase or switching models, not surface a generic internal runtime output.
+
 ## 2026-06-24: Agent Runtime Uses Split LLM Timeout Controls
 
 Decision: Agent Runtime provider calls keep the total request timeout and the stream chunk timeout as separate controls. The validated local runtime baseline is `timeout:300.0`, `stream_chunk_timeout:45.0`, and unchanged `max_retries:2`.

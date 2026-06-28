@@ -127,6 +127,7 @@ export class SQLiteStorageRepository {
     return plan.status === "awaiting_approval" ? this.syncPlanCanvasProjection(threadId, plan.id) ?? plan : plan;
   }
   createPlanIntake(threadId: string, input: Parameters<PlanRepository["createIntake"]>[1]) { return this.plans.createIntake(threadId, input); }
+  updatePlanMetadata(threadId: string, planId: string, input: Parameters<PlanRepository["updateMetadata"]>[2]) { const plan = this.plans.updateMetadata(threadId, planId, input); return plan ? this.syncPlanCanvasProjection(threadId, planId) : undefined; }
   submitPlanClarification(threadId: string, planId: string, clarification: import("./storageTypes.js").PlanClarification) { return this.plans.submitClarification(threadId, planId, clarification); }
   revisePlanRun(threadId: string, planId: string, input: Parameters<PlanRepository["revise"]>[2]) {
     const plan = this.plans.revise(threadId, planId, input);
@@ -740,6 +741,10 @@ export class SQLiteStorageRepository {
         approval: plan.approval,
         currentStepId: plan.currentStepId,
         statusMessage: plan.statusMessage,
+        origin: plan.origin,
+        complexity: plan.complexity,
+        budget: plan.budget,
+        preflight: plan.preflight,
         artifactCount,
         steps: stepSummaries,
         artifacts: artifactSummaries

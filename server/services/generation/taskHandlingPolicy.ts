@@ -2,6 +2,7 @@ import type { GenerateRequest } from "../../contracts/generation.js";
 import { isDirectCanvasDeliveryIntent } from "./canvasDeliveryIntent.js";
 import { resolvePlanRequestPolicy } from "./planRequestPolicy.js";
 import { resolveOrchestrationPolicy } from "./orchestrationPolicy.js";
+import { resolveTaskComplexity } from "./taskComplexityPolicy.js";
 
 export type TaskHandlingKind = "simple_chat" | "plan_intake" | "long_task" | "explicit_canvas" | "plan_execution";
 export type CanvasDeliveryMode = "none" | "progressive" | "explicit";
@@ -55,7 +56,7 @@ export function shouldAutoPreflightPlan(input: {
   if (isDirectCanvasDeliveryIntent(instruction)) return false;
   const policy = resolveOrchestrationPolicy(instruction);
   if (policy.mode === "managed_plan") return false;
-  return isDurableLongTask(payload, input.transientSkillCount ?? 0, input.thinkingMode);
+  return resolveTaskComplexity(input).requiresAgentPlan;
 }
 
 export function isCanvasEligibleTaskPolicy(value: unknown): boolean {

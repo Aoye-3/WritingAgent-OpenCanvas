@@ -82,6 +82,7 @@ test("syncs DeepSeek models with explicit thinking enable and disable settings",
   let pushed: Array<{
     supports_thinking: boolean;
     supports_reasoning_effort: boolean;
+    supports_tool_choice_with_thinking: true | false | "unknown";
     when_thinking_enabled?: unknown;
     when_thinking_disabled?: unknown;
   }> = [];
@@ -101,6 +102,7 @@ test("syncs DeepSeek models with explicit thinking enable and disable settings",
   assert.equal(service.isModelReady("deepseek-config"), true);
   assert.equal(pushed[0]?.supports_thinking, true);
   assert.equal(pushed[0]?.supports_reasoning_effort, false);
+  assert.equal(pushed[0]?.supports_tool_choice_with_thinking, false);
   assert.deepEqual(pushed[0]?.when_thinking_enabled, {
     extra_body: { thinking: { type: "enabled" } }
   });

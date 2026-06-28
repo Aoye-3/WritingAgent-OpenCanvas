@@ -22,6 +22,7 @@ type RuntimeModel = {
   base_url: string;
   supports_thinking: boolean;
   supports_reasoning_effort: boolean;
+  supports_tool_choice_with_thinking: true | false | "unknown";
   when_thinking_enabled?: Record<string, unknown>;
   when_thinking_disabled?: Record<string, unknown>;
 };
@@ -129,8 +130,16 @@ function toRuntimeModel(config: SyncModel): RuntimeModel {
     base_url: config.baseURL,
     supports_thinking: Boolean(thinkingConfig),
     supports_reasoning_effort: false,
+    supports_tool_choice_with_thinking: providerToolChoiceThinkingSupport(config.providerId, config.modelId),
     ...(thinkingConfig ?? {})
   };
+}
+
+function providerToolChoiceThinkingSupport(providerId: string, modelId: string): RuntimeModel["supports_tool_choice_with_thinking"] {
+  if (providerId === "deepseek") return false;
+  const normalized = modelId.toLowerCase();
+  if (providerId === "moonshot" || normalized.includes("kimi") || normalized.includes("qwen")) return "unknown";
+  return "unknown";
 }
 
 function providerThinkingConfig(providerId: string): Pick<RuntimeModel, "when_thinking_enabled" | "when_thinking_disabled"> | undefined {

@@ -4,6 +4,8 @@ import { useI18n } from "../../i18n/I18nProvider";
 
 type AssistantRunTraceProps = {
   events?: RunTimelineEvent[];
+  planId?: string;
+  stepId?: string;
   onFocusNode?: (nodeId: string) => void;
 };
 
@@ -40,12 +42,24 @@ export function formatAssistantRunTraceDetail(event: Pick<RunTimelineEvent, "sta
   return [detail, ...diagnostics].filter(Boolean).join(" · ").slice(0, 220);
 }
 
-export function AssistantRunTrace({ events = [], onFocusNode }: AssistantRunTraceProps) {
+export function filterAssistantRunTraceEvents(events: RunTimelineEvent[], target: { planId?: string; stepId?: string }) {
+  if (!target.planId && !target.stepId) return events;
+  return events.filter((event) => {
+    const payload = event.payload ?? {};
+    const planId = readPayloadString(payload.planId) || readPayloadString(payload.agentPlanId);
+    const stepId = readPayloadString(payload.stepId) || readPayloadString(payload.agentPlanStepId);
+    if (target.planId && planId !== target.planId) return false;
+    if (target.stepId && stepId !== target.stepId) return false;
+    return true;
+  });
+}
+
+export function AssistantRunTrace({ events = [], planId, stepId, onFocusNode }: AssistantRunTraceProps) {
   const { t } = useI18n();
   const [userExpanded, setUserExpanded] = useState<boolean | undefined>();
   const orderedEvents = useMemo(
-    () => [...events].sort((left, right) => left.sequence - right.sequence),
-    [events]
+    () => filterAssistantRunTraceEvents(events, { planId, stepId }).sort((left, right) => left.sequence - right.sequence),
+    [events, planId, stepId]
   );
   const state = deriveAssistantRunTraceState({ events: orderedEvents, userExpanded });
   if (!orderedEvents.length) return null;

@@ -1,19 +1,19 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { JsonValue, PlanActivity, PlanActivityType, PlanArtifact, PlanArtifactLink, PlanClarification, PlanExecution, PlanRun, PlanRunStatus, PlanStep, PlanStepStatus } from "../storageTypes.js";
+import type { JsonValue, PlanActivity, PlanActivityType, PlanArtifact, PlanArtifactLink, PlanClarification, PlanExecution, PlanRun, PlanRunOrigin, PlanRunStatus, PlanStep, PlanStepStatus } from "../storageTypes.js";
 import { cleanText, nowIso, parseJson, randomId, validateId } from "./storageRepositoryUtils.js";
 
 export class PlanRepository {
   constructor(private readonly db: DatabaseSync) {}
 
-  createIntake(threadId: string, input: { title: unknown; goal: unknown }) {
+  createIntake(threadId: string, input: { title: unknown; goal: unknown; origin?: unknown; complexity?: JsonValue; budget?: JsonValue; preflight?: JsonValue }) {
     validateId(threadId, "threadId");
     const thread = this.db.prepare(`SELECT project_id as projectId FROM threads WHERE id = ?`).get(threadId) as { projectId: string } | undefined;
     if (!thread) throw new Error("Thread not found");
     const id = randomId("plan");
     const now = nowIso();
-    this.db.prepare(`INSERT INTO plan_runs (id, project_id, thread_id, title, goal, status, approval, status_message, clarification_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 'draft', 'pending', '', '{}', ?, ?)`)
-      .run(id, thread.projectId, threadId, cleanText(input.title) || "Plan intake", cleanText(input.goal) || "Clarify intent", now, now);
+    this.db.prepare(`INSERT INTO plan_runs (id, project_id, thread_id, title, goal, status, approval, status_message, clarification_json, origin, complexity_json, budget_json, preflight_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'draft', 'pending', '', '{}', ?, ?, ?, ?, ?, ?)`)
+      .run(id, thread.projectId, threadId, cleanText(input.title) || "Plan intake", cleanText(input.goal) || "Clarify intent", readOrigin(input.origin) ?? null, stringifyJson(input.complexity), stringifyJson(input.budget), stringifyJson(input.preflight), now, now);
     return this.get(threadId, id)!;
   }
 
@@ -26,7 +26,7 @@ export class PlanRepository {
     return this.get(threadId, planId)!;
   }
 
-  create(threadId: string, input: { title: unknown; goal: unknown; runId?: string; steps: Array<{ id?: string; title: unknown; detail?: unknown }>; clarification?: PlanClarification }) {
+  create(threadId: string, input: { title: unknown; goal: unknown; runId?: string; steps: Array<{ id?: string; title: unknown; detail?: unknown }>; clarification?: PlanClarification; origin?: unknown; complexity?: JsonValue; budget?: JsonValue; preflight?: JsonValue }) {
     validateId(threadId, "threadId");
     const thread = this.db.prepare(`SELECT project_id as projectId FROM threads WHERE id = ?`).get(threadId) as { projectId: string } | undefined;
     if (!thread) throw new Error("Thread not found");
@@ -37,8 +37,8 @@ export class PlanRepository {
     const now = nowIso();
     this.db.exec("BEGIN");
     try {
-      this.db.prepare(`INSERT INTO plan_runs (id, project_id, thread_id, run_id, title, goal, status, approval, status_message, clarification_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', '', ?, ?, ?)`)
-        .run(id, thread.projectId, threadId, input.runId ?? null, title, goal, input.clarification ? "awaiting_user" : "awaiting_approval", JSON.stringify(input.clarification ?? {}), now, now);
+      this.db.prepare(`INSERT INTO plan_runs (id, project_id, thread_id, run_id, title, goal, status, approval, status_message, clarification_json, origin, complexity_json, budget_json, preflight_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', '', ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, thread.projectId, threadId, input.runId ?? null, title, goal, input.clarification ? "awaiting_user" : "awaiting_approval", JSON.stringify(input.clarification ?? {}), readOrigin(input.origin) ?? null, stringifyJson(input.complexity), stringifyJson(input.budget), stringifyJson(input.preflight), now, now);
       const insert = this.db.prepare(`INSERT INTO plan_steps (id, plan_run_id, step_order, title, detail, status, attempt) VALUES (?, ?, ?, ?, ?, 'pending', 0)`);
       input.steps.forEach((step, order) => insert.run(step.id ? cleanId(step.id) : `step_${order + 1}`, id, order, cleanText(step.title), cleanText(step.detail)));
       this.db.exec("COMMIT");
@@ -54,14 +54,32 @@ export class PlanRepository {
 
   get(threadId: string, planId: string): PlanRun | undefined {
     validateId(threadId, "threadId"); validateId(planId, "planId");
-    const row = this.db.prepare(`SELECT id, project_id as projectId, thread_id as threadId, run_id as runId, title, goal, status, approval, status_message as statusMessage, clarification_json as clarificationJson, canvas_node_id as canvasNodeId, current_step_id as currentStepId, execution_version as executionVersion, created_at as createdAt, updated_at as updatedAt FROM plan_runs WHERE thread_id = ? AND id = ?`).get(threadId, planId) as (Omit<PlanRun, "steps" | "artifacts" | "links" | "clarification"> & { clarificationJson: string }) | undefined;
+    const row = this.db.prepare(`SELECT id, project_id as projectId, thread_id as threadId, run_id as runId, title, goal, status, approval, status_message as statusMessage, clarification_json as clarificationJson, origin, complexity_json as complexityJson, budget_json as budgetJson, preflight_json as preflightJson, canvas_node_id as canvasNodeId, current_step_id as currentStepId, execution_version as executionVersion, created_at as createdAt, updated_at as updatedAt FROM plan_runs WHERE thread_id = ? AND id = ?`).get(threadId, planId) as (Omit<PlanRun, "steps" | "artifacts" | "links" | "clarification" | "complexity" | "budget" | "preflight"> & { clarificationJson: string; complexityJson?: string; budgetJson?: string; preflightJson?: string }) | undefined;
     if (!row) return undefined;
     const steps = this.db.prepare(`SELECT id, plan_run_id as planRunId, step_order as 'order', title, detail, status, attempt, started_at as startedAt, completed_at as completedAt, error FROM plan_steps WHERE plan_run_id = ? ORDER BY step_order`).all(planId) as PlanStep[];
     const artifacts = (this.db.prepare(`SELECT id, plan_run_id as planRunId, step_id as stepId, type, status, title, payload_json as payloadJson, source_json as sourceJson, canvas_target_id as canvasTargetId, layout_json as layoutJson, error, created_at as createdAt, updated_at as updatedAt FROM plan_artifacts WHERE plan_run_id = ? ORDER BY created_at`).all(planId) as Array<Omit<PlanArtifact, "payload" | "source" | "layout"> & { payloadJson: string; sourceJson: string; layoutJson: string }>).map(({ payloadJson, sourceJson, layoutJson, ...item }) => ({ ...item, payload: parseJson(payloadJson) as JsonValue, source: parseJson(sourceJson) as JsonValue, layout: parseJson(layoutJson) as JsonValue }));
     const links = this.db.prepare(`SELECT id, plan_run_id as planRunId, from_artifact_id as fromArtifactId, to_artifact_id as toArtifactId, label, canvas_edge_id as canvasEdgeId FROM plan_artifact_links WHERE plan_run_id = ?`).all(planId) as PlanRun["links"];
-    const { clarificationJson, ...plan } = row;
+    const { clarificationJson, complexityJson, budgetJson, preflightJson, origin, ...plan } = row;
     const clarification = parseJson(clarificationJson) as PlanClarification;
-    return { ...plan, ...(clarification?.question ? { clarification } : {}), steps, artifacts, links };
+    return {
+      ...plan,
+      ...(readOrigin(origin) ? { origin: readOrigin(origin) } : {}),
+      complexity: parseJson(complexityJson ?? "{}") as JsonValue,
+      budget: parseJson(budgetJson ?? "{}") as JsonValue,
+      preflight: parseJson(preflightJson ?? "{}") as JsonValue,
+      ...(clarification?.question ? { clarification } : {}),
+      steps,
+      artifacts,
+      links
+    };
+  }
+
+  updateMetadata(threadId: string, planId: string, input: { origin?: unknown; complexity?: JsonValue; budget?: JsonValue; preflight?: JsonValue }) {
+    if (!this.get(threadId, planId)) return undefined;
+    const now = nowIso();
+    this.db.prepare(`UPDATE plan_runs SET origin = COALESCE(?, origin), complexity_json = COALESCE(?, complexity_json), budget_json = COALESCE(?, budget_json), preflight_json = COALESCE(?, preflight_json), updated_at = ? WHERE thread_id = ? AND id = ?`)
+      .run(input.origin === undefined ? null : readOrigin(input.origin) ?? null, input.complexity === undefined ? null : stringifyJson(input.complexity), input.budget === undefined ? null : stringifyJson(input.budget), input.preflight === undefined ? null : stringifyJson(input.preflight), now, threadId, planId);
+    return this.get(threadId, planId);
   }
 
   setStatus(threadId: string, planId: string, status: PlanRunStatus, approval?: "pending" | "approved" | "rejected", message = "") {
@@ -291,4 +309,12 @@ function cleanId(value: string) {
   const id = value.trim();
   if (!/^[A-Za-z0-9_-]{1,120}$/.test(id)) throw new Error("Plan identifier is invalid");
   return id;
+}
+
+function readOrigin(value: unknown): PlanRunOrigin | undefined {
+  return value === "explicit_plan" || value === "auto_complex_task" || value === "approved_execution" ? value : undefined;
+}
+
+function stringifyJson(value: JsonValue | undefined) {
+  return JSON.stringify(value ?? {});
 }

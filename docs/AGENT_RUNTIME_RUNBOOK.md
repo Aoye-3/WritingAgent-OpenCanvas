@@ -95,6 +95,22 @@ Do not fix this class of stall by reducing WebSearch loop limits, changing `agen
 
 After changing timeout config or AgentBackend middleware, restart the Runtime with `npm.cmd run agent-runtime:up` or restart the app shell so the source/config fingerprint can refresh the managed Gateway.
 
+## Thinking And Tool Choice Compatibility
+
+Forced tool phases must keep the tool protocol deterministic even when the selected model supports a thinking or reasoning mode. The maintained capability field is:
+
+```yaml
+supports_tool_choice_with_thinking: false # true | false | "unknown"
+```
+
+Use `false` for DeepSeek-compatible models until a provider proves otherwise. Keep Kimi, Qwen, and other OpenAI-compatible thinking models as `"unknown"` until they pass local smoke tests for forced Plan clarification, Plan revision, Canvas write, Skill clarification, and long tool chains. Do not mark a provider `true` based only on public model claims.
+
+When `thinking` is enabled and a phase must force a specific tool, the Lead Agent checks the model capability before the provider call. If the model is known incompatible, the runtime disables thinking for that model call only, clears `reasoning_effort`, keeps the forced `tool_choice`, and emits `thinking_disabled_for_tool_choice_compatibility`. This is expected for DeepSeek during Plan/clarification/Canvas guard phases; it is not a reason to remove the forced tool or relax the structured protocol.
+
+Ordinary non-forced tool search can keep thinking enabled. If a provider still returns a 400 that mentions `thinking` and `tool_choice`, update the capability matrix and add a smoke fixture before changing orchestration logic.
+
+User-facing errors should say that the current model does not support thinking with forced tool calls and recommend disabling thinking for the phase or switching models. A stream catch should refresh Thread state so persisted Plan recovery, failed timeline events, and pending clarifications remain visible after the provider error.
+
 ## Troubleshooting
 
 - `uv`/Node/npm/npx missing: run `npm.cmd run agent-runtime:doctor` and install the reported prerequisite.
@@ -105,6 +121,7 @@ After changing timeout config or AgentBackend middleware, restart the Runtime wi
 - stdio MCP cannot find `npx`: confirm Node is on PATH; the launcher prepends discovered Node/npm/npx directories.
 - Docker bridge failure: use `FACETWRITE_INTERNAL_BASE_URL=http://host.docker.internal:<api-port>`.
 - Local bridge failure: use `http://127.0.0.1:<api-port>`.
+- If a run fails with `BadRequestError`, `Thinking mode does not support this tool_choice`, or a generic `AgentBackend returned internal runtime output`, first check whether the timeline contains `thinking_disabled_for_tool_choice_compatibility`. If it does, the runtime intentionally preserved the forced tool protocol and disabled thinking for that call. If it does not, inspect the selected model's `supports_tool_choice_with_thinking` value and the forced-tool phase that set `tool_choice`.
 - If the Agent asks a blocking clarification but the right composer shows Markdown text instead of buttons, verify that the stream contains `agent_backend_agent_clarification_requested` and that the run timeline mirrors it with `status:"waiting"`. The expected path is Runtime `ask_clarification` -> structured ToolMessage artifact or complete tool-call args -> FacetWrite structured Agent clarification event -> waiting run timeline event -> composer choice card. Plain assistant prose with numbered options is not upgraded into buttons, and structured Agent clarification must not create a Canvas node.
 - If a research-scope Skill clarification fails with `AgentBackend skill scope guard requires a structured ask_clarification response`, inspect `modules/agent-runtime/logs/gateway-local.err.log` before debugging the frontend. If the provider error is `Thinking mode does not support this tool_choice`, the phase-one guard did not disable provider thinking/reasoning before forcing `tool_choice="ask_clarification"`. If the Runtime log instead shows `HTTP/1.1 200 OK`, `ClarificationMiddleware - Intercepted clarification request`, and the UI reports `Agent clarification payload was invalid: missing_question`, the provider call succeeded and the failure is the Runtime-to-Node protocol bridge: check whether the adapter ignored partial streamed `AIMessageChunk.tool_calls`, parsed JSON-string `args`, and consumed the `ask_clarification` ToolMessage `artifact` or `additional_kwargs.facetwrite_clarification`. Keep the strict protocol intact; do not parse formatted ToolMessage content, Markdown option lists, or ordinary prose into buttons.
 - The Skill scope guard is a two-phase run. Phase one must expose only `ask_clarification`, set `facetwrite_clarification_phase:"clarification_guard"`, disable thinking/reasoning controls for provider compatibility, and remove Canvas/progressive/file/evidence delivery context. Phase two starts only after `requestContext.agentClarification` is present and restores normal Skills, provider thinking settings, runtime budget, and long-task progressive delivery eligibility.

@@ -3,14 +3,14 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, LightbulbIcon, ModelConfigIcon, SearchIcon, SendIcon, StopIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
-import type { AgentCard, AgentClarification, CanvasNode, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
+import type { AgentCard, AgentClarification, CanvasNode, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, RunTimelineEvent, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
 import type { CanvasNodePatch } from "../../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
 import { useI18n } from "../../i18n/I18nProvider";
 import { AnnotationChipRow, CanvasWriteProposalPanel, type MessageAnnotation } from "./CanvasWriteProposalPanel";
 import { AssistantRunTrace } from "./AssistantRunTrace";
 import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain";
-import { PlanTaskBoard } from "./PlanTaskBoard";
+import { AgentPlanBoard } from "./AgentPlanBoard";
 import { PlanClarificationCard } from "./PlanClarificationCard";
 import { acceptCanvasWriteSuggestion, answerPlan, dismissCanvasWriteSuggestion, pausePlan } from "../../agents/agentClient";
 import { visibleComposerTools } from "../planUiPolicy";
@@ -569,7 +569,7 @@ export function AICollaborationDrawer({
             if (plan.clarification?.status === "answered" && plan.status === "draft") {
               return <PlanClarificationCard busy key={`plan:${plan.id}`} plan={plan} onAnswer={async () => {}} />;
             }
-            const board = <PlanTaskBoard plan={plan} threadId={currentThreadId} onChanged={onPlansChanged} onFocusArtifact={onFocusPlanArtifact} onRevise={(value) => setInput(`/plan revise ${value.id}: `)} />;
+            const board = <AgentPlanBoard plan={plan} threadId={currentThreadId} onChanged={onPlansChanged} onFocusArtifact={onFocusPlanArtifact} onRevise={(value) => setInput(`/plan revise ${value.id}: `)} />;
             return <div key={`plan:${plan.id}`}>
               {plan.clarification?.status === "answered" ? <PlanClarificationCard busy plan={plan} onAnswer={async () => {}} /> : null}
               {board}
@@ -584,19 +584,20 @@ export function AICollaborationDrawer({
           const hasRunTrace = message.role === "assistant" && Boolean(message.timeline?.length);
           const hasReasoningText = message.role === "assistant" && Boolean(message.reasoningText?.trim());
           const usesThinkingStatus = isPendingAssistant && !hasRunTrace && !hasReasoningText;
+          const traceTarget = agentPlanTraceTarget(message.timeline, plans);
           return (
             <article className={`message message-${message.role}${message.isStreaming ? " message-streaming" : ""}${usesThinkingStatus ? " message-thinking" : ""}`} key={message.id}>
               <div className="message-avatar" aria-hidden="true">{message.role === "user" ? "U" : "F"}</div>
               <div className={usesThinkingStatus ? "message-thinking-status" : "message-bubble"}>
                 {message.role === "assistant" && message.isStreaming && !message.text.trim() ? (
                   <>
-                    <AssistantRunTrace events={message.timeline} onFocusNode={onFocusPlanArtifact} />
+                    <AssistantRunTrace events={message.timeline} planId={traceTarget.planId} stepId={traceTarget.stepId} onFocusNode={onFocusPlanArtifact} />
                     <ReasoningStreamPanel message={message} />
                     <StreamingStatus label={streamingStatusLabel(message, t("workspace.preparingResponse"))} />
                   </>
                 ) : message.role === "assistant" ? (
                   <div className="assistant-selectable-text" onMouseUp={(event) => captureSelection(event, message)}>
-                    <AssistantRunTrace events={message.timeline} onFocusNode={onFocusPlanArtifact} />
+                    <AssistantRunTrace events={message.timeline} planId={traceTarget.planId} stepId={traceTarget.stepId} onFocusNode={onFocusPlanArtifact} />
                     <ReasoningStreamPanel message={message} />
                     <MarkdownText text={message.text} highlights={messageAnnotations.map((annotation) => annotation.text)} />
                     {message.isStreaming ? <span className="typing-caret" aria-hidden="true" /> : null}
@@ -949,6 +950,19 @@ function latestBudgetLimitFailure(messages: CollaborationMessage[]) {
     ])
   ].join("\n");
   return /budget_exhausted|Recursion limit of \d+ reached|GRAPH_RECURSION_LIMIT/i.test(haystack);
+}
+
+export function agentPlanTraceTarget(events: RunTimelineEvent[] | undefined, plans: PlanRun[] = []) {
+  const indexedPlans = new Map(plans.map((plan) => [plan.id, plan]));
+  for (const event of [...(events ?? [])].sort((left, right) => right.sequence - left.sequence)) {
+    const payload = event.payload ?? {};
+    const planId = readString(payload.planId) || readString(payload.agentPlanId);
+    if (!planId || !indexedPlans.has(planId)) continue;
+    const plan = indexedPlans.get(planId);
+    const stepId = readString(payload.stepId) || readString(payload.agentPlanStepId) || plan?.currentStepId || "";
+    return { planId, stepId };
+  }
+  return {};
 }
 
 export type AgentClarificationPrompt = {

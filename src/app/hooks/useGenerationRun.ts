@@ -456,8 +456,10 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         createdAt: startedAt
       }
     ]);
+    let threadId: string | undefined;
     try {
-      const threadId = await options.ensureThreadId();
+      threadId = await options.ensureThreadId();
+      const activeThreadId = threadId;
       const transientSkillRefs = readSkillRefs(requestContext?.transientSkillRefs);
       const disabledSkillRefs = readSkillRefs(requestContext?.disabledSkillRefs);
       const runtimeBudgetProfile = readRuntimeBudgetProfile(requestContext?.runtimeBudgetProfile);
@@ -466,7 +468,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         mode: "chat",
         agentCardId: options.activeAgent.id,
         projectId: options.currentProjectId,
-        threadId,
+        threadId: activeThreadId,
         locale: options.locale,
         contextValues: { ...options.getContextValues(), ...requestContextValues },
         chatInstruction: text,
@@ -498,7 +500,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
           enqueueStreamingText(`message:${assistantMessageId}`, token);
         },
         onReasoningToken: (token) => appendReasoningToken(assistantMessageId, token),
-        onToolEvent: (event) => appendToolEvent(event, threadId, operationId),
+        onToolEvent: (event) => appendToolEvent(event, activeThreadId, operationId),
         onTimelineEvent: appendTimelineEvent
       }, { signal: abortController.signal });
       if (operationId !== operationIdRef.current) return;
@@ -543,6 +545,14 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         status: "error",
         statusLabel: undefined
       });
+      if (threadId) {
+        try {
+          const state = await options.onFetchAndApplyThreadState(threadId);
+          if (operationId === operationIdRef.current) applyCollaborationMessagesFromThreadState(state);
+        } catch {
+          // Keep the visible stream failure when persisted recovery state cannot be refreshed.
+        }
+      }
     } finally {
       if (chatAbortControllerRef.current === abortController) chatAbortControllerRef.current = null;
       if (activeChatMessageIdRef.current === assistantMessageId) activeChatMessageIdRef.current = null;

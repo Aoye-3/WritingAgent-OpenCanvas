@@ -55,7 +55,15 @@ export type AgentBackendRunResult = {
 };
 
 export type AgentBackendRuntimeSignal = {
-  type: "heartbeat" | "llm_retry" | "llm_call_start" | "llm_call_end" | "llm_call_error" | "synthesis_gate" | "waiting_for_user";
+  type:
+    | "heartbeat"
+    | "llm_retry"
+    | "llm_call_start"
+    | "llm_call_end"
+    | "llm_call_error"
+    | "synthesis_gate"
+    | "waiting_for_user"
+    | "thinking_disabled_for_tool_choice_compatibility";
   label: string;
   payload?: Record<string, unknown>;
 };
@@ -80,6 +88,16 @@ type AgentBackendRunContext = {
   facetwrite_plan_phase_attempt_id?: string;
   facetwrite_plan_id?: string;
   facetwrite_plan_step_id?: string;
+  facetwrite_agent_plan_id?: string;
+  facetwrite_agent_plan_step_id?: string;
+  facetwrite_agent_plan_origin?: string;
+  facetwrite_agent_plan_phase?: string;
+  facetwrite_step_budget?: {
+    modelCallLimit?: number;
+    toolCallLimit?: number;
+    evidenceToolLimit?: number;
+    recursionLimit?: number;
+  };
   facetwrite_memory_content?: string;
   facetwrite_research_tool_limit?: number;
   facetwrite_progressive_canvas_delivery_enabled?: boolean;
@@ -319,6 +337,12 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
   const planId = planGeneration ? String(planGeneration.planId ?? "").trim() : String(input.planId ?? "").trim();
   const planStepId = planGeneration ? String(planGeneration.stepId ?? "").trim() : String(input.stepId ?? "").trim();
   const phaseAttemptId = planGeneration ? String(planGeneration.phaseAttemptId ?? "").trim() : "";
+  const agentPlan = isRecord(input.contextValues?.agentPlan) ? input.contextValues.agentPlan : {};
+  const agentPlanId = readSourceString(agentPlan.id) || planId;
+  const agentPlanStepId = readSourceString(agentPlan.stepId) || planStepId;
+  const agentPlanOrigin = readSourceString(agentPlan.origin);
+  const agentPlanPhase = readSourceString(agentPlan.phase) || planPolicy.phase;
+  const stepBudget = readStepBudget(agentPlan.stepBudget);
   const modelSettings = input.modelSettings;
   if (!modelSettings) {
     return {
@@ -332,6 +356,11 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
       facetwrite_plan_phase_attempt_id: phaseAttemptId || undefined,
       facetwrite_plan_id: planId || undefined,
       facetwrite_plan_step_id: planStepId || undefined,
+      facetwrite_agent_plan_id: agentPlanId || undefined,
+      facetwrite_agent_plan_step_id: agentPlanStepId || undefined,
+      facetwrite_agent_plan_origin: agentPlanOrigin || undefined,
+      facetwrite_agent_plan_phase: agentPlanPhase || undefined,
+      facetwrite_step_budget: stepBudget,
       facetwrite_research_tool_limit: researchToolLimit,
       facetwrite_progressive_canvas_delivery_enabled: progressiveCanvasDeliveryEnabled,
       facetwrite_runtime_budget_profile: budgetProfile,
@@ -364,6 +393,11 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     facetwrite_plan_phase_attempt_id: phaseAttemptId || undefined,
     facetwrite_plan_id: planId || undefined,
     facetwrite_plan_step_id: planStepId || undefined,
+    facetwrite_agent_plan_id: agentPlanId || undefined,
+    facetwrite_agent_plan_step_id: agentPlanStepId || undefined,
+    facetwrite_agent_plan_origin: agentPlanOrigin || undefined,
+    facetwrite_agent_plan_phase: agentPlanPhase || undefined,
+    facetwrite_step_budget: stepBudget,
     facetwrite_research_tool_limit: researchToolLimit,
     facetwrite_progressive_canvas_delivery_enabled: progressiveCanvasDeliveryEnabled,
     facetwrite_runtime_budget_profile: budgetProfile,
@@ -388,6 +422,17 @@ function normalizeAgentBackendReasoningEffort(effort: ConversationModelRuntimeSe
   if (effort === "max" || effort === "xhigh") return "max";
   if (effort === "low" || effort === "medium" || effort === "high") return effort;
   return undefined;
+}
+
+function readStepBudget(value: unknown): AgentBackendRunContext["facetwrite_step_budget"] {
+  if (!isRecord(value)) return undefined;
+  const budget = {
+    modelCallLimit: readPositiveInteger(value.modelCallLimit),
+    toolCallLimit: readPositiveInteger(value.toolCallLimit),
+    evidenceToolLimit: readPositiveInteger(value.evidenceToolLimit),
+    recursionLimit: readPositiveInteger(value.recursionLimit)
+  };
+  return Object.values(budget).some((entry) => entry !== undefined) ? budget : undefined;
 }
 
 async function readAgentBackendStream(
@@ -558,6 +603,13 @@ function runtimeSignalFromSseEvent(event: string, data: unknown): AgentBackendRu
       payload: sanitizeRuntimeSignalPayload(data)
     };
   }
+  if (type === "thinking_disabled_for_tool_choice_compatibility") {
+    return {
+      type,
+      label: "Thinking disabled for this forced tool call because the selected model does not support thinking with tool_choice.",
+      payload: sanitizeRuntimeSignalPayload(data)
+    };
+  }
   if (type === "llm_call_start" || type === "llm_call_end" || type === "llm_call_error" || type === "synthesis_gate") {
     return {
       type,
@@ -615,7 +667,7 @@ function secondsFromMs(value: unknown) {
 }
 
 function sanitizeRuntimeSignalPayload(data: Record<string, unknown>) {
-  const allowed = ["type", "event", "phase", "attempt", "max_attempts", "maxAttempts", "elapsed_ms", "elapsedMs", "delay_seconds", "delaySeconds", "retry_after", "retryAfter", "wait_ms", "waitMs", "reason", "error_type", "errorType", "status_code", "statusCode", "status", "state", "next", "interrupt", "model", "provider_class", "providerClass", "base_url_host", "baseUrlHost", "timeout_s", "timeoutS", "stream_chunk_timeout_s", "streamChunkTimeoutS", "max_retries", "maxRetries", "completed_evidence_tools", "completedEvidenceTools", "evidence_limit", "evidenceLimit", "model_limit", "modelLimit", "model_calls", "modelCalls", "recursion_limit", "recursionLimit", "estimated_steps_used", "estimatedStepsUsed", "file_delivery_required", "fileDeliveryRequired", "second_handler", "secondHandler", "entered_second_handler", "enteredSecondHandler"];
+  const allowed = ["type", "event", "phase", "planId", "stepId", "agentPlanId", "agentPlanStepId", "attempt", "max_attempts", "maxAttempts", "elapsed_ms", "elapsedMs", "delay_seconds", "delaySeconds", "retry_after", "retryAfter", "wait_ms", "waitMs", "reason", "error_type", "errorType", "status_code", "statusCode", "status", "state", "next", "interrupt", "model", "provider_class", "providerClass", "base_url_host", "baseUrlHost", "timeout_s", "timeoutS", "stream_chunk_timeout_s", "streamChunkTimeoutS", "max_retries", "maxRetries", "tool_choice", "toolChoice", "completed_evidence_tools", "completedEvidenceTools", "evidence_limit", "evidenceLimit", "model_limit", "modelLimit", "model_calls", "modelCalls", "recursion_limit", "recursionLimit", "estimated_steps_used", "estimatedStepsUsed", "file_delivery_required", "fileDeliveryRequired", "second_handler", "secondHandler", "entered_second_handler", "enteredSecondHandler"];
   return Object.fromEntries(allowed.filter((key) => key in data).map((key) => [key, data[key]]));
 }
 
@@ -625,6 +677,9 @@ function runtimeCustomStatusLabel(type: "llm_call_start" | "llm_call_end" | "llm
   if (type === "llm_call_error") {
     const reason = readSourceString(data.reason);
     if (reason === "stream_chunk_timeout") return "Model stream produced no content before timeout.";
+    if (isThinkingToolChoiceCompatibilityMessage(reason)) {
+      return "Current model does not support thinking with forced tool calls. Disable thinking for this step or switch models.";
+    }
     const errorType = readSourceString(data.error_type ?? data.errorType);
     return errorType ? `Model request failed: ${errorType}.` : "Model request failed.";
   }
@@ -650,7 +705,7 @@ function extractRuntimeError(event: string, data: unknown): string | undefined {
   if (typeof data === "string") {
     const message = data.trim() || "AgentBackend runtime stream failed";
     if (isBudgetExhaustionMessage(message)) throw budgetExhaustedError({ message });
-    return message;
+    return actionableRuntimeErrorMessage(message);
   }
   if (!isRecord(data)) return "AgentBackend runtime stream failed";
   const message = readSourceString(data.message) || readSourceString(data.error) || readSourceString(data.detail);
@@ -661,7 +716,18 @@ function extractRuntimeError(event: string, data: unknown): string | undefined {
       estimatedStepsUsed: readPositiveInteger(data.estimated_steps_used ?? data.estimatedStepsUsed)
     });
   }
-  return message || "AgentBackend runtime stream failed";
+  return actionableRuntimeErrorMessage(message || "AgentBackend runtime stream failed");
+}
+
+function actionableRuntimeErrorMessage(message: string) {
+  if (isThinkingToolChoiceCompatibilityMessage(message)) {
+    return "Current model does not support thinking with forced tool calls. Disable thinking for this step or switch to a model verified for thinking + tool use.";
+  }
+  return message;
+}
+
+function isThinkingToolChoiceCompatibilityMessage(message: string) {
+  return /thinking\b[\s\S]{0,120}\btool[_-]?choice|\btool[_-]?choice\b[\s\S]{0,120}\bthinking/i.test(message);
 }
 
 function budgetExhaustedError(input: { message: string; recursionLimit?: number; estimatedStepsUsed?: number }) {

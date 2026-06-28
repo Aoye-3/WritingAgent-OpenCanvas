@@ -4,12 +4,12 @@ import { DatabaseSync } from "node:sqlite";
 import { migrateStorageSchema } from "./db/schema.js";
 import { createStorage } from "./storage.js";
 
-test("schema v14 uses independent Project data domains plus Claim candidates", () => {
+test("schema v15 uses independent Project data domains plus Claim candidates and AgentPlan metadata", () => {
   const db = new DatabaseSync(":memory:");
   migrateStorageSchema(db);
 
   const version = db.prepare(`SELECT MAX(version) as version FROM schema_version`).get() as { version: number };
-  assert.equal(version.version, 14);
+  assert.equal(version.version, 15);
   assert.equal(tableExists(db, "plan_runs"), true);
   assert.equal(tableExists(db, "plan_executions"), true);
   assert.equal(tableExists(db, "run_activities"), true);
@@ -19,6 +19,10 @@ test("schema v14 uses independent Project data domains plus Claim candidates", (
   assert.equal(columnNames(db, "plan_runs").includes("canvas_node_id"), true);
   assert.equal(columnNames(db, "plan_runs").includes("current_step_id"), true);
   assert.equal(columnNames(db, "plan_runs").includes("execution_version"), true);
+  assert.equal(columnNames(db, "plan_runs").includes("origin"), true);
+  assert.equal(columnNames(db, "plan_runs").includes("complexity_json"), true);
+  assert.equal(columnNames(db, "plan_runs").includes("budget_json"), true);
+  assert.equal(columnNames(db, "plan_runs").includes("preflight_json"), true);
   assert.equal(columnNames(db, "plan_executions").includes("lease_expires_at"), true);
   assert.equal(columnNames(db, "plan_executions").includes("last_heartbeat_at"), true);
   assert.equal(tableExists(db, "thread_inputs"), false);

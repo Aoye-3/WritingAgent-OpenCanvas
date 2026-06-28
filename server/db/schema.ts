@@ -157,7 +157,9 @@ export function migrateStorageSchema(db: DatabaseSync) {
     CREATE TABLE IF NOT EXISTS plan_runs (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, thread_id TEXT NOT NULL, run_id TEXT,
       title TEXT NOT NULL, goal TEXT NOT NULL, status TEXT NOT NULL, approval TEXT NOT NULL,
-      status_message TEXT NOT NULL, clarification_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      status_message TEXT NOT NULL, clarification_json TEXT NOT NULL DEFAULT '{}',
+      origin TEXT, complexity_json TEXT NOT NULL DEFAULT '{}', budget_json TEXT NOT NULL DEFAULT '{}',
+      preflight_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS plan_steps (
       id TEXT NOT NULL, plan_run_id TEXT NOT NULL, step_order INTEGER NOT NULL, title TEXT NOT NULL,
@@ -664,6 +666,23 @@ export function migrateStorageSchema(db: DatabaseSync) {
       CREATE INDEX IF NOT EXISTS idx_claim_candidates_source_path ON claim_candidates(source_document_path);
       INSERT INTO schema_version (version, applied_at) VALUES (14, datetime('now'));
     `);
+  }
+
+  const version15 = db.prepare(`SELECT version FROM schema_version WHERE version = 15`).get();
+  if (!version15) {
+    if (!columnExists(db, "plan_runs", "origin")) {
+      db.exec(`ALTER TABLE plan_runs ADD COLUMN origin TEXT`);
+    }
+    if (!columnExists(db, "plan_runs", "complexity_json")) {
+      db.exec(`ALTER TABLE plan_runs ADD COLUMN complexity_json TEXT NOT NULL DEFAULT '{}'`);
+    }
+    if (!columnExists(db, "plan_runs", "budget_json")) {
+      db.exec(`ALTER TABLE plan_runs ADD COLUMN budget_json TEXT NOT NULL DEFAULT '{}'`);
+    }
+    if (!columnExists(db, "plan_runs", "preflight_json")) {
+      db.exec(`ALTER TABLE plan_runs ADD COLUMN preflight_json TEXT NOT NULL DEFAULT '{}'`);
+    }
+    db.exec(`INSERT INTO schema_version (version, applied_at) VALUES (15, datetime('now'))`);
   }
 }
 

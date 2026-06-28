@@ -19,7 +19,7 @@ import type { ProviderRunnerDeps } from "./providerRunner.js";
 import { recordGenerationRun } from "./runRecorder.js";
 import { resolveConfiguredModelApi, type ConfiguredModelApi } from "../../domains/model-config/index.js";
 import { isConfiguredModelRuntimeReady } from "../../runtime/agentBackendAdapter/modelSync.js";
-import { PlanOrchestrator } from "../planOrchestrator.js";
+import { AgentPlanOrchestrator } from "../agentPlanOrchestrator.js";
 import { resolveCanvasAction } from "./canvasActionPolicy.js";
 import { resolvePlanRequestPolicy } from "./planRequestPolicy.js";
 import { resolveOrchestrationPolicy } from "./orchestrationPolicy.js";
@@ -31,8 +31,7 @@ import { extractSourceLinks, formatSourceLinks, type SourceLink } from "./source
 import {
   isCanvasEligibleTaskPolicy,
   isProcessClarificationText,
-  resolveTaskHandlingPolicy,
-  shouldAutoPreflightPlan
+  resolveTaskHandlingPolicy
 } from "./taskHandlingPolicy.js";
 import { isCanvasWorkflowMode, type CanvasWorkflowMode } from "../../../shared/canvasWorkflow.js";
 import { containsInternalRuntimeProtocol } from "../../../shared/internalRuntimeProtocol.js";
@@ -111,7 +110,7 @@ export function createGenerationService(
   deps: GenerationServiceDeps = {}
 ): GenerationService {
   const executionRuntime = deps.agentRuntime ?? (deps.agentBackend ? createAgentBackendRuntimePort(deps.agentBackend) : undefined);
-  const planOrchestrator = new PlanOrchestrator(storage);
+  const agentPlanOrchestrator = new AgentPlanOrchestrator(storage);
 
   async function generateAndRecord(payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
@@ -119,7 +118,7 @@ export function createGenerationService(
     payload = withOrchestrationPolicy(withCanvasAction(payload, threadId, storage));
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
     const projectRuntimeSettings = storage.getProjectRuntimeSettings(selection.projectId);
-    payload = withAutoPreflightPlan(payload, threadId, storage);
+    payload = withAutoPreflightPlan(payload, threadId, projectRuntimeSettings, agentPlanOrchestrator);
     payload = withPlanGeneration(payload, threadId, storage);
     payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
@@ -128,8 +127,8 @@ export function createGenerationService(
     const agentCard = context.runtimeConfig.agentCard;
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
     const observeToolEvent = (event: ToolEventRecord) => {
-      const observed = withAgentClarificationResumeContext(event, payload);
-      planOrchestrator.observe(threadId, observed);
+      const observed = withAgentPlanEventContext(withAgentClarificationResumeContext(event, payload), payload);
+      agentPlanOrchestrator.observe(threadId, observed);
       onToolEvent?.(observed);
     };
     for (const event of canvasActionEvents(payload)) {
@@ -141,7 +140,7 @@ export function createGenerationService(
       observeToolEvent(event);
     }
     try {
-      planOrchestrator.prepare(threadId, payload);
+      agentPlanOrchestrator.prepare(threadId, payload);
       const agentBackendRun = await runAgentRuntimeGeneration({
         payload: { ...payload, toolState: context.effectiveToolState },
         threadId,
@@ -155,7 +154,7 @@ export function createGenerationService(
       }, executionRuntime);
 
       if (agentBackendRun) {
-        planOrchestrator.assertPostcondition(threadId, payload);
+        agentPlanOrchestrator.assertPostcondition(threadId, payload);
         const normalized = normalizeAgentRunOutput({
           text: agentBackendRun.text,
           locale: payload.locale,
@@ -167,9 +166,9 @@ export function createGenerationService(
           runtimeEvents.push(...(normalized.events ?? []), event);
           observeToolEvent(event);
         } else {
-          const baseEvents = dedupeToolEvents([...runtimeEvents, ...(normalized.events ?? []).map((event) => withAgentClarificationResumeContext(event, payload))]);
+          const baseEvents = dedupeToolEvents([...runtimeEvents, ...(normalized.events ?? []).map((event) => withAgentPlanEventContext(withAgentClarificationResumeContext(event, payload), payload))]);
           if (isBlockingAgentClarificationRun(baseEvents, normalized.text, agentBackendRun.finishReason)) {
-            planOrchestrator.complete(threadId, payload);
+            agentPlanOrchestrator.complete(threadId, payload);
             return recordGenerationRun({
               storage,
               payload,
@@ -198,7 +197,7 @@ export function createGenerationService(
             events: baseEvents
           });
           const events = [...baseEvents, ...finalized.timelineEvents.map(timelineEventToToolEvent)];
-          planOrchestrator.complete(threadId, payload);
+          agentPlanOrchestrator.complete(threadId, payload);
           const recorded = recordGenerationRun({
             storage,
             payload,
@@ -225,7 +224,7 @@ export function createGenerationService(
         observeToolEvent(event);
       }
     } catch (error) {
-      planOrchestrator.fail(threadId, payload, error);
+      agentPlanOrchestrator.fail(threadId, payload, error);
       const event = createRuntimeFallbackEvent("agent-backend", error, isMockFallbackEnabled(deps));
       runtimeEvents.push(event);
       observeToolEvent(event);
@@ -262,7 +261,7 @@ export function createGenerationService(
     payload = withOrchestrationPolicy(withCanvasAction(payload, threadId, storage));
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
     const projectRuntimeSettings = storage.getProjectRuntimeSettings(selection.projectId);
-    payload = withAutoPreflightPlan(payload, threadId, storage);
+    payload = withAutoPreflightPlan(payload, threadId, projectRuntimeSettings, agentPlanOrchestrator);
     payload = withPlanGeneration(payload, threadId, storage);
     payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
@@ -282,6 +281,7 @@ export function createGenerationService(
     let lastCanvasCommitAt: number | undefined;
     let runtimeHeartbeatTimelineEmitted = false;
     let runtimeWaitingForUser = false;
+    let lastModelErrorSignal: AgentBackendRuntimeSignal | undefined;
     const progressiveEvidenceEntries: ProgressiveEvidenceEntry[] = [];
     const publicReasoning = createPublicReasoningEmitter(payload.locale, callbacks.onReasoningToken);
     const emitTimeline = (event: RunTimelineEvent) => {
@@ -289,7 +289,7 @@ export function createGenerationService(
       callbacks.onTimelineEvent?.(event);
     };
     const emitRuntimeToolEvent = (event: ToolEventRecord) => {
-      planOrchestrator.observe(threadId, event);
+      agentPlanOrchestrator.observe(threadId, event);
       callbacks.onToolEvent?.(event);
       publicReasoning.fromToolEvent(event);
       emitTimeline(timelineEventFromToolEvent(event) ?? toolEventToTimelineEvent(timeline, event));
@@ -304,7 +304,7 @@ export function createGenerationService(
           "waiting",
           payload.locale === "zh" ? "等待用户选择" : "Waiting for your choice",
           signal.label,
-          { signal: signal.type, ...(signal.payload ?? {}) }
+            { ...agentPlanPayload(payload), signal: signal.type, ...(signal.payload ?? {}) }
         ));
         return;
       }
@@ -317,10 +317,13 @@ export function createGenerationService(
             "running",
             payload.locale === "zh" ? "Agent Runtime 仍在运行" : "Agent Runtime active",
             payload.locale === "zh" ? "Canvas 已更新，正在等待下一次模型决策或工具调用。" : "Canvas is updated; waiting for the next model decision or tool call.",
-            { signal: signal.type, elapsedMsSinceCanvasCommit: Date.now() - lastCanvasCommitAt }
+            { ...agentPlanPayload(payload), signal: signal.type, elapsedMsSinceCanvasCommit: Date.now() - lastCanvasCommitAt }
           ));
         }
         return;
+      }
+      if (signal.type === "llm_call_error") {
+        lastModelErrorSignal = signal;
       }
       const signalReason = typeof signal.payload?.reason === "string" ? signal.payload.reason : "";
       const activeTitle = signal.type === "llm_call_start"
@@ -333,13 +336,15 @@ export function createGenerationService(
               : (payload.locale === "zh" ? "模型请求异常" : "Model request error")
             : signal.type === "synthesis_gate"
               ? (payload.locale === "zh" ? "最终综合中" : "Final synthesis")
-              : (payload.locale === "zh" ? "模型请求重试" : "Model request retry");
+              : signal.type === "thinking_disabled_for_tool_choice_compatibility"
+                ? (payload.locale === "zh" ? "已关闭本轮思考" : "Thinking disabled for tool call")
+                : (payload.locale === "zh" ? "模型请求重试" : "Model request retry");
       emitTimeline(timeline.event(
         "decision",
         signal.type === "llm_call_end" ? "completed" : "waiting",
         activeTitle,
         signal.label,
-        { signal: signal.type, ...(signal.payload ?? {}) }
+        { ...agentPlanPayload(payload), signal: signal.type, ...(signal.payload ?? {}) }
       ));
     };
     const ensureProgressiveDeliveryStarted = () => {
@@ -358,7 +363,7 @@ export function createGenerationService(
       }
     };
     const observeToolEvent = (event: ToolEventRecord) => {
-      const observed = withAgentClarificationResumeContext(event, payload, deliveryId);
+      const observed = withAgentPlanEventContext(withAgentClarificationResumeContext(event, payload, deliveryId), payload);
       if (!runtimeEvents.includes(observed)) runtimeEvents.push(observed);
       emitRuntimeToolEvent(observed);
       if (isAgentClarificationEvent(observed)) {
@@ -376,7 +381,7 @@ export function createGenerationService(
           "completed",
           payload.locale === "zh" ? "下一轮工具调用开始" : "Next tool call started",
           payload.locale === "zh" ? "Canvas 更新后的静默间隔已结束。" : "The quiet interval after the Canvas update ended.",
-          { elapsedMsSinceCanvasCommit: Date.now() - lastCanvasCommitAt }
+          { ...agentPlanPayload(payload), elapsedMsSinceCanvasCommit: Date.now() - lastCanvasCommitAt }
         ));
         lastCanvasCommitAt = undefined;
         runtimeHeartbeatTimelineEmitted = false;
@@ -441,14 +446,14 @@ export function createGenerationService(
 
     callbacks.onStatus?.({ phase: "thinking", label: streamLabels.thinking });
     publicReasoning.emit("prepare", payload.locale === "zh" ? "正在准备上下文、工具和运行环境。" : "Preparing context, tools, and runtime.");
-    emitTimeline(timeline.event("phase_started", "running", payload.locale === "zh" ? "准备执行" : "Preparing run", payload.locale === "zh" ? "正在准备上下文、工具和运行环境。" : "Preparing context, tools, and runtime."));
+    emitTimeline(timeline.event("phase_started", "running", payload.locale === "zh" ? "准备执行" : "Preparing run", payload.locale === "zh" ? "正在准备上下文、工具和运行环境。" : "Preparing context, tools, and runtime.", agentPlanPayload(payload)));
     if (context.transientSkillNames.length) {
       emitTimeline(skillUsageTimelineEvent(timeline, payload.locale, context.transientSkillNames));
     }
     if (!isSkillClarificationGuarded(payload) && shouldStartProgressiveCanvasDeliveryImmediately(payload, context)) ensureProgressiveDeliveryStarted();
 
     try {
-      planOrchestrator.prepare(threadId, payload);
+      agentPlanOrchestrator.prepare(threadId, payload);
       const agentBackendRun = await runAgentRuntimeGeneration({
         payload: { ...payload, toolState: context.effectiveToolState },
         threadId,
@@ -466,7 +471,7 @@ export function createGenerationService(
       }, executionRuntime);
 
       if (agentBackendRun) {
-        planOrchestrator.assertPostcondition(threadId, payload);
+        agentPlanOrchestrator.assertPostcondition(threadId, payload);
         const normalized = normalizeAgentRunOutput({
           text: agentBackendRun.text,
           locale: payload.locale,
@@ -497,12 +502,12 @@ export function createGenerationService(
           textGate.flush();
           callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
           publicReasoning.emit("finalize", payload.locale === "zh" ? "正在整理最终回答，并校准 Canvas 节点内容。" : "Organizing the final answer and reconciling Canvas nodes.");
-          const baseEvents = dedupeToolEvents([...runtimeEvents, ...(normalized.events ?? []).map((event) => withAgentClarificationResumeContext(event, payload, deliveryId))]);
+          const baseEvents = dedupeToolEvents([...runtimeEvents, ...(normalized.events ?? []).map((event) => withAgentPlanEventContext(withAgentClarificationResumeContext(event, payload, deliveryId), payload))]);
           if (isBlockingAgentClarificationRun(baseEvents, normalized.text, agentBackendRun.finishReason)) {
             textGate.flush();
             callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
             const events = [...baseEvents, ...timelineEvents.map(timelineEventToToolEvent)];
-            planOrchestrator.complete(threadId, payload);
+            agentPlanOrchestrator.complete(threadId, payload);
             return recordGenerationRun({
               storage,
               payload,
@@ -551,7 +556,7 @@ export function createGenerationService(
           const completed = timeline.event("run_completed", "completed", payload.locale === "zh" ? "运行完成" : "Run completed", payload.locale === "zh" ? "最终内容已生成。" : "Final content is ready.");
           emitTimeline(completed);
           const events = [...baseEvents, ...progressiveFinalized.events, ...timelineEvents.map(timelineEventToToolEvent)];
-          planOrchestrator.complete(threadId, payload);
+          agentPlanOrchestrator.complete(threadId, payload);
           const recorded = recordGenerationRun({
             storage,
             payload,
@@ -578,7 +583,7 @@ export function createGenerationService(
         observeToolEvent(event);
       }
     } catch (error) {
-      planOrchestrator.fail(threadId, payload, error);
+      agentPlanOrchestrator.fail(threadId, payload, error);
       if (isProgressiveCanvasDeliveryEnabled(payload)) {
         ensureProgressiveDeliveryStarted();
         for (const failureEvent of commitProgressiveFailureDelivery({
@@ -593,10 +598,10 @@ export function createGenerationService(
           emitRuntimeToolEvent(failureEvent);
         }
       }
-      const event = createRuntimeFallbackEvent("agent-backend", error, isMockFallbackEnabled(deps));
+      const event = createRuntimeFallbackEvent("agent-backend", error, isMockFallbackEnabled(deps), lastModelErrorSignal);
       runtimeEvents.push(event);
       observeToolEvent(event);
-      emitTimeline(timeline.event("run_failed", "failed", payload.locale === "zh" ? "运行失败" : "Run failed", safeRuntimeErrorMessage(error), budgetStatusPayload(error)));
+      emitTimeline(timeline.event("run_failed", "failed", payload.locale === "zh" ? "运行失败" : "Run failed", safeRuntimeErrorMessage(error, lastModelErrorSignal), { ...agentPlanPayload(payload), ...budgetStatusPayload(error) }));
       textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     }
 
@@ -627,8 +632,8 @@ function hasBlockedInternalOutput(events?: ToolEventRecord[]) {
   return events?.some((event) => event.eventType === "internal_output_blocked") ?? false;
 }
 
-function createRuntimeFallbackEvent(source: "agent-backend", error: unknown, mockFallbackEnabled: boolean): ToolEventRecord {
-  const message = safeRuntimeErrorMessage(error);
+function createRuntimeFallbackEvent(source: "agent-backend", error: unknown, mockFallbackEnabled: boolean, modelErrorSignal?: AgentBackendRuntimeSignal): ToolEventRecord {
+  const message = safeRuntimeErrorMessage(error, modelErrorSignal);
   const planProtocolFailure = /^Plan (?:planning|revision|execution|phase)\b/i.test(message);
   const budgetStatus = budgetStatusPayload(error);
   return {
@@ -657,12 +662,23 @@ function budgetStatusPayload(error: unknown): Record<string, unknown> | undefine
   return undefined;
 }
 
-function safeRuntimeErrorMessage(error: unknown) {
+function safeRuntimeErrorMessage(error: unknown, modelErrorSignal?: AgentBackendRuntimeSignal) {
   const message = error instanceof Error ? error.message : "Unknown runtime error";
+  const signalReason = typeof modelErrorSignal?.payload?.reason === "string" ? modelErrorSignal.payload.reason : "";
+  if (/AgentBackend returned internal runtime output/i.test(message) && isThinkingToolChoiceCompatibilityMessage(signalReason)) {
+    return "Current model does not support thinking with forced tool calls. Disable thinking for this step or switch to a model verified for thinking + tool use.";
+  }
+  if (isThinkingToolChoiceCompatibilityMessage(message) || isThinkingToolChoiceCompatibilityMessage(signalReason)) {
+    return "Current model does not support thinking with forced tool calls. Disable thinking for this step or switch to a model verified for thinking + tool use.";
+  }
   if (/api[_-]?key|authorization|token|password|secret/i.test(message)) {
     return "Runtime failed with a credential-related error.";
   }
   return message.slice(0, 240);
+}
+
+function isThinkingToolChoiceCompatibilityMessage(message: string) {
+  return /thinking\b[\s\S]{0,120}\btool[_-]?choice|\btool[_-]?choice\b[\s\S]{0,120}\bthinking/i.test(message);
 }
 
 function formatGenerationFailure(runtimeEvents: ToolEventRecord[]) {
@@ -768,33 +784,9 @@ function canvasActionEvents(payload: GenerateRequest): ToolEventRecord[] {
   }];
 }
 
-function withAutoPreflightPlan(payload: GenerateRequest, threadId: string, storage: SQLiteStorageRepository): GenerateRequest {
+function withAutoPreflightPlan(payload: GenerateRequest, threadId: string, projectRuntimeSettings: ProjectRuntimeSettings, agentPlanOrchestrator: AgentPlanOrchestrator): GenerateRequest {
   if (skillScopeIntake(payload).needsClarification) return payload;
-  if (!shouldAutoPreflightPlan({
-    payload,
-    transientSkillCount: payload.transientSkillRefs?.length ?? 0,
-    thinkingMode: payload.modelOverrides?.thinkingMode
-  })) {
-    return payload;
-  }
-  const instruction = payload.chatInstruction || payload.freeTextPrompt || "Plan the task";
-  const plan = storage.createPlanIntake(threadId, {
-    title: "Task plan",
-    goal: instruction
-  });
-  return {
-    ...payload,
-    planPhase: "preflight",
-    planId: plan.id,
-    contextValues: {
-      ...payload.contextValues,
-      autoPreflightPlan: {
-        id: plan.id,
-        trigger: "complex_task",
-        requiresApproval: true
-      }
-    }
-  };
+  return agentPlanOrchestrator.prepareAutoPreflight(threadId, payload, projectRuntimeSettings);
 }
 
 function withPlanGeneration(payload: GenerateRequest, threadId: string, storage: SQLiteStorageRepository): GenerateRequest {
@@ -805,12 +797,29 @@ function withPlanGeneration(payload: GenerateRequest, threadId: string, storage:
   const existingPlanId = payload.planId || readString(record(payload.contextValues?.awaitingPlan).id);
   const planId = existingPlanId || storage.createPlanIntake(threadId, {
     title: "Plan intake",
-    goal: payload.chatInstruction || "Clarify intent"
+    goal: payload.chatInstruction || "Clarify intent",
+    origin: policy.stage === "execution" ? "approved_execution" : "explicit_plan",
+    complexity: payload.contextValues?.taskComplexity as Record<string, unknown> | undefined,
+    preflight: {
+      summary: (payload.chatInstruction || "Clarify intent").slice(0, 240),
+      phase
+    }
   }).id;
+  if (existingPlanId) {
+    storage.updatePlanMetadata(threadId, existingPlanId, {
+      origin: policy.stage === "execution" ? "approved_execution" : "explicit_plan",
+      complexity: payload.contextValues?.taskComplexity as Record<string, unknown> | undefined
+    });
+  }
   const phaseAttemptId = `${policy.stage}_${crypto.randomUUID()}`;
   return {
     ...payload,
-    contextValues: { ...payload.contextValues, planGeneration: {
+    contextValues: { ...payload.contextValues, agentPlan: {
+      id: planId,
+      stepId: payload.stepId ?? policy.executionStepId,
+      origin: policy.stage === "execution" ? "approved_execution" : "explicit_plan",
+      phase
+    }, planGeneration: {
       phase,
       planId,
       stepId: payload.stepId ?? policy.executionStepId,
@@ -846,6 +855,33 @@ function planPhaseEvents(payload: GenerateRequest): ToolEventRecord[] {
       ...(skill ? { skill, summary: `Using skill: ${skill}` } : {})
     }
   }];
+}
+
+function withAgentPlanEventContext(event: ToolEventRecord, payload: GenerateRequest): ToolEventRecord {
+  const context = agentPlanPayload(payload);
+  if (!Object.keys(context).length) return event;
+  return {
+    ...event,
+    payload: {
+      ...context,
+      ...event.payload,
+      phase: readString(event.payload.phase) || context.phase
+    }
+  };
+}
+
+function agentPlanPayload(payload: GenerateRequest): Record<string, unknown> {
+  const generation = payload.planGeneration;
+  const agentPlan = record(payload.contextValues?.agentPlan);
+  const planId = readString(agentPlan.id) || generation?.planId || payload.planId;
+  const stepId = readString(agentPlan.stepId) || generation?.stepId || payload.stepId;
+  const phase = readString(agentPlan.phase) || generation?.phase || payload.planPhase;
+  return {
+    ...(planId ? { planId, agentPlanId: planId } : {}),
+    ...(stepId ? { stepId, agentPlanStepId: stepId } : {}),
+    ...(phase ? { phase } : {}),
+    ...(readString(agentPlan.origin) ? { agentPlanOrigin: readString(agentPlan.origin) } : {})
+  };
 }
 
 function record(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }

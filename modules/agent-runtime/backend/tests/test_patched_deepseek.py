@@ -258,21 +258,22 @@ def test_non_reasoning_model_preserves_specific_tool_choice():
     assert payload["tool_choice"] == {"type": "function", "function": {"name": "ask_clarification"}}
 
 
-def test_reasoning_model_preserves_auto_or_missing_tool_choice():
+def test_reasoning_model_drops_any_tool_choice_from_payload():
     model = _make_model()
     human = HumanMessage(content="Ask one clarification.")
-    base_payload = {
-        "messages": [_make_payload_message("user", "Ask one clarification.")],
-        "extra_body": {"thinking": {"type": "enabled"}},
-        "tool_choice": "auto",
-    }
+    for tool_choice in ("auto", "required", "any"):
+        base_payload = {
+            "messages": [_make_payload_message("user", "Ask one clarification.")],
+            "extra_body": {"thinking": {"type": "enabled"}},
+            "tool_choice": tool_choice,
+        }
 
-    with patch.object(type(model).__bases__[0], "_get_request_payload", return_value=base_payload):
-        with patch.object(model, "_convert_input") as mock_convert:
-            mock_convert.return_value = MagicMock(to_messages=lambda: [human])
-            payload = model._get_request_payload([human])
+        with patch.object(type(model).__bases__[0], "_get_request_payload", return_value=base_payload):
+            with patch.object(model, "_convert_input") as mock_convert:
+                mock_convert.return_value = MagicMock(to_messages=lambda: [human])
+                payload = model._get_request_payload([human])
 
-    assert payload["tool_choice"] == "auto"
+        assert "tool_choice" not in payload
 
     missing_tool_choice_payload = {
         "messages": [_make_payload_message("user", "Ask one clarification.")],

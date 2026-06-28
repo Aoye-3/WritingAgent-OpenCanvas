@@ -31,24 +31,6 @@ def _payload_enables_thinking(payload: dict) -> bool:
     return isinstance(reasoning_effort, str) and reasoning_effort not in ("", "none", "minimal")
 
 
-def _has_specific_tool_choice(payload: dict) -> bool:
-    tool_choice = payload.get("tool_choice")
-    if isinstance(tool_choice, str):
-        return tool_choice not in ("", "auto", "none", "required", "any")
-    if (
-        isinstance(tool_choice, dict)
-        and tool_choice.get("type") == "function"
-        and isinstance(tool_choice.get("name"), str)
-    ):
-        return True
-    return (
-        isinstance(tool_choice, dict)
-        and tool_choice.get("type") == "function"
-        and isinstance(tool_choice.get("function"), dict)
-        and isinstance(tool_choice["function"].get("name"), str)
-    )
-
-
 class PatchedChatDeepSeek(ChatDeepSeek):
     """ChatDeepSeek with proper reasoning_content preservation.
 
@@ -84,7 +66,7 @@ class PatchedChatDeepSeek(ChatDeepSeek):
         # Call parent to get the base payload
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
 
-        if _payload_enables_thinking(payload) and _has_specific_tool_choice(payload):
+        if _payload_enables_thinking(payload) and "tool_choice" in payload:
             payload.pop("tool_choice", None)
 
         # Match payload messages with original messages to restore reasoning_content

@@ -26,6 +26,7 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
 
     def __init__(self):
         self._forced_attempts: set[str] = set()
+        self._compatibility_events: set[str] = set()
 
     def _prepare(self, request: ModelRequest) -> ModelRequest:
         runtime = getattr(request, "runtime", None)
@@ -39,10 +40,10 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         request = PlanToolChoiceMiddleware._apply_runtime_budget(request, context)
         if PlanToolChoiceMiddleware._is_skill_scope_guard(context):
             if not PlanToolChoiceMiddleware._has_tool_result(request, "ask_clarification") and PlanToolChoiceMiddleware._has_tool(request, "ask_clarification"):
-                return request.override(tool_choice="ask_clarification")
+                return self._force_tool_choice(request, context, "ask_clarification")
         if phase == "chat" and isinstance(canvas_action, dict) and canvas_action.get("requiresTool") is True:
             if not PlanToolChoiceMiddleware._has_tool_result(request, "canvas_write") and PlanToolChoiceMiddleware._has_tool(request, "canvas_write"):
-                return request.override(tool_choice="canvas_write")
+                return self._force_tool_choice(request, context, "canvas_write")
         if phase != "planning":
             return request
 
@@ -61,7 +62,28 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         }
         if contract not in tool_names:
             return request
-        return request.override(tool_choice=contract)
+        return self._force_tool_choice(request, context, contract)
+
+    def _force_tool_choice(self, request: ModelRequest, context: object, tool_choice: str) -> ModelRequest:
+        self._emit_tool_choice_compatibility_event(context, tool_choice)
+        return request.override(tool_choice=tool_choice)
+
+    def _emit_tool_choice_compatibility_event(self, context: object, tool_choice: str) -> None:
+        if not isinstance(context, dict) or context.get("facetwrite_thinking_disabled_for_tool_choice_compatibility") is not True:
+            return
+        reason = context.get("facetwrite_thinking_disabled_reason")
+        key = f"{context.get('thread_id')}:{context.get('facetwrite_plan_phase_attempt_id')}:{tool_choice}:{reason}"
+        if key in self._compatibility_events:
+            return
+        self._compatibility_events.add(key)
+        PlanToolChoiceMiddleware._emit_synthesis_event({
+            "type": "thinking_disabled_for_tool_choice_compatibility",
+            "phase": context.get("facetwrite_plan_phase"),
+            "planId": context.get("facetwrite_plan_id") or context.get("facetwrite_agent_plan_id"),
+            "stepId": context.get("facetwrite_plan_step_id") or context.get("facetwrite_agent_plan_step_id"),
+            "tool_choice": tool_choice,
+            "reason": reason or "forced_tool_choice",
+        })
 
     @staticmethod
     def _filter_tools(request: ModelRequest, context: object) -> ModelRequest:

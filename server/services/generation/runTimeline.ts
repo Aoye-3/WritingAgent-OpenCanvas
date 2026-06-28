@@ -119,6 +119,10 @@ export function toolEventToTimelineEvent(builder: RunTimelineBuilder, event: Too
   if (/(?:^|_)canvas_mutation_committed$/.test(event.eventType)) {
     return builder.event("canvas_node_committed", "completed", builder.locale === "zh" ? "Canvas 节点" : "Canvas node", builder.locale === "zh" ? "Canvas 节点已创建或更新" : "Canvas node was created or updated", payload);
   }
+  if (/(?:^|_)runtime_failed$/.test(event.eventType) || /(?:^|_)plan_protocol_failed$/.test(event.eventType)) {
+    const message = string(payload.message) || string(payload.reason) || (builder.locale === "zh" ? "Agent Runtime 运行失败" : "Agent Runtime failed");
+    return builder.event("run_failed", "failed", builder.locale === "zh" ? "运行失败" : "Run failed", message, payload);
+  }
   if (/(?:^|_)artifact_committed$/.test(event.eventType) || /(?:^|_)artifact_staged$/.test(event.eventType)) {
     return builder.event("artifact_committed", "completed", builder.locale === "zh" ? "Canvas 产物" : "Canvas artifact", builder.locale === "zh" ? "Canvas 产物已更新" : "Canvas artifact was updated", payload);
   }

@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { PlanOrchestrator } from "./services/planOrchestrator.js";
-import { mkdtemp } from "node:fs/promises";
-import os from "node:os";
+import { mkdir, mkdtemp } from "node:fs/promises";
 import path from "node:path";
 
 test("persists plan approval, step progress, waiting state, and retry", async () => {
@@ -30,6 +29,32 @@ test("persists plan approval, step progress, waiting state, and retry", async ()
   const resumed = storage.resumePlanWithAnswer("thread_plan", plan.id, "UK market");
   assert.equal(resumed?.status, "running");
   assert.equal(resumed?.statusMessage, "UK market");
+});
+
+test("persists AgentPlan metadata on existing Plan storage", async () => {
+  const storage = await isolatedStorage();
+  await storage.ensureThread("thread_agent_plan_meta", "project_agent_plan_meta", "Research");
+
+  const plan = storage.createPlanIntake("thread_agent_plan_meta", {
+    title: "Research architecture",
+    goal: "Prepare an AgentPlan",
+    origin: "auto_complex_task",
+    complexity: { complexity: "complex", signals: ["multi_stage_intent"] },
+    budget: { profile: "medium", steps: { preflight: { modelCallLimit: 2 } } },
+    preflight: { summary: "Understand the task", recommendedStepCount: 4 }
+  });
+
+  assert.equal(plan.origin, "auto_complex_task");
+  assert.deepEqual(plan.complexity, { complexity: "complex", signals: ["multi_stage_intent"] });
+  assert.deepEqual(plan.budget, { profile: "medium", steps: { preflight: { modelCallLimit: 2 } } });
+  assert.deepEqual(plan.preflight, { summary: "Understand the task", recommendedStepCount: 4 });
+
+  const updated = storage.updatePlanMetadata("thread_agent_plan_meta", plan.id, {
+    preflight: { summary: "Ready to plan", recommendedStepCount: 3 }
+  });
+
+  assert.equal(updated?.origin, "auto_complex_task");
+  assert.deepEqual(updated?.preflight, { summary: "Ready to plan", recommendedStepCount: 3 });
 });
 
 test("validates Plan intake from persisted state instead of stream events", async () => {
@@ -324,7 +349,9 @@ test("creates and refreshes a deletable Canvas Plan projection", async () => {
 });
 
 async function isolatedStorage() {
-  process.env.FACETWRITE_APP_ROOT = await mkdtemp(path.join(os.tmpdir(), "facetwrite-plan-"));
+  const root = path.join(process.cwd(), ".facetwrite-test");
+  await mkdir(root, { recursive: true });
+  process.env.FACETWRITE_APP_ROOT = await mkdtemp(path.join(root, "facetwrite-plan-"));
   const module = await import(`./storage.js?plan=${Date.now()}-${Math.random()}`);
   return module.createStorage();
 }

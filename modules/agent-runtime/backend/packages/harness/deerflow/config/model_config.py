@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -23,6 +25,10 @@ class ModelConfig(BaseModel):
     )
     supports_thinking: bool = Field(default_factory=lambda: False, description="Whether the model supports thinking")
     supports_reasoning_effort: bool = Field(default_factory=lambda: False, description="Whether the model supports reasoning effort")
+    supports_tool_choice_with_thinking: Literal[True, False, "unknown"] = Field(
+        default="unknown",
+        description="Whether the provider accepts tool_choice when thinking is enabled",
+    )
     when_thinking_enabled: dict | None = Field(
         default_factory=lambda: None,
         description="Extra settings to be passed to the model when thinking is enabled",

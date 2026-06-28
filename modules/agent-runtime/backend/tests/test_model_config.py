@@ -15,6 +15,7 @@ def _make_model(**overrides) -> ModelConfig:
 def test_responses_api_fields_are_declared_in_model_schema():
     assert "use_responses_api" in ModelConfig.model_fields
     assert "output_version" in ModelConfig.model_fields
+    assert "supports_tool_choice_with_thinking" in ModelConfig.model_fields
 
 
 def test_responses_api_fields_round_trip_in_model_dump():
@@ -28,3 +29,7 @@ def test_responses_api_fields_round_trip_in_model_dump():
 
     assert dumped["use_responses_api"] is True
     assert dumped["output_version"] == "responses/v1"
+
+
+def test_tool_choice_thinking_support_defaults_to_unknown():
+    assert _make_model().supports_tool_choice_with_thinking == "unknown"

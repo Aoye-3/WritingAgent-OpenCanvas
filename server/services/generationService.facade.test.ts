@@ -122,10 +122,21 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
       getProjectSharedContext: () => undefined,
       getProjectBrief: () => ({ brief: {}, revision: 0 }),
       getTaskBrief: () => ({ brief: {}, revision: 0 }),
-      createPlanIntake: () => ({ id: "plan_intake_test" }),
+      createPlanIntake: (_threadId: string, input?: Record<string, unknown>) => {
+        Object.assign(planState, input ?? {}, { id: "plan_intake_test" });
+        return { id: "plan_intake_test" };
+      },
+      updatePlanMetadata: (_threadId: string, _planId: string, input: Record<string, unknown>) => {
+        Object.assign(planState, input);
+        return planState;
+      },
       getPlanRun: (_threadId: string, planId: string) => planId === "plan_intake_test"
         ? planState
         : undefined,
+      setPlanRunStatus: (_threadId: string, _planId: string, status: string, message = "") => {
+        Object.assign(planState, { status, statusMessage: message });
+        return planState;
+      },
       listPlanRuns: () => [{ id: "plan_intake_test", status: "draft" }],
       recordPlanActivity: () => undefined,
       listMessages: () => messages.map((message, index) => ({
@@ -2551,8 +2562,25 @@ test("generation accepts a persisted Plan clarification when the stream event is
   assert.equal(result.provider, "agent-backend");
 });
 
-test("generation rejects a Plan success event when the repository was not updated", async () => {
-  const { storage } = fakeStorage();
+test("generation records recovery when a Plan success event was not persisted", async () => {
+  const { storage, planState } = fakeStorage();
+  const activities: Array<Record<string, unknown>> = [];
+  storage.recordPlanActivity = (_threadId, _planId, input) => {
+    activities.push(input);
+    return {
+      id: `activity_${activities.length}`,
+      threadId: _threadId,
+      planRunId: _planId,
+      runId: input.runId,
+      stepId: input.stepId,
+      type: input.type,
+      status: input.status,
+      summary: String(input.summary ?? ""),
+      detail: input.detail ?? {},
+      sequence: activities.length,
+      createdAt: new Date(0).toISOString()
+    };
+  };
   const service = createGenerationService(storage, fakeAgentRuntime(), {
     modelRuntime: fakeModelRuntime,
     agentBackend: {
@@ -2565,10 +2593,13 @@ test("generation rejects a Plan success event when the repository was not update
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "/plan Compare laptops" }),
-    /persisted clarification/
-  );
+  const result = await service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "/plan Compare laptops" });
+
+  assert.equal(result.provider, "agent-backend");
+  assert.equal(planState.status, "failed");
+  assert.match(String(planState.statusMessage), /persisted clarification/);
+  assert.equal(activities.at(-1)?.type, "plan_failed");
+  assert.equal(activities.at(-1)?.status, "needs_recovery");
 });
 
 test("generation facade blocks AgentBackend internal prompt output before recording", async () => {

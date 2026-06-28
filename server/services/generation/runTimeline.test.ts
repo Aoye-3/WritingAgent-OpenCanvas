@@ -128,3 +128,18 @@ test("run timeline includes Plan tool failure reason in the summary", () => {
   assert.equal(event.status, "failed");
   assert.equal(event.summary, "Plan Clarification Submit failed: invalid_clarification");
 });
+
+test("run timeline maps AgentBackend runtime failures to run_failed", () => {
+  const builder = createRunTimelineBuilder({ threadId: "thread_1", runId: "pending", locale: "en" });
+  const event = toolEventToTimelineEvent(builder, {
+    eventType: "agent_backend_runtime_failed",
+    payload: {
+      message: "Current model does not support thinking with forced tool calls."
+    }
+  });
+
+  assert.equal(event.eventType, "run_failed");
+  assert.equal(event.status, "failed");
+  assert.equal(event.title, "Run failed");
+  assert.equal(event.summary, "Current model does not support thinking with forced tool calls.");
+});

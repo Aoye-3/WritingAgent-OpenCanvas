@@ -272,6 +272,33 @@ test("surfaces llm_retry custom events without creating tool events", async () =
   assert.ok(statuses.some((label) => label.includes("600s")));
 });
 
+test("surfaces thinking/tool_choice compatibility custom events", async () => {
+  const statuses: string[] = [];
+  const signals: Array<{ type: string; toolChoice?: unknown }> = [];
+  const body = [
+    'event: custom\ndata: {"type":"thinking_disabled_for_tool_choice_compatibility","phase":"planning","tool_choice":"plan_clarification_submit","reason":"plan_intake"}\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"Ready"}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body, {
+    onStatus: (status) => statuses.push(status.label),
+    onRuntimeSignal: (signal) => signals.push({ type: signal.type, toolChoice: signal.payload?.tool_choice })
+  });
+
+  assert.equal(result.text, "Ready");
+  assert.deepEqual(signals, [{ type: "thinking_disabled_for_tool_choice_compatibility", toolChoice: "plan_clarification_submit" }]);
+  assert.ok(statuses.includes("Thinking disabled for this forced tool call because the selected model does not support thinking with tool_choice."));
+});
+
+test("maps thinking/tool_choice stream errors to actionable messages", async () => {
+  const body = 'event: error\ndata: {"message":"LLM request failed: Thinking mode does not support this tool_choice"}\n\n';
+
+  await assert.rejects(
+    () => runWithBody(body),
+    /Current model does not support thinking with forced tool calls/
+  );
+});
+
 test("surfaces LLM provider lifecycle custom events without creating tool events", async () => {
   const statuses: string[] = [];
   const signals: string[] = [];

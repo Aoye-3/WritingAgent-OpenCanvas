@@ -77,7 +77,8 @@ def request(*, phase: str, stage: str | None = None, messages=None, canvas_actio
             allowed_tool_refs=None, tool_state=None, evidence_tool_limit=None, evidence_tools=None,
             progressive_enabled=None, model_call_limit=None, recursion_limit=None, synthesis_reserve_steps=None,
             force_synthesis_after_evidence=None, body_draft_write_limit=None, body_draft_writes_used=None,
-            force_synthesis_after_body_drafts=None, clarification_policy=None, markdown_file_delivery_required=None):
+            force_synthesis_after_body_drafts=None, clarification_policy=None, markdown_file_delivery_required=None,
+            thinking_disabled_for_tool_choice_compatibility=None):
     runtime = SimpleNamespace(context={
         "facetwrite_plan_phase": phase,
         "facetwrite_plan_stage": stage,
@@ -97,6 +98,8 @@ def request(*, phase: str, stage: str | None = None, messages=None, canvas_actio
         "facetwrite_force_synthesis_after_body_drafts": force_synthesis_after_body_drafts,
         "facetwrite_clarification_policy": clarification_policy,
         "facetwrite_markdown_file_delivery_required": markdown_file_delivery_required,
+        "facetwrite_thinking_disabled_for_tool_choice_compatibility": thinking_disabled_for_tool_choice_compatibility,
+        "facetwrite_thinking_disabled_reason": "plan_intake",
     })
     initial_messages = messages or [HumanMessage(content="Plan this task")]
     initial_tools = [plan_update, plan_clarification_submit, plan_revision_submit, web_search, web_fetch, read_file, artifact_stage, canvas_write, write_file, present_files, ask_clarification]
@@ -399,6 +402,31 @@ def test_forces_stage_specific_contract_for_the_first_planning_model_call():
     )
 
     assert captured["request"].tool_choice == "plan_clarification_submit"
+
+
+def test_forced_tool_choice_emits_thinking_compatibility_signal(monkeypatch: pytest.MonkeyPatch):
+    middleware = PlanToolChoiceMiddleware()
+    events = []
+    captured = {}
+    monkeypatch.setattr("langgraph.config.get_stream_writer", lambda: events.append)
+
+    middleware.wrap_model_call(
+        request(
+            phase="planning",
+            thinking_disabled_for_tool_choice_compatibility=True,
+        ),
+        lambda model_request: captured.setdefault("request", model_request),
+    )
+
+    assert captured["request"].tool_choice == "plan_clarification_submit"
+    assert events == [{
+        "type": "thinking_disabled_for_tool_choice_compatibility",
+        "phase": "planning",
+        "planId": None,
+        "stepId": None,
+        "tool_choice": "plan_clarification_submit",
+        "reason": "plan_intake",
+    }]
 
 
 def test_does_not_repeat_force_after_any_stage_contract_result():
