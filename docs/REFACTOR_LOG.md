@@ -611,3 +611,32 @@ Deferred:
 - Added server-created intake Plans, leased server-side sequential execution, startup recovery, compact activity rows, and visible Plan skill usage.
 - Removed the legacy model-callable `plan_update` catalog and runtime branch; historical Plan events remain read-only.
 - Added token-only internal Bridge authentication, sanitized Tool events, executor lease heartbeats, persistent Canvas write suggestions, and stable multi-node Artifact delivery.
+
+## 2026-06-28 - Runtime Clarification And File Delivery Reconciliation
+
+Scope: Fixed an Agent Runtime final-delivery failure where a run continued after a clarification event but was still recorded as waiting for user input.
+
+Completed:
+- Investigated the latest failed run and confirmed it executed search/tool work, wrote Markdown files, and called `present_files`, but retained `finishReason:"clarification_required"` because an earlier clarification event poisoned final state.
+- Updated the AgentBackend stream adapter so substantive post-clarification progress clears the waiting interpretation.
+- Updated generation finalization so blocking clarification requires no later progress, stream Plan postconditions receive the complete event set, and presented Markdown files can create `file_document` nodes even when assistant chat text is empty.
+- Added regression coverage for clarification followed by continued tool execution and progressive file delivery.
+
+Validation:
+- `node --import tsx --test server/services/generationService.facade.test.ts server/runtime/agentBackendAdapter/client.test.ts`
+- `node --import tsx --test server/planRuntime.test.ts`
+- `npm.cmd run typecheck`
+
+## 2026-06-28 - Markdown File Preview Source Thread Fix
+
+Scope: Fixed `file_document` Markdown preview 404s when a Project-level Canvas node was opened from a different Thread than the one that generated the output file.
+
+Completed:
+- Confirmed archived Markdown files live under `.facetwrite/threads/<threadId>/user-data/outputs/`, while Canvas nodes are Project-level and can be viewed from sibling Threads.
+- Added `metadata.fileDocument.threadId` to newly generated Markdown file nodes.
+- Added frontend preview target resolution that uses explicit source Thread metadata and recovers legacy generated nodes from `deliveryId`.
+
+Validation:
+- `node --import tsx --test tests/frontend/fileDocumentPreviewTarget.test.ts`
+- `node --import tsx --test server/services/generationService.facade.test.ts`
+- `npm.cmd run typecheck`

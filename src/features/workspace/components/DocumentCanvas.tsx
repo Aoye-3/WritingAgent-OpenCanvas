@@ -22,6 +22,7 @@ import { ResetIcon, ZoomInIcon, ZoomOutIcon } from "../../../shared/icons";
 import { CanvasCurveEdge } from "./canvas/CanvasCurveEdge";
 import { CanvasNodeFrame } from "./canvas/CanvasNodeFrame";
 import { CanvasContextMenu, CanvasSelectedNodeWorkflow, CanvasSelectionBar, type CanvasMenuState } from "./canvas/CanvasChrome";
+import { fileDocumentPreviewTarget } from "./canvas/fileDocumentPreview";
 import { MAX_ZOOM, MIN_ZOOM, canvasNodeKinds, kindLabels, workflowModeLabels } from "./canvas/constants";
 import { collectDraggedNodePositionPatches } from "./canvas/dragPersistence";
 import { buildCanvasFlowNodes } from "./canvas/flowMapping";
@@ -253,10 +254,11 @@ function DocumentCanvasInner({
     onDeleteNode: (nodeId: string) => actionRef.current.onDeleteNode(nodeId),
     onIgnoreSuggestion: (suggestionId: string) => actionRef.current.onIgnoreSuggestion(suggestionId),
     onOpenDocumentPreview: (node: CanvasNode) => {
-      const path = readFileDocumentPath(node);
-      if (!path) return;
+      const target = fileDocumentPreviewTarget(node, threadId);
+      if (!target) return;
+      const { path } = target;
       setDocumentPreview({ path, nodeTitle: node.title, status: "loading" });
-      void fetchMarkdownOutputPreview(threadId, path)
+      void fetchMarkdownOutputPreview(target.threadId, path)
         .then((document) => {
           setDocumentPreview({ path, nodeTitle: node.title, status: "ready", document });
           onClaimDocumentPreviewChange?.({
@@ -863,15 +865,6 @@ function contextExcerpt(content: string, start: number, end: number) {
 
 function fingerprint(text: string) {
   return text.trim().replace(/\s+/g, " ").slice(0, 120);
-}
-
-function readFileDocumentPath(node: CanvasNode) {
-  const metadata = node.metadata;
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return "";
-  const fileDocument = (metadata as Record<string, unknown>).fileDocument;
-  if (!fileDocument || typeof fileDocument !== "object" || Array.isArray(fileDocument)) return "";
-  const path = (fileDocument as Record<string, unknown>).path;
-  return typeof path === "string" ? path : "";
 }
 
 function sameStringArray(left: string[], right: string[]) {

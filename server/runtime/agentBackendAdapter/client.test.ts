@@ -911,6 +911,21 @@ test("maps ask_clarification tool calls into structured Agent clarification even
   assert.equal(result.text, "");
 });
 
+test("does not keep clarification_required after runtime continues with tools", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_clarify","name":"ask_clarification","args":{"question":"Which citation format?","options":[{"id":"apa","label":"APA","detail":"APA 7th","recommended":true},{"id":"ieee","label":"IEEE","detail":"IEEE style"}]}}]}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_search","name":"web_search","args":{"query":"recent AI agent survey"}}]}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"tool","name":"web_search","tool_call_id":"call_search","content":"[]"}]\n\n',
+    'event: end\ndata: null\n\n'
+  ].join("");
+
+  const result = await runWithBody(body);
+
+  assert.equal(result.finishReason, "agent_backend_completed");
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_agent_clarification_requested"));
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_tool_completed" && event.payload.toolName === "web_search"));
+});
+
 test("maps ask_clarification tool calls with JSON string args", async () => {
   const args = JSON.stringify({
     question: "Which scope should I use?",

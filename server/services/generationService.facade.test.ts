@@ -138,6 +138,44 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
         return planState;
       },
       listPlanRuns: () => [{ id: "plan_intake_test", status: "draft" }],
+      updatePlanStep: (_threadId: string, _planId: string, stepId: string, patch: Record<string, unknown>) => {
+        const steps = Array.isArray(planState.steps) ? planState.steps as Array<Record<string, unknown>> : [];
+        const step = steps.find((item) => item.id === stepId);
+        if (!step) return undefined;
+        Object.assign(step, patch);
+        if (patch.status === "completed") {
+          const next = steps.find((item) => item.status === "pending");
+          Object.assign(planState, {
+            currentStepId: next?.id,
+            status: next ? "running" : "completed"
+          });
+        }
+        return step;
+      },
+      stagePlanArtifact: (_threadId: string, _planId: string, input: Record<string, unknown>) => {
+        const artifacts = planState.artifacts as Array<Record<string, unknown>>;
+        const existing = artifacts.find((item) => item.artifactId === input.artifactId);
+        const artifact = {
+          ...existing,
+          ...input,
+          id: String(input.artifactId),
+          planRunId: "plan_intake_test",
+          status: "staged"
+        };
+        if (existing) {
+          Object.assign(existing, artifact);
+          return existing;
+        }
+        artifacts.push(artifact);
+        return artifact;
+      },
+      markPlanArtifactCommitted: (_threadId: string, _planId: string, artifactId: string, canvasTargetId: string) => {
+        const artifacts = planState.artifacts as Array<Record<string, unknown>>;
+        const artifact = artifacts.find((item) => item.artifactId === artifactId || item.id === artifactId);
+        if (!artifact) return undefined;
+        Object.assign(artifact, { status: "committed", canvasTargetId });
+        return artifact;
+      },
       recordPlanActivity: () => undefined,
       listMessages: () => messages.map((message, index) => ({
         id: `msg_${index}`,
@@ -466,6 +504,67 @@ test("direct Canvas delivery is committed by the server planner without copying 
   assert.equal(String(canvasNodes[1]?.content).includes("我已经通过网络搜索"), false);
   assert.match(String(canvasNodes[1]?.content), /科技领域/);
   assert.equal(canvasEdges.length, 2);
+});
+
+test("non-stream Plan execution commits progressive Canvas delivery before completing the step", async () => {
+  const { storage, planState, canvasNodes } = fakeStorage();
+  Object.assign(planState, {
+    projectId: "project_test",
+    threadId: "thread_test",
+    status: "running",
+    approval: "approved",
+    currentStepId: "step_1",
+    executionVersion: 1,
+    steps: [{ id: "step_1", title: "Deliver research", status: "pending", attempt: 0 }],
+    artifacts: []
+  });
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: [
+          "# Result",
+          "",
+          "The requested research has been completed and written into Canvas.",
+          "",
+          "## Sources",
+          "- [News A](https://news.example/a)"
+        ].join("\n"),
+        finishReason: "stop",
+        events: [{
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "web_search",
+            sources: [{ title: "News A", url: "https://news.example/a" }]
+          }
+        }]
+      })
+    }
+  });
+
+  const result = await service.generateAndRecord({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Continue approved plan plan_intake_test. Execute only step step_1.",
+    planPhase: "execution",
+    planId: "plan_intake_test",
+    stepId: "step_1",
+    planGeneration: { phase: "execution", planId: "plan_intake_test", stepId: "step_1", phaseAttemptId: "exec_1" },
+    contextValues: {
+      planExecution: { planId: "plan_intake_test", stepId: "step_1" },
+      canvas: { workflow: { mode: "batch_delivery" } }
+    },
+    toolState: { web_search: true }
+  });
+
+  assert.equal(result.provider, "agent-backend");
+  assert.ok(canvasNodes.some((node) => node.kind === "document"));
+  assert.equal((planState.steps as Array<{ status: string }>)[0]?.status, "completed");
+  assert.equal(planState.status, "completed");
+  assert.equal((planState.artifacts as Array<{ status: string; canvasTargetId?: string }>)[0]?.status, "committed");
+  assert.ok((planState.artifacts as Array<{ status: string; canvasTargetId?: string }>)[0]?.canvasTargetId);
 });
 
 test("direct Canvas delivery treats process clarification text as recoverable output", async () => {
@@ -1678,12 +1777,108 @@ test("progressive Canvas creates a file document node for Markdown output files"
     const fileNodes = canvasNodes.filter((node) => node.kind === "file_document");
     assert.equal(fileNodes.length, 1);
     assert.equal((fileNodes[0]?.metadata as { fileDocument?: { status?: string } }).fileDocument?.status, "presented");
+    assert.equal((fileNodes[0]?.metadata as { fileDocument?: { threadId?: string } }).fileDocument?.threadId, "thread_runtime_archive");
     assert.equal(fileNodes[0]?.includeInProjectContext, false);
     assert.equal(String(fileNodes[0]?.content).includes("Long section content."), false);
     assert.ok(String(fileNodes[0]?.content).includes("/mnt/user-data/outputs/report.md"));
     assert.ok(canvasEdges.some((edge) => edge.targetNodeId === fileNodes[0]?.id));
     const saved = await readFile(path.resolve(process.cwd(), appRoot, "threads", "thread_runtime_archive", "user-data", "outputs", "report.md"), "utf8");
     assert.ok(saved.includes("Long section content."));
+  } finally {
+    if (previousRoot === undefined) {
+      delete process.env.FACETWRITE_APP_ROOT;
+    } else {
+      process.env.FACETWRITE_APP_ROOT = previousRoot;
+    }
+    await rm(path.resolve(process.cwd(), appRoot), { recursive: true, force: true });
+  }
+});
+
+test("progressive Canvas finalizes files after clarification when runtime keeps working", async () => {
+  const appRoot = `.facetwrite-test/md-after-clarification-${Date.now()}`;
+  const previousRoot = process.env.FACETWRITE_APP_ROOT;
+  process.env.FACETWRITE_APP_ROOT = appRoot;
+  try {
+    const { storage, canvasNodes, records } = fakeStorage();
+    const reportPath = "/mnt/user-data/outputs/Systematic_Literature_Review_AI_Agents.md";
+    const reportMarkdown = `# Systematic Literature Review\n\n${"Agent literature synthesis. ".repeat(160)}`;
+    const service = createGenerationService(storage, fakeAgentRuntime(), {
+      modelRuntime: fakeModelRuntime,
+      archiveMarkdownOutput: (threadId, virtualPath) => archiveMarkdownForTest(threadId, virtualPath, reportMarkdown),
+      agentBackend: {
+        getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+        runAgent: async (input) => {
+          const emitted: ToolEventRecord[] = [];
+          const emit = (event: ToolEventRecord) => {
+            emitted.push(event);
+            input.onToolEvent?.(event);
+          };
+          emit({
+            eventType: "agent_backend_agent_clarification_requested",
+            payload: {
+              type: "agent_clarification_requested",
+              toolCallId: "call_citation_format",
+              question: "您希望文献综述使用哪种引用格式？",
+              options: [
+                { id: "apa", label: "APA 7th", detail: "社会科学常用格式", recommended: true },
+                { id: "ieee", label: "IEEE", detail: "工程领域常用格式" }
+              ]
+            }
+          });
+          emit({
+            eventType: "agent_backend_tool_started",
+            payload: { type: "tool_started", toolName: "web_search", toolCallId: "call_search" }
+          });
+          emit({
+            eventType: "agent_backend_tool_completed",
+            payload: {
+              type: "tool_completed",
+              toolName: "web_search",
+              toolCallId: "call_search",
+              query: "recent AI agent survey",
+              sources: [{ title: "Agent survey", url: "https://example.com/agent-survey" }]
+            }
+          });
+          emit({
+            eventType: "agent_backend_tool_completed",
+            payload: { type: "tool_completed", toolName: "write_file", toolCallId: "call_write", path: reportPath }
+          });
+          emit({
+            eventType: "agent_backend_tool_completed",
+            payload: { type: "tool_completed", toolName: "present_files", toolCallId: "call_present", filepaths: [reportPath] }
+          });
+          return {
+            text: "",
+            finishReason: "clarification_required",
+            events: emitted
+          };
+        }
+      }
+    });
+
+    const result = await service.generateAndRecordStream({
+      mode: "chat",
+      locale: "zh",
+      threadId: "thread_after_clarification",
+      agentCardId: "chat-agent",
+      chatInstruction: "帮我查找最近Agent相关的文献，并且做文献综述。",
+      transientSkillRefs: ["database-lookup", "literature-review"],
+      contextValues: {
+        canvas: { workflow: { mode: "batch_delivery" } },
+        agentClarification: answeredAgentClarification()
+      },
+      toolState: { web_search: true }
+    });
+
+    assert.notEqual(result.finishReason, "clarification_required");
+    assert.equal(records.length, 1);
+    assert.notEqual((records[0] as { finishReason?: string }).finishReason, "clarification_required");
+    const fileNode = canvasNodes.find((node) => node.kind === "file_document");
+    assert.ok(fileNode);
+    assert.ok(String(fileNode.content).includes(reportPath));
+    assert.ok(canvasNodes.some((node) => node.title === "正文"));
+    const body = canvasNodes.find((node) => node.title === "正文");
+    assert.ok(String(body?.content).includes("Systematic Literature Review"));
   } finally {
     if (previousRoot === undefined) {
       delete process.env.FACETWRITE_APP_ROOT;

@@ -555,7 +555,11 @@ async function readAgentBackendStream(
         if (key && emittedToolEventKeys.has(key)) continue;
         if (key) emittedToolEventKeys.add(key);
         events.push(event);
-        if (isAgentClarificationToolEvent(event)) sawWaitingForUser = true;
+        if (isAgentClarificationToolEvent(event)) {
+          sawWaitingForUser = true;
+        } else if (isPostClarificationProgressEvent(event)) {
+          sawWaitingForUser = false;
+        }
         callbacks.onStatus?.(statusFromToolEvent(event));
         callbacks.onToolEvent?.(event);
       }
@@ -690,6 +694,13 @@ function runtimeCustomStatusLabel(type: "llm_call_start" | "llm_call_end" | "llm
 function isAgentClarificationToolEvent(event: ToolEventRecord) {
   const type = readSourceString(event.payload?.type) || readSourceString(event.payload?.eventType);
   return /agent_clarification_requested$/.test(event.eventType) || type === "agent_clarification_requested";
+}
+
+function isPostClarificationProgressEvent(event: ToolEventRecord) {
+  const toolName = readSourceString(event.payload?.toolName) || readSourceString(event.payload?.tool);
+  return /(?:^|_)tool_(?:started|completed)$/.test(event.eventType)
+    || /^(?:write_file|present_files|web_search|web_fetch|knowledge_base)$/.test(toolName)
+    || /^canvas_delivery_/.test(readSourceString(event.payload?.eventType));
 }
 
 function shouldSuppressAssistantText(events: ToolEventRecord[]) {

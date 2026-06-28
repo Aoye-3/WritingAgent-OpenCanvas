@@ -124,12 +124,92 @@ export function createGenerationService(
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     payload = withTaskHandlingPolicy(payload, context);
     payload = withRuntimeContext(payload, context.canvasDeliveryContract);
+    payload = withProgressiveCanvasDeliveryContext(payload, context, projectRuntimeSettings);
     const agentCard = context.runtimeConfig.agentCard;
     const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
+    const timeline = createRunTimelineBuilder({ threadId, locale: payload.locale });
+    const timelineEvents: RunTimelineEvent[] = [];
+    const deliveryId = stableCanvasDeliveryId(threadId, payload, storage);
+    let researchDeliverySequence = 0;
+    let bodyDraftWriteCount = 0;
+    let progressiveDeliveryStarted = false;
+    let progressiveSynthesisStarted = false;
+    const progressiveEvidenceEntries: ProgressiveEvidenceEntry[] = [];
+    const emitTimeline = (event: RunTimelineEvent) => {
+      timelineEvents.push(event);
+    };
+    const emitRuntimeToolEvent = (event: ToolEventRecord) => {
+      agentPlanOrchestrator.observe(threadId, event);
+      emitTimeline(timelineEventFromToolEvent(event) ?? toolEventToTimelineEvent(timeline, event));
+      onToolEvent?.(event);
+    };
+    const ensureProgressiveDeliveryStarted = () => {
+      if (progressiveDeliveryStarted || !isProgressiveCanvasDeliveryEnabled(payload)) return;
+      progressiveDeliveryStarted = true;
+      const events = beginProgressiveCanvasDelivery({
+        payload,
+        threadId,
+        projectId: selection.projectId,
+        storage,
+        deliveryId
+      });
+      for (const event of events) {
+        runtimeEvents.push(event);
+        emitRuntimeToolEvent(event);
+      }
+    };
     const observeToolEvent = (event: ToolEventRecord) => {
-      const observed = withAgentPlanEventContext(withAgentClarificationResumeContext(event, payload), payload);
-      agentPlanOrchestrator.observe(threadId, observed);
-      onToolEvent?.(observed);
+      const observed = withAgentPlanEventContext(withAgentClarificationResumeContext(event, payload, deliveryId), payload);
+      if (!runtimeEvents.includes(observed)) runtimeEvents.push(observed);
+      emitRuntimeToolEvent(observed);
+      if (isProgressiveToolCompletion(observed)) ensureProgressiveDeliveryStarted();
+      const researchEvents = commitProgressiveResearchDelivery({
+        payload,
+        threadId,
+        projectId: selection.projectId,
+        storage,
+        deliveryId,
+        event: observed,
+        onEvidenceEntry: (entry) => progressiveEvidenceEntries.push(entry),
+        nextSequence: () => {
+          researchDeliverySequence += 1;
+          return researchDeliverySequence;
+        }
+      });
+      for (const researchEvent of researchEvents) {
+        runtimeEvents.push(researchEvent);
+        emitRuntimeToolEvent(researchEvent);
+      }
+      if (researchEvents.length && !progressiveSynthesisStarted) {
+        const budget = readProgressiveDeliveryBudget(payload);
+        if (bodyDraftWriteCount < budget.bodyDraftWriteLimit) {
+          const bodyEvents = commitProgressiveBodyCheckpointDelivery({
+            payload,
+            projectId: selection.projectId,
+            storage,
+            deliveryId,
+            entries: progressiveEvidenceEntries,
+            draftIndex: bodyDraftWriteCount + 1,
+            draftLimit: budget.bodyDraftWriteLimit
+          });
+          if (bodyEvents.length) bodyDraftWriteCount += 1;
+          for (const bodyEvent of bodyEvents) {
+            runtimeEvents.push(bodyEvent);
+            emitRuntimeToolEvent(bodyEvent);
+          }
+        }
+        if (progressiveEvidenceEntries.length >= budget.evidenceToolLimit) {
+          progressiveSynthesisStarted = true;
+          const synthesisEvent = canvasDeliveryEvent("canvas_delivery_synthesis_started", deliveryId, payload.locale, undefined, {
+            evidenceCount: progressiveEvidenceEntries.length,
+            bodyDraftWriteCount,
+            evidenceToolLimit: budget.evidenceToolLimit,
+            bodyDraftWriteLimit: budget.bodyDraftWriteLimit
+          });
+          runtimeEvents.push(synthesisEvent);
+          emitRuntimeToolEvent(synthesisEvent);
+        }
+      }
     };
     for (const event of canvasActionEvents(payload)) {
       runtimeEvents.push(event);
@@ -139,6 +219,8 @@ export function createGenerationService(
       runtimeEvents.push(event);
       observeToolEvent(event);
     }
+    const directCanvasIntent = isDirectCanvasDeliveryIntent(payload.chatInstruction ?? payload.freeTextPrompt ?? "");
+    if (!directCanvasIntent && !isSkillClarificationGuarded(payload) && shouldStartProgressiveCanvasDeliveryImmediately(payload, context)) ensureProgressiveDeliveryStarted();
     try {
       agentPlanOrchestrator.prepare(threadId, payload);
       const agentBackendRun = await runAgentRuntimeGeneration({
@@ -154,7 +236,6 @@ export function createGenerationService(
       }, executionRuntime);
 
       if (agentBackendRun) {
-        agentPlanOrchestrator.assertPostcondition(threadId, payload);
         const normalized = normalizeAgentRunOutput({
           text: agentBackendRun.text,
           locale: payload.locale,
@@ -166,9 +247,9 @@ export function createGenerationService(
           runtimeEvents.push(...(normalized.events ?? []), event);
           observeToolEvent(event);
         } else {
-          const baseEvents = dedupeToolEvents([...runtimeEvents, ...(normalized.events ?? []).map((event) => withAgentPlanEventContext(withAgentClarificationResumeContext(event, payload), payload))]);
+          const baseEvents = dedupeToolEvents([...runtimeEvents, ...(normalized.events ?? []).map((event) => withAgentPlanEventContext(withAgentClarificationResumeContext(event, payload, deliveryId), payload))]);
           if (isBlockingAgentClarificationRun(baseEvents, normalized.text, agentBackendRun.finishReason)) {
-            agentPlanOrchestrator.complete(threadId, payload);
+            agentPlanOrchestrator.complete(threadId, payload, baseEvents);
             return recordGenerationRun({
               storage,
               payload,
@@ -193,11 +274,33 @@ export function createGenerationService(
             threadId,
             projectId: selection.projectId,
             storage,
+            deliveryId,
             text: normalized.text,
-            events: baseEvents
+            events: baseEvents,
+            timeline,
+            emitTimeline
           });
-          const events = [...baseEvents, ...finalized.timelineEvents.map(timelineEventToToolEvent)];
-          agentPlanOrchestrator.complete(threadId, payload);
+          const progressiveFinalized = await finalizeProgressiveCanvasDelivery({
+            payload,
+            threadId,
+            projectId: selection.projectId,
+            storage,
+            deliveryId,
+            text: finalized.text || normalized.text,
+            events: baseEvents,
+            timeline,
+            emitTimeline,
+            archiveMarkdownOutput: deps.archiveMarkdownOutput
+          });
+          for (const finalEvent of progressiveFinalized.events) {
+            emitRuntimeToolEvent(finalEvent);
+          }
+          const completed = timeline.event("run_completed", "completed", payload.locale === "zh" ? "运行完成" : "Run completed", payload.locale === "zh" ? "最终内容已生成。" : "Final content is ready.");
+          emitTimeline(completed);
+          const events = [...baseEvents, ...progressiveFinalized.events, ...timelineEvents.map(timelineEventToToolEvent)];
+          agentPlanOrchestrator.assertPostcondition(threadId, payload, events);
+          agentPlanOrchestrator.complete(threadId, payload, events);
+          const finishReason = finalFinishReason(agentBackendRun.finishReason, events);
           const recorded = recordGenerationRun({
             storage,
             payload,
@@ -208,12 +311,12 @@ export function createGenerationService(
             modelId: context.modelSettings.model,
             mode: context.mode,
             prompt: context.prompt,
-            text: finalized.text,
+            text: progressiveFinalized.text || finalized.text,
             provider: "agent-backend",
             usedMock: false,
             toolState: context.effectiveToolState,
             events,
-            finishReason: agentBackendRun.finishReason,
+            finishReason,
             usage: agentBackendRun.usage
           });
           return recorded;
@@ -225,6 +328,20 @@ export function createGenerationService(
       }
     } catch (error) {
       agentPlanOrchestrator.fail(threadId, payload, error);
+      if (!directCanvasIntent && isProgressiveCanvasDeliveryEnabled(payload)) {
+        ensureProgressiveDeliveryStarted();
+        for (const failureEvent of commitProgressiveFailureDelivery({
+          payload,
+          projectId: selection.projectId,
+          storage,
+          deliveryId,
+          error,
+          entries: progressiveEvidenceEntries
+        })) {
+          runtimeEvents.push(failureEvent);
+          emitRuntimeToolEvent(failureEvent);
+        }
+      }
       const event = createRuntimeFallbackEvent("agent-backend", error, isMockFallbackEnabled(deps));
       runtimeEvents.push(event);
       observeToolEvent(event);
@@ -242,7 +359,7 @@ export function createGenerationService(
       mode: context.mode,
       prompt: context.prompt,
       toolState: context.effectiveToolState,
-      events: runtimeEvents
+      events: [...runtimeEvents, ...timelineEvents.map(timelineEventToToolEvent)]
     });
   }
 
@@ -471,7 +588,6 @@ export function createGenerationService(
       }, executionRuntime);
 
       if (agentBackendRun) {
-        agentPlanOrchestrator.assertPostcondition(threadId, payload);
         const normalized = normalizeAgentRunOutput({
           text: agentBackendRun.text,
           locale: payload.locale,
@@ -507,7 +623,7 @@ export function createGenerationService(
             textGate.flush();
             callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
             const events = [...baseEvents, ...timelineEvents.map(timelineEventToToolEvent)];
-            agentPlanOrchestrator.complete(threadId, payload);
+            agentPlanOrchestrator.complete(threadId, payload, events);
             return recordGenerationRun({
               storage,
               payload,
@@ -556,7 +672,9 @@ export function createGenerationService(
           const completed = timeline.event("run_completed", "completed", payload.locale === "zh" ? "运行完成" : "Run completed", payload.locale === "zh" ? "最终内容已生成。" : "Final content is ready.");
           emitTimeline(completed);
           const events = [...baseEvents, ...progressiveFinalized.events, ...timelineEvents.map(timelineEventToToolEvent)];
-          agentPlanOrchestrator.complete(threadId, payload);
+          agentPlanOrchestrator.assertPostcondition(threadId, payload, events);
+          agentPlanOrchestrator.complete(threadId, payload, events);
+          const finishReason = finalFinishReason(agentBackendRun.finishReason, events);
           const recorded = recordGenerationRun({
             storage,
             payload,
@@ -572,7 +690,7 @@ export function createGenerationService(
             usedMock: false,
             toolState: context.effectiveToolState,
             events,
-            finishReason: agentBackendRun.finishReason,
+            finishReason,
             usage: agentBackendRun.usage
           });
           return recorded;
@@ -1189,11 +1307,18 @@ function markAnsweredAgentClarification(storage: SQLiteStorageRepository, thread
 
 function isBlockingAgentClarificationRun(events: ToolEventRecord[], text: string, finishReason?: string) {
   if (!hasAgentClarificationEvent(events)) return false;
+  if (hasPostClarificationProgress(events)) return false;
   const visible = stripAppendedSources(text).trim();
   return finishReason === "clarification_required"
     || !visible
     || isProcessClarificationText(visible)
     || /(?:need(?:s|ed)?\s+(?:to\s+)?(?:confirm|clarif|supplement)|clarif(?:y|ication)|supplement(?:al)?\s+information|范围|确认|补充|澄清)/i.test(visible) && visible.length < 500;
+}
+
+function finalFinishReason(finishReason: string | undefined, events: ToolEventRecord[]) {
+  return finishReason === "clarification_required" && hasPostClarificationProgress(events)
+    ? "agent_backend_completed"
+    : finishReason;
 }
 
 function stripAppendedSources(text: string) {
@@ -1430,7 +1555,8 @@ async function finalizeProgressiveCanvasDelivery(input: {
   const instruction = input.payload.chatInstruction ?? input.payload.freeTextPrompt ?? "";
   if (isDirectCanvasDeliveryIntent(instruction)) return { text: input.text, events: [] as ToolEventRecord[] };
   const assistantText = input.text.trim();
-  if (!assistantText) return { text: input.text, events: [] as ToolEventRecord[] };
+  const existingFilePaths = outputMarkdownPathsFromEvents(input.events);
+  if (!assistantText && existingFilePaths.length === 0) return { text: input.text, events: [] as ToolEventRecord[] };
   if (containsInternalRuntimeProtocol(assistantText)) {
     throw new Error("AgentBackend returned internal runtime output");
   }
@@ -1442,7 +1568,6 @@ async function finalizeProgressiveCanvasDelivery(input: {
     text: assistantText,
     events: input.events
   });
-  const existingFilePaths = outputMarkdownPathsFromEvents(input.events);
   const archiveResult = await archiveProgressiveMarkdownOutputs({
     threadId: input.threadId,
     deliveryId: input.deliveryId,
@@ -1490,6 +1615,7 @@ async function finalizeProgressiveCanvasDelivery(input: {
     events.push(syntheticWriteEvent);
     const fileDocumentEvents = commitProgressiveFileDocumentDelivery({
       payload: input.payload,
+      threadId: input.threadId,
       projectId: input.projectId,
       storage: input.storage,
       deliveryId: input.deliveryId,
@@ -1515,6 +1641,7 @@ async function finalizeProgressiveCanvasDelivery(input: {
   for (const event of input.events) {
     const fileDocumentEvents = commitProgressiveFileDocumentDelivery({
       payload: input.payload,
+      threadId: input.threadId,
       projectId: input.projectId,
       storage: input.storage,
       deliveryId: input.deliveryId,
@@ -1547,6 +1674,7 @@ async function finalizeProgressiveCanvasDelivery(input: {
     };
     const fileDocumentEvents = commitProgressiveFileDocumentDelivery({
       payload: input.payload,
+      threadId: input.threadId,
       projectId: input.projectId,
       storage: input.storage,
       deliveryId: input.deliveryId,
@@ -1598,7 +1726,7 @@ async function finalizeProgressiveCanvasDelivery(input: {
         phase: "file_document",
         progressive: true,
         status: "final",
-        fileDocument: document
+        fileDocument: { ...document, threadId: input.threadId }
       },
       includeInProjectContext: false
     }));
@@ -1969,6 +2097,20 @@ function hasAgentClarificationEvent(events: ToolEventRecord[]) {
   return events.some(isAgentClarificationEvent);
 }
 
+function hasPostClarificationProgress(events: ToolEventRecord[]) {
+  const clarificationIndex = events.findIndex(isAgentClarificationEvent);
+  if (clarificationIndex < 0) return false;
+  return events.slice(clarificationIndex + 1).some((event) => {
+    if (isAgentClarificationEvent(event)) return false;
+    const payload = record(event.payload);
+    const toolName = readString(payload.toolName) || readString(payload.tool);
+    const eventType = readString(payload.eventType) || event.eventType;
+    return /(?:^|_)tool_(?:started|completed)$/.test(event.eventType)
+      || /^canvas_delivery_(?:research|body_checkpoint|body_final|file_document)_committed$/.test(eventType)
+      || /^(?:write_file|present_files|web_search|web_fetch|knowledge_base)$/.test(toolName);
+  });
+}
+
 function unavailableFinalBodySummary(locale: GenerateRequest["locale"], sourceCount: number) {
   const title = locale === "zh" ? "正文摘要" : "Body summary";
   const message = locale === "zh"
@@ -2140,6 +2282,7 @@ function commitProgressiveResearchDelivery(input: {
 
 function commitProgressiveFileDocumentDelivery(input: {
   payload: GenerateRequest;
+  threadId: string;
   projectId: string;
   storage: SQLiteStorageRepository;
   deliveryId: string;
@@ -2172,7 +2315,7 @@ function commitProgressiveFileDocumentDelivery(input: {
         canvasDelivery: true,
         deliveryId: input.deliveryId,
         phase: "file_document",
-        fileDocument: document
+        fileDocument: { ...document, threadId: input.threadId }
       },
       includeInProjectContext: false
     };
