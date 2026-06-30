@@ -291,12 +291,15 @@ test("generation facade records AgentBackend runs when AgentBackend is enabled",
     }
   });
 
-  const result = await service.generateAndRecord({ mode: "structured", locale: "en", agentCardId: "blog-post" });
+  const result = await service.generateAndRecord({ mode: "structured", locale: "en", agentCardId: "blog-post", clientRequestId: "request_1" });
 
   assert.equal(result.provider, "agent-backend");
   assert.equal(result.usedMock, false);
+  assert.equal(result.completion?.status, "completed");
   assert.equal((records[0] as { provider: string }).provider, "agent-backend");
   assert.equal((records[0] as { configuredModelApiId: string }).configuredModelApiId, "configured-test");
+  assert.equal((records[0] as { clientRequestId: string }).clientRequestId, "request_1");
+  assert.ok((records[0] as { events: ToolEventRecord[] }).events.some((event) => event.eventType === "completion_evaluated"));
 });
 
 test("complex chat automatically enters preflight Plan generation", async () => {
@@ -649,26 +652,27 @@ test("streaming direct Canvas delivery keeps progressive placeholders when Agent
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
-      mode: "chat",
-      locale: "zh",
-      agentCardId: "chat-agent",
-      chatInstruction: "\u628a\u76f8\u5173\u4fe1\u606f\u6574\u7406\u5230Canvas\u91cc",
-      toolState: { web_search: true }
-    }, {
-      onToken: (token) => tokens.push(token),
-      onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /no visible assistant text or structured lifecycle events/i
-  );
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "chat-agent",
+    chatInstruction: "\u628a\u76f8\u5173\u4fe1\u606f\u6574\u7406\u5230Canvas\u91cc",
+    toolState: { web_search: true }
+  }, {
+    onToken: (token) => tokens.push(token),
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
 
   assert.equal(tokens.join(""), "");
+  assert.equal(result.provider, "agent-backend");
+  assert.equal(result.usedMock, false);
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /no visible assistant text or structured lifecycle events/i);
   assert.equal(canvasNodes.length, 3);
   assert.ok(canvasNodes.some((node) => node.metadata && (node.metadata as { phase?: string }).phase === "outline"));
   assert.ok(canvasNodes.some((node) => node.metadata && (node.metadata as { phase?: string }).phase === "body"));
   assert.ok(canvasNodes.some((node) => node.metadata && (node.metadata as { phase?: string }).phase === "failure"));
-  assert.equal(records.length, 0);
+  assert.equal(records.length, 1);
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_outline_committed"));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
   assert.ok(events.some((event) => event.eventType === "agent_backend_runtime_failed" && event.payload.fallback === "none"));
@@ -695,20 +699,19 @@ test("streaming direct Canvas delivery commits a link-only research reference af
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
-      mode: "chat",
-      locale: "zh",
-      agentCardId: "chat-agent",
-      chatInstruction: "\u9605\u8bfb\u6280\u672f\u6587\u6863\uff0c\u628a\u6bcf\u8f6e\u641c\u7d22\u548c\u67e5\u627e\u7684\u7ed3\u679c\u5b58\u5230\u753b\u5e03\uff0c\u6700\u540e\u751f\u6210\u6574\u4f53\u6982\u8ff0\u8282\u70b9",
-      toolState: { web_search: true }
-    }, {
-      onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /Recursion limit of 100 reached/
-  );
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "chat-agent",
+    chatInstruction: "\u9605\u8bfb\u6280\u672f\u6587\u6863\uff0c\u628a\u6bcf\u8f6e\u641c\u7d22\u548c\u67e5\u627e\u7684\u7ed3\u679c\u5b58\u5230\u753b\u5e03\uff0c\u6700\u540e\u751f\u6210\u6574\u4f53\u6982\u8ff0\u8282\u70b9",
+    toolState: { web_search: true }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
 
-  assert.equal(records.length, 0);
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /Recursion limit of 100 reached/);
+  assert.equal(records.length, 1);
   const researchNode = canvasNodes.find((node) => node.title === "\u7814\u7a76\u6458\u5f55 1");
   assert.ok(researchNode);
   assert.ok(String(researchNode.content).includes("[Agent Survey](https://example.com/agent-survey)"));
@@ -746,20 +749,19 @@ test("streaming direct Canvas delivery skips research references when search has
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
-      mode: "chat",
-      locale: "zh",
-      agentCardId: "chat-agent",
-      chatInstruction: "\u9605\u8bfb\u6280\u672f\u6587\u6863\uff0c\u628a\u6bcf\u8f6e\u641c\u7d22\u548c\u67e5\u627e\u7684\u7ed3\u679c\u5b58\u5230\u753b\u5e03\uff0c\u6700\u540e\u751f\u6210\u6574\u4f53\u6982\u8ff0\u8282\u70b9",
-      toolState: { web_search: true }
-    }, {
-      onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /Recursion limit of 100 reached/
-  );
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "chat-agent",
+    chatInstruction: "\u9605\u8bfb\u6280\u672f\u6587\u6863\uff0c\u628a\u6bcf\u8f6e\u641c\u7d22\u548c\u67e5\u627e\u7684\u7ed3\u679c\u5b58\u5230\u753b\u5e03\uff0c\u6700\u540e\u751f\u6210\u6574\u4f53\u6982\u8ff0\u8282\u70b9",
+    toolState: { web_search: true }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
 
-  assert.equal(records.length, 0);
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /Recursion limit of 100 reached/);
+  assert.equal(records.length, 1);
   assert.equal(canvasNodes.some((node) => node.title === "\u7814\u7a76\u6458\u5f55 1"), false);
   assert.equal(canvasNodes.some((node) => String(node.content).includes("Search completed")), false);
   assert.equal(events.some((event) => event.eventType === "canvas_delivery_research_committed"), false);
@@ -789,19 +791,18 @@ test("streaming direct Canvas delivery dedupes repeated research evidence keys",
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
-      mode: "chat",
-      locale: "zh",
-      agentCardId: "chat-agent",
-      chatInstruction: "\u9605\u8bfb\u6280\u672f\u6587\u6863\uff0c\u628a\u6bcf\u8f6e\u641c\u7d22\u548c\u67e5\u627e\u7684\u7ed3\u679c\u5b58\u5230\u753b\u5e03\uff0c\u6700\u540e\u751f\u6210\u6574\u4f53\u6982\u8ff0\u8282\u70b9",
-      toolState: { web_search: true }
-    }, {
-      onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /Recursion limit of 100 reached/
-  );
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "chat-agent",
+    chatInstruction: "\u9605\u8bfb\u6280\u672f\u6587\u6863\uff0c\u628a\u6bcf\u8f6e\u641c\u7d22\u548c\u67e5\u627e\u7684\u7ed3\u679c\u5b58\u5230\u753b\u5e03\uff0c\u6700\u540e\u751f\u6210\u6574\u4f53\u6982\u8ff0\u8282\u70b9",
+    toolState: { web_search: true }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
 
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /Recursion limit of 100 reached/);
   assert.equal(canvasNodes.filter((node) => String(node.title).startsWith("\u7814\u7a76\u6458\u5f55")).length, 1);
   assert.equal(events.filter((event) => event.eventType === "canvas_delivery_research_committed").length, 1);
 });
@@ -836,8 +837,7 @@ test("streaming skill long task creates Canvas progress without explicit Canvas 
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
+  const result = await service.generateAndRecordStream({
       mode: "chat",
       locale: "zh",
       agentCardId: "chat-agent",
@@ -848,11 +848,11 @@ test("streaming skill long task creates Canvas progress without explicit Canvas 
       toolState: { web_search: true }
     }, {
       onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /Recursion limit of 100 reached/
-  );
+  });
 
-  assert.equal(records.length, 0);
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /Recursion limit of 100 reached/);
+  assert.equal(records.length, 1);
   assert.ok(canvasNodes.some((node) => node.title === "整体概述"));
   assert.ok(canvasNodes.some((node) => node.title === "正文"));
   assert.equal(canvasNodes.some((node) => String(node.content).includes("literature-review/SKILL.md")), false);
@@ -1674,8 +1674,7 @@ test("streaming generic long task creates Canvas progress from evidence tools", 
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
+  const result = await service.generateAndRecordStream({
       mode: "chat",
       locale: "en",
       agentCardId: "chat-agent",
@@ -1683,11 +1682,11 @@ test("streaming generic long task creates Canvas progress from evidence tools", 
       contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
     }, {
       onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /Recursion limit of 100 reached/
-  );
+  });
 
-  assert.equal(records.length, 0);
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /Recursion limit of 100 reached/);
+  assert.equal(records.length, 1);
   assert.ok(canvasNodes.some((node) => node.title === "Overview"));
   assert.ok(canvasNodes.some((node) => node.title === "Body draft" && String(node.content).includes("Working body draft")));
   const progressNode = canvasNodes.find((node) => node.title === "Progress note 1");
@@ -1723,8 +1722,7 @@ test("streaming generic long task skips web fetch references without linked sour
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
+  const result = await service.generateAndRecordStream({
       mode: "chat",
       locale: "en",
       agentCardId: "chat-agent",
@@ -1732,11 +1730,11 @@ test("streaming generic long task skips web fetch references without linked sour
       contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
     }, {
       onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /Recursion limit of 100 reached/
-  );
+  });
 
-  assert.equal(records.length, 0);
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /Recursion limit of 100 reached/);
+  assert.equal(records.length, 1);
   assert.ok(canvasNodes.some((node) => node.title === "Overview"));
   assert.equal(canvasNodes.some((node) => node.title === "Progress note 1"), false);
   assert.equal(canvasNodes.some((node) => String(node.content).includes("Fetched runtime notes")), false);
@@ -2626,8 +2624,7 @@ test("progressive Canvas blocks leaked skill DSML as final body", async () => {
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
+  const result = await service.generateAndRecordStream({
       mode: "chat",
       locale: "zh",
       agentCardId: "chat-agent",
@@ -2637,11 +2634,11 @@ test("progressive Canvas blocks leaked skill DSML as final body", async () => {
     }, {
       onToken: (token) => tokens.push(token),
       onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /internal runtime output/
-  );
+  });
 
-  assert.equal(records.length, 0);
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /internal runtime output/);
+  assert.equal(records.length, 1);
   assert.equal(tokens.join("").includes("webfetch"), false);
   assert.equal(canvasNodes.some((node) => /DSML|tool_calls|webfetch|invoke|parameter|maxcontentlength|2504\.19678/i.test(String(node.content))), false);
   assert.ok(canvasNodes.some((node) => node.title === "正文草稿" && String(node.content).includes("工作正文草稿")));
@@ -2669,18 +2666,17 @@ test("progressive Canvas notes sanitize unsafe tool snippets", async () => {
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
+  const result = await service.generateAndRecordStream({
       mode: "chat",
       locale: "en",
       agentCardId: "chat-agent",
       chatInstruction: "Audit the project files",
       transientSkillRefs: ["database-lookup"],
       contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
-    }),
-    /Recursion limit of 100 reached/
-  );
+  });
 
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /Recursion limit of 100 reached/);
   const text = canvasNodes.map((node) => String(node.content)).join("\n");
   assert.equal(text.includes("sk-secret"), false);
   assert.equal(text.includes("OPENAI_API_KEY"), false);

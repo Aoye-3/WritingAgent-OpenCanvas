@@ -302,6 +302,10 @@ export function migrateStorageSchema(db: DatabaseSync) {
   if (!columnExists(db, "runs", "model_id")) {
     db.exec(`ALTER TABLE runs ADD COLUMN model_id TEXT`);
   }
+  if (!columnExists(db, "runs", "client_request_id")) {
+    db.exec(`ALTER TABLE runs ADD COLUMN client_request_id TEXT`);
+  }
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_thread_client_request ON runs(thread_id, client_request_id) WHERE client_request_id IS NOT NULL`);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS project_model_bindings (
@@ -683,6 +687,15 @@ export function migrateStorageSchema(db: DatabaseSync) {
       db.exec(`ALTER TABLE plan_runs ADD COLUMN preflight_json TEXT NOT NULL DEFAULT '{}'`);
     }
     db.exec(`INSERT INTO schema_version (version, applied_at) VALUES (15, datetime('now'))`);
+  }
+
+  const version16 = db.prepare(`SELECT version FROM schema_version WHERE version = 16`).get();
+  if (!version16) {
+    if (!columnExists(db, "runs", "client_request_id")) {
+      db.exec(`ALTER TABLE runs ADD COLUMN client_request_id TEXT`);
+    }
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_thread_client_request ON runs(thread_id, client_request_id) WHERE client_request_id IS NOT NULL`);
+    db.exec(`INSERT INTO schema_version (version, applied_at) VALUES (16, datetime('now'))`);
   }
 }
 

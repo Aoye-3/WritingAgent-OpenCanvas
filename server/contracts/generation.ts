@@ -7,6 +7,7 @@ import type { OrchestrationPolicy } from "../services/generation/orchestrationPo
 
 export type GenerateRequest = {
   mode: "faceted" | "freeText" | "structured" | "chat";
+  clientRequestId?: string;
   taskId?: string;
   agentCardId?: string;
   projectId?: string;
@@ -50,7 +51,17 @@ export type GenerateResponse = {
   errorMessage?: string;
   events?: ToolEventRecord[];
   finishReason?: string;
+  completion?: RunCompletionVerdict;
   usage?: unknown;
+};
+
+export type RunCompletionStatus = "continue" | "waiting" | "finalizing" | "completed" | "partial" | "failed";
+
+export type RunCompletionVerdict = {
+  status: RunCompletionStatus;
+  reasons: string[];
+  missingRequirements: string[];
+  evaluatedAt: string;
 };
 
 export function parseGenerateRequest(value: unknown): GenerateRequest {
@@ -70,6 +81,7 @@ export function parseGenerateRequest(value: unknown): GenerateRequest {
 
   return {
     mode,
+    clientRequestId: readString(body.clientRequestId),
     locale,
     taskId: readString(body.taskId),
     agentCardId: readString(body.agentCardId),

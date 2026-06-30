@@ -6,7 +6,8 @@ import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, Kno
 import { MarkdownText } from "../../../shared/MarkdownText";
 import type { AgentCard, AgentClarification, CanvasNode, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, RunTimelineEvent, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
 import type { CanvasNodePatch } from "../../canvas/canvasClient";
-import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
+import { fetchRuntimeRunEvents } from "../../generation/generationClient";
+import type { CollaborationMessage, GenerateRequest, RuntimeRunEvent } from "../../generation/types";
 import { useI18n } from "../../i18n/I18nProvider";
 import { AnnotationChipRow, CanvasWriteProposalPanel, type MessageAnnotation } from "./CanvasWriteProposalPanel";
 import { AssistantRunTrace } from "./AssistantRunTrace";
@@ -616,48 +617,62 @@ export function AICollaborationDrawer({
           const isPendingAssistant = message.role === "assistant" && message.isStreaming && !message.text.trim();
           const progressSegments = message.role === "assistant" ? progressSegmentsForMessage(message) : [];
           const rawRunLogEvents = message.role === "assistant" ? rawRunLogEventsForMessage(message) : [];
+          const rawRunTarget = message.role === "assistant" ? runtimeRunTargetForMessage(message, rawRunLogEvents) : undefined;
           const hasProgressSegments = progressSegments.length > 0;
           const hasRunTrace = message.role === "assistant" && Boolean(message.timeline?.some((event) => !isProgressTimelineEvent(event)));
           const hasReasoningText = message.role === "assistant" && Boolean(message.reasoningText?.trim());
+          const hasRuntimePanel = message.role === "assistant" && (hasProgressSegments || hasRunTrace || hasReasoningText || Boolean(rawRunTarget) || Boolean(message.completion));
           const usesThinkingStatus = isPendingAssistant && !hasRunTrace && !hasReasoningText && !hasProgressSegments;
           const traceTarget = agentPlanTraceTarget(message.timeline, plans);
-          return (
-            <article className={`message message-${message.role}${message.isStreaming ? " message-streaming" : ""}${usesThinkingStatus ? " message-thinking" : ""}`} key={message.id}>
-              <div className="message-avatar" aria-hidden="true">{message.role === "user" ? "U" : "F"}</div>
-              <div className={usesThinkingStatus ? "message-thinking-status" : "message-bubble"}>
-                {message.role === "assistant" && message.isStreaming && !message.text.trim() ? (
-                  hasProgressSegments ? (
-                    <>
-                      <ProgressSegmentList completed={false} rawEvents={rawRunLogEvents} segments={progressSegments} />
+          const runtimePanel = hasRuntimePanel ? (
+            <AgentLoopRunPanel
+              completed={!message.isStreaming && Boolean(message.text.trim())}
+              fallbackEvents={rawRunLogEvents}
+              isStreaming={Boolean(message.isStreaming)}
+              key={`${message.id}:runtime`}
+              message={message}
+              onFocusPlanArtifact={onFocusPlanArtifact}
+              progressSegments={progressSegments}
+              runTarget={rawRunTarget}
+              traceTarget={traceTarget}
+            />
+          ) : null;
+          if (message.role === "assistant" && !message.text.trim()) {
+            return (
+              <div className="agent-loop-message-frame" key={message.id}>
+                {runtimePanel}
+                {message.isStreaming && !runtimePanel ? (
+                  <article className="message message-assistant message-streaming message-thinking">
+                    <div className="message-avatar" aria-hidden="true">F</div>
+                    <div className="message-thinking-status">
                       <StreamingStatus label={streamingStatusLabel(message, t("workspace.preparingResponse"))} />
-                    </>
+                    </div>
+                  </article>
+                ) : null}
+              </div>
+            );
+          }
+          return (
+            <div className="agent-loop-message-frame" key={message.id}>
+              {runtimePanel}
+              <article className={`message message-${message.role}${message.isStreaming ? " message-streaming" : ""}${usesThinkingStatus ? " message-thinking" : ""}`}>
+                <div className="message-avatar" aria-hidden="true">{message.role === "user" ? "U" : "F"}</div>
+                <div className={usesThinkingStatus ? "message-thinking-status" : "message-bubble"}>
+                  {message.role === "assistant" ? (
+                    <div className="assistant-selectable-text" onMouseUp={(event) => captureSelection(event, message)}>
+                      <MarkdownText text={message.text} highlights={messageAnnotations.map((annotation) => annotation.text)} />
+                      {message.isStreaming ? <span className="typing-caret" aria-hidden="true" /> : null}
+                    </div>
                   ) : (
                     <>
-                      <AssistantRunTrace events={message.timeline} planId={traceTarget.planId} stepId={traceTarget.stepId} onFocusNode={onFocusPlanArtifact} />
-                      <ReasoningStreamPanel message={message} />
-                      <StreamingStatus label={streamingStatusLabel(message, t("workspace.preparingResponse"))} />
+                      <p>{message.text}</p>
+                      <QueuedInputStatus message={message} onRequestIntervention={onRequestQueuedInputIntervention} />
                     </>
-                  )
-                ) : message.role === "assistant" ? (
-                  <div className="assistant-selectable-text" onMouseUp={(event) => captureSelection(event, message)}>
-                    {hasProgressSegments ? <ProgressSegmentList completed={!message.isStreaming && Boolean(message.text.trim())} rawEvents={rawRunLogEvents} segments={progressSegments} /> : (
-                      <>
-                        <AssistantRunTrace events={message.timeline} planId={traceTarget.planId} stepId={traceTarget.stepId} onFocusNode={onFocusPlanArtifact} />
-                        <ReasoningStreamPanel message={message} />
-                      </>
-                    )}
-                    <MarkdownText text={message.text} highlights={messageAnnotations.map((annotation) => annotation.text)} />
-                    {message.isStreaming ? <span className="typing-caret" aria-hidden="true" /> : null}
-                  </div>
-                ) : (
-                  <>
-                    <p>{message.text}</p>
-                    <QueuedInputStatus message={message} onRequestIntervention={onRequestQueuedInputIntervention} />
-                  </>
-                )}
-                {message.usedMock ? <span className="message-meta">{t("workspace.mockFallback")}</span> : null}
-              </div>
-            </article>
+                  )}
+                  {message.usedMock ? <span className="message-meta">{t("workspace.mockFallback")}</span> : null}
+                </div>
+              </article>
+            </div>
           );
         })}
         {pendingWriteSuggestion ? (
@@ -895,9 +910,10 @@ export function AICollaborationDrawer({
   );
 }
 
-function ProgressSegmentList({ completed, rawEvents, segments }: {
+function ProgressSegmentList({ completed, rawEvents, runTarget, segments }: {
   completed: boolean;
   rawEvents: RunTimelineEvent[];
+  runTarget?: { threadId: string; runId: string };
   segments: ReturnType<typeof progressSegmentsForMessage>;
 }) {
   const { locale } = useI18n();
@@ -914,7 +930,7 @@ function ProgressSegmentList({ completed, rawEvents, segments }: {
           </div>
         ))}
       </div>
-      <RawRunLogDetails events={rawEvents} />
+      <RawRunLogDetails fallbackEvents={rawEvents} runTarget={runTarget} />
     </>
   );
   if (!completed) return body;
@@ -926,19 +942,38 @@ function ProgressSegmentList({ completed, rawEvents, segments }: {
   );
 }
 
-function RawRunLogDetails({ events }: { events: RunTimelineEvent[] }) {
+function RawRunLogDetails({ fallbackEvents, runTarget }: { fallbackEvents: RunTimelineEvent[]; runTarget?: { threadId: string; runId: string } }) {
   const { locale } = useI18n();
-  if (!events.length) return null;
+  const [events, setEvents] = useState<RuntimeRunEvent[]>([]);
+  const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "failed">("idle");
+  if (!runTarget && !fallbackEvents.length) return null;
+  const displayEvents = events.length ? events : fallbackEvents.map(runtimeRunEventFromTimeline);
+  const count = displayEvents.length;
+  const label = locale === "zh" ? "\u5df2\u8fd0\u884c\u547d\u4ee4/\u5de5\u5177" : "Raw tool log";
+  const loadEvents = () => {
+    if (!runTarget || status !== "idle") return;
+    setStatus("loading");
+    fetchRuntimeRunEvents({ ...runTarget, limit: 500 })
+      .then((nextEvents) => {
+        setEvents(nextEvents);
+        setStatus("loaded");
+      })
+      .catch(() => setStatus("failed"));
+  };
   return (
-    <details className="raw-run-log-details">
-      <summary>{locale === "zh" ? `\u5df2\u8fd0\u884c\u547d\u4ee4/\u5de5\u5177 ${events.length}` : `Raw tool log ${events.length}`}</summary>
+    <details className="raw-run-log-details" onToggle={(event) => { if (event.currentTarget.open) loadEvents(); }}>
+      <summary>
+        {label}{count ? ` ${count}` : ""}
+        {status === "loading" ? (locale === "zh" ? " \u52a0\u8f7d\u4e2d" : " loading") : null}
+        {status === "failed" ? (locale === "zh" ? " \u4f7f\u7528\u6458\u8981" : " using summary") : null}
+      </summary>
       <div className="raw-run-log-list">
-        {events.map((event) => (
-          <div className="raw-run-log-item" key={event.id}>
-            <strong>{event.title}</strong>
-            {event.summary ? <p>{event.summary}</p> : null}
+        {displayEvents.length ? displayEvents.map((event, index) => (
+          <div className="raw-run-log-item" key={`${event.sequence ?? index}:${event.eventType}`}>
+            <strong>{runtimeRunEventTitle(event)}</strong>
+            {runtimeRunEventDetail(event) ? <p>{runtimeRunEventDetail(event)}</p> : null}
           </div>
-        ))}
+        )) : <div className="raw-run-log-item"><p>{locale === "zh" ? "\u6682\u65e0\u53ef\u5c55\u793a\u7684\u540e\u53f0\u65e5\u5fd7\u3002" : "No displayable raw events yet."}</p></div>}
       </div>
     </details>
   );
@@ -1226,6 +1261,82 @@ function buildAgentClarificationTimeline(entries: PlanTimelineEntry[], clarifica
   return result;
 }
 
+function AgentLoopRunPanel({
+  completed,
+  fallbackEvents,
+  isStreaming,
+  message,
+  onFocusPlanArtifact,
+  progressSegments,
+  runTarget,
+  traceTarget
+}: {
+  completed: boolean;
+  fallbackEvents: RunTimelineEvent[];
+  isStreaming: boolean;
+  message: CollaborationMessage;
+  onFocusPlanArtifact: (targetId: string) => void;
+  progressSegments: ReturnType<typeof progressSegmentsForMessage>;
+  runTarget?: { threadId: string; runId: string };
+  traceTarget: { planId?: string; stepId?: string };
+}) {
+  const { locale, t } = useI18n();
+  const completion = message.completion;
+  const statusLabel = completion
+    ? completionStatusLabel(locale, completion.status)
+    : isStreaming
+      ? t("workspace.preparingResponse")
+      : locale === "zh" ? "运行记录" : "Run record";
+  return (
+    <section className="agent-loop-run" aria-label={locale === "zh" ? "Agent 运行循环" : "Agent run loop"}>
+      <div className="agent-loop-run-header">
+        <span>{statusLabel}</span>
+        {isStreaming ? <i aria-hidden="true" /> : null}
+      </div>
+      {completion ? <CompletionVerdictSummary completion={completion} locale={locale} /> : null}
+      {progressSegments.length ? (
+        <ProgressSegmentList completed={completed} rawEvents={fallbackEvents} runTarget={runTarget} segments={progressSegments} />
+      ) : (
+        <>
+          <AssistantRunTrace events={message.timeline} planId={traceTarget.planId} stepId={traceTarget.stepId} onFocusNode={onFocusPlanArtifact} />
+          <ReasoningStreamPanel message={message} />
+          <RawRunLogDetails fallbackEvents={fallbackEvents} runTarget={runTarget} />
+        </>
+      )}
+      {isStreaming ? <StreamingStatus label={streamingStatusLabel(message, t("workspace.preparingResponse"))} /> : null}
+    </section>
+  );
+}
+
+function CompletionVerdictSummary({ completion, locale }: { completion: NonNullable<CollaborationMessage["completion"]>; locale: "en" | "zh" }) {
+  const reason = completion.reasons[0];
+  const missing = completion.missingRequirements[0];
+  return (
+    <div className="completion-verdict" data-status={completion.status}>
+      <strong>{completionStatusLabel(locale, completion.status)}</strong>
+      {reason ? <span>{reason}</span> : null}
+      {missing ? <em>{missing}</em> : null}
+    </div>
+  );
+}
+
+function completionStatusLabel(locale: "en" | "zh", status: NonNullable<CollaborationMessage["completion"]>["status"]) {
+  if (locale === "zh") {
+    if (status === "completed") return "完成";
+    if (status === "partial") return "部分完成";
+    if (status === "waiting") return "等待用户";
+    if (status === "failed") return "失败";
+    if (status === "finalizing") return "最终整理";
+    return "继续运行";
+  }
+  if (status === "completed") return "Completed";
+  if (status === "partial") return "Partial";
+  if (status === "waiting") return "Waiting";
+  if (status === "failed") return "Failed";
+  if (status === "finalizing") return "Finalizing";
+  return "Continuing";
+}
+
 export function mergeAgentClarificationDisplayRecords(records: AgentClarification[], optimisticRecords: AgentClarification[]) {
   const persistedAnsweredKeys = new Set(records
     .filter((record) => record.status === "answered")
@@ -1321,6 +1432,14 @@ function progressSegmentFromTimelineEvent(event: RunTimelineEvent): NonNullable<
     threadId: event.threadId,
     runId: event.runId,
     stageId: typeof payload.stageId === "string" ? payload.stageId : undefined,
+    loopId: typeof payload.loopId === "string" ? payload.loopId : undefined,
+    loopIndex: typeof payload.loopIndex === "number" ? payload.loopIndex : undefined,
+    stepKind: readStepKind(payload.stepKind),
+    actionId: typeof payload.actionId === "string" ? payload.actionId : undefined,
+    observationId: typeof payload.observationId === "string" ? payload.observationId : undefined,
+    completionStatus: readCompletionStatus(payload.completionStatus),
+    completionReasons: readStringArray(payload.completionReasons),
+    missingRequirements: readStringArray(payload.missingRequirements),
     phase: typeof payload.phase === "string" ? payload.phase : undefined,
     status: event.status,
     title: event.title,
@@ -1332,11 +1451,71 @@ function progressSegmentFromTimelineEvent(event: RunTimelineEvent): NonNullable<
   };
 }
 
+function readStepKind(value: unknown): NonNullable<CollaborationMessage["progressSegments"]>[number]["stepKind"] | undefined {
+  return value === "intake" || value === "context" || value === "decide" || value === "act" || value === "observe" || value === "evaluate" || value === "checkpoint" || value === "complete" || value === "fail"
+    ? value
+    : undefined;
+}
+
+function readCompletionStatus(value: unknown): NonNullable<CollaborationMessage["progressSegments"]>[number]["completionStatus"] | undefined {
+  return value === "continue" || value === "waiting" || value === "finalizing" || value === "completed" || value === "partial" || value === "failed"
+    ? value
+    : undefined;
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()) : undefined;
+}
+
 function rawRunLogEventsForMessage(message: CollaborationMessage) {
   return [...(message.timeline ?? [])]
     .filter((event) => !isProgressTimelineEvent(event))
     .filter((event) => event.eventType === "tool_started" || event.eventType === "tool_completed" || event.status === "failed" || event.payload?.visibility === "raw")
     .sort((left, right) => left.sequence - right.sequence);
+}
+
+function runtimeRunTargetForMessage(message: CollaborationMessage, rawEvents: RunTimelineEvent[]) {
+  if (message.runtimeRun?.threadId && message.runtimeRun.runId) return message.runtimeRun;
+  const candidates = [
+    ...(message.progressSegments ?? []).map((event) => ({ threadId: event.threadId, runId: event.runId })),
+    ...rawEvents.map((event) => ({ threadId: event.threadId, runId: event.runId }))
+  ].reverse();
+  return candidates.find((candidate): candidate is { threadId: string; runId: string } => Boolean(candidate.threadId && candidate.runId));
+}
+
+function runtimeRunEventFromTimeline(event: RunTimelineEvent): RuntimeRunEvent {
+  return {
+    threadId: event.threadId,
+    runId: event.runId,
+    eventType: event.eventType,
+    category: "timeline",
+    content: event.summary,
+    metadata: event.payload,
+    sequence: event.sequence,
+    createdAt: event.createdAt
+  };
+}
+
+function runtimeRunEventTitle(event: RuntimeRunEvent) {
+  const label = event.eventType.replace(/[_:.]+/g, " ").trim();
+  return event.category ? `${label} / ${event.category}` : label;
+}
+
+function runtimeRunEventDetail(event: RuntimeRunEvent) {
+  const content = compactRuntimeValue(event.content);
+  if (content) return content;
+  return compactRuntimeValue(event.metadata);
+}
+
+function compactRuntimeValue(value: unknown): string {
+  if (typeof value === "string") return value.trim().slice(0, 500);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (!value) return "";
+  try {
+    return JSON.stringify(value).replace(/\s+/g, " ").slice(0, 500);
+  } catch {
+    return "";
+  }
 }
 
 function queuedInputLabels(locale: string, status: NonNullable<CollaborationMessage["queuedInput"]>["status"]) {
@@ -1493,7 +1672,9 @@ function readClarificationOptions(value: unknown): AgentClarificationPrompt["opt
 }
 
 function readString(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  return /^(?:undefined|null|none|nan)$/i.test(text) ? "" : text;
 }
 
 export function agentClarificationRecordKeys(clarification: AgentClarification) {

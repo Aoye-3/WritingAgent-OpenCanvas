@@ -2,6 +2,7 @@ import type { Locale } from "../i18n/types";
 
 export type GenerateRequest = {
   mode: "faceted" | "freeText" | "structured" | "chat";
+  clientRequestId?: string;
   taskId?: string;
   agentCardId?: string;
   projectId?: string;
@@ -35,7 +36,17 @@ export type GenerateResponse = {
   errorMessage?: string;
   events?: GenerationEvent[];
   finishReason?: string;
+  completion?: RunCompletionVerdict;
   usage?: unknown;
+};
+
+export type RunCompletionStatus = "continue" | "waiting" | "finalizing" | "completed" | "partial" | "failed";
+
+export type RunCompletionVerdict = {
+  status: RunCompletionStatus;
+  reasons: string[];
+  missingRequirements: string[];
+  evaluatedAt: string;
 };
 
 export type GenerationEvent = {
@@ -66,6 +77,14 @@ export type AgentProgressEvent = {
   threadId?: string;
   runId?: string;
   stageId?: string;
+  loopId?: string;
+  loopIndex?: number;
+  stepKind?: "intake" | "context" | "decide" | "act" | "observe" | "evaluate" | "checkpoint" | "complete" | "fail";
+  actionId?: string;
+  observationId?: string;
+  completionStatus?: RunCompletionStatus;
+  completionReasons?: string[];
+  missingRequirements?: string[];
   phase?: string;
   status?: "running" | "completed" | "failed" | "waiting";
   title?: string;
@@ -78,6 +97,17 @@ export type AgentProgressEvent = {
 };
 
 export type ProgressSegment = AgentProgressEvent;
+
+export type RuntimeRunEvent = {
+  threadId?: string;
+  runId?: string;
+  eventType: string;
+  category?: string;
+  content?: unknown;
+  metadata?: Record<string, unknown>;
+  sequence?: number;
+  createdAt?: string;
+};
 
 export type QueuedRunInput = {
   id: string;
@@ -93,6 +123,8 @@ export type CollaborationMessage = {
   isReasoningStreaming?: boolean;
   timeline?: RunTimelineEvent[];
   progressSegments?: ProgressSegment[];
+  runtimeRun?: { threadId: string; runId: string };
+  completion?: RunCompletionVerdict;
   queuedInput?: QueuedRunInput;
   usedMock?: boolean;
   isStreaming?: boolean;

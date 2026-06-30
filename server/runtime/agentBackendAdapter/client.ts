@@ -61,6 +61,7 @@ export type AgentBackendRuntimeSignal = {
     | "llm_call_start"
     | "llm_call_end"
     | "llm_call_error"
+    | "run_metadata"
     | "synthesis_gate"
     | "waiting_for_user"
     | "agent_progress_reported"
@@ -185,6 +186,33 @@ export async function requestAgentBackendRunIntervention(input: {
     id: isRecord(payload) && typeof payload.id === "string" ? payload.id : input.inputId ?? "",
     status: isRecord(payload) && typeof payload.status === "string" ? payload.status : "requested"
   };
+}
+
+export async function listAgentBackendRunEvents(input: {
+  threadId: string;
+  runId: string;
+  limit?: number;
+  config?: AgentBackendRuntimeConfig;
+  fetchImpl?: typeof fetch;
+}): Promise<unknown[]> {
+  const config = input.config ?? getAgentBackendRuntimeConfig();
+  if (!config.enabled) {
+    throw new Error("AgentBackend runtime is disabled");
+  }
+  const limit = Number.isInteger(input.limit) && input.limit && input.limit > 0
+    ? Math.min(input.limit, 2000)
+    : 500;
+  const response = await authenticatedAgentBackendFetch({
+    config,
+    path: `/api/threads/${encodeURIComponent(input.threadId)}/runs/${encodeURIComponent(input.runId)}/events?limit=${limit}`,
+    fetchImpl: input.fetchImpl,
+    init: { method: "GET" }
+  });
+  if (!response.ok) {
+    throw new Error(await formatRuntimeHttpError(response));
+  }
+  const payload = await response.json() as unknown;
+  return Array.isArray(payload) ? payload : [];
 }
 
 async function formatRuntimeHttpError(response: Response) {
@@ -554,7 +582,9 @@ async function readAgentBackendStream(
           signalType: runtimeSignal.type,
           payload: runtimeSignal.payload
         });
-        if (runtimeSignal.type === "waiting_for_user") {
+        if (runtimeSignal.type === "run_metadata") {
+          callbacks.onRuntimeSignal?.(runtimeSignal);
+        } else if (runtimeSignal.type === "waiting_for_user") {
           sawWaitingForUser = true;
           callbacks.onStatus?.({ phase: "finalizing", label: runtimeSignal.label });
           callbacks.onRuntimeSignal?.(runtimeSignal);
@@ -631,6 +661,25 @@ async function readAgentBackendStream(
 }
 
 function runtimeSignalFromSseEvent(event: string, data: unknown): AgentBackendRuntimeSignal | undefined {
+  if (event === "metadata" && isRecord(data)) {
+    const runId = readSourceString(data.run_id) || readSourceString(data.runId);
+    const threadId = readSourceString(data.thread_id) || readSourceString(data.threadId);
+    if (!runId || !threadId) return undefined;
+    return {
+      type: "run_metadata",
+      label: "Agent runtime run opened.",
+      payload: {
+        type: "agent_progress_reported",
+        runId,
+        threadId,
+        phase: "run",
+        status: "running",
+        summary: "Agent runtime run opened.",
+        visibility: "raw",
+        source: "agent_runtime_metadata"
+      }
+    };
+  }
   if (event === "comment") {
     const comment = typeof data === "string" ? data.trim().toLowerCase() : "";
     if (comment === "heartbeat") {
@@ -751,7 +800,7 @@ function sanitizeRuntimeSignalPayload(data: Record<string, unknown>) {
 }
 
 function sanitizeAgentProgressPayload(data: Record<string, unknown>) {
-  const allowed = ["type", "event", "runId", "threadId", "phase", "status", "summary", "next", "source", "createdAt"];
+  const allowed = ["type", "event", "runId", "threadId", "stageId", "loopId", "loopIndex", "stepKind", "actionId", "observationId", "completionStatus", "completionReasons", "missingRequirements", "phase", "status", "title", "summary", "next", "interventionHint", "visibility", "source", "createdAt"];
   return Object.fromEntries(allowed.filter((key) => key in data).map((key) => [key, data[key]]));
 }
 

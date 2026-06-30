@@ -1,5 +1,5 @@
-import type { AgentProgressEvent, GenerateRequest, GenerateResponse, RunTimelineEvent, StreamStatus } from "./types";
-import { apiPost } from "../../shared/apiClient";
+import type { AgentProgressEvent, GenerateRequest, GenerateResponse, RuntimeRunEvent, RunTimelineEvent, StreamStatus } from "./types";
+import { apiGet, apiPost } from "../../shared/apiClient";
 
 export async function generateText(payload: GenerateRequest): Promise<GenerateResponse> {
   return apiPost<GenerateResponse>("/api/generate", payload);
@@ -16,6 +16,18 @@ export async function requestRunIntervention(payload: {
     text: payload.text,
     inputId: payload.inputId
   });
+}
+
+export async function fetchRuntimeRunEvents(payload: {
+  threadId: string;
+  runId: string;
+  limit?: number;
+}): Promise<RuntimeRunEvent[]> {
+  const limit = payload.limit && Number.isInteger(payload.limit) ? `&limit=${encodeURIComponent(String(payload.limit))}` : "";
+  const response = await apiGet<{ events: RuntimeRunEvent[] }>(
+    `/api/generate/runs/${encodeURIComponent(payload.runId)}/events?threadId=${encodeURIComponent(payload.threadId)}${limit}`
+  );
+  return response.events;
 }
 
 export async function generateTextStream(

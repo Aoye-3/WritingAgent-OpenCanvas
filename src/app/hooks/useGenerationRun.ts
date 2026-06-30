@@ -292,6 +292,13 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const appendProgressEvent = (event: AgentProgressEvent, assistantMessageId = activeChatMessageIdRef.current) => {
     if (event.runId && event.threadId) {
       activeRunRef.current = { runId: event.runId, threadId: event.threadId };
+      if (assistantMessageId) {
+        setCollaborationMessages((messages) => messages.map((message) => (
+          message.id === assistantMessageId
+            ? { ...message, runtimeRun: { runId: event.runId!, threadId: event.threadId! } }
+            : message
+        )));
+      }
     }
     if (event.phase === "intervention" && event.status === "completed") {
       markFirstRequestedInterventionInjected();
@@ -440,7 +447,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       kind: "activity" as const,
       createdAt: activity.createdAt
     }));
-    const messagesWithTimeline = attachTimelineToLatestAssistant(state.messages, state.runTimelineEvents ?? []);
+    const messagesWithTimeline = attachRunStateToLatestAssistant(state.messages, state.runTimelineEvents ?? [], state.runCompletion);
     const timelineMessages = [...messagesWithTimeline, ...activityMessages].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     setCollaborationMessages((current) => reconcileCollaborationMessages(current, timelineMessages));
     setPlans(state.plans ?? []);
@@ -457,6 +464,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       const threadId = await options.ensureThreadId();
       const payload: GenerateRequest = {
         mode: "structured",
+        clientRequestId: crypto.randomUUID(),
         agentCardId: options.activeAgent.id,
         projectId: options.currentProjectId,
         threadId,
@@ -544,6 +552,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       const requestContextValues = omitSkillOverrideRefs(requestContext);
       const payload: GenerateRequest = {
         mode: "chat",
+        clientRequestId: assistantMessageId,
         agentCardId: options.activeAgent.id,
         projectId: options.currentProjectId,
         threadId: activeThreadId,
@@ -589,6 +598,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       updateStreamingMessage(assistantMessageId, {
         isStreaming: false,
         isReasoningStreaming: false,
+        completion: result.completion,
         status: "finalizing",
         statusLabel: undefined
       });
@@ -844,14 +854,18 @@ function reasoningBlockedMessage(locale: Locale) {
     : "Thinking hidden because internal runtime data was detected.";
 }
 
-function attachTimelineToLatestAssistant<T extends CollaborationMessage>(messages: T[], events: RunTimelineEvent[]) {
-  if (events.length === 0) return messages;
+function attachRunStateToLatestAssistant<T extends CollaborationMessage>(
+  messages: T[],
+  events: RunTimelineEvent[],
+  completion: ThreadStateResponse["runCompletion"]
+) {
+  if (events.length === 0 && !completion) return messages;
   const latestAssistantIndex = [...messages].reverse().findIndex((message) => message.role === "assistant");
   if (latestAssistantIndex < 0) return messages;
   const targetIndex = messages.length - 1 - latestAssistantIndex;
   const timeline = [...events].sort((left, right) => left.sequence - right.sequence);
   return messages.map((message, index) => (
-    index === targetIndex ? { ...message, timeline } : message
+    index === targetIndex ? { ...message, timeline, ...(completion ? { completion } : {}) } : message
   ));
 }
 

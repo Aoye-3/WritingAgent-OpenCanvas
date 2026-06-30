@@ -60,6 +60,8 @@ export type ToolEventRecord = {
     | "tool_call_completed"
     | "tool_call_failed"
     | "tool_loop_stopped"
+    | "completion_evaluated"
+    | "todo_completion_incomplete"
     | "internal_output_blocked"
     | "knowledge_search_completed"
     | "knowledge_search_failed"

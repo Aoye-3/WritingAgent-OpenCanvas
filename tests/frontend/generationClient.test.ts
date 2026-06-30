@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { generateTextStream } from "../../src/features/generation/generationClient";
+import { fetchRuntimeRunEvents, generateTextStream } from "../../src/features/generation/generationClient";
 
 test("streaming generation client forwards timeline events", async () => {
   const body = [
@@ -110,6 +110,35 @@ test("streaming generation client sends disabled skill refs in the request paylo
     });
 
     assert.deepEqual(JSON.parse(observedBody).disabledSkillRefs, ["summary"]);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("generation client fetches runtime run events", async () => {
+  let observedUrl = "";
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    observedUrl = String(input);
+    return Response.json({
+      events: [{
+        eventType: "llm.tool.result",
+        category: "message",
+        content: "done",
+        sequence: 1
+      }]
+    });
+  };
+  try {
+    const events = await fetchRuntimeRunEvents({ threadId: "thread_1", runId: "run_1", limit: 25 });
+
+    assert.equal(observedUrl, "/api/generate/runs/run_1/events?threadId=thread_1&limit=25");
+    assert.deepEqual(events, [{
+      eventType: "llm.tool.result",
+      category: "message",
+      content: "done",
+      sequence: 1
+    }]);
   } finally {
     globalThis.fetch = previousFetch;
   }

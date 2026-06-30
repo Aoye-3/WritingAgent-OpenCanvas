@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { defaultAgentSettings, getAgentCard } from "../../agentCards.js";
-import { buildRunRequest, requestAgentBackendRunIntervention, runAgentBackendAgent } from "./client.js";
+import { buildRunRequest, listAgentBackendRunEvents, requestAgentBackendRunIntervention, runAgentBackendAgent } from "./client.js";
 
 test("builds LangGraph-compatible AgentBackend run request", () => {
   const card = getAgentCard("summary");
@@ -262,6 +262,34 @@ test("surfaces AgentBackend heartbeat comments as runtime liveness status", asyn
   assert.ok(statuses.includes("Agent Runtime is still working..."));
 });
 
+test("surfaces AgentBackend metadata as a raw runtime run signal", async () => {
+  const statuses: string[] = [];
+  const signals: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+  const body = [
+    'event: metadata\ndata: {"run_id":"runtime_run_1","thread_id":"thread_1"}\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"Done"}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body, {
+    onStatus: (status) => statuses.push(status.label),
+    onRuntimeSignal: (signal) => signals.push(signal)
+  });
+
+  assert.equal(result.text, "Done");
+  assert.deepEqual(statuses, ["Thinking...", "Writing..."]);
+  assert.equal(signals[0]?.type, "run_metadata");
+  assert.deepEqual(signals[0]?.payload, {
+    type: "agent_progress_reported",
+    runId: "runtime_run_1",
+    threadId: "thread_1",
+    phase: "run",
+    status: "running",
+    summary: "Agent runtime run opened.",
+    visibility: "raw",
+    source: "agent_runtime_metadata"
+  });
+});
+
 test("does not let heartbeat overwrite an Agent clarification waiting state", async () => {
   const statuses: string[] = [];
   const body = [
@@ -364,6 +392,77 @@ test("surfaces LLM provider lifecycle custom events without creating tool events
   assert.ok(statuses.includes("Waiting for model response..."));
   assert.ok(statuses.includes("Model response received."));
   assert.ok(statuses.includes("Forcing final synthesis..."));
+});
+
+test("surfaces public agent progress custom events with display fields intact", async () => {
+  const signals: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+  const body = [
+    'event: custom\ndata: {"type":"agent_progress_reported","runId":"run_1","threadId":"thread_1","stageId":"evidence:collecting","loopId":"loop_1","loopIndex":1,"stepKind":"act","actionId":"call_search","observationId":"obs_search","completionStatus":"continue","completionReasons":["tool running"],"missingRequirements":["tool result"],"phase":"evidence","status":"running","title":"Evidence collection","summary":"Collecting sources.","next":"Review evidence next.","interventionHint":"Add source preferences now.","visibility":"stage","source":"agent_runtime","createdAt":"2026-06-14T00:00:00.000Z","prompt":"hidden"}\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"Done"}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body, {
+    onRuntimeSignal: (signal) => signals.push(signal)
+  });
+
+  assert.equal(result.text, "Done");
+  assert.equal(signals.length, 1);
+  assert.equal(signals[0]?.type, "agent_progress_reported");
+  assert.deepEqual(signals[0]?.payload, {
+    type: "agent_progress_reported",
+    runId: "run_1",
+    threadId: "thread_1",
+    stageId: "evidence:collecting",
+    loopId: "loop_1",
+    loopIndex: 1,
+    stepKind: "act",
+    actionId: "call_search",
+    observationId: "obs_search",
+    completionStatus: "continue",
+    completionReasons: ["tool running"],
+    missingRequirements: ["tool result"],
+    phase: "evidence",
+    status: "running",
+    title: "Evidence collection",
+    summary: "Collecting sources.",
+    next: "Review evidence next.",
+    interventionHint: "Add source preferences now.",
+    visibility: "stage",
+    source: "agent_runtime",
+    createdAt: "2026-06-14T00:00:00.000Z"
+  });
+});
+
+test("lists AgentBackend run events through authenticated runtime API", async () => {
+  let eventsUrl = "";
+  const fetchImpl = async (url: string | URL | Request) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) return Response.json({ needs_setup: false });
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, { headers });
+    }
+    eventsUrl = textUrl;
+    return Response.json([{ event_type: "llm.tool.result", category: "message", seq: 1 }]);
+  };
+
+  const events = await listAgentBackendRunEvents({
+    threadId: "thread_1",
+    runId: "run_1",
+    limit: 50,
+    config: {
+      enabled: true,
+      baseUrl: "http://AgentBackend.local",
+      assistantId: "lead_agent",
+      auth: { email: "admin@example.com", password: "strong-password", autoSetup: false, timeoutMs: 5000 }
+    },
+    fetchImpl
+  });
+
+  assert.equal(eventsUrl, "http://AgentBackend.local/api/threads/thread_1/runs/run_1/events?limit=50");
+  assert.deepEqual(events, [{ event_type: "llm.tool.result", category: "message", seq: 1 }]);
 });
 
 test("surfaces stream chunk timeout retry metadata without creating tool events", async () => {

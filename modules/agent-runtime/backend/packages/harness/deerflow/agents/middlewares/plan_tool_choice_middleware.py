@@ -145,12 +145,14 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         evidence_tools_raw = context.get("facetwrite_evidence_tools")
         evidence_tools = {value for value in evidence_tools_raw if isinstance(value, str)} if isinstance(evidence_tools_raw, list) else set()
         completed_evidence_tools = PlanToolChoiceMiddleware._completed_tool_count(request, evidence_tools)
+        completed_tools = PlanToolChoiceMiddleware._completed_tool_count(request, None)
         model_calls = sum(1 for message in request.messages if isinstance(message, AIMessage))
-        estimated_steps_used = len(request.messages)
+        estimated_steps_used = max(len(request.messages), model_calls * 4 + completed_tools * 3)
+        effective_reserve_steps = max(reserve_steps, recursion_limit // 3 if recursion_limit else 0)
 
         evidence_exhausted = bool(evidence_limit and completed_evidence_tools >= evidence_limit and context.get("facetwrite_force_synthesis_after_evidence") is True)
-        model_exhausting = bool(model_limit and model_calls >= max(model_limit - 1, 1))
-        recursion_exhausting = bool(recursion_limit and reserve_steps and recursion_limit - estimated_steps_used <= reserve_steps)
+        model_exhausting = bool(model_limit and model_calls >= max(model_limit - 4, 1))
+        recursion_exhausting = bool(recursion_limit and effective_reserve_steps and recursion_limit - estimated_steps_used <= effective_reserve_steps)
         if not (evidence_exhausted or model_exhausting or recursion_exhausting):
             return request
 
@@ -165,6 +167,7 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             "model_calls": model_calls,
             "recursion_limit": recursion_limit,
             "estimated_steps_used": estimated_steps_used,
+            "reserve_steps": effective_reserve_steps,
             "file_delivery_required": context.get("facetwrite_markdown_file_delivery_required") is True,
             "second_handler": False,
             "entered_second_handler": False,
@@ -244,13 +247,13 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         return value if isinstance(value, int) and value > 0 else None
 
     @staticmethod
-    def _completed_tool_count(request: ModelRequest, tool_names: set[str]) -> int:
-        if not tool_names:
+    def _completed_tool_count(request: ModelRequest, tool_names: set[str] | None) -> int:
+        if tool_names is not None and not tool_names:
             return 0
         return sum(
             1
             for message in request.messages
-            if isinstance(message, ToolMessage) and getattr(message, "name", None) in tool_names
+            if isinstance(message, ToolMessage) and (tool_names is None or getattr(message, "name", None) in tool_names)
         )
 
     @staticmethod

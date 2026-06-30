@@ -15,6 +15,9 @@ export class RunRepository {
   ) {}
 
   recordRun(input: RunRecordInput) {
+    const existing = this.findRunByClientRequest(input.threadId, input.clientRequestId);
+    if (existing) return existing;
+
     const runId = randomId("run");
     const promptVersionId = randomId("prompt");
     const outputVersionId = randomId("output");
@@ -26,10 +29,10 @@ export class RunRepository {
     this.deps.withTransaction(() => {
       this.db
         .prepare(
-          `INSERT INTO runs (id, thread_id, agent_card_id, configured_model_api_id, model_id, mode, provider, used_mock, status, error_message, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO runs (id, thread_id, client_request_id, agent_card_id, configured_model_api_id, model_id, mode, provider, used_mock, status, error_message, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(runId, input.threadId, input.agentCardId, input.configuredModelApiId ?? null, input.modelId ?? null, input.mode, input.provider, input.usedMock ? 1 : 0, status, input.errorMessage ?? null, now);
+        .run(runId, input.threadId, input.clientRequestId ?? null, input.agentCardId, input.configuredModelApiId ?? null, input.modelId ?? null, input.mode, input.provider, input.usedMock ? 1 : 0, status, input.errorMessage ?? null, now);
 
       if (input.userMessage) {
         this.addMessage(input.threadId, "user", input.userMessage, false, now);
@@ -210,6 +213,25 @@ export class RunRepository {
     this.db
       .prepare(`INSERT INTO messages (id, thread_id, role, text, used_mock, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
       .run(randomId("msg"), threadId, role, text, usedMock ? 1 : 0, createdAt);
+  }
+
+  private findRunByClientRequest(threadId: string, clientRequestId?: string) {
+    if (!clientRequestId) return undefined;
+    const run = this.db
+      .prepare(`SELECT id FROM runs WHERE thread_id = ? AND client_request_id = ?`)
+      .get(threadId, clientRequestId) as { id: string } | undefined;
+    if (!run?.id) return undefined;
+    const prompt = this.db
+      .prepare(`SELECT id FROM prompt_versions WHERE thread_id = ? AND run_id = ? ORDER BY created_at DESC LIMIT 1`)
+      .get(threadId, run.id) as { id: string } | undefined;
+    const output = this.db
+      .prepare(`SELECT id FROM output_versions WHERE thread_id = ? AND run_id = ? ORDER BY created_at DESC LIMIT 1`)
+      .get(threadId, run.id) as { id: string } | undefined;
+    return {
+      runId: run.id,
+      promptVersionId: prompt?.id ?? "",
+      outputVersionId: output?.id ?? ""
+    };
   }
 
   private recordAgentClarificationFromEvent(threadId: string, runId: string, event: { eventType: string; payload: unknown }, createdAt: string) {

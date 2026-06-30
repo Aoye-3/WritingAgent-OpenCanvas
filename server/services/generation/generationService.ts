@@ -72,6 +72,14 @@ export type AgentProgressEvent = {
   threadId: string;
   runId?: string;
   stageId?: string;
+  loopId?: string;
+  loopIndex?: number;
+  stepKind?: "intake" | "context" | "decide" | "act" | "observe" | "evaluate" | "checkpoint" | "complete" | "fail";
+  actionId?: string;
+  observationId?: string;
+  completionStatus?: "continue" | "waiting" | "finalizing" | "completed" | "partial" | "failed";
+  completionReasons?: string[];
+  missingRequirements?: string[];
   phase?: string;
   status?: "running" | "completed" | "failed" | "waiting";
   title?: string;
@@ -417,6 +425,8 @@ export function createGenerationService(
     let runtimeHeartbeatTimelineEmitted = false;
     let runtimeWaitingForUser = false;
     let lastModelErrorSignal: AgentBackendRuntimeSignal | undefined;
+    let runtimeFailureError: unknown;
+    let runFailedTimelineEmitted = false;
     const suppressedInvalidClarifications: ToolEventRecord[] = [];
     let suppressedInvalidClarificationsEmitted = false;
     const progressiveEvidenceEntries: ProgressiveEvidenceEntry[] = [];
@@ -454,7 +464,7 @@ export function createGenerationService(
       for (const event of suppressedInvalidClarifications) emitRuntimeToolEvent(event);
     };
     const observeRuntimeSignal = (signal: AgentBackendRuntimeSignal) => {
-      if (signal.type === "agent_progress_reported" || signal.type === "agent_intervention_checkpoint") {
+      if (signal.type === "run_metadata" || signal.type === "agent_progress_reported" || signal.type === "agent_intervention_checkpoint") {
         stageProgress.fromRuntimeSignal(signal);
         return;
       }
@@ -602,6 +612,11 @@ export function createGenerationService(
         }
       }
     };
+    const emitRunFailedTimeline = (error: unknown) => {
+      if (runFailedTimelineEmitted) return;
+      runFailedTimelineEmitted = true;
+      emitTimeline(timeline.event("run_failed", "failed", payload.locale === "zh" ? "运行失败" : "Run failed", safeRuntimeErrorMessage(error, lastModelErrorSignal), { ...agentPlanPayload(payload), ...budgetStatusPayload(error) }));
+    };
     const observeToolEvent = (event: ToolEventRecord) => observeToolEventForPayload(event, payload);
     for (const event of canvasActionEvents(payload)) {
       runtimeEvents.push(event);
@@ -646,6 +661,7 @@ export function createGenerationService(
         });
         if (hasBlockedInternalOutput(normalized.events)) {
           const internalOutputError = new Error("AgentBackend returned internal runtime output");
+          runtimeFailureError = internalOutputError;
           const event = createRuntimeFallbackEvent("agent-backend", internalOutputError, isMockFallbackEnabled(deps));
           runtimeEvents.push(...(normalized.events ?? []), event);
           observeToolEvent(event);
@@ -663,6 +679,7 @@ export function createGenerationService(
               emitRuntimeToolEvent(failureEvent);
             }
           }
+          emitRunFailedTimeline(internalOutputError);
           textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
         } else {
           textGate.flush();
@@ -806,11 +823,14 @@ export function createGenerationService(
           return recorded;
         }
       } else {
-        const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend is disabled or unavailable"), isMockFallbackEnabled(deps));
+        runtimeFailureError = new Error("AgentBackend is disabled or unavailable");
+        const event = createRuntimeFallbackEvent("agent-backend", runtimeFailureError, isMockFallbackEnabled(deps));
         runtimeEvents.push(event);
         observeToolEvent(event);
+        emitRunFailedTimeline(runtimeFailureError);
       }
     } catch (error) {
+      runtimeFailureError = error;
       agentPlanOrchestrator.fail(threadId, payload, error);
       if (isProgressiveCanvasDeliveryEnabled(payload)) {
         ensureProgressiveDeliveryStarted();
@@ -829,11 +849,33 @@ export function createGenerationService(
       const event = createRuntimeFallbackEvent("agent-backend", error, isMockFallbackEnabled(deps), lastModelErrorSignal);
       runtimeEvents.push(event);
       observeToolEvent(event);
-      emitTimeline(timeline.event("run_failed", "failed", payload.locale === "zh" ? "运行失败" : "Run failed", safeRuntimeErrorMessage(error, lastModelErrorSignal), { ...agentPlanPayload(payload), ...budgetStatusPayload(error) }));
+      emitRunFailedTimeline(error);
       textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
     }
 
-    if (!isMockFallbackEnabled(deps)) throw runtimeGenerationError(runtimeEvents);
+    if (!isMockFallbackEnabled(deps)) {
+      const events = dedupeToolEvents([...runtimeEvents, ...timelineEvents.map(timelineEventToToolEvent)]);
+      const errorMessage = formatGenerationFailure(runtimeEvents);
+      const failureStatus = runtimeFailureError ? budgetStatusPayload(runtimeFailureError)?.status : undefined;
+      return recordGenerationRun({
+        storage,
+        payload,
+        threadId,
+        agentCardId: agentCard.id,
+        agentTitle: agentCard.title[payload.locale],
+        configuredModelApiId: context.modelSettings.configuredModelApiId,
+        modelId: context.modelSettings.model,
+        mode: context.mode,
+        prompt: context.prompt,
+        text: "",
+        provider: "agent-backend",
+        usedMock: false,
+        toolState: context.effectiveToolState,
+        events,
+        finishReason: failureStatus === "budget_exhausted" ? "budget_exhausted" : "runtime_failed",
+        errorMessage
+      });
+    }
     const result = recordMockFallback({
       storage,
       payload,
@@ -868,6 +910,14 @@ function progressEventFromRuntimeSignal(signal: AgentBackendRuntimeSignal, threa
     threadId: readString(payload.threadId) || threadId,
     ...(readString(payload.runId) ? { runId: readString(payload.runId) } : {}),
     ...(readString(payload.stageId) ? { stageId: readString(payload.stageId) } : {}),
+    ...(readString(payload.loopId) ? { loopId: readString(payload.loopId) } : {}),
+    ...(readOptionalNumber(payload.loopIndex) !== undefined ? { loopIndex: readOptionalNumber(payload.loopIndex) } : {}),
+    ...(readStepKind(payload.stepKind) ? { stepKind: readStepKind(payload.stepKind) } : {}),
+    ...(readString(payload.actionId) ? { actionId: readString(payload.actionId) } : {}),
+    ...(readString(payload.observationId) ? { observationId: readString(payload.observationId) } : {}),
+    ...(readCompletionStatus(payload.completionStatus) ? { completionStatus: readCompletionStatus(payload.completionStatus) } : {}),
+    ...(readStringList(payload.completionReasons).length ? { completionReasons: readStringList(payload.completionReasons) } : {}),
+    ...(readStringList(payload.missingRequirements).length ? { missingRequirements: readStringList(payload.missingRequirements) } : {}),
     ...(readString(payload.phase) ? { phase: readString(payload.phase) } : {}),
     ...(status ? { status } : {}),
     ...(readString(payload.title) ? { title: safeProgressText(readString(payload.title)) } : {}),
@@ -881,6 +931,7 @@ function progressEventFromRuntimeSignal(signal: AgentBackendRuntimeSignal, threa
 }
 
 function safeProgressText(value: string) {
+  if (isSentinelText(value)) return "";
   if (/prompt|reasoning|chain[_\s-]?of[_\s-]?thought|arguments?|contextValues|api.?key|token|secret|password/i.test(value)) {
     return "";
   }
@@ -895,10 +946,32 @@ function readProgressVisibility(value: unknown): AgentProgressEvent["visibility"
   return value === "stage" || value === "raw" ? value : undefined;
 }
 
+function readStepKind(value: unknown): AgentProgressEvent["stepKind"] | undefined {
+  return value === "intake" || value === "context" || value === "decide" || value === "act" || value === "observe" || value === "evaluate" || value === "checkpoint" || value === "complete" || value === "fail"
+    ? value
+    : undefined;
+}
+
+function readCompletionStatus(value: unknown): AgentProgressEvent["completionStatus"] | undefined {
+  return value === "continue" || value === "waiting" || value === "finalizing" || value === "completed" || value === "partial" || value === "failed"
+    ? value
+    : undefined;
+}
+
+function readOptionalNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
 function isLowValueRuntimeProgress(summary: string, phase: string, signalType: AgentBackendRuntimeSignal["type"]) {
+  if (signalType === "run_metadata") return true;
   if (phase === "intervention" && /intervention|instruction|constraint/i.test(summary)) return false;
   if (signalType === "agent_intervention_checkpoint") return true;
-  return /^(?:Agent run started\.?|Agent runtime is ready\.?|Preparing the next model step\.?|Model step completed\.?|Using .+\.?|.+ completed\.?|Agent reached a safe point .*)$/i.test(summary);
+  return /^(?:Agent runtime run opened\.?|Agent run started\.?|Agent runtime is ready\.?|Preparing the next model step\.?|Model step completed\.?|Using .+\.?|.+ completed\.?|Agent reached a safe point .*|Agent is deciding the next action.*|Agent is running .+\.?|.+ returned an observation for the next decision\.?)$/i.test(summary);
 }
 
 function hasBlockedInternalOutput(events?: ToolEventRecord[]) {
@@ -1158,7 +1231,15 @@ function agentPlanPayload(payload: GenerateRequest): Record<string, unknown> {
 }
 
 function record(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
-function readString(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
+function readString(value: unknown) {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  return isSentinelText(text) ? "" : text;
+}
+
+function isSentinelText(value: string) {
+  return /^(?:undefined|null|none|nan)$/i.test(value.trim());
+}
 
 export function stableCanvasDeliveryId(threadId: string, payload: GenerateRequest, storage: SQLiteStorageRepository) {
   const resumeDeliveryId = readAgentClarificationResumeDeliveryId(threadId, payload);
@@ -2923,6 +3004,11 @@ function createStageProgressEmitter(input: {
     title?: string;
     interventionHint?: string;
     source?: string;
+    loopId?: string;
+    loopIndex?: number;
+    stepKind?: AgentProgressEvent["stepKind"];
+    actionId?: string;
+    observationId?: string;
   } = {}) => {
     if (emitted.has(key)) return;
     const summary = safeProgressText(text);
@@ -2935,6 +3021,11 @@ function createStageProgressEmitter(input: {
       id: `progress_${crypto.randomUUID()}`,
       threadId: input.threadId,
       stageId: key,
+      ...(options.loopId ? { loopId: options.loopId } : {}),
+      ...(options.loopIndex !== undefined ? { loopIndex: options.loopIndex } : {}),
+      ...(options.stepKind ? { stepKind: options.stepKind } : {}),
+      ...(options.actionId ? { actionId: options.actionId } : {}),
+      ...(options.observationId ? { observationId: options.observationId } : {}),
       status: options.status ?? "running",
       ...(options.phase ? { phase: options.phase } : {}),
       ...(safeTitle ? { title: safeTitle } : {}),
@@ -2946,7 +3037,10 @@ function createStageProgressEmitter(input: {
       createdAt: new Date().toISOString()
     };
     input.onProgressEvent?.(progress);
-    input.emitTimeline(input.timeline.event(
+    emitProgressTimeline(progress);
+  };
+  const emitProgressTimeline = (progress: AgentProgressEvent) => {
+    const timelineEvent = input.timeline.event(
       "decision",
       progress.status ?? "running",
       progress.title || (input.locale === "zh" ? "阶段汇报" : "Stage update"),
@@ -2956,14 +3050,23 @@ function createStageProgressEmitter(input: {
         kind: "progress_report",
         progressId: progress.id,
         stageId: progress.stageId,
+        loopId: progress.loopId,
+        loopIndex: progress.loopIndex,
+        stepKind: progress.stepKind,
+        actionId: progress.actionId,
+        observationId: progress.observationId,
+        completionStatus: progress.completionStatus,
+        completionReasons: progress.completionReasons,
+        missingRequirements: progress.missingRequirements,
         phase: progress.phase,
         next: progress.next,
         interventionHint: progress.interventionHint,
         source: progress.source,
-        visibility: "stage",
-        signal: "stage_progress"
+        visibility: progress.visibility ?? "stage",
+        signal: progress.stepKind ? "loop_progress" : "stage_progress"
       }
-    ));
+    );
+    input.emitTimeline(progress.runId ? { ...timelineEvent, runId: progress.runId } : timelineEvent);
   };
   const emitEvidenceStage = (phase: "started" | "completed") => {
     if (phase === "started") {
@@ -3013,18 +3116,11 @@ function createStageProgressEmitter(input: {
         input.onProgressEvent?.(progress);
         return;
       }
-      emit(
-        progress.stageId || `${progress.phase || "runtime"}:${progress.status || "running"}:${progress.summary}`,
-        progress.summary,
-        progress.next,
-        {
-          phase: progress.phase,
-          status: progress.status,
-          title: progress.title,
-          interventionHint: progress.interventionHint,
-          source: progress.source || "agent_runtime"
-        }
-      );
+      const key = progress.stageId || progress.loopId || `${progress.phase || "runtime"}:${progress.status || "running"}:${progress.summary}`;
+      if (emitted.has(key)) return;
+      emitted.add(key);
+      input.onProgressEvent?.(progress);
+      emitProgressTimeline(progress);
     },
     fromToolEvent(event: ToolEventRecord) {
       if (/^canvas_delivery_outline_started$/.test(event.eventType)) {

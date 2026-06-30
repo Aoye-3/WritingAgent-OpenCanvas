@@ -132,6 +132,41 @@ test("storage facade sanitizes historical leaked assistant messages and output v
   await storage.hardDeleteThread(threadId);
 });
 
+test("storage facade dedupes replayed runs by client request id", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_run_replay_${Date.now()}`;
+  await storage.ensureThread(threadId, "blog-post");
+
+  const first = storage.recordRun({
+    threadId,
+    clientRequestId: "request_1",
+    agentCardId: "blog-post",
+    mode: "chat",
+    prompt: "Prompt text",
+    output: "First answer",
+    provider: "agent-backend",
+    usedMock: false,
+    userMessage: "Hello"
+  });
+  const replay = storage.recordRun({
+    threadId,
+    clientRequestId: "request_1",
+    agentCardId: "blog-post",
+    mode: "chat",
+    prompt: "Prompt text replay",
+    output: "Replay answer",
+    provider: "agent-backend",
+    usedMock: false,
+    userMessage: "Hello again"
+  });
+
+  assert.deepEqual(replay, first);
+  assert.deepEqual(storage.listMessages(threadId).map((message) => message.text), ["Hello", "First answer"]);
+
+  storage.moveThreadToTrash(threadId);
+  await storage.hardDeleteThread(threadId);
+});
+
 test("storage facade sanitizes leaked Canvas node content at read time", async () => {
   const storage = await createStorage();
   const threadId = `thread_canvas_sanitize_${Date.now()}`;

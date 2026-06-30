@@ -4,7 +4,7 @@ import type { GenerationService } from "../services/generationService.js";
 import type { CanvasDomainService } from "../domains/canvas/index.js";
 import { errorMessage, sendError, sendOk } from "../utils/http.js";
 import { GenerationError } from "../domains/generation/index.js";
-import { requestAgentBackendRunIntervention } from "../runtime/agentBackendAdapter/client.js";
+import { listAgentBackendRunEvents, requestAgentBackendRunIntervention } from "../runtime/agentBackendAdapter/client.js";
 import { sanitizeToolEventPayload } from "../services/generation/toolEventSanitizer.js";
 
 type GenerationRouteDeps = {
@@ -109,6 +109,25 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
     }
   });
 
+  app.get("/api/generate/runs/:runId/events", async (request, response) => {
+    try {
+      const threadId = typeof request.query.threadId === "string" ? request.query.threadId.trim() : "";
+      const limit = typeof request.query.limit === "string" ? Number.parseInt(request.query.limit, 10) : undefined;
+      if (!threadId) {
+        sendError(response, 400, "bad_request", "threadId is required");
+        return;
+      }
+      const events = await listAgentBackendRunEvents({
+        threadId,
+        runId: request.params.runId,
+        limit
+      });
+      sendOk(response, { events: sanitizeRuntimeRunEvents(events) });
+    } catch (error) {
+      sendError(response, 503, "runtime_unavailable", errorMessage(error, "Unable to load runtime run events"));
+    }
+  });
+
   app.post("/api/threads/:threadId/canvas/range-rewrites", async (request, response) => {
     try {
       const body = request.body as Record<string, unknown>;
@@ -180,6 +199,66 @@ function readModelOverrides(value: unknown): GenerateRequest["modelOverrides"] {
 function writeSse(response: Response, event: string, payload: unknown) {
   response.write(`event: ${event}\n`);
   response.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function sanitizeRuntimeRunEvents(events: unknown[]) {
+  return events
+    .flatMap((event) => sanitizeRuntimeRunEvent(event))
+    .slice(0, 500);
+}
+
+function sanitizeRuntimeRunEvent(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const source = value as Record<string, unknown>;
+  const eventType = readString(source.event_type ?? source.eventType);
+  if (!eventType || isHiddenRuntimeEventType(eventType)) return [];
+  const category = readString(source.category);
+  const content = sanitizeRuntimeRunValue(source.content, 0);
+  const metadata = sanitizeRuntimeRunValue(source.metadata, 0);
+  return [{
+    threadId: readString(source.thread_id ?? source.threadId),
+    runId: readString(source.run_id ?? source.runId),
+    eventType,
+    category,
+    content,
+    metadata: metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {},
+    sequence: readInteger(source.seq ?? source.sequence),
+    createdAt: readString(source.created_at ?? source.createdAt)
+  }];
+}
+
+function isHiddenRuntimeEventType(eventType: string) {
+  return /^(?:human_message|ai_message|llm\.human\.input|llm\.ai\.response)$/i.test(eventType);
+}
+
+function sanitizeRuntimeRunValue(value: unknown, depth: number): unknown {
+  if (depth > 4) return "[truncated]";
+  if (typeof value === "string") return redactSecretLikeText(value).replace(/\s+/g, " ").trim().slice(0, 900);
+  if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => sanitizeRuntimeRunValue(item, depth + 1));
+  if (!value || typeof value !== "object") return "";
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 40).map(([key, entry]) => (
+    secretKeyPattern.test(key)
+      ? [key, "[redacted]"]
+      : [key, sanitizeRuntimeRunValue(entry, depth + 1)]
+  )));
+}
+
+const secretKeyPattern = /(key|token|secret|password|credential|authorization|cookie)/i;
+
+function redactSecretLikeText(value: string) {
+  return value
+    .replace(/\b[A-Za-z0-9_]*(?:api[_-]?key|authorization|token|password|secret|cookie)\s*[:=]\s*\S+/gi, "[redacted credential]")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "[redacted credential]");
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readInteger(value: unknown) {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : 0;
+  return Number.isInteger(number) ? number : 0;
 }
 
 function createServerStreamTrace() {

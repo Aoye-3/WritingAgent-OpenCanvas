@@ -7,6 +7,7 @@ export type JsonValue = Record<string, unknown> | unknown[] | string | number | 
 
 export type RunRecordInput = {
   threadId: string;
+  clientRequestId?: string;
   agentCardId: string;
   configuredModelApiId?: string;
   modelId?: string;

@@ -195,6 +195,9 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
     const runTimelineSourceEvents = latestRunId
       ? toolEvents.filter((event) => event.runId === latestRunId)
       : toolEvents;
+    const latestCompletion = latestRunId
+      ? latestRunCompletion(toolEvents.filter((event) => event.runId === latestRunId))
+      : latestRunCompletion(toolEvents);
     sendOk(response, {
       thread,
       project,
@@ -205,6 +208,7 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
       toolEvents,
       agentClarifications: storage.listAgentClarifications(request.params.threadId),
       runTimelineEvents: runTimelineSourceEvents.map(timelineEventFromToolEvent).filter((event): event is NonNullable<typeof event> => Boolean(event)),
+      runCompletion: latestCompletion,
       canvasNodes: storage.listCanvasNodes(projectId),
       canvasEdges: storage.listCanvasEdges(projectId),
       canvasObjects: storage.listCanvasObjects(projectId),
@@ -216,6 +220,39 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
       planActivities: plans.flatMap((plan) => storage.listPlanActivities(request.params.threadId, plan.id))
     });
   });
+}
+
+function latestRunCompletion(events: Array<{ eventType: string; payload: unknown; createdAt: string }>) {
+  const event = [...events]
+    .filter((candidate) => candidate.eventType === "completion_evaluated")
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  const payload = record(event?.payload);
+  const status = readCompletionStatus(payload.completionStatus);
+  if (!status) return undefined;
+  return {
+    status,
+    reasons: readStringList(payload.completionReasons),
+    missingRequirements: readStringList(payload.missingRequirements),
+    evaluatedAt: readString(payload.evaluatedAt) || event?.createdAt || new Date().toISOString()
+  };
+}
+
+function readCompletionStatus(value: unknown) {
+  return value === "continue" || value === "waiting" || value === "finalizing" || value === "completed" || value === "partial" || value === "failed"
+    ? value
+    : undefined;
+}
+
+function readStringList(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()) : [];
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function record(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 function parseThreadIds(value: unknown) {

@@ -252,6 +252,15 @@ export type RunTimelineEvent = {
   createdAt: string;
 };
 
+export type RunCompletionStatus = "continue" | "waiting" | "finalizing" | "completed" | "partial" | "failed";
+
+export type RunCompletionVerdict = {
+  status: RunCompletionStatus;
+  reasons: string[];
+  missingRequirements: string[];
+  evaluatedAt: string;
+};
+
 export type CanvasNodeKind = "document" | "note" | "reference" | "role" | "plan" | "file_document" | "clarification";
 export type CanvasWriteOperation = "create" | "replace" | "append" | "replace_range";
 export type CanvasWriteRequestStatus = "pending" | "approved" | "rejected" | "stale";
@@ -387,6 +396,7 @@ export type ThreadStateResponse = {
   toolEvents: StoredToolEvent[];
   agentClarifications?: AgentClarification[];
   runTimelineEvents?: RunTimelineEvent[];
+  runCompletion?: RunCompletionVerdict;
   canvasNodes?: CanvasNode[];
   canvasEdges?: CanvasEdge[];
   canvasObjects?: CanvasObject[];

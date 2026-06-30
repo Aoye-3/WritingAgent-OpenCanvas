@@ -19,6 +19,10 @@ from deerflow.runtime.progress import emit_public_progress, public_progress_payl
 class ProgressReportingMiddleware(AgentMiddleware[AgentState]):
     """Emit public custom stream events without exposing prompts or raw tool args."""
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._loop_indexes: dict[str, int] = {}
+
     def _context(self, runtime: Any | None) -> dict[str, Any]:
         context = getattr(runtime, "context", None)
         return context if isinstance(context, dict) else {}
@@ -30,6 +34,19 @@ class ProgressReportingMiddleware(AgentMiddleware[AgentState]):
             "thread_id": str(context.get("thread_id")) if context.get("thread_id") else None,
         }
 
+    def _current_loop(self, runtime: Any | None) -> tuple[int, str | None]:
+        base = self._base(runtime)
+        run_id = base["run_id"] or "local"
+        index = self._loop_indexes.get(run_id, 0)
+        return index, f"{run_id}:loop:{index}" if base["run_id"] else None
+
+    def _advance_loop(self, runtime: Any | None) -> tuple[int, str | None]:
+        base = self._base(runtime)
+        run_id = base["run_id"] or "local"
+        index = self._loop_indexes.get(run_id, 0) + 1
+        self._loop_indexes[run_id] = index
+        return index, f"{run_id}:loop:{index}" if base["run_id"] else None
+
     def _emit(
         self,
         runtime: Any | None,
@@ -37,6 +54,13 @@ class ProgressReportingMiddleware(AgentMiddleware[AgentState]):
         phase: str,
         summary: str,
         status: str = "running",
+        stage_id: str | None = None,
+        title: str | None = None,
+        loop_index: int | None = None,
+        loop_id: str | None = None,
+        step_kind: str | None = None,
+        action_id: str | None = None,
+        observation_id: str | None = None,
         next: str | None = None,
         intervention_hint: str | None = None,
         visibility: str = "stage",
@@ -48,6 +72,13 @@ class ProgressReportingMiddleware(AgentMiddleware[AgentState]):
             event_type,  # type: ignore[arg-type]
             run_id=base["run_id"],
             thread_id=base["thread_id"],
+            stage_id=stage_id,
+            title=title,
+            loop_index=loop_index,
+            loop_id=loop_id,
+            step_kind=step_kind,
+            action_id=action_id,
+            observation_id=observation_id,
             phase=phase,
             status=status,  # type: ignore[arg-type]
             summary=summary,
@@ -63,11 +94,17 @@ class ProgressReportingMiddleware(AgentMiddleware[AgentState]):
         return str(name or "tool").replace("_", " ")[:80]
 
     def _checkpoint(self, runtime: Any | None, *, summary: str, status: str = "waiting", next: str | None = None) -> None:
+        loop_index, loop_id = self._current_loop(runtime)
         self._emit(
             runtime,
             event_type="agent_intervention_checkpoint",
             phase="intervention",
             status=status,
+            stage_id=f"loop:{loop_index}:checkpoint",
+            title="Checkpoint",
+            loop_index=loop_index,
+            loop_id=loop_id,
+            step_kind="checkpoint",
             summary=summary,
             next=next,
             visibility="raw",
@@ -75,6 +112,20 @@ class ProgressReportingMiddleware(AgentMiddleware[AgentState]):
 
     @override
     def before_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+        loop_index, loop_id = self._advance_loop(runtime)
+        self._emit(
+            runtime,
+            phase="decide",
+            status="running",
+            stage_id=f"loop:{loop_index}:decide",
+            title="Deciding next step",
+            loop_index=loop_index,
+            loop_id=loop_id,
+            step_kind="decide",
+            summary="Agent is deciding the next action from the latest observations.",
+            next="It may call a tool, ask for clarification, or produce the final answer.",
+            visibility="raw",
+        )
         self._checkpoint(runtime, summary="Agent reached a safe point before the next model step.")
         return None
 
@@ -94,6 +145,9 @@ class ProgressReportingMiddleware(AgentMiddleware[AgentState]):
             runtime,
             phase="intervention",
             status="completed",
+            stage_id="intervention:accepted",
+            title="Intervention accepted",
+            step_kind="checkpoint",
             summary="User intervention was received and will guide the next step.",
             next="Continuing from the next safe model step.",
             intervention_hint="The current run has accepted the new instruction.",
@@ -118,11 +172,40 @@ class ProgressReportingMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ToolCallRequest], ToolMessage | Command],
     ) -> ToolMessage | Command:
         try:
+            loop_index, loop_id = self._current_loop(request.runtime)
+            action_id = str(request.tool_call.get("id") or request.tool_call.get("name") or "tool")[:120]
+            self._emit(
+                request.runtime,
+                phase="act",
+                status="running",
+                stage_id=f"loop:{loop_index}:act:{self._safe_tool_name(request)}",
+                title=f"Running {self._safe_tool_name(request)}",
+                loop_index=loop_index,
+                loop_id=loop_id,
+                step_kind="act",
+                action_id=action_id,
+                summary=f"Agent is running {self._safe_tool_name(request)}.",
+                visibility="raw",
+            )
             result = handler(request)
         except Exception:
-            self._emit(request.runtime, phase="recovery", status="failed", summary="A tool step failed; the agent is recovering with available context.", next="The raw log has the diagnostic detail.")
+            self._emit(request.runtime, phase="recovery", status="failed", title="Tool recovery", step_kind="observe", summary="A tool step failed; the agent is recovering with available context.", next="The raw log has the diagnostic detail.")
             raise
+        loop_index, loop_id = self._current_loop(request.runtime)
         self._checkpoint(request.runtime, summary="Agent reached a safe point after a tool result.")
+        self._emit(
+            request.runtime,
+            phase="observe",
+            status="completed",
+            stage_id=f"loop:{loop_index}:observe:{self._safe_tool_name(request)}",
+            title=f"Observed {self._safe_tool_name(request)} result",
+            loop_index=loop_index,
+            loop_id=loop_id,
+            step_kind="observe",
+            observation_id=str(request.tool_call.get("id") or request.tool_call.get("name") or "tool")[:120],
+            summary=f"{self._safe_tool_name(request)} returned an observation for the next decision.",
+            visibility="raw",
+        )
         return result
 
     @override
@@ -132,11 +215,40 @@ class ProgressReportingMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
         try:
+            loop_index, loop_id = self._current_loop(request.runtime)
+            action_id = str(request.tool_call.get("id") or request.tool_call.get("name") or "tool")[:120]
+            self._emit(
+                request.runtime,
+                phase="act",
+                status="running",
+                stage_id=f"loop:{loop_index}:act:{self._safe_tool_name(request)}",
+                title=f"Running {self._safe_tool_name(request)}",
+                loop_index=loop_index,
+                loop_id=loop_id,
+                step_kind="act",
+                action_id=action_id,
+                summary=f"Agent is running {self._safe_tool_name(request)}.",
+                visibility="raw",
+            )
             result = await handler(request)
         except Exception:
-            self._emit(request.runtime, phase="recovery", status="failed", summary="A tool step failed; the agent is recovering with available context.", next="The raw log has the diagnostic detail.")
+            self._emit(request.runtime, phase="recovery", status="failed", title="Tool recovery", step_kind="observe", summary="A tool step failed; the agent is recovering with available context.", next="The raw log has the diagnostic detail.")
             raise
+        loop_index, loop_id = self._current_loop(request.runtime)
         self._checkpoint(request.runtime, summary="Agent reached a safe point after a tool result.")
+        self._emit(
+            request.runtime,
+            phase="observe",
+            status="completed",
+            stage_id=f"loop:{loop_index}:observe:{self._safe_tool_name(request)}",
+            title=f"Observed {self._safe_tool_name(request)} result",
+            loop_index=loop_index,
+            loop_id=loop_id,
+            step_kind="observe",
+            observation_id=str(request.tool_call.get("id") or request.tool_call.get("name") or "tool")[:120],
+            summary=f"{self._safe_tool_name(request)} returned an observation for the next decision.",
+            visibility="raw",
+        )
         return result
 
     async def _take_intervention(self, runtime: Runtime) -> str | None:

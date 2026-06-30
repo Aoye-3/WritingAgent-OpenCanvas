@@ -35,6 +35,18 @@ test("redacts DSML tool protocol from tool event payload strings", () => {
   assert.equal(JSON.stringify(payload).includes("webfetch"), false);
 });
 
+test("omits undefined object fields instead of stringifying them", () => {
+  const payload = sanitizeToolEventPayload({
+    title: "Progress",
+    next: undefined,
+    nested: { interventionHint: undefined, summary: "Visible" }
+  }) as Record<string, unknown>;
+
+  assert.equal(payload.title, "Progress");
+  assert.equal("next" in payload, false);
+  assert.deepEqual(payload.nested, { summary: "Visible" });
+});
+
 test("summarizes checkpoint canvas node payloads without full node content", () => {
   const payload = sanitizeToolEventPayload({
     eventType: "canvas_delivery_body_checkpoint_committed",
