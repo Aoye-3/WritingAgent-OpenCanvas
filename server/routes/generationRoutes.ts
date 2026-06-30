@@ -4,6 +4,7 @@ import type { GenerationService } from "../services/generationService.js";
 import type { CanvasDomainService } from "../domains/canvas/index.js";
 import { errorMessage, sendError, sendOk } from "../utils/http.js";
 import { GenerationError } from "../domains/generation/index.js";
+import { requestAgentBackendRunIntervention } from "../runtime/agentBackendAdapter/client.js";
 import { sanitizeToolEventPayload } from "../services/generation/toolEventSanitizer.js";
 
 type GenerationRouteDeps = {
@@ -52,6 +53,10 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
           trace("timeline_event", { eventType: event.eventType, status: event.status, sequence: event.sequence });
           writeSse(response, "timeline_event", event);
         },
+        onProgressEvent: (event) => {
+          trace("progress_event", { status: event.status, phase: event.phase });
+          writeSse(response, "progress_event", event);
+        },
         onToolEvent: (event) => {
           const safePayload = sanitizeToolEventPayload(event.payload);
           const safeEvent = { ...event, payload: safePayload };
@@ -80,6 +85,27 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
     } finally {
       trace("end");
       response.end();
+    }
+  });
+
+  app.post("/api/generate/runs/:runId/interventions", async (request, response) => {
+    try {
+      const body = request.body as Record<string, unknown>;
+      const threadId = typeof body.threadId === "string" ? body.threadId.trim() : "";
+      const text = typeof body.text === "string" ? body.text.trim() : "";
+      const inputId = typeof body.inputId === "string" ? body.inputId : undefined;
+      if (!threadId || !text) {
+        sendError(response, 400, "bad_request", "threadId and text are required");
+        return;
+      }
+      sendOk(response, await requestAgentBackendRunIntervention({
+        threadId,
+        runId: request.params.runId,
+        text,
+        inputId
+      }));
+    } catch (error) {
+      sendError(response, 503, "runtime_unavailable", errorMessage(error, "Unable to request run intervention"));
     }
   });
 

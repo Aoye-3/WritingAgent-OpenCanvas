@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { defaultAgentSettings, getAgentCard } from "../../agentCards.js";
-import { buildRunRequest, runAgentBackendAgent } from "./client.js";
+import { buildRunRequest, requestAgentBackendRunIntervention, runAgentBackendAgent } from "./client.js";
 
 test("builds LangGraph-compatible AgentBackend run request", () => {
   const card = getAgentCard("summary");
@@ -61,6 +61,50 @@ test("builds LangGraph-compatible AgentBackend run request", () => {
   assert.equal(request.metadata.subagent.name, "facetwrite-chat-agent");
   assert.deepEqual(request.stream_mode, ["messages-tuple", "custom", "values"]);
   assert.equal(request.multitask_strategy, "interrupt");
+});
+
+test("requests AgentBackend run intervention through authenticated runtime API", async () => {
+  let interventionUrl = "";
+  let interventionBody: unknown;
+  const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) return Response.json({ needs_setup: false });
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, { headers });
+    }
+    interventionUrl = textUrl;
+    interventionBody = JSON.parse(String(init?.body ?? "{}")) as unknown;
+    return Response.json({ id: "queued_1", status: "requested" });
+  };
+
+  const result = await requestAgentBackendRunIntervention({
+    threadId: "thread_1",
+    runId: "run_1",
+    text: "Please adjust the next section.",
+    inputId: "queued_1",
+    config: {
+      enabled: true,
+      baseUrl: "http://AgentBackend.local",
+      assistantId: "lead_agent",
+      auth: {
+        email: "admin@example.com",
+        password: "strong-password",
+        autoSetup: false,
+        timeoutMs: 5000
+      }
+    },
+    fetchImpl
+  });
+
+  assert.equal(interventionUrl, "http://AgentBackend.local/api/threads/thread_1/runs/run_1/interventions");
+  assert.deepEqual(interventionBody, {
+    text: "Please adjust the next section.",
+    input_id: "queued_1"
+  });
+  assert.deepEqual(result, { id: "queued_1", status: "requested" });
 });
 
 test("does not pass Agent-owned memory into a project run", () => {

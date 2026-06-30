@@ -54,3 +54,12 @@ test("assistant run trace hides low-value tool lifecycle events by default", () 
 
   assert.deepEqual(filterAssistantRunTraceEvents([...events]).map((event) => event.id), ["3", "4"]);
 });
+
+test("assistant run trace hides progress report timeline events", () => {
+  const events = [
+    { id: "1", eventType: "decision", status: "running", title: "Run update", summary: "Collecting evidence", sequence: 1, createdAt: "2026-06-14T00:00:00.000Z", payload: { kind: "progress_report" } },
+    { id: "2", eventType: "decision", status: "running", title: "Public decision", summary: "Choosing next step", sequence: 2, createdAt: "2026-06-14T00:00:01.000Z" }
+  ] as const;
+
+  assert.deepEqual(filterAssistantRunTraceEvents([...events]).map((event) => event.id), ["2"]);
+});

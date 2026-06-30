@@ -62,8 +62,25 @@ export type GenerationService = {
       onStatus?: (status: StreamStatus) => void;
       onToolEvent?: (event: ToolEventRecord) => void;
       onTimelineEvent?: (event: RunTimelineEvent) => void;
+      onProgressEvent?: (event: AgentProgressEvent) => void;
     }
   ) => Promise<GenerateResponse>;
+};
+
+export type AgentProgressEvent = {
+  id: string;
+  threadId: string;
+  runId?: string;
+  stageId?: string;
+  phase?: string;
+  status?: "running" | "completed" | "failed" | "waiting";
+  title?: string;
+  summary: string;
+  next?: string;
+  interventionHint?: string;
+  visibility?: "stage" | "raw";
+  source?: string;
+  createdAt: string;
 };
 
 export type GenerationServiceDeps = {
@@ -371,6 +388,7 @@ export function createGenerationService(
       onStatus?: (status: StreamStatus) => void;
       onToolEvent?: (event: ToolEventRecord) => void;
       onTimelineEvent?: (event: RunTimelineEvent) => void;
+      onProgressEvent?: (event: AgentProgressEvent) => void;
     } = {}
   ): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
@@ -402,15 +420,32 @@ export function createGenerationService(
     const suppressedInvalidClarifications: ToolEventRecord[] = [];
     let suppressedInvalidClarificationsEmitted = false;
     const progressiveEvidenceEntries: ProgressiveEvidenceEntry[] = [];
-    const publicReasoning = createPublicReasoningEmitter(payload.locale, callbacks.onReasoningToken);
     const emitTimeline = (event: RunTimelineEvent) => {
       timelineEvents.push(event);
       callbacks.onTimelineEvent?.(event);
     };
+    const stageProgress = createStageProgressEmitter({
+      locale: payload.locale,
+      threadId,
+      timeline,
+      agentPlanPayload: agentPlanPayload(payload),
+      onProgressEvent: callbacks.onProgressEvent,
+      emitTimeline
+    });
+    stageProgress.emit(
+      "run:preparing",
+      payload.locale === "zh" ? "正在准备任务上下文、工具和运行环境。" : "Preparing task context, tools, and runtime.",
+      payload.locale === "zh" ? "你可以继续输入补充要求；默认会排队，选择介入后会在安全点生效。" : "You can add guidance while it runs; it queues by default and applies at a safe point when requested.",
+      {
+        phase: "preparing",
+        title: payload.locale === "zh" ? "准备执行" : "Preparing run",
+        interventionHint: payload.locale === "zh" ? "可补充目标、范围或格式要求。" : "You may add goal, scope, or format constraints."
+      }
+    );
     const emitRuntimeToolEvent = (event: ToolEventRecord) => {
       agentPlanOrchestrator.observe(threadId, event);
       callbacks.onToolEvent?.(event);
-      publicReasoning.fromToolEvent(event);
+      stageProgress.fromToolEvent(event);
       emitTimeline(timelineEventFromToolEvent(event) ?? toolEventToTimelineEvent(timeline, event));
     };
     const emitSuppressedInvalidClarifications = () => {
@@ -419,6 +454,10 @@ export function createGenerationService(
       for (const event of suppressedInvalidClarifications) emitRuntimeToolEvent(event);
     };
     const observeRuntimeSignal = (signal: AgentBackendRuntimeSignal) => {
+      if (signal.type === "agent_progress_reported" || signal.type === "agent_intervention_checkpoint") {
+        stageProgress.fromRuntimeSignal(signal);
+        return;
+      }
       if (signal.type === "waiting_for_user") {
         runtimeWaitingForUser = true;
         lastCanvasCommitAt = undefined;
@@ -574,7 +613,6 @@ export function createGenerationService(
     }
 
     callbacks.onStatus?.({ phase: "thinking", label: streamLabels.thinking });
-    publicReasoning.emit("prepare", payload.locale === "zh" ? "正在准备上下文、工具和运行环境。" : "Preparing context, tools, and runtime.");
     emitTimeline(timeline.event("phase_started", "running", payload.locale === "zh" ? "准备执行" : "Preparing run", payload.locale === "zh" ? "正在准备上下文、工具和运行环境。" : "Preparing context, tools, and runtime.", agentPlanPayload(payload)));
     if (context.transientSkillNames.length) {
       emitTimeline(skillUsageTimelineEvent(timeline, payload.locale, context.transientSkillNames));
@@ -629,7 +667,12 @@ export function createGenerationService(
         } else {
           textGate.flush();
           callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
-          publicReasoning.emit("finalize", payload.locale === "zh" ? "正在整理最终回答，并校准 Canvas 节点内容。" : "Organizing the final answer and reconciling Canvas nodes.");
+          stageProgress.emit(
+            "run:finalizing",
+            payload.locale === "zh" ? "正在整理最终回答，并校准 Canvas 节点内容。" : "Organizing the final answer and reconciling Canvas nodes.",
+            payload.locale === "zh" ? "下一步会给出最终答复和可查看的交付物。" : "Next, the final answer and deliverables will be ready.",
+            { phase: "finalizing", title: payload.locale === "zh" ? "最终整理" : "Final review" }
+          );
           const baseEvents = dedupeToolEvents([...runtimeEvents, ...(normalized.events ?? []).map((event) => withAgentPlanEventContext(withAgentClarificationResumeContext(event, payload, deliveryId), payload))]);
           if (shouldRepairAgentClarification(baseEvents, normalized.text, agentBackendRun.finishReason)) {
             callbacks.onStatus?.({ phase: "thinking", label: payload.locale === "zh" ? "正在重新生成澄清选项..." : "Regenerating clarification choices..." });
@@ -811,6 +854,51 @@ export function createGenerationService(
 
   return { generateAndRecord, generateAndRecordStream };
 
+}
+
+function progressEventFromRuntimeSignal(signal: AgentBackendRuntimeSignal, threadId: string): AgentProgressEvent | undefined {
+  const payload = record(signal.payload);
+  const visibility = readProgressVisibility(payload.visibility);
+  const summary = safeProgressText(readString(payload.summary) || signal.label);
+  if (!summary) return undefined;
+  if (visibility !== "raw" && isLowValueRuntimeProgress(summary, readString(payload.phase), signal.type)) return undefined;
+  const status = readProgressStatus(payload.status);
+  return {
+    id: `progress_${crypto.randomUUID()}`,
+    threadId: readString(payload.threadId) || threadId,
+    ...(readString(payload.runId) ? { runId: readString(payload.runId) } : {}),
+    ...(readString(payload.stageId) ? { stageId: readString(payload.stageId) } : {}),
+    ...(readString(payload.phase) ? { phase: readString(payload.phase) } : {}),
+    ...(status ? { status } : {}),
+    ...(readString(payload.title) ? { title: safeProgressText(readString(payload.title)) } : {}),
+    summary,
+    ...(readString(payload.next) ? { next: safeProgressText(readString(payload.next)) } : {}),
+    ...(readString(payload.interventionHint) ? { interventionHint: safeProgressText(readString(payload.interventionHint)) } : {}),
+    visibility: visibility ?? "stage",
+    ...(readString(payload.source) ? { source: readString(payload.source) } : {}),
+    createdAt: readString(payload.createdAt) || new Date().toISOString()
+  };
+}
+
+function safeProgressText(value: string) {
+  if (/prompt|reasoning|chain[_\s-]?of[_\s-]?thought|arguments?|contextValues|api.?key|token|secret|password/i.test(value)) {
+    return "";
+  }
+  return value.replace(/\s+/g, " ").trim().slice(0, 360);
+}
+
+function readProgressStatus(value: unknown): AgentProgressEvent["status"] | undefined {
+  return value === "running" || value === "completed" || value === "failed" || value === "waiting" ? value : undefined;
+}
+
+function readProgressVisibility(value: unknown): AgentProgressEvent["visibility"] | undefined {
+  return value === "stage" || value === "raw" ? value : undefined;
+}
+
+function isLowValueRuntimeProgress(summary: string, phase: string, signalType: AgentBackendRuntimeSignal["type"]) {
+  if (phase === "intervention" && /intervention|instruction|constraint/i.test(summary)) return false;
+  if (signalType === "agent_intervention_checkpoint") return true;
+  return /^(?:Agent run started\.?|Agent runtime is ready\.?|Preparing the next model step\.?|Model step completed\.?|Using .+\.?|.+ completed\.?|Agent reached a safe point .*)$/i.test(summary);
 }
 
 function hasBlockedInternalOutput(events?: ToolEventRecord[]) {
@@ -2820,30 +2908,143 @@ function readCanvasWorkflowMode(contextValues: GenerateRequest["contextValues"])
   return isCanvasWorkflowMode(workflow.mode) ? workflow.mode : "batch_delivery";
 }
 
-function createPublicReasoningEmitter(locale: GenerateRequest["locale"], onReasoningToken?: (token: string) => void) {
+function createStageProgressEmitter(input: {
+  locale: GenerateRequest["locale"];
+  threadId: string;
+  timeline: ReturnType<typeof createRunTimelineBuilder>;
+  agentPlanPayload: Record<string, unknown>;
+  onProgressEvent?: (event: AgentProgressEvent) => void;
+  emitTimeline: (event: RunTimelineEvent) => void;
+}) {
   const emitted = new Set<string>();
-  const emit = (key: string, text: string) => {
-    if (!onReasoningToken || emitted.has(key)) return;
+  const emit = (key: string, text: string, next?: string, options: {
+    phase?: string;
+    status?: AgentProgressEvent["status"];
+    title?: string;
+    interventionHint?: string;
+    source?: string;
+  } = {}) => {
+    if (emitted.has(key)) return;
+    const summary = safeProgressText(text);
+    if (!summary) return;
     emitted.add(key);
-    onReasoningToken(`${text}\n`);
+    const safeNext = next ? safeProgressText(next) : "";
+    const safeTitle = options.title ? safeProgressText(options.title) : "";
+    const safeInterventionHint = options.interventionHint ? safeProgressText(options.interventionHint) : "";
+    const progress: AgentProgressEvent = {
+      id: `progress_${crypto.randomUUID()}`,
+      threadId: input.threadId,
+      stageId: key,
+      status: options.status ?? "running",
+      ...(options.phase ? { phase: options.phase } : {}),
+      ...(safeTitle ? { title: safeTitle } : {}),
+      summary,
+      ...(safeNext ? { next: safeNext } : {}),
+      ...(safeInterventionHint ? { interventionHint: safeInterventionHint } : {}),
+      visibility: "stage",
+      source: options.source ?? "facetwrite_stage",
+      createdAt: new Date().toISOString()
+    };
+    input.onProgressEvent?.(progress);
+    input.emitTimeline(input.timeline.event(
+      "decision",
+      progress.status ?? "running",
+      progress.title || (input.locale === "zh" ? "阶段汇报" : "Stage update"),
+      progress.summary,
+      {
+        ...input.agentPlanPayload,
+        kind: "progress_report",
+        progressId: progress.id,
+        stageId: progress.stageId,
+        phase: progress.phase,
+        next: progress.next,
+        interventionHint: progress.interventionHint,
+        source: progress.source,
+        visibility: "stage",
+        signal: "stage_progress"
+      }
+    ));
+  };
+  const emitEvidenceStage = (phase: "started" | "completed") => {
+    if (phase === "started") {
+      emit(
+        "evidence:collecting",
+        input.locale === "zh" ? "正在收集和整理可用于回答的资料。" : "Collecting and organizing material for the answer.",
+        input.locale === "zh" ? "你可以补充来源偏好、范围或格式要求。" : "You can still add source, scope, or format guidance.",
+        {
+          phase: "evidence",
+          title: input.locale === "zh" ? "资料收集" : "Evidence collection",
+          interventionHint: input.locale === "zh" ? "可补充来源偏好或研究范围。" : "You may add source preferences or scope constraints."
+        }
+      );
+      return;
+    }
+    emit(
+      "evidence:reviewing",
+      input.locale === "zh" ? "资料已返回，正在筛选能支撑最终回答和 Canvas 的内容。" : "Material returned; selecting what supports the final answer and Canvas.",
+      input.locale === "zh" ? "下一步会把可用内容整理成交付物。" : "Next, the useful material will be shaped into the deliverable.",
+      { phase: "evidence", title: input.locale === "zh" ? "资料筛选" : "Evidence review" }
+    );
+  };
+  const emitDeliveryStage = (key: string, started: boolean) => {
+    emit(
+      key,
+      started
+        ? input.locale === "zh" ? "正在准备交付物和 Canvas 更新。" : "Preparing deliverables and Canvas updates."
+        : input.locale === "zh" ? "交付物或 Canvas 节点已更新，正在校对最终内容。" : "Deliverables or Canvas nodes were updated; reviewing the final content.",
+      started
+        ? input.locale === "zh" ? "此阶段适合补充文风、格式或交付目标。" : "This is a good moment to add tone, format, or delivery constraints."
+        : input.locale === "zh" ? "下一步会整理最终答复。" : "Next, the final response will be assembled.",
+      {
+        phase: "delivery",
+        title: input.locale === "zh" ? "交付物更新" : "Deliverable update",
+        interventionHint: started
+          ? input.locale === "zh" ? "可调整文风、格式或交付目标。" : "You may adjust tone, format, or delivery goals."
+          : undefined
+      }
+    );
   };
   return {
     emit,
+    fromRuntimeSignal(signal: AgentBackendRuntimeSignal) {
+      const progress = progressEventFromRuntimeSignal(signal, input.threadId);
+      if (!progress) return;
+      if (progress.visibility === "raw") {
+        input.onProgressEvent?.(progress);
+        return;
+      }
+      emit(
+        progress.stageId || `${progress.phase || "runtime"}:${progress.status || "running"}:${progress.summary}`,
+        progress.summary,
+        progress.next,
+        {
+          phase: progress.phase,
+          status: progress.status,
+          title: progress.title,
+          interventionHint: progress.interventionHint,
+          source: progress.source || "agent_runtime"
+        }
+      );
+    },
     fromToolEvent(event: ToolEventRecord) {
       if (/^canvas_delivery_outline_started$/.test(event.eventType)) {
-        emit("canvas:outline:start", locale === "zh" ? "检测到明确 Canvas 交付请求，先搭建摘要和正文节点。" : "Detected an explicit Canvas delivery request, so I am creating outline and body placeholders first.");
+        emitDeliveryStage("delivery:canvas:started", true);
         return;
       }
       if (/^canvas_delivery_outline_committed$/.test(event.eventType)) {
-        emit("canvas:outline:commit", locale === "zh" ? "摘要节点已就位，后续会用最终内容校准。" : "The outline node is in place and will be reconciled with the final content.");
+        emitDeliveryStage("delivery:canvas:outlined", false);
         return;
       }
       if (/^canvas_delivery_body_started$/.test(event.eventType)) {
-        emit("canvas:body:start", locale === "zh" ? "正文节点已就位，等待完整答案后写入分节内容。" : "The body node is in place and will receive section content after the answer stabilizes.");
+        emitDeliveryStage("delivery:body:started", true);
         return;
       }
       if (/^canvas_delivery_body_checkpoint_committed$/.test(event.eventType)) {
-        emit("canvas:body:checkpoint", locale === "zh" ? "正文草稿已根据当前工具结果更新。" : "The body draft was updated from the current tool results.");
+        emitDeliveryStage("delivery:body:updated", false);
+        return;
+      }
+      if (/(?:^|_)canvas_mutation_committed$/.test(event.eventType) || /(?:^|_)artifact_(?:committed|staged)$/.test(event.eventType)) {
+        emitDeliveryStage("delivery:artifact:updated", false);
         return;
       }
       const payload = record(event.payload);
@@ -2857,23 +3058,26 @@ function createPublicReasoningEmitter(locale: GenerateRequest["locale"], onReaso
             ? "started"
             : "";
       if (!phase) return;
-      const label = publicToolLabel(toolName, locale);
-      if (phase === "started") {
-        emit(`tool:${toolName}:started`, locale === "zh" ? `正在使用 ${label} 收集中间依据。` : `Using ${label} to gather supporting information.`);
-      } else if (phase === "completed") {
-        emit(`tool:${toolName}:completed`, locale === "zh" ? `${label} 已返回结果，正在筛选可用于回答和 Canvas 的信息。` : `${label} returned results; selecting what is useful for the answer and Canvas.`);
-      } else if (phase === "failed") {
-        emit(`tool:${toolName}:failed`, locale === "zh" ? `${label} 有部分失败，继续使用可用结果推进。` : `${label} had a partial failure; continuing with available results.`);
+      if (phase === "failed") {
+        emit(
+          `tool:${toolName}:failed`,
+          input.locale === "zh" ? "有一个工具步骤失败，Agent 会基于可用结果继续或恢复。" : "A tool step failed; the agent will continue or recover with available results.",
+          input.locale === "zh" ? "原生日志里保留了失败细节。" : "The raw log keeps the failure detail.",
+          { phase: "recovery", status: "failed", title: input.locale === "zh" ? "工具恢复" : "Tool recovery" }
+        );
+      } else if (isEvidenceTool(toolName)) {
+        emitEvidenceStage(phase === "started" ? "started" : "completed");
+      } else if (isDeliveryTool(toolName)) {
+        emitDeliveryStage(`delivery:${phase}`, phase === "started");
       }
     }
   };
 }
 
-function publicToolLabel(toolName: string, locale: GenerateRequest["locale"]) {
-  if (toolName === "web_search") return locale === "zh" ? "网页搜索" : "web search";
-  if (toolName === "web_fetch") return locale === "zh" ? "网页读取" : "web fetch";
-  if (toolName === "knowledge_base") return locale === "zh" ? "知识库" : "knowledge base";
-  if (toolName === "canvas_write") return locale === "zh" ? "Canvas 写入" : "Canvas write";
-  if (toolName === "canvas_delivery") return locale === "zh" ? "Canvas 交付" : "Canvas delivery";
-  return toolName.replace(/[_-]+/g, " ");
+function isEvidenceTool(toolName: string) {
+  return /^(?:web_search|web_fetch|knowledge_base|ask_clarification|read_file|readfile|grep|glob|ls)$/i.test(toolName);
+}
+
+function isDeliveryTool(toolName: string) {
+  return /^(?:canvas_write|canvas_delivery|write_file|present_files|artifact_stage)$/i.test(toolName);
 }

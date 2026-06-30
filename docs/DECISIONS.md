@@ -8,6 +8,14 @@ Reason: Raw tool lifecycle text explains which tool ran, but it is mechanical an
 
 Impact: Frontend trace rendering should prefer summarized `timeline_event` entries over raw tool-event streams. Backend/runtime adapters may continue to persist detailed tool events for audit and debugging, but any user-visible progress copy must be sanitized and phrased as execution status, not internal thought.
 
+## 2026-06-30: Agent Run Reporting Uses Final, Stage, And Raw Layers
+
+Decision: Split Agent run reporting into three projections. `final` is the authoritative assistant answer, processing summary, validation outcome, and deliverable entry points. `stage` is the public in-progress Agent work report shown in the right conversation run block, backed by `agent_progress_reported` and `progressSegments`. `raw` is the diagnostic layer for model steps, tool calls, command logs, safe-point lifecycle, stdout/stderr, and trace metadata. Progress text must not be written into final assistant `text`, `reasoningText`, or Canvas deliverable bodies.
+
+Reason: The first progress implementation proved the transport but promoted model/tool lifecycle sentences such as "Using write_file" and "Model step completed" into the main conversation. That recreated the old Thinking problem in a different slot: users saw a tool-event ledger rather than task-level work narration. The product needs the Codex-like shape where the completed answer is calm, the expandable run report explains what the Agent was doing and where a user could intervene, and raw command/tool details remain available only when explicitly expanded.
+
+Impact: Runtime `ProgressReportingMiddleware` must treat model/tool lifecycle and ordinary safe points as `visibility:"raw"` telemetry by default. Only semantic milestones, deliverable checkpoints, failure recovery, final synthesis, and explicit user-intervention hints may become `visibility:"stage"` reports. The Node generation service may aggregate raw runtime, tool, timeline, and Canvas facts into stage summaries as a fallback, but it must dedupe repeated events and never mirror the same low-level event as main progress and raw trace copy. The frontend renders stage reports inside the assistant run block and keeps raw logs behind the run details entry.
+
 ## 2026-06-28: Runtime Budget Defaults Are Low-First
 
 Decision: Keep the low runtime budget at `8 evidence / 2 body drafts / 18 model calls / 80 recursion / 16 reserve`, make it the persisted Project default, set medium to `12 / 3 / 24 / 110 / 22`, and make high equal the previous medium cap, `16 / 4 / 32 / 140 / 28`.

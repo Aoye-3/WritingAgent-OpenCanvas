@@ -40,3 +40,12 @@ test("composer keeps model selection available as a compact select", () => {
   assert.match(source, /aria-label=\{t\("workspace\.conversationModel"\)\}/);
   assert.match(styles, /\.view-workspace \.chat-send-icon \{\s*flex: 0 0 34px;\s*margin-left: auto;/);
 });
+
+test("running composer switches between stop and queued send based on typed text", () => {
+  const source = readFileSync("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
+
+  assert.match(source, /export function shouldShowStopControl\(isSending: boolean, input: string\)/);
+  assert.match(source, /const showStopControl = shouldShowStopControl\(isSending, input\);/);
+  assert.match(source, /type=\{showStopControl \? "button" : "submit"\}/);
+  assert.match(source, /onClick=\{showStopControl \? onStopSending : undefined\}/);
+});

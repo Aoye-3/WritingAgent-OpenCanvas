@@ -4569,6 +4569,118 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   position: relative;
 }
 
+.progress-segment-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.progress-segment {
+  display: grid;
+  gap: 3px;
+  color: var(--color-text);
+}
+
+.progress-segment strong {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.progress-segment p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.progress-segment small {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.progress-segment em {
+  color: var(--color-primary);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.45;
+}
+
+.progress-segment-history {
+  margin: 0 0 10px;
+  color: var(--color-text-muted);
+}
+
+.progress-segment-history summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.progress-segment-history .progress-segment-list {
+  margin: 8px 0 0;
+  opacity: 0.82;
+}
+
+.raw-run-log-details {
+  margin-top: 8px;
+  border-top: 1px solid rgba(102, 115, 134, 0.14);
+  padding-top: 8px;
+}
+
+.raw-run-log-details summary {
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.raw-run-log-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.raw-run-log-item {
+  border-left: 2px solid rgba(102, 115, 134, 0.28);
+  padding-left: 8px;
+}
+
+.raw-run-log-item strong {
+  display: block;
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.raw-run-log-item p {
+  margin: 2px 0 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.queued-input-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.queued-input-status button {
+  border: 1px solid rgba(255, 255, 255, 0.48);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  padding: 3px 7px;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
 .reasoning-stream-panel {
   margin: 0 0 10px;
   border: 1px solid var(--color-border);

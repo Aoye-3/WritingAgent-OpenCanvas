@@ -10,6 +10,7 @@ from deerflow.agents.middlewares.clarification_middleware import ClarificationMi
 from deerflow.agents.middlewares.loop_detection_middleware import LoopDetectionMiddleware
 from deerflow.agents.middlewares.memory_middleware import MemoryMiddleware
 from deerflow.agents.middlewares.plan_tool_choice_middleware import PlanToolChoiceMiddleware
+from deerflow.agents.middlewares.progress_reporting_middleware import ProgressReportingMiddleware
 from deerflow.agents.middlewares.subagent_limit_middleware import SubagentLimitMiddleware
 from deerflow.agents.middlewares.summarization_middleware import BeforeSummarizationHook, DeerFlowSummarizationMiddleware
 from deerflow.agents.middlewares.title_middleware import TitleMiddleware
@@ -354,6 +355,8 @@ def _build_middlewares(
     loop_detection_config = resolved_app_config.loop_detection
     if loop_detection_config.enabled:
         middlewares.append(LoopDetectionMiddleware.from_config(loop_detection_config))
+
+    middlewares.append(ProgressReportingMiddleware())
 
     # Inject custom middlewares before ClarificationMiddleware
     if custom_middlewares:

@@ -7,8 +7,9 @@ test("pending assistant messages with run trace use a normal bubble layout", () 
 
   assert.match(source, /hasRunTrace/);
   assert.match(source, /hasReasoningText/);
+  assert.match(source, /hasProgressSegments/);
   assert.match(source, /usesThinkingStatus/);
-  assert.match(source, /usesThinkingStatus = isPendingAssistant && !hasRunTrace && !hasReasoningText/);
+  assert.match(source, /usesThinkingStatus = isPendingAssistant && !hasRunTrace && !hasReasoningText && !hasProgressSegments/);
   assert.doesNotMatch(source, /className=\{isPendingAssistant \? "message-thinking-status" : "message-bubble"\}/);
 });
 
@@ -17,6 +18,6 @@ test("pending assistant messages render streamed reasoning before answer text st
 
   assert.match(
     source,
-    /message\.role === "assistant" && message\.isStreaming && !message\.text\.trim\(\) \? \(\s*<>\s*<AssistantRunTrace[\s\S]*?<ReasoningStreamPanel message=\{message\} \/>[\s\S]*?<StreamingStatus/,
+    /hasProgressSegments \? \(\s*<>\s*<ProgressSegmentList[\s\S]*?<StreamingStatus[\s\S]*?\) : \(\s*<>\s*<AssistantRunTrace[\s\S]*?<ReasoningStreamPanel message=\{message\} \/>[\s\S]*?<StreamingStatus/,
   );
 });

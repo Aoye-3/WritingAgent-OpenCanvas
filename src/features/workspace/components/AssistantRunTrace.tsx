@@ -55,7 +55,8 @@ export function filterAssistantRunTraceEvents(events: RunTimelineEvent[], target
   });
 }
 
-function isVisibleRunTraceEvent(event: Pick<RunTimelineEvent, "eventType" | "status">) {
+function isVisibleRunTraceEvent(event: Pick<RunTimelineEvent, "eventType" | "status" | "payload">) {
+  if (event.payload?.kind === "progress_report") return false;
   if (event.status === "failed" || event.status === "waiting") return true;
   return event.eventType === "phase_started"
     || event.eventType === "decision"

@@ -33,6 +33,32 @@ test("streaming generation client forwards timeline events", async () => {
   }
 });
 
+test("streaming generation client forwards progress events outside final text", async () => {
+  const body = [
+    'event: progress_event\ndata: {"id":"progress_1","threadId":"thread_1","status":"running","summary":"正在收集证据","createdAt":"2026-06-14T00:00:00.000Z"}\n\n',
+    'event: final\ndata: {"text":"Done","prompt":"","provider":"agent-backend","usedMock":false,"threadId":"thread_1"}\n\n'
+  ].join("");
+  const progressEvents: unknown[] = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+      controller.close();
+    }
+  }), { status: 200 });
+  try {
+    const result = await generateTextStream({ mode: "chat", locale: "zh", chatInstruction: "Hi" }, {
+      onProgressEvent: (event) => progressEvents.push(event)
+    });
+
+    assert.equal(result.text, "Done");
+    assert.equal(progressEvents.length, 1);
+    assert.equal((progressEvents[0] as { summary?: string }).summary, "正在收集证据");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test("streaming generation client sends transient skill refs in the request payload", async () => {
   let observedBody = "";
   const previousFetch = globalThis.fetch;

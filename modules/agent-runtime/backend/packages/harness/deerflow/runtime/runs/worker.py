@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from langchain_core.messages import HumanMessage
 
 from deerflow.config.app_config import AppConfig
+from deerflow.runtime.progress import public_progress_payload
 from deerflow.runtime.serialization import serialize
 from deerflow.runtime.stream_bridge import StreamBridge
 
@@ -84,6 +85,34 @@ def _budget_exhausted_payload(exc: Exception, runnable_config: dict[str, Any]) -
     }
 
 
+async def _publish_progress(
+    bridge: StreamBridge,
+    *,
+    run_id: str,
+    thread_id: str,
+    phase: str,
+    summary: str,
+    status: Literal["running", "completed", "failed", "waiting"] = "running",
+    next: str | None = None,
+    visibility: Literal["stage", "raw"] = "stage",
+    event_type: Literal["agent_progress_reported", "agent_intervention_checkpoint"] = "agent_progress_reported",
+) -> None:
+    await bridge.publish(
+        run_id,
+        "custom",
+        public_progress_payload(
+            event_type,
+            run_id=run_id,
+            thread_id=thread_id,
+            phase=phase,
+            status=status,
+            summary=summary,
+            next=next,
+            visibility=visibility,
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class RunContext:
     """Infrastructure dependencies for a single agent run.
@@ -104,10 +133,11 @@ class RunContext:
 def _install_runtime_context(config: dict, runtime_context: dict[str, Any]) -> None:
     existing_context = config.get("context")
     if isinstance(existing_context, dict):
-        existing_context.setdefault("thread_id", runtime_context["thread_id"])
-        existing_context.setdefault("run_id", runtime_context["run_id"])
-        if "app_config" in runtime_context:
-            existing_context["app_config"] = runtime_context["app_config"]
+        for key, value in runtime_context.items():
+            if key == "app_config" or key.startswith("__facetwrite_"):
+                existing_context[key] = value
+            else:
+                existing_context.setdefault(key, value)
         return
 
     config["context"] = dict(runtime_context)
@@ -221,6 +251,15 @@ async def run_agent(
                 "thread_id": thread_id,
             },
         )
+        await _publish_progress(
+            bridge,
+            run_id=run_id,
+            thread_id=thread_id,
+            phase="run",
+            summary="Agent run started.",
+            next="Preparing the agent runtime.",
+            visibility="raw",
+        )
 
         # 3. Build the agent
         from langchain_core.runnables import RunnableConfig
@@ -231,6 +270,7 @@ async def run_agent(
         # manually here because we drive the graph through ``agent.astream(config=...)``
         # without passing the official ``context=`` parameter.
         runtime_ctx = _build_runtime_context(thread_id, run_id, config.get("context"), ctx.app_config)
+        runtime_ctx["__facetwrite_run_manager"] = run_manager
         _install_runtime_context(config, runtime_ctx)
         runtime = Runtime(context=cast(Any, runtime_ctx), store=store)
         config.setdefault("configurable", {})["__pregel_runtime"] = runtime
@@ -245,6 +285,15 @@ async def run_agent(
             agent = agent_factory(config=runnable_config, app_config=ctx.app_config)
         else:
             agent = agent_factory(config=runnable_config)
+        await _publish_progress(
+            bridge,
+            run_id=run_id,
+            thread_id=thread_id,
+            phase="run",
+            summary="Agent runtime is ready.",
+            next="Starting model and tool execution.",
+            visibility="raw",
+        )
 
         # Capture the effective (resolved) model name from the agent's metadata.
         # _resolve_model_name in agent.py may return the default model if the
@@ -329,6 +378,14 @@ async def run_agent(
             action = record.abort_action
             if action == "rollback":
                 await run_manager.set_status(run_id, RunStatus.error, error="Rolled back by user")
+                await _publish_progress(
+                    bridge,
+                    run_id=run_id,
+                    thread_id=thread_id,
+                    phase="run",
+                    status="failed",
+                    summary="Agent run was rolled back by the user.",
+                )
                 try:
                     await _rollback_to_pre_run_checkpoint(
                         checkpointer=checkpointer,
@@ -343,13 +400,37 @@ async def run_agent(
                     logger.warning("Failed to rollback checkpoint for run %s", run_id, exc_info=True)
             else:
                 await run_manager.set_status(run_id, RunStatus.interrupted)
+                await _publish_progress(
+                    bridge,
+                    run_id=run_id,
+                    thread_id=thread_id,
+                    phase="run",
+                    status="completed",
+                    summary="Agent run was interrupted by the user.",
+                )
         else:
             await run_manager.set_status(run_id, RunStatus.success)
+            await _publish_progress(
+                bridge,
+                run_id=run_id,
+                thread_id=thread_id,
+                phase="run",
+                status="completed",
+                summary="Agent run completed.",
+            )
 
     except asyncio.CancelledError:
         action = record.abort_action
         if action == "rollback":
             await run_manager.set_status(run_id, RunStatus.error, error="Rolled back by user")
+            await _publish_progress(
+                bridge,
+                run_id=run_id,
+                thread_id=thread_id,
+                phase="run",
+                status="failed",
+                summary="Agent run was rolled back by the user.",
+            )
             try:
                 await _rollback_to_pre_run_checkpoint(
                     checkpointer=checkpointer,
@@ -364,12 +445,29 @@ async def run_agent(
                 logger.warning("Run %s cancellation rollback failed", run_id, exc_info=True)
         else:
             await run_manager.set_status(run_id, RunStatus.interrupted)
+            await _publish_progress(
+                bridge,
+                run_id=run_id,
+                thread_id=thread_id,
+                phase="run",
+                status="completed",
+                summary="Agent run was interrupted by the user.",
+            )
             logger.info("Run %s was cancelled", run_id)
 
     except Exception as exc:
         error_msg = f"{exc}"
         logger.exception("Run %s failed: %s", run_id, error_msg)
         await run_manager.set_status(run_id, RunStatus.error, error=error_msg)
+        await _publish_progress(
+            bridge,
+            run_id=run_id,
+            thread_id=thread_id,
+            phase="run",
+            status="failed",
+            summary="Agent run failed.",
+            next="Review the runtime error details.",
+        )
         budget_payload = _budget_exhausted_payload(exc, runnable_config)
         await bridge.publish(
             run_id,
@@ -416,6 +514,20 @@ async def run_agent(
                 await thread_store.update_status(thread_id, final_status)
             except Exception:
                 logger.debug("Failed to update thread_meta status for %s (non-fatal)", thread_id)
+
+        expired_intervention = await run_manager.expire_requested_intervention(run_id)
+        if expired_intervention is not None:
+            await _publish_progress(
+                bridge,
+                run_id=run_id,
+                thread_id=thread_id,
+                phase="intervention",
+                status="failed",
+                summary="User intervention was not injected before this run completed.",
+                next="The queued input can be handled after the run.",
+                visibility="stage",
+                event_type="agent_intervention_checkpoint",
+            )
 
         await bridge.publish_end(run_id)
         asyncio.create_task(bridge.cleanup(run_id, delay=60))

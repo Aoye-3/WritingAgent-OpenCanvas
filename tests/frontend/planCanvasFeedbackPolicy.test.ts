@@ -106,5 +106,5 @@ test("chat generation can be stopped while the agent is thinking", async () => {
   assert.match(hookSource, /chatAbortControllerRef\.current\?\.abort\(\)/);
   assert.match(drawerSource, /onStopSending/);
   assert.match(drawerSource, /StopIcon/);
-  assert.match(drawerSource, /type=\{isSending \? "button" : "submit"\}/);
+  assert.match(drawerSource, /type=\{showStopControl \? "button" : "submit"\}/);
 });

@@ -81,6 +81,8 @@ type AICollaborationDrawerProps = {
   onRemoveMindChainContext: () => void;
   onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => Promise<unknown>;
+  onQueueInput: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => string | undefined;
+  onRequestQueuedInputIntervention: (id: string) => void;
   onStopSending: () => void;
   onSelectAgent: (agentCardId: string) => void;
   onSelectModel: (configuredModelApiId: string) => Promise<void>;
@@ -107,6 +109,10 @@ const toolMeta: Record<string, { en: string; zh: string; hint: string }> = {
 
 const COMPOSER_MIN_HEIGHT = 72;
 const COMPOSER_MAX_HEIGHT = 240;
+
+export function shouldShowStopControl(isSending: boolean, input: string) {
+  return isSending && input.trim().length === 0;
+}
 
 export function AICollaborationDrawer({
   allowedTools,
@@ -145,6 +151,8 @@ export function AICollaborationDrawer({
   onRemoveMindChainContext,
   onResizeStart,
   onSend,
+  onQueueInput,
+  onRequestQueuedInputIntervention,
   onStopSending,
   onSelectAgent,
   onSelectModel,
@@ -219,6 +227,7 @@ export function AICollaborationDrawer({
   );
   const floatingPlan = pendingClarificationPlan ?? floatingBoardPlan;
   const floatingPlanPanelStyle = { "--plan-panel-bottom": `${pendingClarificationPlan || pendingAgentClarification ? 142 : composerHeight + 142}px` } as CSSProperties;
+  const showStopControl = shouldShowStopControl(isSending, input);
 
   useEffect(() => {
     setThinkingChoice(modelSettingsToThinkingChoice(modelSettings));
@@ -307,6 +316,23 @@ export function AICollaborationDrawer({
     if (!text) return;
     if (pendingAgentClarification) return;
     setInput("");
+    const runtimeBudgetOverride = runtimeBudgetChoice === (runtimeBudgetProfile ?? "low")
+      ? undefined
+      : runtimeBudgetChoice;
+    const messageModelOverrides = supportsThinking ? thinkingOverridesFromChoice(thinkingChoice) : undefined;
+    const messageRequestContext = {
+      ...(mindChainContext ? { canvasMindChain: mindChainContext.text } : {}),
+      ...(enabledSkillRefs.length ? { transientSkillRefs: enabledSkillRefs } : {}),
+      ...(disabledSkillRefs.length ? { disabledSkillRefs } : {}),
+      ...(runtimeBudgetOverride ? { runtimeBudgetProfile: runtimeBudgetOverride } : {})
+    };
+    if (isSending) {
+      onQueueInput(text, messageModelOverrides, messageRequestContext);
+      onSkillOverridesConsumed();
+      setSkillPickerOpen(false);
+      if (mindChainContext) onMindChainContextConsumed();
+      return;
+    }
     if (isWriteConfirmation(text)) {
       if (pendingWriteSuggestion) {
         await acceptCanvasWriteSuggestion(currentThreadId, pendingWriteSuggestion.id);
@@ -326,16 +352,10 @@ export function AICollaborationDrawer({
       await onPlansChanged();
     }
     try {
-      const runtimeBudgetOverride = runtimeBudgetChoice === (runtimeBudgetProfile ?? "low")
-        ? undefined
-        : runtimeBudgetChoice;
       const sendResult = await onSend(text, supportsThinking ? thinkingOverridesFromChoice(thinkingChoice) : undefined, {
-        ...(mindChainContext ? { canvasMindChain: mindChainContext.text } : {}),
+        ...messageRequestContext,
         ...(awaitingPlan ? { awaitingPlan: { id: awaitingPlan.id, answer: text } } : {}),
-        ...(revisePlan ? { awaitingPlan: { id: revisePlan.id, revise: true } } : {}),
-        ...(enabledSkillRefs.length ? { transientSkillRefs: enabledSkillRefs } : {}),
-        ...(disabledSkillRefs.length ? { disabledSkillRefs } : {}),
-        ...(runtimeBudgetOverride ? { runtimeBudgetProfile: runtimeBudgetOverride } : {})
+        ...(revisePlan ? { awaitingPlan: { id: revisePlan.id, revise: true } } : {})
       });
       if (sendResult) {
         if (!isAgentClarificationRequired(sendResult)) {
@@ -594,28 +614,47 @@ export function AICollaborationDrawer({
           }
           const messageAnnotations = annotations.filter((annotation) => annotation.messageId === message.id);
           const isPendingAssistant = message.role === "assistant" && message.isStreaming && !message.text.trim();
-          const hasRunTrace = message.role === "assistant" && Boolean(message.timeline?.length);
+          const progressSegments = message.role === "assistant" ? progressSegmentsForMessage(message) : [];
+          const rawRunLogEvents = message.role === "assistant" ? rawRunLogEventsForMessage(message) : [];
+          const hasProgressSegments = progressSegments.length > 0;
+          const hasRunTrace = message.role === "assistant" && Boolean(message.timeline?.some((event) => !isProgressTimelineEvent(event)));
           const hasReasoningText = message.role === "assistant" && Boolean(message.reasoningText?.trim());
-          const usesThinkingStatus = isPendingAssistant && !hasRunTrace && !hasReasoningText;
+          const usesThinkingStatus = isPendingAssistant && !hasRunTrace && !hasReasoningText && !hasProgressSegments;
           const traceTarget = agentPlanTraceTarget(message.timeline, plans);
           return (
             <article className={`message message-${message.role}${message.isStreaming ? " message-streaming" : ""}${usesThinkingStatus ? " message-thinking" : ""}`} key={message.id}>
               <div className="message-avatar" aria-hidden="true">{message.role === "user" ? "U" : "F"}</div>
               <div className={usesThinkingStatus ? "message-thinking-status" : "message-bubble"}>
                 {message.role === "assistant" && message.isStreaming && !message.text.trim() ? (
-                  <>
-                    <AssistantRunTrace events={message.timeline} planId={traceTarget.planId} stepId={traceTarget.stepId} onFocusNode={onFocusPlanArtifact} />
-                    <ReasoningStreamPanel message={message} />
-                    <StreamingStatus label={streamingStatusLabel(message, t("workspace.preparingResponse"))} />
-                  </>
+                  hasProgressSegments ? (
+                    <>
+                      <ProgressSegmentList completed={false} rawEvents={rawRunLogEvents} segments={progressSegments} />
+                      <StreamingStatus label={streamingStatusLabel(message, t("workspace.preparingResponse"))} />
+                    </>
+                  ) : (
+                    <>
+                      <AssistantRunTrace events={message.timeline} planId={traceTarget.planId} stepId={traceTarget.stepId} onFocusNode={onFocusPlanArtifact} />
+                      <ReasoningStreamPanel message={message} />
+                      <StreamingStatus label={streamingStatusLabel(message, t("workspace.preparingResponse"))} />
+                    </>
+                  )
                 ) : message.role === "assistant" ? (
                   <div className="assistant-selectable-text" onMouseUp={(event) => captureSelection(event, message)}>
-                    <AssistantRunTrace events={message.timeline} planId={traceTarget.planId} stepId={traceTarget.stepId} onFocusNode={onFocusPlanArtifact} />
-                    <ReasoningStreamPanel message={message} />
+                    {hasProgressSegments ? <ProgressSegmentList completed={!message.isStreaming && Boolean(message.text.trim())} rawEvents={rawRunLogEvents} segments={progressSegments} /> : (
+                      <>
+                        <AssistantRunTrace events={message.timeline} planId={traceTarget.planId} stepId={traceTarget.stepId} onFocusNode={onFocusPlanArtifact} />
+                        <ReasoningStreamPanel message={message} />
+                      </>
+                    )}
                     <MarkdownText text={message.text} highlights={messageAnnotations.map((annotation) => annotation.text)} />
                     {message.isStreaming ? <span className="typing-caret" aria-hidden="true" /> : null}
                   </div>
-                ) : <p>{message.text}</p>}
+                ) : (
+                  <>
+                    <p>{message.text}</p>
+                    <QueuedInputStatus message={message} onRequestIntervention={onRequestQueuedInputIntervention} />
+                  </>
+                )}
                 {message.usedMock ? <span className="message-meta">{t("workspace.mockFallback")}</span> : null}
               </div>
             </article>
@@ -846,13 +885,79 @@ export function AICollaborationDrawer({
           <button className="tool-icon-button plan-command-button" type="button" onClick={() => setInput((value) => value.startsWith("/plan") ? value : `/plan ${value}`)} aria-label={t("workspace.createTaskPlan")} title={t("workspace.createTaskPlan")}>
             <ModelConfigIcon aria-hidden="true" size={15} />
           </button>
-          <button className={isSending ? "button button-primary chat-send chat-send-icon is-stopping" : "button button-primary chat-send chat-send-icon"} type={isSending ? "button" : "submit"} disabled={writeBusy} onClick={isSending ? onStopSending : undefined}
-            aria-label={t("workspace.send")} title={isSending ? t("workspace.sending") : t("workspace.send")}>
-            {isSending ? <StopIcon aria-hidden="true" size={18} /> : <SendIcon aria-hidden="true" size={18} />}
+          <button className={showStopControl ? "button button-primary chat-send chat-send-icon is-stopping" : "button button-primary chat-send chat-send-icon"} type={showStopControl ? "button" : "submit"} disabled={writeBusy} onClick={showStopControl ? onStopSending : undefined}
+            aria-label={showStopControl ? (locale === "zh" ? "停止" : "Stop") : t("workspace.send")} title={showStopControl ? (locale === "zh" ? "停止当前任务" : "Stop current run") : isSending ? (locale === "zh" ? "发送并排队" : "Send and queue") : t("workspace.send")}>
+            {showStopControl ? <StopIcon aria-hidden="true" size={18} /> : <SendIcon aria-hidden="true" size={18} />}
           </button>
         </div>
       </form>
     </motion.aside>
+  );
+}
+
+function ProgressSegmentList({ completed, rawEvents, segments }: {
+  completed: boolean;
+  rawEvents: RunTimelineEvent[];
+  segments: ReturnType<typeof progressSegmentsForMessage>;
+}) {
+  const { locale } = useI18n();
+  if (!segments.length) return null;
+  const body = (
+    <>
+      <div className="progress-segment-list">
+        {segments.map((segment) => (
+          <div className="progress-segment" key={segment.id}>
+            {segment.title ? <strong>{segment.title}</strong> : null}
+            <p>{segment.summary}</p>
+            {segment.next ? <small>{segment.next}</small> : null}
+            {segment.interventionHint ? <em>{segment.interventionHint}</em> : null}
+          </div>
+        ))}
+      </div>
+      <RawRunLogDetails events={rawEvents} />
+    </>
+  );
+  if (!completed) return body;
+  return (
+    <details className="progress-segment-history">
+      <summary>{locale === "zh" ? "\u9636\u6bb5\u6c47\u62a5" : "Stage reports"}</summary>
+      {body}
+    </details>
+  );
+}
+
+function RawRunLogDetails({ events }: { events: RunTimelineEvent[] }) {
+  const { locale } = useI18n();
+  if (!events.length) return null;
+  return (
+    <details className="raw-run-log-details">
+      <summary>{locale === "zh" ? `\u5df2\u8fd0\u884c\u547d\u4ee4/\u5de5\u5177 ${events.length}` : `Raw tool log ${events.length}`}</summary>
+      <div className="raw-run-log-list">
+        {events.map((event) => (
+          <div className="raw-run-log-item" key={event.id}>
+            <strong>{event.title}</strong>
+            {event.summary ? <p>{event.summary}</p> : null}
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function QueuedInputStatus({ message, onRequestIntervention }: { message: CollaborationMessage; onRequestIntervention: (id: string) => void }) {
+  const { locale } = useI18n();
+  const queued = message.queuedInput;
+  if (!queued) return null;
+  const labels = queuedInputLabels(locale, queued.status);
+  return (
+    <div className="queued-input-status">
+      <span>{labels.status}</span>
+      {queued.status === "queued_after_run" ? (
+        <button type="button" onClick={() => onRequestIntervention(queued.id)}>
+          {labels.action}
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -1189,6 +1294,74 @@ function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "
       </div>
     </section>
   );
+}
+
+function progressSegmentsForMessage(message: CollaborationMessage) {
+  const byId = new Map<string, NonNullable<CollaborationMessage["progressSegments"]>[number]>();
+  for (const segment of message.progressSegments ?? []) {
+    if (segment.visibility === "raw") continue;
+    byId.set(segment.id, segment);
+  }
+  for (const event of message.timeline ?? []) {
+    if (!isProgressTimelineEvent(event)) continue;
+    const segment = progressSegmentFromTimelineEvent(event);
+    byId.set(segment.id, segment);
+  }
+  return [...byId.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+function isProgressTimelineEvent(event: RunTimelineEvent) {
+  return event.payload?.kind === "progress_report" && event.payload?.visibility !== "raw";
+}
+
+function progressSegmentFromTimelineEvent(event: RunTimelineEvent): NonNullable<CollaborationMessage["progressSegments"]>[number] {
+  const payload = event.payload ?? {};
+  return {
+    id: typeof payload.progressId === "string" ? payload.progressId : event.id,
+    threadId: event.threadId,
+    runId: event.runId,
+    stageId: typeof payload.stageId === "string" ? payload.stageId : undefined,
+    phase: typeof payload.phase === "string" ? payload.phase : undefined,
+    status: event.status,
+    title: event.title,
+    summary: event.summary,
+    next: typeof payload.next === "string" ? payload.next : undefined,
+    interventionHint: typeof payload.interventionHint === "string" ? payload.interventionHint : undefined,
+    source: typeof payload.source === "string" ? payload.source : undefined,
+    createdAt: event.createdAt
+  };
+}
+
+function rawRunLogEventsForMessage(message: CollaborationMessage) {
+  return [...(message.timeline ?? [])]
+    .filter((event) => !isProgressTimelineEvent(event))
+    .filter((event) => event.eventType === "tool_started" || event.eventType === "tool_completed" || event.status === "failed" || event.payload?.visibility === "raw")
+    .sort((left, right) => left.sequence - right.sequence);
+}
+
+function queuedInputLabels(locale: string, status: NonNullable<CollaborationMessage["queuedInput"]>["status"]) {
+  if (status === "intervention_requested") {
+    return {
+      status: locale === "zh" ? "\u5df2\u6807\u8bb0\u4ecb\u5165\uff0c\u5c06\u5728\u5b89\u5168\u70b9\u5904\u7406" : "Intervention requested; it will be handled at a safe point.",
+      action: ""
+    };
+  }
+  if (status === "sent_after_run") {
+    return {
+      status: locale === "zh" ? "\u5df2\u5728\u5f53\u524d\u8fd0\u884c\u540e\u53d1\u9001" : "Sent after the current run.",
+      action: ""
+    };
+  }
+  if (status === "injected") {
+    return {
+      status: locale === "zh" ? "\u5df2\u4ecb\u5165\u5f53\u524d\u8fd0\u884c" : "Injected into the current run.",
+      action: ""
+    };
+  }
+  return {
+    status: locale === "zh" ? "\u5df2\u6392\u961f\uff0c\u5c06\u5728\u5f53\u524d\u8fd0\u884c\u540e\u5904\u7406" : "Queued; it will run after the current task.",
+    action: locale === "zh" ? "\u4ecb\u5165\u5f53\u524d\u8fd0\u884c" : "Intervene current run"
+  };
 }
 
 function AgentClarificationAnswerCard({ clarification, locale }: {

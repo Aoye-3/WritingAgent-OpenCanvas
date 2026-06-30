@@ -68,6 +68,20 @@ class RunResponse(BaseModel):
     updated_at: str = ""
 
 
+class RunInterventionRequest(BaseModel):
+    text: str = Field(description="User text to inject at the next safe checkpoint")
+    input_id: str | None = Field(default=None, description="Client-side queued input id")
+
+
+class RunInterventionResponse(BaseModel):
+    id: str
+    run_id: str
+    thread_id: str
+    status: str
+    created_at: str
+    updated_at: str
+
+
 class ThreadTokenUsageModelBreakdown(BaseModel):
     tokens: int = 0
     runs: int = 0
@@ -231,6 +245,35 @@ async def cancel_run(
         return Response(status_code=204)
 
     return Response(status_code=202)
+
+
+@router.post("/{thread_id}/runs/{run_id}/interventions", response_model=RunInterventionResponse)
+@require_permission("runs", "create", owner_check=True, require_existing=True)
+async def request_run_intervention(
+    thread_id: str,
+    run_id: str,
+    body: RunInterventionRequest,
+    request: Request,
+) -> RunInterventionResponse:
+    """Request safe-point injection of user text into a running run."""
+
+    run_mgr = get_run_manager(request)
+    intervention = await run_mgr.request_intervention(
+        run_id,
+        thread_id=thread_id,
+        text=body.text,
+        intervention_id=body.input_id,
+    )
+    if intervention is None:
+        raise HTTPException(status_code=409, detail=f"Run {run_id} is not accepting interventions")
+    return RunInterventionResponse(
+        id=intervention.id,
+        run_id=intervention.run_id,
+        thread_id=intervention.thread_id,
+        status=intervention.status,
+        created_at=intervention.created_at,
+        updated_at=intervention.updated_at,
+    )
 
 
 @router.get("/{thread_id}/runs/{run_id}/join")

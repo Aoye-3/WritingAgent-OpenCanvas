@@ -1,8 +1,21 @@
-import type { GenerateRequest, GenerateResponse, RunTimelineEvent, StreamStatus } from "./types";
+import type { AgentProgressEvent, GenerateRequest, GenerateResponse, RunTimelineEvent, StreamStatus } from "./types";
 import { apiPost } from "../../shared/apiClient";
 
 export async function generateText(payload: GenerateRequest): Promise<GenerateResponse> {
   return apiPost<GenerateResponse>("/api/generate", payload);
+}
+
+export async function requestRunIntervention(payload: {
+  threadId: string;
+  runId: string;
+  text: string;
+  inputId: string;
+}): Promise<{ id: string; status: string }> {
+  return apiPost<{ id: string; status: string }>(`/api/generate/runs/${encodeURIComponent(payload.runId)}/interventions`, {
+    threadId: payload.threadId,
+    text: payload.text,
+    inputId: payload.inputId
+  });
 }
 
 export async function generateTextStream(
@@ -13,6 +26,7 @@ export async function generateTextStream(
     onStatus?: (status: StreamStatus) => void;
     onToolEvent?: (event: unknown) => void;
     onTimelineEvent?: (event: RunTimelineEvent) => void;
+    onProgressEvent?: (event: AgentProgressEvent) => void;
   } = {},
   options: { signal?: AbortSignal } = {}
 ): Promise<GenerateResponse> {
@@ -61,6 +75,8 @@ export async function generateTextStream(
         handlers.onToolEvent?.(parsed.data);
       } else if (parsed.event === "timeline_event") {
         handlers.onTimelineEvent?.(parsed.data as RunTimelineEvent);
+      } else if (parsed.event === "progress_event") {
+        handlers.onProgressEvent?.(parsed.data as AgentProgressEvent);
       } else if (parsed.event === "final") {
         finalResult = parsed.data as GenerateResponse;
         trace("final", { threadId: finalResult.threadId, runId: finalResult.runId });
@@ -101,6 +117,7 @@ function createStreamTrace(payload: GenerateRequest) {
       || event === "error"
       || event === "status"
       || event === "tool_event"
+      || event === "progress_event"
       || event === "activity"
       || /^canvas_delivery_/.test(type)
       || /^agent_backend_/.test(type)

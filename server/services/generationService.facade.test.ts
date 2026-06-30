@@ -2719,6 +2719,7 @@ test("streaming direct Canvas delivery progressively creates placeholders and fi
     }
   });
 
+  const progressEvents: Array<{ title?: string; summary: string; visibility?: string }> = [];
   const result = await service.generateAndRecordStream({
     mode: "chat",
     locale: "en",
@@ -2727,14 +2728,17 @@ test("streaming direct Canvas delivery progressively creates placeholders and fi
     toolState: { web_search: true }
   }, {
     onReasoningToken: (token) => reasoningTokens.push(token),
+    onProgressEvent: (event) => progressEvents.push(event),
     onToolEvent: (event) => events.push(event as typeof events[number])
   });
 
   assert.equal(result.usedMock, false);
   assert.equal(result.text.includes("Creating outline"), false);
-  assert.ok(reasoningTokens.join("").includes("Preparing context"));
-  assert.ok(reasoningTokens.join("").includes("creating outline and body placeholders"));
-  assert.ok(reasoningTokens.join("").includes("reconciling Canvas nodes"));
+  assert.equal(reasoningTokens.join("").includes("Preparing context"), false);
+  assert.ok(progressEvents.every((event) => event.visibility !== "raw"));
+  assert.ok(progressEvents.some((event) => event.title === "Preparing run" && event.summary.includes("Preparing task context")));
+  assert.ok(progressEvents.some((event) => event.title === "Deliverable update" && event.summary.includes("Canvas updates")));
+  assert.ok(progressEvents.some((event) => event.summary.includes("reconciling Canvas nodes")));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_outline_committed"));
   assert.ok(canvasNodes.length >= 3);
   assert.ok(canvasEdges.length >= 2);

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentCard, AgentClarification, CanvasNode, CanvasWriteSuggestion, PlanRun, RunTimelineEvent, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
-import { generateText, generateTextStream } from "../../features/generation/generationClient";
-import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../../features/generation/types";
+import { generateText, generateTextStream, requestRunIntervention } from "../../features/generation/generationClient";
+import type { AgentProgressEvent, CollaborationMessage, GenerateRequest, GenerateResponse, QueuedRunInput } from "../../features/generation/types";
 import type { Locale } from "../../features/i18n/types";
 import { buildRequestToolState } from "../../features/workspace/planUiPolicy";
 import {
@@ -42,6 +42,15 @@ type UseGenerationRunOptions = {
 };
 
 type TypewriterTarget = "editable" | `message:${string}`;
+
+type QueuedChatInput = {
+  id: string;
+  text: string;
+  status: QueuedRunInput["status"];
+  createdAt: string;
+  modelOverrides?: GenerateRequest["modelOverrides"];
+  requestContext?: Record<string, unknown>;
+};
 
 type LiveThreadStateRefreshRequest = {
   threadId: string;
@@ -138,6 +147,9 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const operationIdRef = useRef(0);
   const chatAbortControllerRef = useRef<AbortController | null>(null);
   const activeChatMessageIdRef = useRef<string | null>(null);
+  const activeRunRef = useRef<{ threadId: string; runId: string } | null>(null);
+  const queuedInputsRef = useRef<QueuedChatInput[]>([]);
+  const drainingQueuedInputsRef = useRef(false);
   const blockedReasoningMessageIdsRef = useRef<Set<string>>(new Set());
   const liveToolEventStateRef = useRef(createLiveToolEventState());
   const liveStateRefreshRef = useRef(createLiveThreadStateRefreshScheduler());
@@ -146,6 +158,9 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     chatAbortControllerRef.current?.abort();
     chatAbortControllerRef.current = null;
     activeChatMessageIdRef.current = null;
+    activeRunRef.current = null;
+    queuedInputsRef.current = [];
+    drainingQueuedInputsRef.current = false;
     blockedReasoningMessageIdsRef.current = new Set();
     liveToolEventStateRef.current = createLiveToolEventState();
     liveStateRefreshRef.current.reset();
@@ -165,6 +180,9 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     chatAbortControllerRef.current?.abort();
     chatAbortControllerRef.current = null;
     activeChatMessageIdRef.current = null;
+    activeRunRef.current = null;
+    queuedInputsRef.current = [];
+    drainingQueuedInputsRef.current = false;
     blockedReasoningMessageIdsRef.current = new Set();
     liveToolEventStateRef.current = createLiveToolEventState();
     liveStateRefreshRef.current.reset();
@@ -269,6 +287,39 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         .sort((left, right) => left.sequence - right.sequence);
       return { ...message, timeline };
     }));
+  };
+
+  const appendProgressEvent = (event: AgentProgressEvent, assistantMessageId = activeChatMessageIdRef.current) => {
+    if (event.runId && event.threadId) {
+      activeRunRef.current = { runId: event.runId, threadId: event.threadId };
+    }
+    if (event.phase === "intervention" && event.status === "completed") {
+      markFirstRequestedInterventionInjected();
+    }
+    if (event.visibility === "raw") return;
+    if (!assistantMessageId || !event.summary.trim()) return;
+    setCollaborationMessages((messages) => messages.map((message) => {
+      if (message.id !== assistantMessageId) return message;
+      const progressSegments = [...(message.progressSegments ?? []).filter((item) => item.id !== event.id), event]
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      return { ...message, progressSegments };
+    }));
+  };
+
+  const markQueuedInputStatus = (id: string, status: QueuedRunInput["status"]) => {
+    queuedInputsRef.current = queuedInputsRef.current.map((item) => (
+      item.id === id ? { ...item, status } : item
+    ));
+    setCollaborationMessages((messages) => messages.map((message) => (
+      message.queuedInput?.id === id
+        ? { ...message, queuedInput: { ...message.queuedInput, status } }
+        : message
+    )));
+  };
+
+  const markFirstRequestedInterventionInjected = () => {
+    const requested = queuedInputsRef.current.find((item) => item.status === "intervention_requested");
+    if (requested) markQueuedInputStatus(requested.id, "injected");
   };
 
   const updateStreamingMessage = (messageId: string, patch: Partial<CollaborationMessage>) => {
@@ -458,7 +509,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     activeChatMessageIdRef.current = assistantMessageId;
     blockedReasoningMessageIdsRef.current.delete(assistantMessageId);
     const startedAt = new Date().toISOString();
-    const suppressUserMessage = hasAgentClarificationContext(requestContext);
+    const suppressUserMessage = hasAgentClarificationContext(requestContext) || typeof requestContext?.queuedInputMessageId === "string";
     const userMessage: CollaborationMessage = {
       id: userMessageId,
       role: "user",
@@ -528,7 +579,8 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         },
         onReasoningToken: (token) => appendReasoningToken(assistantMessageId, token),
         onToolEvent: (event) => appendToolEvent(event, activeThreadId, operationId),
-        onTimelineEvent: appendTimelineEvent
+        onTimelineEvent: appendTimelineEvent,
+        onProgressEvent: (event) => appendProgressEvent(event, assistantMessageId)
       }, { signal: abortController.signal });
       if (operationId !== operationIdRef.current) return;
 
@@ -541,6 +593,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         statusLabel: undefined
       });
       setGeneration(result);
+      activeRunRef.current = result.runId ? { threadId: result.threadId, runId: result.runId } : null;
       options.onPersistThreadId(result.threadId);
 
       const state = await options.onFetchAndApplyThreadState(result.threadId);
@@ -583,7 +636,86 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     } finally {
       if (chatAbortControllerRef.current === abortController) chatAbortControllerRef.current = null;
       if (activeChatMessageIdRef.current === assistantMessageId) activeChatMessageIdRef.current = null;
-      if (operationId === operationIdRef.current) setIsChatSending(false);
+      activeRunRef.current = null;
+      if (operationId === operationIdRef.current) {
+        setIsChatSending(false);
+        if (!drainingQueuedInputsRef.current) {
+          window.setTimeout(() => { void drainQueuedChatInputs(); }, 0);
+        }
+      }
+    }
+  };
+
+  const queueChatInput = (
+    text: string,
+    modelOverrides?: GenerateRequest["modelOverrides"],
+    requestContext?: Record<string, unknown>
+  ) => {
+    const trimmed = text.trim();
+    if (!trimmed) return undefined;
+    if (!isChatSending && !activeChatMessageIdRef.current && !drainingQueuedInputsRef.current) {
+      void handleChatSend(trimmed, modelOverrides, requestContext);
+      return undefined;
+    }
+    const id = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const queued: QueuedChatInput = {
+      id,
+      text: trimmed,
+      status: "queued_after_run",
+      createdAt,
+      modelOverrides,
+      requestContext
+    };
+    queuedInputsRef.current = [...queuedInputsRef.current, queued];
+    setCollaborationMessages((current) => [...current, {
+      id,
+      role: "user",
+      text: trimmed,
+      usedMock: false,
+      createdAt,
+      queuedInput: {
+        id,
+        status: "queued_after_run",
+        createdAt
+      }
+    }]);
+    return id;
+  };
+
+  const requestQueuedInputIntervention = (id: string) => {
+    markQueuedInputStatus(id, "intervention_requested");
+    const queued = queuedInputsRef.current.find((item) => item.id === id);
+    const activeRun = activeRunRef.current;
+    if (!queued || !activeRun) return;
+    requestRunIntervention({
+      threadId: activeRun.threadId,
+      runId: activeRun.runId,
+      text: queued.text,
+      inputId: id
+    }).catch((error) => {
+      console.warn("Unable to request run intervention", error);
+    });
+  };
+
+  const drainQueuedChatInputs = async () => {
+    if (drainingQueuedInputsRef.current) return;
+    const next = queuedInputsRef.current.find((item) => item.status === "queued_after_run" || item.status === "intervention_requested");
+    if (!next) return;
+    drainingQueuedInputsRef.current = true;
+    try {
+      markQueuedInputStatus(next.id, "sent_after_run");
+      queuedInputsRef.current = queuedInputsRef.current.filter((item) => item.id !== next.id);
+      await handleChatSend(next.text, next.modelOverrides, {
+        ...(next.requestContext ?? {}),
+        queuedInputMessageId: next.id,
+        queuedInputStatus: next.status
+      });
+    } finally {
+      drainingQueuedInputsRef.current = false;
+      if (queuedInputsRef.current.some((item) => item.status === "queued_after_run" || item.status === "intervention_requested")) {
+        window.setTimeout(() => { void drainQueuedChatInputs(); }, 0);
+      }
     }
   };
 
@@ -629,6 +761,8 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     applyCollaborationMessagesFromThreadState,
     handleGenerate,
     handleChatSend,
+    queueChatInput,
+    requestQueuedInputIntervention,
     restoreVersion
   };
 }

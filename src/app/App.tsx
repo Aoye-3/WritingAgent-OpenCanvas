@@ -573,6 +573,8 @@ function AppContent() {
         onRetryTaskBrief={saveTaskBriefNow}
         onApproveCanvasWriteRequest={canvasState.handleApproveCanvasWriteRequest}
         onChatSend={generationRun.handleChatSend}
+        onQueueChatInput={generationRun.queueChatInput}
+        onRequestQueuedInputIntervention={generationRun.requestQueuedInputIntervention}
         onStopChatSend={generationRun.stopChatGeneration}
         onPlansChanged={async () => { if (threadSession.threadId) await refreshThreadState(threadSession.threadId); }}
         onCreateCanvasEdge={canvasState.handleCreateCanvasEdge}

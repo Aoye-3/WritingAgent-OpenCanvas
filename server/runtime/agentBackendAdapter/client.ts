@@ -63,6 +63,8 @@ export type AgentBackendRuntimeSignal = {
     | "llm_call_error"
     | "synthesis_gate"
     | "waiting_for_user"
+    | "agent_progress_reported"
+    | "agent_intervention_checkpoint"
     | "thinking_disabled_for_tool_choice_compatibility";
   label: string;
   payload?: Record<string, unknown>;
@@ -151,6 +153,38 @@ export async function runAgentBackendAgent(input: AgentBackendRunInput): Promise
     onStatus: input.onStatus,
     onRuntimeSignal: input.onRuntimeSignal
   });
+}
+
+export async function requestAgentBackendRunIntervention(input: {
+  threadId: string;
+  runId: string;
+  text: string;
+  inputId?: string;
+  config?: AgentBackendRuntimeConfig;
+  fetchImpl?: typeof fetch;
+}): Promise<{ id: string; status: string }> {
+  const config = input.config ?? getAgentBackendRuntimeConfig();
+  if (!config.enabled) {
+    throw new Error("AgentBackend runtime is disabled");
+  }
+  const response = await authenticatedAgentBackendFetch({
+    config,
+    path: `/api/threads/${encodeURIComponent(input.threadId)}/runs/${encodeURIComponent(input.runId)}/interventions`,
+    fetchImpl: input.fetchImpl,
+    init: {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: input.text, input_id: input.inputId })
+    }
+  });
+  if (!response.ok) {
+    throw new Error(await formatRuntimeHttpError(response));
+  }
+  const payload = await response.json() as unknown;
+  return {
+    id: isRecord(payload) && typeof payload.id === "string" ? payload.id : input.inputId ?? "",
+    status: isRecord(payload) && typeof payload.status === "string" ? payload.status : "requested"
+  };
 }
 
 async function formatRuntimeHttpError(response: Response) {
@@ -625,6 +659,22 @@ function runtimeSignalFromSseEvent(event: string, data: unknown): AgentBackendRu
       payload: sanitizeRuntimeSignalPayload(data)
     };
   }
+  if (type === "agent_progress_reported") {
+    const payload = sanitizeAgentProgressPayload(data);
+    return {
+      type,
+      label: readSourceString(payload.summary) || "Agent progress updated.",
+      payload
+    };
+  }
+  if (type === "agent_intervention_checkpoint") {
+    const payload = sanitizeAgentProgressPayload(data);
+    return {
+      type,
+      label: readSourceString(payload.summary) || "Agent reached an intervention checkpoint.",
+      payload
+    };
+  }
   if (type === "llm_retry" || type === "llm_call_retry") {
     return {
       type: "llm_retry",
@@ -697,6 +747,11 @@ function secondsFromMs(value: unknown) {
 
 function sanitizeRuntimeSignalPayload(data: Record<string, unknown>) {
   const allowed = ["type", "event", "phase", "planId", "stepId", "agentPlanId", "agentPlanStepId", "attempt", "max_attempts", "maxAttempts", "elapsed_ms", "elapsedMs", "delay_seconds", "delaySeconds", "retry_after", "retryAfter", "wait_ms", "waitMs", "reason", "error_type", "errorType", "status_code", "statusCode", "status", "state", "next", "interrupt", "model", "provider_class", "providerClass", "base_url_host", "baseUrlHost", "timeout_s", "timeoutS", "stream_chunk_timeout_s", "streamChunkTimeoutS", "max_retries", "maxRetries", "tool_choice", "toolChoice", "completed_evidence_tools", "completedEvidenceTools", "evidence_limit", "evidenceLimit", "model_limit", "modelLimit", "model_calls", "modelCalls", "recursion_limit", "recursionLimit", "estimated_steps_used", "estimatedStepsUsed", "file_delivery_required", "fileDeliveryRequired", "second_handler", "secondHandler", "entered_second_handler", "enteredSecondHandler"];
+  return Object.fromEntries(allowed.filter((key) => key in data).map((key) => [key, data[key]]));
+}
+
+function sanitizeAgentProgressPayload(data: Record<string, unknown>) {
+  const allowed = ["type", "event", "runId", "threadId", "phase", "status", "summary", "next", "source", "createdAt"];
   return Object.fromEntries(allowed.filter((key) => key in data).map((key) => [key, data[key]]));
 }
 

@@ -61,6 +61,30 @@ export type StreamStatus = {
   label: string;
 };
 
+export type AgentProgressEvent = {
+  id: string;
+  threadId?: string;
+  runId?: string;
+  stageId?: string;
+  phase?: string;
+  status?: "running" | "completed" | "failed" | "waiting";
+  title?: string;
+  summary: string;
+  next?: string;
+  interventionHint?: string;
+  visibility?: "stage" | "raw";
+  source?: string;
+  createdAt: string;
+};
+
+export type ProgressSegment = AgentProgressEvent;
+
+export type QueuedRunInput = {
+  id: string;
+  status: "queued_after_run" | "intervention_requested" | "injected" | "sent_after_run";
+  createdAt: string;
+};
+
 export type CollaborationMessage = {
   id: string;
   role: "user" | "assistant";
@@ -68,6 +92,8 @@ export type CollaborationMessage = {
   reasoningText?: string;
   isReasoningStreaming?: boolean;
   timeline?: RunTimelineEvent[];
+  progressSegments?: ProgressSegment[];
+  queuedInput?: QueuedRunInput;
   usedMock?: boolean;
   isStreaming?: boolean;
   status?: StreamStatus["phase"] | "error" | "stopped";
