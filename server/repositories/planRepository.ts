@@ -171,6 +171,14 @@ export class PlanRepository {
 
   recordActivity(threadId: string, planId: string, input: { runId?: string; stepId?: string; type: PlanActivityType; status: string; summary: unknown; detail?: JsonValue }): PlanActivity {
     if (!this.get(threadId, planId)) throw new Error("Plan not found");
+    const duplicate = dedupeableActivity(input.type)
+      ? this.db.prepare(`SELECT id, thread_id as threadId, plan_run_id as planRunId, run_id as runId, step_id as stepId, activity_type as type, status, summary, detail_json as detailJson, sequence, created_at as createdAt FROM run_activities WHERE thread_id = ? AND plan_run_id = ? AND activity_type = ? AND COALESCE(step_id, '') = ? AND status = ? AND summary = ? ORDER BY sequence DESC LIMIT 1`)
+        .get(threadId, planId, input.type, input.stepId ?? "", cleanText(input.status), cleanText(input.summary)) as (Omit<PlanActivity, "detail"> & { detailJson: string }) | undefined
+      : undefined;
+    if (duplicate) {
+      const { detailJson, ...activity } = duplicate;
+      return { ...activity, detail: parseJson(detailJson) as JsonValue };
+    }
     const sequenceRow = this.db.prepare(`SELECT COALESCE(MAX(sequence), 0) + 1 as sequence FROM run_activities WHERE plan_run_id = ?`).get(planId) as { sequence: number };
     const activity: PlanActivity = {
       id: randomId("activity"), threadId, planRunId: planId, runId: input.runId, stepId: input.stepId,
@@ -317,4 +325,12 @@ function readOrigin(value: unknown): PlanRunOrigin | undefined {
 
 function stringifyJson(value: JsonValue | undefined) {
   return JSON.stringify(value ?? {});
+}
+
+function dedupeableActivity(type: PlanActivityType) {
+  return type === "clarification_ready"
+    || type === "plan_preparing"
+    || type === "plan_ready"
+    || type === "tool_started"
+    || type === "tool_completed";
 }

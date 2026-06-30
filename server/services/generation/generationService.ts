@@ -100,8 +100,8 @@ type RuntimeBudgetProfile = NonNullable<GenerateRequest["runtimeBudgetProfile"]>
 
 const runtimeBudgetProfiles: Record<RuntimeBudgetProfile, ProjectRuntimeSettings> = {
   low: { runtimeBudgetProfile: "low", recursionLimit: 80, modelCallLimit: 18, evidenceToolLimit: 8, bodyDraftWriteLimit: 2, synthesisReserveSteps: 16 },
-  medium: { runtimeBudgetProfile: "medium", recursionLimit: 140, modelCallLimit: 32, evidenceToolLimit: 16, bodyDraftWriteLimit: 4, synthesisReserveSteps: 28 },
-  high: { runtimeBudgetProfile: "high", recursionLimit: 220, modelCallLimit: 56, evidenceToolLimit: 32, bodyDraftWriteLimit: 8, synthesisReserveSteps: 44 }
+  medium: { runtimeBudgetProfile: "medium", recursionLimit: 110, modelCallLimit: 24, evidenceToolLimit: 12, bodyDraftWriteLimit: 3, synthesisReserveSteps: 22 },
+  high: { runtimeBudgetProfile: "high", recursionLimit: 140, modelCallLimit: 32, evidenceToolLimit: 16, bodyDraftWriteLimit: 4, synthesisReserveSteps: 28 }
 };
 
 export function createGenerationService(
@@ -399,6 +399,8 @@ export function createGenerationService(
     let runtimeHeartbeatTimelineEmitted = false;
     let runtimeWaitingForUser = false;
     let lastModelErrorSignal: AgentBackendRuntimeSignal | undefined;
+    const suppressedInvalidClarifications: ToolEventRecord[] = [];
+    let suppressedInvalidClarificationsEmitted = false;
     const progressiveEvidenceEntries: ProgressiveEvidenceEntry[] = [];
     const publicReasoning = createPublicReasoningEmitter(payload.locale, callbacks.onReasoningToken);
     const emitTimeline = (event: RunTimelineEvent) => {
@@ -410,6 +412,11 @@ export function createGenerationService(
       callbacks.onToolEvent?.(event);
       publicReasoning.fromToolEvent(event);
       emitTimeline(timelineEventFromToolEvent(event) ?? toolEventToTimelineEvent(timeline, event));
+    };
+    const emitSuppressedInvalidClarifications = () => {
+      if (suppressedInvalidClarificationsEmitted) return;
+      suppressedInvalidClarificationsEmitted = true;
+      for (const event of suppressedInvalidClarifications) emitRuntimeToolEvent(event);
     };
     const observeRuntimeSignal = (signal: AgentBackendRuntimeSignal) => {
       if (signal.type === "waiting_for_user") {
@@ -479,9 +486,13 @@ export function createGenerationService(
         emitRuntimeToolEvent(event);
       }
     };
-    const observeToolEvent = (event: ToolEventRecord) => {
-      const observed = withAgentPlanEventContext(withAgentClarificationResumeContext(event, payload, deliveryId), payload);
+    const observeToolEventForPayload = (event: ToolEventRecord, eventPayload: GenerateRequest) => {
+      const observed = withAgentPlanEventContext(withAgentClarificationResumeContext(event, eventPayload, deliveryId), eventPayload);
       if (!runtimeEvents.includes(observed)) runtimeEvents.push(observed);
+      if (isInvalidAgentClarificationEvent(observed)) {
+        suppressedInvalidClarifications.push(observed);
+        return;
+      }
       emitRuntimeToolEvent(observed);
       if (isAgentClarificationEvent(observed)) {
         runtimeWaitingForUser = true;
@@ -552,6 +563,7 @@ export function createGenerationService(
         }
       }
     };
+    const observeToolEvent = (event: ToolEventRecord) => observeToolEventForPayload(event, payload);
     for (const event of canvasActionEvents(payload)) {
       runtimeEvents.push(event);
       observeToolEvent(event);
@@ -619,6 +631,61 @@ export function createGenerationService(
           callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
           publicReasoning.emit("finalize", payload.locale === "zh" ? "正在整理最终回答，并校准 Canvas 节点内容。" : "Organizing the final answer and reconciling Canvas nodes.");
           const baseEvents = dedupeToolEvents([...runtimeEvents, ...(normalized.events ?? []).map((event) => withAgentPlanEventContext(withAgentClarificationResumeContext(event, payload, deliveryId), payload))]);
+          if (shouldRepairAgentClarification(baseEvents, normalized.text, agentBackendRun.finishReason)) {
+            callbacks.onStatus?.({ phase: "thinking", label: payload.locale === "zh" ? "正在重新生成澄清选项..." : "Regenerating clarification choices..." });
+            const repairPayload = withAgentClarificationRepairPolicy(payload, latestInvalidAgentClarificationEvent(baseEvents));
+            const repairRun = await runAgentRuntimeGeneration({
+              payload: repairPayload,
+              threadId,
+              projectId: selection.projectId,
+              configuredModelApiId: context.modelSettings.configuredModelApiId!,
+              modelSettings: context.modelSettings,
+              runtimeConfig: context.runtimeConfig,
+              messages: context.messages,
+              prompt: context.prompt,
+              onToolEvent: (event) => observeToolEventForPayload(event, repairPayload),
+              onReasoningToken: callbacks.onReasoningToken,
+              onStatus: callbacks.onStatus,
+              onRuntimeSignal: observeRuntimeSignal
+            }, executionRuntime);
+            if (repairRun) {
+              const repairNormalized = normalizeAgentRunOutput({
+                text: repairRun.text,
+                locale: payload.locale,
+                source: "agent-backend",
+                events: repairRun.events
+              });
+              const repairedBaseEvents = dedupeToolEvents([
+                ...runtimeEvents.filter((event) => !isInvalidAgentClarificationEvent(event)),
+                ...(repairNormalized.events ?? []).map((event) => withAgentPlanEventContext(withAgentClarificationResumeContext(event, repairPayload, deliveryId), repairPayload))
+              ]);
+              if (hasAgentClarificationEvent(repairedBaseEvents) && isBlockingAgentClarificationRun(repairedBaseEvents, repairNormalized.text, repairRun.finishReason)) {
+                textGate.flush();
+                callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
+                const events = [...repairedBaseEvents, ...timelineEvents.map(timelineEventToToolEvent)];
+                agentPlanOrchestrator.complete(threadId, payload, events);
+                return recordGenerationRun({
+                  storage,
+                  payload,
+                  threadId,
+                  agentCardId: agentCard.id,
+                  agentTitle: agentCard.title[payload.locale],
+                  configuredModelApiId: context.modelSettings.configuredModelApiId,
+                  modelId: context.modelSettings.model,
+                  mode: context.mode,
+                  prompt: context.prompt,
+                  text: "",
+                  provider: "agent-backend",
+                  usedMock: false,
+                  toolState: context.effectiveToolState,
+                  events,
+                  finishReason: "clarification_required",
+                  usage: repairRun.usage ?? agentBackendRun.usage
+                });
+              }
+            }
+            emitSuppressedInvalidClarifications();
+          }
           if (isBlockingAgentClarificationRun(baseEvents, normalized.text, agentBackendRun.finishReason)) {
             textGate.flush();
             callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
@@ -1082,7 +1149,7 @@ function resolveRuntimeBudget(profileOverride: GenerateRequest["runtimeBudgetPro
 }
 
 function readRuntimeBudgetProfile(value: GenerateRequest["runtimeBudgetProfile"] | unknown): RuntimeBudgetProfile {
-  return value === "low" || value === "high" ? value : "medium";
+  return value === "low" || value === "medium" || value === "high" ? value : "low";
 }
 
 function readProgressiveDeliveryBudget(payload: GenerateRequest): ProjectRuntimeSettings {
@@ -2097,6 +2164,19 @@ function hasAgentClarificationEvent(events: ToolEventRecord[]) {
   return events.some(isAgentClarificationEvent);
 }
 
+function latestInvalidAgentClarificationEvent(events: ToolEventRecord[]) {
+  return events.findLast(isInvalidAgentClarificationEvent);
+}
+
+function shouldRepairAgentClarification(events: ToolEventRecord[], text: string, finishReason?: string) {
+  if (!latestInvalidAgentClarificationEvent(events)) return false;
+  if (hasAgentClarificationEvent(events)) return false;
+  const visible = stripAppendedSources(text).trim();
+  return finishReason === "clarification_required"
+    || !visible
+    || isProcessClarificationText(visible);
+}
+
 function hasPostClarificationProgress(events: ToolEventRecord[]) {
   const clarificationIndex = events.findIndex(isAgentClarificationEvent);
   if (clarificationIndex < 0) return false;
@@ -2360,6 +2440,51 @@ function isAgentClarificationEvent(event: ToolEventRecord) {
   const payload = record(event.payload);
   const type = readString(payload.type) || readString(payload.eventType);
   return /agent_clarification_requested$/.test(event.eventType) || type === "agent_clarification_requested";
+}
+
+function isInvalidAgentClarificationEvent(event: ToolEventRecord) {
+  const payload = record(event.payload);
+  const type = readString(payload.type) || readString(payload.eventType);
+  return /agent_clarification_invalid$/.test(event.eventType) || type === "agent_clarification_invalid";
+}
+
+function withAgentClarificationRepairPolicy(payload: GenerateRequest, invalidEvent: ToolEventRecord | undefined): GenerateRequest {
+  const invalidPayload = record(invalidEvent?.payload);
+  const existingPolicy = record(payload.contextValues?.facetwrite_clarification_policy);
+  const existingSkillRefs = readStringList(existingPolicy.skillRefs);
+  const existingDisabledSkillRefs = readStringList(existingPolicy.disabledSkillRefs);
+  const existingCanvas = record(existingPolicy.canvas);
+  const payloadCanvas = record(payload.contextValues?.canvas);
+  const reason = readString(invalidPayload.reason) || "invalid_payload";
+  const optionCount = typeof invalidPayload.optionCount === "number" ? invalidPayload.optionCount : undefined;
+  const originalInstruction = stripSelectedClarificationInstruction(existingPolicy.originalInstruction)
+    || stripSelectedClarificationInstruction(payload.chatInstruction)
+    || stripSelectedClarificationInstruction(payload.freeTextPrompt);
+  const optionCountText = optionCount ? ` It had ${optionCount} options.` : "";
+  const instruction = payload.locale === "zh"
+    ? `上一轮 ask_clarification 参数无效，原因：${reason}${optionCount ? `，选项数为 ${optionCount}` : ""}。请立即重新调用 ask_clarification，保留相同澄清意图，但必须只给 2-3 个互斥选项；每个选项必须有 id、label、detail 或 description，最多一个 recommended:true。不要继续执行任务，不要调用搜索或写文件工具，不要输出普通文本。`
+    : `The previous ask_clarification payload was invalid: ${reason}.${optionCountText} Immediately call ask_clarification again with the same clarification intent, but with only 2-3 mutually exclusive options. Every option must include id, label, and detail or description, with at most one recommended:true. Do not continue the task, do not call search or file tools, and do not output ordinary text.`;
+  return {
+    ...payload,
+    contextValues: {
+      ...payload.contextValues,
+      facetwrite_clarification_policy: {
+        ...existingPolicy,
+        mode: "skill_scope_guard",
+        source: "server_clarification_repair",
+        originalInstruction,
+        skillRefs: existingSkillRefs.length ? existingSkillRefs : payload.transientSkillRefs ?? [],
+        disabledSkillRefs: existingDisabledSkillRefs.length ? existingDisabledSkillRefs : payload.disabledSkillRefs ?? [],
+        ...(readOptionalRuntimeBudgetProfile(existingPolicy.runtimeBudgetProfile) ?? payload.runtimeBudgetProfile
+          ? { runtimeBudgetProfile: readOptionalRuntimeBudgetProfile(existingPolicy.runtimeBudgetProfile) ?? payload.runtimeBudgetProfile }
+          : {}),
+        ...(Object.keys(existingCanvas).length || Object.keys(payloadCanvas).length ? { canvas: Object.keys(existingCanvas).length ? existingCanvas : payloadCanvas } : {}),
+        invalidReason: reason,
+        ...(optionCount ? { invalidOptionCount: optionCount } : {}),
+        instruction
+      }
+    }
+  };
 }
 
 function commitProgressiveBodyCheckpointDelivery(input: {

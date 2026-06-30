@@ -9,7 +9,7 @@ import type {
   ExtractClaimsInput,
   UpdateClaimInput
 } from "../../../shared/claimReview.js";
-import { createClaimCanvasNodeContent } from "../../../shared/claimReview.js";
+import { claimSummaryTitle, createClaimCanvasNodeContent } from "../../../shared/claimReview.js";
 import type { MarkdownOutputPreview } from "../../services/threadOutputPreview.js";
 import { sanitizeVisibleText } from "../../services/generation/outputNormalizer.js";
 
@@ -103,15 +103,21 @@ export function createClaimReviewDomainService(
       return storage.updateClaim(threadId, claimId, input);
     },
 
+    delete(threadId: string, claimId: string) {
+      return storage.deleteClaim(threadId, claimId);
+    },
+
     createNode(threadId: string, claimId: string, input: CreateClaimCanvasNodeInput = {}) {
       const projectId = projectIdForThread(threadId);
-      const claim = storage.listClaims(threadId).find((candidate) => candidate.id === claimId);
+      const claims = storage.listClaims(threadId);
+      const claimIndex = claims.findIndex((candidate) => candidate.id === claimId);
+      const claim = claims[claimIndex];
       if (!claim) return undefined;
       if (claim.status !== "accepted") throw new Error("Only accepted Claims can create Canvas nodes");
       const kind = input.kind === "reference" || input.kind === "note" ? input.kind : "document";
       const node = storage.createCanvasNode(projectId, {
         kind,
-        title: claim.claimText.slice(0, 80) || "Claim",
+        title: claimSummaryTitle(claimIndex + 1),
         content: createClaimCanvasNodeContent(claim),
         x: 160,
         y: 160,
@@ -135,10 +141,10 @@ export function createClaimReviewDomainService(
       const ids = new Set(Array.isArray(input.claimIds) ? input.claimIds.filter((id): id is string => typeof id === "string") : []);
       return storage.listClaims(threadId)
         .filter((claim) => claim.status === "accepted" && (!ids.size || ids.has(claim.id)))
-        .map((claim) => {
+        .map((claim, index) => {
           const node = storage.createCanvasNode(projectIdForThread(threadId), {
             kind: input.kind === "reference" || input.kind === "note" ? input.kind : "document",
-            title: claim.claimText.slice(0, 80) || "Claim",
+            title: claimSummaryTitle(index + 1),
             content: createClaimCanvasNodeContent(claim),
             x: 160,
             y: 160,

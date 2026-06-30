@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
 import type { ClaimCandidate, ClaimStatus, CreateClaimFromSelectionInput } from "../../../../shared/claimReview";
-import { createClaimCanvasNodeContent } from "../../../../shared/claimReview";
+import { claimSummaryTitle, createClaimCanvasNodeContent } from "../../../../shared/claimReview";
 import type { CanvasNodeDraft } from "../../canvas/canvasClient";
-import { createClaimFromSelection, extractClaims, fetchClaims, updateClaim } from "./claimReviewClient";
+import { createClaimFromSelection, deleteClaim, extractClaims, fetchClaims, updateClaim } from "./claimReviewClient";
 
 export type ClaimReviewDocument = {
   sourceNodeId: string;
@@ -107,15 +107,33 @@ export function useClaimReview({
   }, [threadId]);
 
   const createNodeFromClaim = useCallback(async (claim: ClaimCandidate) => {
-    if (claim.status !== "accepted") return;
-    await onCreateCanvasNode(claimNodeDraft(claim));
-  }, [onCreateCanvasNode]);
+    await onCreateCanvasNode(claimNodeDraft(claim, titleForClaim(claim, claims)));
+  }, [claims, onCreateCanvasNode]);
+
+  const createNodesFromClaims = useCallback(async (selectedClaims: ClaimCandidate[]) => {
+    for (const claim of selectedClaims) {
+      await onCreateCanvasNode(claimNodeDraft(claim, titleForClaim(claim, claims)));
+    }
+  }, [claims, onCreateCanvasNode]);
 
   const createNodesFromAccepted = useCallback(async () => {
     for (const claim of acceptedClaims) {
-      await onCreateCanvasNode(claimNodeDraft(claim));
+      await onCreateCanvasNode(claimNodeDraft(claim, titleForClaim(claim, claims)));
     }
-  }, [acceptedClaims, onCreateCanvasNode]);
+  }, [acceptedClaims, claims, onCreateCanvasNode]);
+
+  const deleteClaimCandidate = useCallback(async (claim: ClaimCandidate) => {
+    await deleteClaim(threadId, claim.id);
+    setClaims((current) => current.filter((item) => item.id !== claim.id));
+  }, [threadId]);
+
+  const deleteClaimCandidates = useCallback(async (selectedClaims: ClaimCandidate[]) => {
+    for (const claim of selectedClaims) {
+      await deleteClaim(threadId, claim.id);
+    }
+    const deletedIds = new Set(selectedClaims.map((claim) => claim.id));
+    setClaims((current) => current.filter((claim) => !deletedIds.has(claim.id)));
+  }, [threadId]);
 
   const sendClaimsToChat = useCallback((selected: ClaimCandidate[]) => {
     if (!selected.length) return;
@@ -133,7 +151,10 @@ export function useClaimReview({
     activateDocument,
     createFromSelection,
     createNodeFromClaim,
+    createNodesFromClaims,
     createNodesFromAccepted,
+    deleteClaimCandidate,
+    deleteClaimCandidates,
     editClaim,
     extractActiveDocumentClaims,
     loadClaims,
@@ -152,10 +173,10 @@ export function getAcceptedClaims(claims: ClaimCandidate[]) {
   return claims.filter((claim) => claim.status === "accepted");
 }
 
-export function claimNodeDraft(claim: ClaimCandidate): CanvasNodeDraft {
+export function claimNodeDraft(claim: ClaimCandidate, title = claimSummaryTitle(1)): CanvasNodeDraft {
   return {
     kind: "document",
-    title: claim.claimText.slice(0, 80) || "Claim",
+    title,
     content: createClaimCanvasNodeContent(claim),
     width: 360,
     height: 240,
@@ -169,6 +190,11 @@ export function claimNodeDraft(claim: ClaimCandidate): CanvasNodeDraft {
     },
     includeInProjectContext: true
   };
+}
+
+function titleForClaim(claim: ClaimCandidate, claims: ClaimCandidate[]) {
+  const index = claims.findIndex((item) => item.id === claim.id);
+  return claimSummaryTitle(index + 1);
 }
 
 export function formatClaimForChat(claim: ClaimCandidate) {

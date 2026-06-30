@@ -19,8 +19,11 @@ test("Claim Review accepted Claim draft creates a document node with source meta
   const draft = claimNodeDraft(claim);
 
   assert.equal(draft.kind, "document");
-  assert.match(draft.content, /Claim: AI systems require review\./);
-  assert.match(draft.content, /Source: \/mnt\/user-data\/outputs\/research\.md/);
+  assert.equal(draft.title, "摘要 1");
+  assert.equal(draft.content, "AI systems require review.");
+  assert.doesNotMatch(draft.content, /Evidence:/);
+  assert.doesNotMatch(draft.content, /Source:/);
+  assert.doesNotMatch(draft.content, /Status:/);
   assert.deepEqual(draft.metadata?.claimReview, {
     claimId: "claim-1",
     sourceNodeId: "node-1",
@@ -50,6 +53,32 @@ test("Claim Review panel is mounted in Markdown preview instead of the AI drawer
   assert.doesNotMatch(panelSource, /claimPanel|claimCount|claimPanelActive/);
   assert.match(canvasSource, /markdown-document-claims-panel/);
   assert.match(workspaceSource, /<WorkspaceMainCanvas[\s\S]*claimPanel=\{/);
+});
+
+test("Claim Review candidates render as collapsible drawer cards", () => {
+  const claimPanelSource = readFileSync("src/features/workspace/claims/ClaimReviewPanel.tsx", "utf8");
+  const stylesSource = readFileSync("src/app/styles.css", "utf8");
+
+  assert.match(claimPanelSource, /aria-expanded=\{expanded\}/);
+  assert.match(claimPanelSource, /aria-controls=\{detailId\}/);
+  assert.match(claimPanelSource, /className="claim-review-expand"/);
+  assert.match(claimPanelSource, /claimSummaryTitle\(index \+ 1\)/);
+  assert.match(claimPanelSource, /className="claim-review-preview"/);
+  assert.match(claimPanelSource, /className="claim-review-source-action"/);
+  assert.match(claimPanelSource, /copy\.createSelected/);
+  assert.match(claimPanelSource, /copy\.deleteSelected/);
+  assert.doesNotMatch(claimPanelSource, /acceptSelected|rejectSelected|createAccepted/);
+  assert.doesNotMatch(claimPanelSource, /statusLabel/);
+  assert.doesNotMatch(claimPanelSource, /<blockquote>\{claim\.evidenceText\}<\/blockquote>/);
+  assert.match(stylesSource, /\.claim-review-item-summary[\s\S]*min-height: 72px/);
+  assert.match(stylesSource, /\.claim-review-preview[\s\S]*-webkit-line-clamp: 2/);
+});
+
+test("Claim Review client exposes persistent delete API", () => {
+  const clientSource = readFileSync("src/features/workspace/claims/claimReviewClient.ts", "utf8");
+
+  assert.match(clientSource, /export async function deleteClaim/);
+  assert.match(clientSource, /apiDelete\(`\/api\/threads\/\$\{encodeURIComponent\(threadId\)\}\/claims\/\$\{encodeURIComponent\(claimId\)\}`\)/);
 });
 
 function claimFixture(id: string, status: ClaimStatus): ClaimCandidate {

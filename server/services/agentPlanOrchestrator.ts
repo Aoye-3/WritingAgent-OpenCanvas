@@ -64,13 +64,13 @@ export class AgentPlanOrchestrator {
     this.legacy.observe(threadId, event);
   }
 
-  complete(threadId: string, payload: GenerateRequest) {
-    this.legacy.complete(threadId, payload);
+  complete(threadId: string, payload: GenerateRequest, events: ToolEventRecord[] = []) {
+    this.legacy.complete(threadId, payload, events);
   }
 
-  assertPostcondition(threadId: string, payload: GenerateRequest) {
+  assertPostcondition(threadId: string, payload: GenerateRequest, events: ToolEventRecord[] = []) {
     try {
-      this.legacy.assertPostcondition(threadId, payload);
+      this.legacy.assertPostcondition(threadId, payload, events);
     } catch (error) {
       if (!this.persistProtocolRecovery(threadId, payload, error)) throw error;
     }

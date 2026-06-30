@@ -173,6 +173,9 @@ export class SQLiteStorageRepository {
   updateClaim(threadId: string, claimId: string, input: import("../shared/claimReview.js").UpdateClaimInput) {
     return this.claims.updateClaim(threadId, claimId, input);
   }
+  deleteClaim(threadId: string, claimId: string) {
+    return this.claims.deleteClaim(threadId, claimId);
+  }
   setClaimCanvasNode(threadId: string, claimId: string, canvasNodeId: string) {
     return this.claims.setClaimCanvasNode(threadId, claimId, canvasNodeId);
   }

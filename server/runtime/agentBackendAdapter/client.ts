@@ -458,10 +458,13 @@ async function readAgentBackendStream(
   let buffer = "";
   let sawWaitingForUser = false;
   let sawRuntimeEnd = false;
+  const trace = createAgentBackendStreamTrace();
+  trace("start");
 
   while (true) {
     const { value, done } = await reader.read();
     if (value) {
+      trace("chunk", { byteLength: value.byteLength });
       buffer += decoder.decode(value, { stream: !done });
       const splitAt = buffer.lastIndexOf("\n\n");
       if (splitAt >= 0) {
@@ -471,7 +474,10 @@ async function readAgentBackendStream(
         if (sawRuntimeEnd) break;
       }
     }
-    if (done || sawRuntimeEnd) break;
+    if (done || sawRuntimeEnd) {
+      trace(done ? "reader_done" : "runtime_end_break", { sawRuntimeEnd });
+      break;
+    }
   }
   if (sawRuntimeEnd) {
     try {
@@ -485,6 +491,12 @@ async function readAgentBackendStream(
     handleEvents(parseSseChunk(buffer));
   }
 
+  trace("complete", {
+    finishReason: sawWaitingForUser ? "clarification_required" : "agent_backend_completed",
+    eventCount: events.length,
+    sawRuntimeEnd,
+    textLength: (finalValuesText || (lastMessageId ? textByMessageId.get(lastMessageId)?.join("") : unkeyedText.join("")) || "").trim().length
+  });
   return {
     text: (finalValuesText || (lastMessageId ? textByMessageId.get(lastMessageId)?.join("") : unkeyedText.join("")) || "").trim(),
     finishReason: sawWaitingForUser ? "clarification_required" : "agent_backend_completed",
@@ -497,11 +509,17 @@ async function readAgentBackendStream(
       const runtimeError = extractRuntimeError(parsed.event, parsed.data);
       if (runtimeError) throw new Error(runtimeError);
       if (parsed.event === "end") {
+        trace("event", { event: parsed.event });
         sawRuntimeEnd = true;
         continue;
       }
       const runtimeSignal = runtimeSignalFromSseEvent(parsed.event, parsed.data);
       if (runtimeSignal) {
+        trace("runtime_signal", {
+          event: parsed.event,
+          signalType: runtimeSignal.type,
+          payload: runtimeSignal.payload
+        });
         if (runtimeSignal.type === "waiting_for_user") {
           sawWaitingForUser = true;
           callbacks.onStatus?.({ phase: "finalizing", label: runtimeSignal.label });
@@ -525,6 +543,7 @@ async function readAgentBackendStream(
       let toolEvents = mapToolEvents(parsed.event, parsed.data, toolCallArgsById);
       const text = extractText(parsed.event, parsed.data);
       if (text && !shouldSuppressAssistantText(toolEvents)) {
+        trace("text", { event: parsed.event, length: text.length });
         if (messageId) {
           const parts = textByMessageId.get(messageId) ?? [];
           parts.push(text);
@@ -555,6 +574,12 @@ async function readAgentBackendStream(
         if (key && emittedToolEventKeys.has(key)) continue;
         if (key) emittedToolEventKeys.add(key);
         events.push(event);
+        trace("tool_event", {
+          eventType: event.eventType,
+          structuredEvent: readSourceString(event.payload?.eventType) || readSourceString(event.payload?.type),
+          tool: readSourceString(event.payload?.tool) || readSourceString(event.payload?.toolName),
+          deliveryId: readSourceString(event.payload?.deliveryId)
+        });
         if (isAgentClarificationToolEvent(event)) {
           sawWaitingForUser = true;
         } else if (isPostClarificationProgressEvent(event)) {
@@ -694,6 +719,31 @@ function runtimeCustomStatusLabel(type: "llm_call_start" | "llm_call_end" | "llm
 function isAgentClarificationToolEvent(event: ToolEventRecord) {
   const type = readSourceString(event.payload?.type) || readSourceString(event.payload?.eventType);
   return /agent_clarification_requested$/.test(event.eventType) || type === "agent_clarification_requested";
+}
+
+function createAgentBackendStreamTrace() {
+  const traceId = `runtime_stream_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const startedAt = Date.now();
+  let lastAt = startedAt;
+  let heartbeatCount = 0;
+  return (phase: string, details: Record<string, unknown> = {}) => {
+    const now = Date.now();
+    const signalType = typeof details.signalType === "string" ? details.signalType : "";
+    if (signalType === "heartbeat") {
+      heartbeatCount += 1;
+      if (now - lastAt < 30_000) return;
+      details = { ...details, heartbeatCount };
+    }
+    if (phase === "chunk" && now - lastAt < 30_000) return;
+    console.info("[FacetWrite runtime stream trace]", {
+      traceId,
+      phase,
+      elapsedMs: now - startedAt,
+      sinceLastMs: now - lastAt,
+      ...details
+    });
+    lastAt = now;
+  };
 }
 
 function isPostClarificationProgressEvent(event: ToolEventRecord) {

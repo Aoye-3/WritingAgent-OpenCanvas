@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, LightbulbIcon, ModelConfigIcon, SearchIcon, SendIcon, StopIcon } from "../../../shared/icons";
@@ -162,7 +163,7 @@ export function AICollaborationDrawer({
   const [input, setInput] = useState("");
   const supportsThinking = modelSettings?.providerId === "deepseek";
   const [thinkingChoice, setThinkingChoice] = useState<ThinkingChoice>(modelSettingsToThinkingChoice(modelSettings));
-  const [runtimeBudgetChoice, setRuntimeBudgetChoice] = useState<RuntimeBudgetChoice>(runtimeBudgetProfile ?? "medium");
+  const [runtimeBudgetChoice, setRuntimeBudgetChoice] = useState<RuntimeBudgetChoice>(runtimeBudgetProfile ?? "low");
   const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
   const [annotations, setAnnotations] = useState<MessageAnnotation[]>([]);
   const [writeDraft, setWriteDraft] = useState<WriteDraft | null>(null);
@@ -174,6 +175,7 @@ export function AICollaborationDrawer({
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [contextResetNotice, setContextResetNotice] = useState(false);
   const [clarificationBusy, setClarificationBusy] = useState(false);
+  const [planPanelCollapsed, setPlanPanelCollapsed] = useState(false);
   const [submittedAgentClarificationKeys, setSubmittedAgentClarificationKeys] = useState<Set<string>>(() => new Set());
   const [optimisticAgentClarifications, setOptimisticAgentClarifications] = useState<AgentClarification[]>([]);
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -211,6 +213,12 @@ export function AICollaborationDrawer({
     [answeredAgentClarificationKeys, messages, pendingAgentClarification]
   );
   const budgetLimitFailure = useMemo(() => latestBudgetLimitFailure(messages), [messages]);
+  const floatingBoardPlan = useMemo(
+    () => plans.find((plan) => plan.status === "awaiting_approval" || plan.status === "running" || plan.status === "paused"),
+    [plans]
+  );
+  const floatingPlan = pendingClarificationPlan ?? floatingBoardPlan;
+  const floatingPlanPanelStyle = { "--plan-panel-bottom": `${pendingClarificationPlan || pendingAgentClarification ? 142 : composerHeight + 142}px` } as CSSProperties;
 
   useEffect(() => {
     setThinkingChoice(modelSettingsToThinkingChoice(modelSettings));
@@ -221,7 +229,7 @@ export function AICollaborationDrawer({
   }, [supportsThinking]);
 
   useEffect(() => {
-    setRuntimeBudgetChoice(runtimeBudgetProfile ?? "medium");
+    setRuntimeBudgetChoice(runtimeBudgetProfile ?? "low");
   }, [runtimeBudgetProfile]);
 
   useEffect(() => {
@@ -238,7 +246,11 @@ export function AICollaborationDrawer({
   useEffect(() => {
     setSubmittedAgentClarificationKeys(new Set());
     setOptimisticAgentClarifications([]);
+    setPlanPanelCollapsed(false);
   }, [currentThreadId]);
+  useEffect(() => {
+    setPlanPanelCollapsed(false);
+  }, [floatingPlan?.id, floatingPlan?.status, pendingAgentClarification?.clarificationId]);
 
   useEffect(() => {
     if (skillPickerOpen) onRequestSkillCatalog();
@@ -314,7 +326,7 @@ export function AICollaborationDrawer({
       await onPlansChanged();
     }
     try {
-      const runtimeBudgetOverride = runtimeBudgetChoice === (runtimeBudgetProfile ?? "medium")
+      const runtimeBudgetOverride = runtimeBudgetChoice === (runtimeBudgetProfile ?? "low")
         ? undefined
         : runtimeBudgetChoice;
       const sendResult = await onSend(text, supportsThinking ? thinkingOverridesFromChoice(thinkingChoice) : undefined, {
@@ -563,6 +575,7 @@ export function AICollaborationDrawer({
           }
           if (entry.kind === "plan") {
             const plan = entry.value;
+            if (floatingPlan?.id === plan.id) return null;
             if (plan.clarification && plan.status === "awaiting_user") {
               return pendingClarificationPlan?.id === plan.id ? null : <PlanClarificationCard busy={clarificationBusy} key={`plan:${plan.id}`} plan={plan} onAnswer={(answer) => answerClarification(plan, answer)} />;
             }
@@ -642,7 +655,50 @@ export function AICollaborationDrawer({
         </button>
       ) : null}
 
-      <form className={pendingClarificationPlan || pendingAgentClarification ? "drawer-chat-composer drawer-chat-composer-clarification" : "drawer-chat-composer"} onSubmit={submit}>
+      {floatingPlan || pendingAgentClarification ? (
+        <section
+          className={planPanelCollapsed ? "floating-plan-panel is-collapsed" : "floating-plan-panel"}
+          style={floatingPlanPanelStyle}
+        >
+          <button
+            aria-expanded={!planPanelCollapsed}
+            className="floating-plan-panel-toggle"
+            onClick={() => setPlanPanelCollapsed((value) => !value)}
+            type="button"
+          >
+            <strong>{floatingPlan ? t("plan.progress") : locale === "zh" ? "补充信息" : "Clarification"}</strong>
+            <span>{planPanelCollapsed ? "+" : "-"}</span>
+          </button>
+          {!planPanelCollapsed && pendingClarificationPlan ? (
+            <PlanClarificationCard
+              busy={clarificationBusy}
+              plan={pendingClarificationPlan}
+              variant="composer"
+              onAnswer={(answer) => answerClarification(pendingClarificationPlan, answer)}
+            />
+          ) : null}
+          {!planPanelCollapsed && floatingPlan && floatingPlan.id !== pendingClarificationPlan?.id ? (
+            <AgentPlanBoard
+              plan={floatingPlan}
+              threadId={currentThreadId}
+              onChanged={onPlansChanged}
+              onFocusArtifact={onFocusPlanArtifact}
+              onRevise={(value) => setInput(`/plan revise ${value.id}: `)}
+            />
+          ) : null}
+          {!planPanelCollapsed && pendingAgentClarification ? (
+            <AgentClarificationChoiceCard
+              busy={clarificationBusy}
+              clarification={pendingAgentClarification}
+              locale={locale}
+              variant="composer"
+              onAnswer={(answer) => answerAgentClarification(pendingAgentClarification, answer)}
+            />
+          ) : null}
+        </section>
+      ) : null}
+
+      <form className="drawer-chat-composer" onSubmit={submit}>
         <div className="composer-control-row" data-testid="composer-control-row">
           <div className="composer-agent-section">
             <AgentIcon aria-hidden="true" size={16} />
@@ -691,23 +747,6 @@ export function AICollaborationDrawer({
               </span>
             ))}
           </div>
-        ) : null}
-        {pendingClarificationPlan ? (
-          <PlanClarificationCard
-            busy={clarificationBusy}
-            plan={pendingClarificationPlan}
-            variant="composer"
-            onAnswer={(answer) => answerClarification(pendingClarificationPlan, answer)}
-          />
-        ) : null}
-        {pendingAgentClarification ? (
-          <AgentClarificationChoiceCard
-            busy={clarificationBusy}
-            clarification={pendingAgentClarification}
-            locale={locale}
-            variant="composer"
-            onAnswer={(answer) => answerAgentClarification(pendingAgentClarification, answer)}
-          />
         ) : null}
         {mindChainContext ? (
           <div className="mind-chain-context-chip" data-testid="mind-chain-context-chip">
@@ -1011,10 +1050,10 @@ export function buildAgentClarificationSubmission(input: AgentClarificationSubmi
   const resumeDisabledSkillRefs = resume?.disabledSkillRefs.length ? resume.disabledSkillRefs : input.disabledSkillRefs;
   const resumeRuntimeContext = resume
     ? {
-      runtimeBudgetProfile: resume.runtimeBudgetProfile ?? input.runtimeBudgetChoice ?? input.runtimeBudgetProfile ?? "medium",
+      runtimeBudgetProfile: resume.runtimeBudgetProfile ?? input.runtimeBudgetChoice ?? input.runtimeBudgetProfile ?? "low",
       ...(Object.keys(resume.canvas).length ? { canvas: resume.canvas } : {})
     }
-    : { runtimeBudgetProfile: input.runtimeBudgetChoice ?? input.runtimeBudgetProfile ?? "medium" };
+    : { runtimeBudgetProfile: input.runtimeBudgetChoice ?? input.runtimeBudgetProfile ?? "low" };
   const selectedText = option
     ? `${option.label}${option.detail ? ` - ${option.detail}` : ""}`
     : customAnswer;

@@ -42,9 +42,10 @@ export function formatAssistantRunTraceDetail(event: Pick<RunTimelineEvent, "sta
   return [detail, ...diagnostics].filter(Boolean).join(" · ").slice(0, 220);
 }
 
-export function filterAssistantRunTraceEvents(events: RunTimelineEvent[], target: { planId?: string; stepId?: string }) {
-  if (!target.planId && !target.stepId) return events;
+export function filterAssistantRunTraceEvents(events: RunTimelineEvent[], target: { planId?: string; stepId?: string } = {}) {
   return events.filter((event) => {
+    if (!isVisibleRunTraceEvent(event)) return false;
+    if (!target.planId && !target.stepId) return true;
     const payload = event.payload ?? {};
     const planId = readPayloadString(payload.planId) || readPayloadString(payload.agentPlanId);
     const stepId = readPayloadString(payload.stepId) || readPayloadString(payload.agentPlanStepId);
@@ -52,6 +53,16 @@ export function filterAssistantRunTraceEvents(events: RunTimelineEvent[], target
     if (target.stepId && stepId !== target.stepId) return false;
     return true;
   });
+}
+
+function isVisibleRunTraceEvent(event: Pick<RunTimelineEvent, "eventType" | "status">) {
+  if (event.status === "failed" || event.status === "waiting") return true;
+  return event.eventType === "phase_started"
+    || event.eventType === "decision"
+    || event.eventType === "canvas_node_committed"
+    || event.eventType === "artifact_committed"
+    || event.eventType === "run_completed"
+    || event.eventType === "run_failed";
 }
 
 export function AssistantRunTrace({ events = [], planId, stepId, onFocusNode }: AssistantRunTraceProps) {

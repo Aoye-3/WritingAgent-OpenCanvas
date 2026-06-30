@@ -4,12 +4,12 @@ import { fallbackAgentBackendConfig, fallbackAgentBackendStatus, fallbackStatus,
 import type { AgentBackendConfigOverview, AgentBackendRuntimeStatus, ProjectRuntimeSettings, SettingsStatus } from "../types";
 
 const fallbackRuntimeSettings: ProjectRuntimeSettings = {
-  runtimeBudgetProfile: "medium",
-  evidenceToolLimit: 16,
-  bodyDraftWriteLimit: 4,
-  modelCallLimit: 32,
-  recursionLimit: 140,
-  synthesisReserveSteps: 28
+  runtimeBudgetProfile: "low",
+  evidenceToolLimit: 8,
+  bodyDraftWriteLimit: 2,
+  modelCallLimit: 18,
+  recursionLimit: 80,
+  synthesisReserveSteps: 16
 };
 
 export function useProjectSettings(open: boolean, projectId: string, copy: {

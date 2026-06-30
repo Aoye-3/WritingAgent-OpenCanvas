@@ -38,6 +38,16 @@ export function registerClaimReviewRoutes(app: Express, claimService: ClaimRevie
     }
   });
 
+  app.delete("/api/threads/:threadId/claims/:claimId", (request, response) => {
+    try {
+      const deleted = claimService.delete(request.params.threadId, request.params.claimId);
+      if (!deleted) return sendError(response, 404, "not_found", "Claim candidate not found");
+      sendOk(response, { deleted: true });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to delete Claim candidate"));
+    }
+  });
+
   app.post("/api/threads/:threadId/claims/:claimId/create-node", (request, response) => {
     try {
       const result = claimService.createNode(request.params.threadId, request.params.claimId, request.body ?? {});

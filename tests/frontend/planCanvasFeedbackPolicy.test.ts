@@ -22,11 +22,16 @@ test("Canvas Plan nodes prefer structured projection metadata before content fal
   assert.match(source, /node\.content\.split/);
 });
 
-test("pending Plan clarification is rendered as the composer form", async () => {
+test("pending Plan clarification is rendered in a floating composer-adjacent panel", async () => {
   const source = await readFile("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
   assert.match(source, /pendingClarificationPlan/);
   assert.match(source, /pendingAgentClarification/);
-  assert.match(source, /drawer-chat-composer-clarification/);
+  assert.match(source, /floatingBoardPlan/);
+  assert.match(source, /floatingPlan\?\.id === plan\.id/);
+  assert.match(source, /<AgentPlanBoard/);
+  assert.match(source, /floating-plan-panel/);
+  assert.match(source, /planPanelCollapsed/);
+  assert.match(source, /setPlanPanelCollapsed/);
   assert.match(source, /variant="composer"/);
   assert.match(source, /hidden=\{Boolean\(pendingClarificationPlan \|\| pendingAgentClarification\)\}/);
   assert.match(source, /disabled=\{Boolean\(pendingClarificationPlan \|\| pendingAgentClarification\)\}/);

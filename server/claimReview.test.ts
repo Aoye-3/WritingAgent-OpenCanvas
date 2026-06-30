@@ -48,8 +48,11 @@ test("creates Canvas nodes only from accepted Claims", async () => {
   const result = service.createNode(threadId, accepted!.id);
 
   assert.equal(result?.node.kind, "document");
-  assert.match(result?.node.content ?? "", /Claim: Accepted claim\./);
-  assert.match(result?.node.content ?? "", /Source: \/mnt\/user-data\/outputs\/research\.md/);
+  assert.equal(result?.node.title, "摘要 1");
+  assert.equal(result?.node.content, "Accepted claim.");
+  assert.doesNotMatch(result?.node.content ?? "", /Evidence:/);
+  assert.doesNotMatch(result?.node.content ?? "", /Source:/);
+  assert.doesNotMatch(result?.node.content ?? "", /Status:/);
   assert.equal(storage.listClaims(threadId)[0].canvasNodeId, result?.node.id);
 });
 
@@ -68,6 +71,19 @@ test("failed extraction does not delete existing reviewed Claims", async () => {
   }), /extract failed/);
 
   assert.equal(fixture.storage.listClaims(fixture.threadId)[0].status, "accepted");
+});
+
+test("deletes Claim candidates persistently", async () => {
+  const { service, storage, threadId, sourceNode } = await claimFixture();
+  const claim = await service.createFromSelection(threadId, {
+    sourceNodeId: sourceNode.id,
+    sourceDocumentPath: "/mnt/user-data/outputs/research.md",
+    selectedText: "Delete this claim."
+  });
+
+  assert.equal(service.delete(threadId, claim.id), true);
+  assert.deepEqual(storage.listClaims(threadId).map((item) => item.id), []);
+  assert.equal(service.delete(threadId, claim.id), false);
 });
 
 test("rejects Claim creation when the source path does not match the file_document node", async () => {

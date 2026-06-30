@@ -67,6 +67,8 @@ Knowledge Base vector stores and uploads are created under:
   - Tool and run events stored as JSON payloads. `web_search` events may include sanitized `sources` arrays with title and URL only; raw search result payloads and secrets must not be persisted.
 - `agent_clarifications`
   - Durable Agent Runtime clarification state per Thread/run/question. Pending rows drive the composer choice card; answered rows preserve selected option metadata so follow-up runs can mark the question resolved and retain resume context.
+- `claim_candidates`
+  - Persisted Markdown preview Claim candidates keyed by Project, Thread, source node, and source document path. Rows keep `claim_text`, `evidence_text`, source anchor JSON, citation URLs, review status, created-by origin, optional extraction run id, and optional created Canvas node id.
 - `settings`
   - Generic settings key/value table.
 - `agent_settings`
@@ -113,6 +115,15 @@ Canvas Workflow suggestions are separate rows in `canvas_workflow_suggestions` b
 Canvas pan, drag, resize, and hit testing are presentation-only. React Flow viewport state, selected node state, visual grid, resize handles, and future decorative overlays should not introduce persistence changes or new node state; they must remain separate from `canvas_nodes` unless they represent an explicit saved user artifact.
 
 Free arrows, shapes, tables, and asset cards are explicit saved user artifacts and therefore live in `canvas_objects`. They never create `canvas_edges` implicitly. Asset bytes live under `.facetwrite/threads/<threadId>/user-data/uploads/`; SQLite stores only safe metadata and the thread-relative path.
+
+## Claim Review Semantics
+`claim_candidates` is the durable review queue for Markdown preview extraction and selected-text candidates.
+
+- AI extraction and manual selection create candidate rows only; they never create Canvas nodes automatically.
+- The current UI treats candidates as selectable work items: users can create nodes from selected candidates or delete selected candidates.
+- `DELETE /api/threads/:threadId/claims/:claimId` removes only the candidate row. It intentionally does not delete a previously created Canvas node because that node may have been edited or connected after creation.
+- `source_anchor_json` and `evidence_text` remain stored so `Show source` can highlight the original document region or fall back to matching evidence text, even though the queue card and created Canvas node no longer render persistent evidence/source/status blocks.
+- `canvas_node_id` is a provenance link from a candidate to the node created through the legacy accepted-Claim route; created Claim nodes use compact `摘要 N` titles and visible content from `claim_text`, while Canvas node lifecycle remains owned by `canvas_nodes`.
 
 ## Thread And Project Semantics
 Projects are backed by `projects` and renamed independently from their Threads. Threads are conversations inside a Project and own the explicit `configured_model_api_id` for model selection; they do not own Agent identity, Canvas resources, project model bindings, or project shared context.

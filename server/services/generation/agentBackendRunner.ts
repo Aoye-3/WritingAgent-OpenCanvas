@@ -112,5 +112,5 @@ function isSkillClarificationGuarded(payload: GenerateRequest) {
 }
 
 function hasAgentClarificationEvent(events: ToolEventRecord[]) {
-  return events.some((event) => /agent_clarification_requested$/.test(event.eventType));
+  return events.some((event) => /agent_clarification_(?:requested|invalid)$/.test(event.eventType));
 }

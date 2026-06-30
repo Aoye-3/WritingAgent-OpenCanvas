@@ -10,6 +10,7 @@ import type { SQLiteStorageRepository } from "../storage.js";
 import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
 import type { KnowledgeSearchInput } from "../knowledge/service.js";
 import type { ToolEventRecord } from "../toolRuntime.js";
+import type { AgentRuntimePort } from "../runtime/agentRuntimePort.js";
 
 function runtimeConfig(): AgentRuntimeConfig {
   const agentCard = agentCards[0];
@@ -111,12 +112,12 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
       getThread: () => ({ id: "thread_test", projectId: "project_test", title: "Test", configuredModelApiId: "configured-test", contextResetAt, updatedAt: "" }),
       getProject: () => ({ id: "project_test", title: "Test", summary: "", updatedAt: "" }),
       getProjectRuntimeSettings: () => ({
-        runtimeBudgetProfile: "medium",
-        evidenceToolLimit: 16,
-        bodyDraftWriteLimit: 4,
-        modelCallLimit: 32,
-        recursionLimit: 140,
-        synthesisReserveSteps: 28
+        runtimeBudgetProfile: "low",
+        evidenceToolLimit: 8,
+        bodyDraftWriteLimit: 2,
+        modelCallLimit: 18,
+        recursionLimit: 80,
+        synthesisReserveSteps: 16
       }),
       getProjectModelBindings: () => ["configured-test"],
       getProjectSharedContext: () => undefined,
@@ -1030,6 +1031,82 @@ test("clarification-required AgentBackend run is waiting and deduplicates repeat
   assert.equal(events.filter((event) => event.eventType === "agent_backend_agent_clarification_requested").length, 1);
 });
 
+test("invalid Agent clarification options are repaired by retrying ask_clarification", async () => {
+  const { storage, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  let calls = 0;
+  let repairPolicy: Record<string, unknown> | undefined;
+  const invalidEvent: ToolEventRecord = {
+    eventType: "agent_backend_agent_clarification_invalid",
+    payload: {
+      type: "agent_clarification_invalid",
+      toolName: "ask_clarification",
+      toolCallId: "call_bad_options",
+      status: "failed",
+      reason: "too_many_options",
+      hasQuestion: true,
+      optionCount: 4,
+      summary: "Agent clarification payload was invalid"
+    }
+  };
+  const repairedEvent: ToolEventRecord = {
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      toolName: "ask_clarification",
+      toolCallId: "call_repaired_options",
+      question: "Which citation format should I use?",
+      options: [
+        { id: "apa", label: "APA 7th", detail: "Author-date references.", recommended: true },
+        { id: "ieee", label: "IEEE", detail: "Numbered engineering references." }
+      ]
+    }
+  };
+  const runtime: AgentRuntimePort = {
+    providerId: "agent-backend",
+    run: async (input) => {
+      calls += 1;
+      if (calls === 1) {
+        input.onToolEvent?.(invalidEvent);
+        return { text: "", finishReason: "clarification_required", events: [invalidEvent] };
+      }
+      repairPolicy = input.payload.contextValues?.facetwrite_clarification_policy as Record<string, unknown> | undefined;
+      input.onToolEvent?.(repairedEvent);
+      return { text: "", finishReason: "clarification_required", events: [repairedEvent] };
+    },
+    getStatus: async () => ({}),
+    getConfigOverview: async () => ({}),
+    getDashboard: async () => ({})
+  };
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentRuntime: runtime
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent agent literature",
+    transientSkillRefs: ["literature-review"],
+    toolState: { web_search: true }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.finishReason, "clarification_required");
+  assert.equal(repairPolicy?.source, "server_clarification_repair");
+  assert.equal(repairPolicy?.invalidReason, "too_many_options");
+  assert.equal(repairPolicy?.invalidOptionCount, 4);
+  assert.equal(events.some((event) => event.eventType === "agent_backend_agent_clarification_invalid"), false);
+  assert.equal(events.filter((event) => event.eventType === "agent_backend_agent_clarification_requested").length, 1);
+  assert.equal(records.length, 1);
+  const record = records[0] as { events?: Array<{ eventType: string }> };
+  assert.equal(record.events?.some((event) => event.eventType === "agent_backend_agent_clarification_invalid"), false);
+  assert.equal(record.events?.filter((event) => event.eventType === "agent_backend_agent_clarification_requested").length, 1);
+});
+
 test("answered Agent clarification preserves resume context for follow-up clarification", async () => {
   const { storage, records } = fakeStorage();
   const originalInstruction = "Review recent Agent literature and write a survey.";
@@ -1458,7 +1535,7 @@ test("skill scope guard fills default budget and Canvas resume context when runt
   const resumeContext = clarification?.payload.resumeContext as Record<string, unknown> | undefined;
   assert.equal(resumeContext?.originalInstruction, originalInstruction);
   assert.deepEqual(resumeContext?.transientSkillRefs, ["database-lookup", "literature-review"]);
-  assert.equal(resumeContext?.runtimeBudgetProfile, "medium");
+  assert.equal(resumeContext?.runtimeBudgetProfile, "low");
   assert.deepEqual((resumeContext?.canvas as { workflow?: unknown } | undefined)?.workflow, { mode: "batch_delivery" });
   assert.equal((resumeContext?.canvas as { runtimeMarker?: boolean } | undefined)?.runtimeMarker, true);
 });
@@ -1709,18 +1786,20 @@ test("progressive Canvas keeps body drafts until evidence budget and finalizes B
   assert.equal(result.usedMock, false);
   assert.equal(records.length, 1);
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_synthesis_started"));
-  assert.equal(events.filter((event) => event.eventType === "canvas_delivery_body_checkpoint_committed").length, 4);
-  const checkpoint = events.find((event) => event.eventType === "canvas_delivery_body_checkpoint_committed");
-  assert.ok(String(checkpoint?.payload.nodeId).endsWith("_4"));
+  const checkpoints = events.filter((event) => event.eventType === "canvas_delivery_body_checkpoint_committed");
+  assert.equal(checkpoints.length, 2);
+  const checkpoint = checkpoints.at(-1);
+  assert.equal(checkpoint?.payload.draftIndex, 2);
+  assert.equal(checkpoint?.payload.draftLimit, 2);
   assert.equal((checkpoint?.payload.node as { title?: string } | undefined)?.title, "Body draft");
   assert.ok(String((checkpoint?.payload.node as { content?: string } | undefined)?.content ?? "").includes("Working body draft"));
   assert.ok(String((checkpoint?.payload.node as { content?: string } | undefined)?.content ?? "").startsWith("# Body draft"));
   assert.ok(canvasNodes.some((node) => node.title === "Progress note 3"));
-  assert.ok(canvasNodes.some((node) => node.title === "Progress note 16"));
+  assert.ok(canvasNodes.some((node) => node.title === "Progress note 8"));
   const draft = canvasNodes.find((node) => node.title === "Body draft");
   assert.ok(draft);
-  assert.ok(String(draft.content).includes("Evidence 4"));
-  assert.equal(String(draft.content).includes("Evidence 16"), false);
+  assert.ok(String(draft.content).includes("Evidence 2"));
+  assert.equal(String(draft.content).includes("Evidence 8"), false);
   const body = canvasNodes.find((node) => node.title === "Body");
   assert.ok(body);
   assert.equal(String(body.content).includes("Working body draft"), false);

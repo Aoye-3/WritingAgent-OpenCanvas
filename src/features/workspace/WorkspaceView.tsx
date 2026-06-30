@@ -418,14 +418,13 @@ export function WorkspaceView({
               extracting={claimReview.extracting}
               loading={claimReview.loading}
               locale={locale}
-              onAccept={(claim) => claimReview.setClaimStatus(claim, "accepted")}
               onCreateNode={claimReview.createNodeFromClaim}
-              onCreateNodesFromAccepted={claimReview.createNodesFromAccepted}
+              onCreateSelected={claimReview.createNodesFromClaims}
+              onDelete={claimReview.deleteClaimCandidate}
+              onDeleteSelected={claimReview.deleteClaimCandidates}
               onEdit={claimReview.editClaim}
               onExtract={claimReview.extractActiveDocumentClaims}
-              onReject={(claim) => claimReview.setClaimStatus(claim, "rejected")}
               onSendToChat={claimReview.sendClaimsToChat}
-              onSetStatus={claimReview.setClaimStatus}
               onShowSource={(claim) => claimReview.setSourceFocusClaim(claim)}
             />
           }

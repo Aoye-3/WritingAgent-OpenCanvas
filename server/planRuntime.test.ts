@@ -273,6 +273,70 @@ test("product runtime advances an execution step after its artifact commits", as
   ]);
 });
 
+test("product runtime treats committed Canvas delivery as a Plan step artifact", async () => {
+  const storage = await isolatedStorage();
+  await storage.ensureThread("thread_canvas_delivery_plan", "project_canvas_delivery_plan", "Research");
+  const plan = storage.createPlanRun("thread_canvas_delivery_plan", {
+    title: "Deliver result",
+    goal: "Create a visible Canvas node",
+    steps: [{ id: "deliver", title: "Deliver" }]
+  });
+  storage.approvePlanRun("thread_canvas_delivery_plan", plan.id);
+  const orchestrator = new PlanOrchestrator(storage);
+  const payload = {
+    mode: "chat" as const,
+    locale: "en" as const,
+    contextValues: { planExecution: { planId: plan.id, stepId: "deliver" } }
+  };
+
+  orchestrator.prepare("thread_canvas_delivery_plan", payload);
+  orchestrator.assertPostcondition("thread_canvas_delivery_plan", payload, [{
+    eventType: "canvas_delivery_body_final_committed",
+    payload: {
+      deliveryId: "delivery_1",
+      nodeId: "canvas_body",
+      title: "Body"
+    }
+  }]);
+  orchestrator.complete("thread_canvas_delivery_plan", payload, [{
+    eventType: "canvas_delivery_body_final_committed",
+    payload: {
+      deliveryId: "delivery_1",
+      nodeId: "canvas_body",
+      title: "Body"
+    }
+  }]);
+
+  const advanced = storage.getPlanRun("thread_canvas_delivery_plan", plan.id);
+  assert.equal(advanced?.steps[0]?.status, "completed");
+  assert.equal(advanced?.status, "completed");
+  assert.equal(advanced?.artifacts[0]?.status, "committed");
+  assert.equal(advanced?.artifacts[0]?.canvasTargetId, "canvas_body");
+});
+
+test("deduplicates repeated Plan ready activities", async () => {
+  const storage = await isolatedStorage();
+  await storage.ensureThread("thread_plan_ready_dedupe", "project_plan_ready_dedupe", "Research");
+  const plan = storage.createPlanRun("thread_plan_ready_dedupe", {
+    title: "Research",
+    goal: "Prepare a plan",
+    steps: [{ id: "research", title: "Research" }]
+  });
+
+  storage.recordPlanActivity("thread_plan_ready_dedupe", plan.id, {
+    type: "plan_ready",
+    status: "awaiting_approval",
+    summary: "Plan is ready for approval"
+  });
+  storage.recordPlanActivity("thread_plan_ready_dedupe", plan.id, {
+    type: "plan_ready",
+    status: "awaiting_approval",
+    summary: "Plan is ready for approval"
+  });
+
+  assert.equal(storage.listPlanActivities("thread_plan_ready_dedupe", plan.id).filter((activity: { type: string }) => activity.type === "plan_ready").length, 1);
+});
+
 test("persists Plan activities and resumes a paused execution", async () => {
   const storage = await isolatedStorage();
   await storage.ensureThread("thread_activity", "project_activity", "Research");

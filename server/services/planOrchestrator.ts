@@ -73,11 +73,13 @@ export class PlanOrchestrator {
     }
   }
 
-  complete(threadId: string, payload: GenerateRequest) {
+  complete(threadId: string, payload: GenerateRequest, events: ToolEventRecord[] = []) {
     const context = executionContext(payload);
     if (!context) return;
     const plan = this.storage.getPlanRun(threadId, context.planId);
-    const committed = plan?.artifacts.some((artifact) => artifact.stepId === context.stepId && artifact.status === "committed");
+    const committedDelivery = plan && ensureCanvasDeliveryArtifact(this.storage, threadId, context.planId, context.stepId, events);
+    const committed = plan?.artifacts.some((artifact) => artifact.stepId === context.stepId && artifact.status === "committed")
+      || Boolean(committedDelivery);
     if (!plan || !committed) return;
     this.storage.updatePlanStep(threadId, plan.id, context.stepId, { status: "completed" });
     this.storage.recordPlanActivity(threadId, plan.id, {
@@ -91,7 +93,7 @@ export class PlanOrchestrator {
     }
   }
 
-  assertPostcondition(threadId: string, payload: GenerateRequest) {
+  assertPostcondition(threadId: string, payload: GenerateRequest, events: ToolEventRecord[] = []) {
     const generation = payload.planGeneration;
     if (!generation) return;
     const plan = this.storage.getPlanRun(threadId, generation.planId);
@@ -115,9 +117,10 @@ export class PlanOrchestrator {
 
     const stepId = generation.stepId;
     const artifactCommitted = Boolean(stepId && plan.artifacts.some((artifact) => artifact.stepId === stepId && artifact.status === "committed"));
+    const canvasDeliveryCommitted = Boolean(stepId && planCanvasDeliveryEvent(events));
     const interrupted = plan.status === "awaiting_user" || plan.status === "failed" || plan.status === "paused";
-    if (!artifactCommitted && !interrupted) {
-      throw new Error("Plan execution phase completed without a committed Artifact or persisted interruption.");
+    if (!artifactCommitted && !canvasDeliveryCommitted && !interrupted) {
+      throw new Error("This Plan step did not produce a Canvas deliverable. The Plan has paused so you can retry the step or revise the Plan.");
     }
   }
 
@@ -139,8 +142,51 @@ function executionContext(payload: GenerateRequest) {
 
 function safeToolSummary(payload: Record<string, unknown>, fallback: string) {
   const tool = string(payload.toolName) || string(payload.tool);
-  return tool ? `${fallback}: ${tool}` : fallback;
+  if (/(?:web_search|web_fetch|knowledge_base)/i.test(tool)) return fallback === "Tool completed" ? "Source check completed" : "Checking sources";
+  if (/(?:artifact_stage|canvas_write|canvas_delivery)/i.test(tool)) return fallback === "Tool completed" ? "Canvas update completed" : "Updating Canvas";
+  if (/(?:read_file|write_file|present_files|bash|grep|glob|ls)/i.test(tool)) return fallback === "Tool completed" ? "Workspace check completed" : "Checking workspace";
+  return fallback === "Tool completed" ? "Tool work completed" : "Tool work running";
 }
 
 function record(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function string(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
+
+function ensureCanvasDeliveryArtifact(
+  storage: SQLiteStorageRepository,
+  threadId: string,
+  planId: string,
+  stepId: string,
+  events: ToolEventRecord[]
+) {
+  const event = planCanvasDeliveryEvent(events);
+  if (!event) return undefined;
+  const payload = record(event.payload);
+  const nodeId = string(payload.nodeId);
+  if (!nodeId) return undefined;
+  const deliveryId = string(payload.deliveryId) || "canvas_delivery";
+  const artifactId = `canvas_${stepId}_${deliveryId}`.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 120);
+  const title = string(payload.title) || "Canvas deliverable";
+  const staged = storage.stagePlanArtifact(threadId, planId, {
+    artifactId,
+    stepId,
+    type: "text",
+    title,
+    payload: {
+      nodeId,
+      deliveryId,
+      eventType: event.eventType
+    }
+  });
+  return staged ? storage.markPlanArtifactCommitted(threadId, planId, staged.id, nodeId) : undefined;
+}
+
+function planCanvasDeliveryEvent(events: ToolEventRecord[]) {
+  return [...events].reverse().find((event) => {
+    const payload = record(event.payload);
+    const eventType = string(payload.eventType) || event.eventType;
+    return /^canvas_delivery_/.test(eventType)
+      && /_committed$/.test(eventType)
+      && eventType !== "canvas_delivery_failed_summary_committed"
+      && Boolean(string(payload.nodeId));
+  });
+}

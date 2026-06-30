@@ -739,11 +739,11 @@ test("sends progressive Canvas evidence controls for skill long tasks", () => {
       progressiveCanvasDelivery: {
         enabled: true,
         runtimeBudgetProfile: "medium",
-        recursionLimit: 140,
-        modelCallLimit: 32,
-        evidenceToolLimit: 16,
-        bodyDraftWriteLimit: 4,
-        synthesisReserveSteps: 28,
+        recursionLimit: 110,
+        modelCallLimit: 24,
+        evidenceToolLimit: 12,
+        bodyDraftWriteLimit: 3,
+        synthesisReserveSteps: 22,
         forceSynthesisAfterEvidence: true,
         evidenceTools: ["web_search", "web_fetch", "read_file", "bash"]
       }
@@ -753,13 +753,13 @@ test("sends progressive Canvas evidence controls for skill long tasks", () => {
 
   assert.equal(request.context.facetwrite_progressive_canvas_delivery_enabled, true);
   assert.equal(request.config.configurable.facetwrite_progressive_canvas_delivery_enabled, true);
-  assert.equal(request.config.recursion_limit, 140);
+  assert.equal(request.config.recursion_limit, 110);
   assert.equal(request.context.facetwrite_runtime_budget_profile, "medium");
-  assert.equal(request.context.facetwrite_recursion_limit, 140);
-  assert.equal(request.context.facetwrite_model_call_limit, 32);
-  assert.equal(request.context.facetwrite_evidence_tool_limit, 16);
-  assert.equal(request.context.facetwrite_body_draft_write_limit, 4);
-  assert.equal(request.context.facetwrite_synthesis_reserve_steps, 28);
+  assert.equal(request.context.facetwrite_recursion_limit, 110);
+  assert.equal(request.context.facetwrite_model_call_limit, 24);
+  assert.equal(request.context.facetwrite_evidence_tool_limit, 12);
+  assert.equal(request.context.facetwrite_body_draft_write_limit, 3);
+  assert.equal(request.context.facetwrite_synthesis_reserve_steps, 22);
   assert.equal(request.context.facetwrite_force_synthesis_after_evidence, true);
   assert.equal((request.context as Record<string, unknown>).facetwrite_force_synthesis_after_body_drafts, undefined);
   assert.equal(request.context.facetwrite_markdown_file_delivery_required, true);
@@ -798,11 +798,11 @@ test("preserves progressive Canvas budget after an answered skill clarification"
       progressiveCanvasDelivery: {
         enabled: true,
         runtimeBudgetProfile: "medium",
-        recursionLimit: 140,
-        modelCallLimit: 32,
-        evidenceToolLimit: 16,
-        bodyDraftWriteLimit: 4,
-        synthesisReserveSteps: 28,
+        recursionLimit: 110,
+        modelCallLimit: 24,
+        evidenceToolLimit: 12,
+        bodyDraftWriteLimit: 3,
+        synthesisReserveSteps: 22,
         forceSynthesisAfterEvidence: true,
         evidenceTools: ["web_search", "web_fetch", "read_file", "bash"]
       }
@@ -810,7 +810,7 @@ test("preserves progressive Canvas budget after an answered skill clarification"
     toolState: { web_search: true }
   }, { enabled: true, baseUrl: "http://127.0.0.1:8000", assistantId: "lead_agent" });
 
-  assert.equal(request.config.recursion_limit, 140);
+  assert.equal(request.config.recursion_limit, 110);
   assert.equal(request.context.facetwrite_progressive_canvas_delivery_enabled, true);
   assert.equal(request.context.facetwrite_runtime_budget_profile, "medium");
   assert.equal(request.context.facetwrite_allowed_tool_refs.includes("web_search"), true);
@@ -853,11 +853,11 @@ test("skill clarification guard exposes only ask_clarification even with progres
       progressiveCanvasDelivery: {
         enabled: true,
         runtimeBudgetProfile: "high",
-        recursionLimit: 220,
-        modelCallLimit: 56,
-        evidenceToolLimit: 32,
-        bodyDraftWriteLimit: 8,
-        synthesisReserveSteps: 44,
+        recursionLimit: 140,
+        modelCallLimit: 32,
+        evidenceToolLimit: 16,
+        bodyDraftWriteLimit: 4,
+        synthesisReserveSteps: 28,
         forceSynthesisAfterEvidence: true,
         evidenceTools: ["web_search", "web_fetch", "read_file", "bash"]
       }

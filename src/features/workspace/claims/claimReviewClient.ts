@@ -6,7 +6,7 @@ import type {
   UpdateClaimInput
 } from "../../../../shared/claimReview";
 import type { CanvasNode } from "../../agents/types";
-import { apiGet, apiPatch, apiPost } from "../../../shared/apiClient";
+import { apiDelete, apiGet, apiPatch, apiPost } from "../../../shared/apiClient";
 
 export async function fetchClaims(threadId: string, sourceNodeId?: string): Promise<ClaimCandidate[]> {
   const suffix = sourceNodeId ? `?sourceNodeId=${encodeURIComponent(sourceNodeId)}` : "";
@@ -27,6 +27,10 @@ export async function extractClaims(threadId: string, input: ExtractClaimsInput)
 export async function updateClaim(threadId: string, claimId: string, input: UpdateClaimInput): Promise<ClaimCandidate> {
   const payload = await apiPatch<{ claim: ClaimCandidate }>(`/api/threads/${encodeURIComponent(threadId)}/claims/${encodeURIComponent(claimId)}`, input);
   return payload.claim;
+}
+
+export async function deleteClaim(threadId: string, claimId: string): Promise<void> {
+  await apiDelete(`/api/threads/${encodeURIComponent(threadId)}/claims/${encodeURIComponent(claimId)}`);
 }
 
 export async function createClaimCanvasNode(threadId: string, claimId: string, input: CreateClaimCanvasNodeInput = {}): Promise<{ claim: ClaimCandidate; node: CanvasNode }> {

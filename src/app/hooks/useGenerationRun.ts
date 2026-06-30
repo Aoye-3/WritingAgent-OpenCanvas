@@ -56,18 +56,43 @@ export function createLiveThreadStateRefreshScheduler() {
   let inFlight: Promise<void> | null = null;
   let pending: LiveThreadStateRefreshRequest | null = null;
   let generation = 0;
+  let sequence = 0;
 
   const run = (request: LiveThreadStateRefreshRequest, runGeneration = generation) => {
+    const refreshId = `live_refresh_${++sequence}`;
+    const startedAt = performance.now();
+    traceLiveRefresh("start", refreshId, request, { generation: runGeneration });
     const refresh = request.fetchAndApply(request.threadId)
       .then((state) => {
-        if (runGeneration !== generation || request.operationId !== request.currentOperationId() || state.thread.id !== request.threadId) return;
+        if (runGeneration !== generation || request.operationId !== request.currentOperationId() || state.thread.id !== request.threadId) {
+          traceLiveRefresh("skip_stale", refreshId, request, {
+            elapsedMs: Math.round(performance.now() - startedAt),
+            generation: runGeneration,
+            currentOperationId: request.currentOperationId(),
+            stateThreadId: state.thread.id
+          });
+          return;
+        }
         request.apply(state);
+        traceLiveRefresh("applied", refreshId, request, {
+          elapsedMs: Math.round(performance.now() - startedAt),
+          planCount: state.plans?.length ?? 0,
+          messageCount: state.messages.length
+        });
       })
       .catch((error) => {
         console.warn("Live thread state refresh failed", error instanceof Error ? error.message : "Unknown error");
+        traceLiveRefresh("failed", refreshId, request, {
+          elapsedMs: Math.round(performance.now() - startedAt),
+          error: error instanceof Error ? error.message : "Unknown error"
+        });
       })
       .finally(() => {
         request.onSettled?.();
+        traceLiveRefresh("settled", refreshId, request, {
+          elapsedMs: Math.round(performance.now() - startedAt),
+          hasPending: Boolean(pending)
+        });
         if (runGeneration !== generation) return;
         if (inFlight === refresh) inFlight = null;
         const next = pending;
@@ -80,6 +105,7 @@ export function createLiveThreadStateRefreshScheduler() {
   return {
     request(request: LiveThreadStateRefreshRequest) {
       if (inFlight) {
+        traceLiveRefresh("queued", `live_refresh_pending_${sequence + 1}`, request);
         pending = request;
         return;
       }
@@ -89,6 +115,7 @@ export function createLiveThreadStateRefreshScheduler() {
       generation += 1;
       inFlight = null;
       pending = null;
+      console.info("[FacetWrite live refresh trace]", { phase: "reset", generation });
     }
   };
 }
@@ -354,7 +381,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   };
 
   const applyCollaborationMessagesFromThreadState = (state: ThreadStateResponse) => {
-    const activityMessages = (state.planActivities ?? []).map((activity) => ({
+    const activityMessages = dedupePlanActivities(state.planActivities ?? []).map((activity) => ({
       id: `activity:${activity.id}`,
       role: "assistant" as const,
       text: activity.summary,
@@ -610,6 +637,16 @@ function isPlanInstruction(text: string) {
   return /^\s*\/plan\b/i.test(text) || /^\s*continue approved plan\b/i.test(text);
 }
 
+function dedupePlanActivities<T extends { planRunId: string; stepId?: string; type: string; status: string; summary: string }>(activities: T[]) {
+  const seen = new Set<string>();
+  return activities.filter((activity) => {
+    const key = [activity.planRunId, activity.stepId ?? "", activity.type, activity.status, activity.summary].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function readSkillRefs(value: unknown) {
   if (!Array.isArray(value)) return undefined;
   const refs = value
@@ -682,4 +719,19 @@ function attachTimelineToLatestAssistant<T extends CollaborationMessage>(message
   return messages.map((message, index) => (
     index === targetIndex ? { ...message, timeline } : message
   ));
+}
+
+function traceLiveRefresh(
+  phase: string,
+  refreshId: string,
+  request: LiveThreadStateRefreshRequest,
+  details: Record<string, unknown> = {}
+) {
+  console.info("[FacetWrite live refresh trace]", {
+    phase,
+    refreshId,
+    threadId: request.threadId,
+    operationId: request.operationId,
+    ...details
+  });
 }
