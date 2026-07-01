@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deriveAssistantRunTraceState } from "../../src/features/workspace/components/AssistantRunTrace";
+import { deriveAssistantRunTraceState, filterAssistantRunTraceEvents, formatAssistantRunTraceDetail } from "../../src/features/workspace/components/AssistantRunTrace";
 
 test("assistant run trace derives failed and running states from visible events", () => {
   assert.deepEqual(deriveAssistantRunTraceState({
@@ -17,4 +17,49 @@ test("assistant run trace derives failed and running states from visible events"
     ],
     userExpanded: undefined
   }), { expanded: true, failed: true, running: false });
+});
+
+test("assistant run trace exposes safe failed payload diagnostics", () => {
+  assert.equal(formatAssistantRunTraceDetail({
+    status: "failed",
+    payload: {
+      reason: "invalid_clarification",
+      optionCount: 2,
+      optionShape: "missing_recommended",
+      hasQuestion: true
+    }
+  }), "invalid_clarification \u00b7 options=2 \u00b7 shape=missing_recommended \u00b7 hasQuestion=true");
+});
+
+test("assistant run trace filters to the active AgentPlan step", () => {
+  const events = [
+    { id: "1", eventType: "tool_started", status: "running", title: "Read", summary: "", sequence: 1, createdAt: "2026-06-14T00:00:00.000Z", payload: { planId: "plan_1", stepId: "step_1" } },
+    { id: "2", eventType: "artifact_committed", status: "completed", title: "Result", summary: "", sequence: 2, createdAt: "2026-06-14T00:00:01.000Z", payload: { agentPlanId: "plan_1", agentPlanStepId: "step_2" } },
+    { id: "3", eventType: "tool_completed", status: "completed", title: "Other", summary: "", sequence: 3, createdAt: "2026-06-14T00:00:02.000Z", payload: { planId: "plan_2", stepId: "step_1" } }
+  ] as const;
+
+  assert.deepEqual(
+    filterAssistantRunTraceEvents([...events], { planId: "plan_1", stepId: "step_2" }).map((event) => event.id),
+    ["2"]
+  );
+});
+
+test("assistant run trace hides low-value tool lifecycle events by default", () => {
+  const events = [
+    { id: "1", eventType: "tool_started", status: "running", title: "Tool", summary: "", sequence: 1, createdAt: "2026-06-14T00:00:00.000Z" },
+    { id: "2", eventType: "tool_completed", status: "completed", title: "Tool", summary: "", sequence: 2, createdAt: "2026-06-14T00:00:01.000Z" },
+    { id: "3", eventType: "run_completed", status: "completed", title: "Done", summary: "", sequence: 3, createdAt: "2026-06-14T00:00:02.000Z" },
+    { id: "4", eventType: "tool_completed", status: "failed", title: "Tool failed", summary: "", sequence: 4, createdAt: "2026-06-14T00:00:03.000Z" }
+  ] as const;
+
+  assert.deepEqual(filterAssistantRunTraceEvents([...events]).map((event) => event.id), ["3", "4"]);
+});
+
+test("assistant run trace hides progress report timeline events", () => {
+  const events = [
+    { id: "1", eventType: "decision", status: "running", title: "Run update", summary: "Collecting evidence", sequence: 1, createdAt: "2026-06-14T00:00:00.000Z", payload: { kind: "progress_report" } },
+    { id: "2", eventType: "decision", status: "running", title: "Public decision", summary: "Choosing next step", sequence: 2, createdAt: "2026-06-14T00:00:01.000Z" }
+  ] as const;
+
+  assert.deepEqual(filterAssistantRunTraceEvents([...events]).map((event) => event.id), ["2"]);
 });

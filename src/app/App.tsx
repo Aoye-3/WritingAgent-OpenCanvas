@@ -99,7 +99,7 @@ function AppContent() {
   const [toolState, setToolState] = useState<GenerateRequest["toolState"]>({ web_search: true, knowledge_base: false, canvas_write: true });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [canvasUndoDepth, setCanvasUndoDepth] = useState(20);
-  const [runtimeBudgetProfile, setRuntimeBudgetProfile] = useState<GenerateRequest["runtimeBudgetProfile"]>("medium");
+  const [runtimeBudgetProfile, setRuntimeBudgetProfile] = useState<GenerateRequest["runtimeBudgetProfile"]>("low");
 
   const applyThreadState = (state: ThreadStateResponse) => {
     activeProjectIdRef.current = state.thread.projectId;
@@ -334,6 +334,24 @@ function AppContent() {
     onRefreshProjectSurfaces: refreshProjectSurfaces,
     beforeGenerate: flushBriefs
   });
+  const activePlanPollingKey = useMemo(() => {
+    const activePlans = generationRun.plans.filter((plan) => plan.status === "running" || plan.status === "paused" || plan.status === "awaiting_approval");
+    return activePlans.map((plan) => `${plan.id}:${plan.status}:${plan.currentStepId ?? ""}:${plan.updatedAt}`).join("|");
+  }, [generationRun.plans]);
+
+  useEffect(() => {
+    if (!threadSession.threadId || !activePlanPollingKey) return;
+    let cancelled = false;
+    const refreshActivePlans = () => {
+      if (!threadSession.threadId || cancelled) return;
+      void refreshThreadState(threadSession.threadId).catch(() => undefined);
+    };
+    const timer = window.setInterval(refreshActivePlans, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activePlanPollingKey, threadSession.threadId]);
 
   const projectTrash = useProjectTrash({
     onClearPersistedThreadId: threadSession.clearPersistedThreadId,
@@ -371,7 +389,7 @@ function AppContent() {
     if (activeProjectId) {
       void getProjectRuntimeSettings(activeProjectId)
         .then((settings) => setRuntimeBudgetProfile(settings.runtimeBudgetProfile))
-        .catch(() => setRuntimeBudgetProfile("medium"));
+        .catch(() => setRuntimeBudgetProfile("low"));
     }
   }, [activeProjectId]);
 
@@ -555,6 +573,8 @@ function AppContent() {
         onRetryTaskBrief={saveTaskBriefNow}
         onApproveCanvasWriteRequest={canvasState.handleApproveCanvasWriteRequest}
         onChatSend={generationRun.handleChatSend}
+        onQueueChatInput={generationRun.queueChatInput}
+        onRequestQueuedInputIntervention={generationRun.requestQueuedInputIntervention}
         onStopChatSend={generationRun.stopChatGeneration}
         onPlansChanged={async () => { if (threadSession.threadId) await refreshThreadState(threadSession.threadId); }}
         onCreateCanvasEdge={canvasState.handleCreateCanvasEdge}

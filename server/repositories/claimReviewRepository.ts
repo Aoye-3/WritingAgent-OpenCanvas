@@ -166,6 +166,16 @@ export class ClaimReviewRepository {
     return this.getClaim(threadId, claimId);
   }
 
+  deleteClaim(threadId: string, claimId: string) {
+    validateId(threadId, "threadId");
+    validateId(claimId, "claimId");
+    const existing = this.getClaim(threadId, claimId);
+    if (!existing) return false;
+    const result = this.db.prepare(`DELETE FROM claim_candidates WHERE id = ? AND thread_id = ?`).run(claimId, threadId);
+    if (result.changes > 0) this.deps.touchProject(existing.projectId);
+    return result.changes > 0;
+  }
+
   getClaim(threadId: string, claimId: string) {
     return this.listClaims(threadId).find((claim) => claim.id === claimId);
   }

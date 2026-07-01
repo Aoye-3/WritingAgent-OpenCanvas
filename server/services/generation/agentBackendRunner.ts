@@ -49,6 +49,10 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     allowedToolRefs: allowedToolsForRequest(input),
     toolState: input.payload.toolState,
     selectedCanvasNodeId: input.payload.selectedCanvasNodeId,
+    planPhase: input.payload.planPhase,
+    planId: input.payload.planId,
+    stepId: input.payload.stepId,
+    planGeneration: input.payload.planGeneration,
     contextValues: { ...input.payload.contextValues, ...(input.payload.canvasAction ? { canvasAction: input.payload.canvasAction } : {}), ...(input.payload.planGeneration ? { planGeneration: input.payload.planGeneration } : {}) },
     chatInstruction: input.payload.chatInstruction ?? input.payload.freeTextPrompt,
     onToolEvent: input.onToolEvent,
@@ -57,10 +61,6 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     onStatus: input.onStatus,
     onRuntimeSignal: input.onRuntimeSignal
   });
-
-  if (isSkillClarificationGuarded(input.payload) && !hasAgentClarificationEvent(run.events)) {
-    throw new Error("AgentBackend skill scope guard requires a structured ask_clarification response");
-  }
 
   if (!run.text && !run.events.some((event) => /(?:^|_)(?:plan|artifact|canvas)_/.test(event.eventType))) {
     if (!hasAgentClarificationEvent(run.events)) {
@@ -112,5 +112,5 @@ function isSkillClarificationGuarded(payload: GenerateRequest) {
 }
 
 function hasAgentClarificationEvent(events: ToolEventRecord[]) {
-  return events.some((event) => /agent_clarification_requested$/.test(event.eventType));
+  return events.some((event) => /agent_clarification_(?:requested|invalid)$/.test(event.eventType));
 }

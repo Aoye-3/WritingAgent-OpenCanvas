@@ -108,7 +108,7 @@ export const toolCatalog: ToolDefinition[] = [
     promptHint: "Revise only the supplied Plan id with short sequential executable steps.",
     schema: { type: "object", properties: {
       planId: { type: "string" }, title: { type: "string" }, goal: { type: "string" },
-      steps: { type: "array", minItems: 1, items: { type: "object", properties: {
+      steps: { type: "array", minItems: 2, maxItems: 5, items: { type: "object", properties: {
         id: { type: "string" }, title: { type: "string" }, detail: { type: "string" }
       }, required: ["id", "title"], additionalProperties: false } }
     }, required: ["planId", "title", "goal", "steps"], additionalProperties: false },

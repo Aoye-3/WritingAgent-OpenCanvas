@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { defaultAgentSettings, getAgentCard } from "../../agentCards.js";
-import { buildRunRequest, runAgentBackendAgent } from "./client.js";
+import { buildRunRequest, listAgentBackendRunEvents, requestAgentBackendRunIntervention, runAgentBackendAgent } from "./client.js";
 
 test("builds LangGraph-compatible AgentBackend run request", () => {
   const card = getAgentCard("summary");
@@ -61,6 +61,50 @@ test("builds LangGraph-compatible AgentBackend run request", () => {
   assert.equal(request.metadata.subagent.name, "facetwrite-chat-agent");
   assert.deepEqual(request.stream_mode, ["messages-tuple", "custom", "values"]);
   assert.equal(request.multitask_strategy, "interrupt");
+});
+
+test("requests AgentBackend run intervention through authenticated runtime API", async () => {
+  let interventionUrl = "";
+  let interventionBody: unknown;
+  const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) return Response.json({ needs_setup: false });
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, { headers });
+    }
+    interventionUrl = textUrl;
+    interventionBody = JSON.parse(String(init?.body ?? "{}")) as unknown;
+    return Response.json({ id: "queued_1", status: "requested" });
+  };
+
+  const result = await requestAgentBackendRunIntervention({
+    threadId: "thread_1",
+    runId: "run_1",
+    text: "Please adjust the next section.",
+    inputId: "queued_1",
+    config: {
+      enabled: true,
+      baseUrl: "http://AgentBackend.local",
+      assistantId: "lead_agent",
+      auth: {
+        email: "admin@example.com",
+        password: "strong-password",
+        autoSetup: false,
+        timeoutMs: 5000
+      }
+    },
+    fetchImpl
+  });
+
+  assert.equal(interventionUrl, "http://AgentBackend.local/api/threads/thread_1/runs/run_1/interventions");
+  assert.deepEqual(interventionBody, {
+    text: "Please adjust the next section.",
+    input_id: "queued_1"
+  });
+  assert.deepEqual(result, { id: "queued_1", status: "requested" });
 });
 
 test("does not pass Agent-owned memory into a project run", () => {
@@ -218,6 +262,34 @@ test("surfaces AgentBackend heartbeat comments as runtime liveness status", asyn
   assert.ok(statuses.includes("Agent Runtime is still working..."));
 });
 
+test("surfaces AgentBackend metadata as a raw runtime run signal", async () => {
+  const statuses: string[] = [];
+  const signals: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+  const body = [
+    'event: metadata\ndata: {"run_id":"runtime_run_1","thread_id":"thread_1"}\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"Done"}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body, {
+    onStatus: (status) => statuses.push(status.label),
+    onRuntimeSignal: (signal) => signals.push(signal)
+  });
+
+  assert.equal(result.text, "Done");
+  assert.deepEqual(statuses, ["Thinking...", "Writing..."]);
+  assert.equal(signals[0]?.type, "run_metadata");
+  assert.deepEqual(signals[0]?.payload, {
+    type: "agent_progress_reported",
+    runId: "runtime_run_1",
+    threadId: "thread_1",
+    phase: "run",
+    status: "running",
+    summary: "Agent runtime run opened.",
+    visibility: "raw",
+    source: "agent_runtime_metadata"
+  });
+});
+
 test("does not let heartbeat overwrite an Agent clarification waiting state", async () => {
   const statuses: string[] = [];
   const body = [
@@ -272,6 +344,33 @@ test("surfaces llm_retry custom events without creating tool events", async () =
   assert.ok(statuses.some((label) => label.includes("600s")));
 });
 
+test("surfaces thinking/tool_choice compatibility custom events", async () => {
+  const statuses: string[] = [];
+  const signals: Array<{ type: string; toolChoice?: unknown }> = [];
+  const body = [
+    'event: custom\ndata: {"type":"thinking_disabled_for_tool_choice_compatibility","phase":"planning","tool_choice":"plan_clarification_submit","reason":"plan_intake"}\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"Ready"}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body, {
+    onStatus: (status) => statuses.push(status.label),
+    onRuntimeSignal: (signal) => signals.push({ type: signal.type, toolChoice: signal.payload?.tool_choice })
+  });
+
+  assert.equal(result.text, "Ready");
+  assert.deepEqual(signals, [{ type: "thinking_disabled_for_tool_choice_compatibility", toolChoice: "plan_clarification_submit" }]);
+  assert.ok(statuses.includes("Thinking disabled for this forced tool call because the selected model does not support thinking with tool_choice."));
+});
+
+test("maps thinking/tool_choice stream errors to actionable messages", async () => {
+  const body = 'event: error\ndata: {"message":"LLM request failed: Thinking mode does not support this tool_choice"}\n\n';
+
+  await assert.rejects(
+    () => runWithBody(body),
+    /Current model does not support thinking with forced tool calls/
+  );
+});
+
 test("surfaces LLM provider lifecycle custom events without creating tool events", async () => {
   const statuses: string[] = [];
   const signals: string[] = [];
@@ -293,6 +392,77 @@ test("surfaces LLM provider lifecycle custom events without creating tool events
   assert.ok(statuses.includes("Waiting for model response..."));
   assert.ok(statuses.includes("Model response received."));
   assert.ok(statuses.includes("Forcing final synthesis..."));
+});
+
+test("surfaces public agent progress custom events with display fields intact", async () => {
+  const signals: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+  const body = [
+    'event: custom\ndata: {"type":"agent_progress_reported","runId":"run_1","threadId":"thread_1","stageId":"evidence:collecting","loopId":"loop_1","loopIndex":1,"stepKind":"act","actionId":"call_search","observationId":"obs_search","completionStatus":"continue","completionReasons":["tool running"],"missingRequirements":["tool result"],"phase":"evidence","status":"running","title":"Evidence collection","summary":"Collecting sources.","next":"Review evidence next.","interventionHint":"Add source preferences now.","visibility":"stage","source":"agent_runtime","createdAt":"2026-06-14T00:00:00.000Z","prompt":"hidden"}\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"Done"}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body, {
+    onRuntimeSignal: (signal) => signals.push(signal)
+  });
+
+  assert.equal(result.text, "Done");
+  assert.equal(signals.length, 1);
+  assert.equal(signals[0]?.type, "agent_progress_reported");
+  assert.deepEqual(signals[0]?.payload, {
+    type: "agent_progress_reported",
+    runId: "run_1",
+    threadId: "thread_1",
+    stageId: "evidence:collecting",
+    loopId: "loop_1",
+    loopIndex: 1,
+    stepKind: "act",
+    actionId: "call_search",
+    observationId: "obs_search",
+    completionStatus: "continue",
+    completionReasons: ["tool running"],
+    missingRequirements: ["tool result"],
+    phase: "evidence",
+    status: "running",
+    title: "Evidence collection",
+    summary: "Collecting sources.",
+    next: "Review evidence next.",
+    interventionHint: "Add source preferences now.",
+    visibility: "stage",
+    source: "agent_runtime",
+    createdAt: "2026-06-14T00:00:00.000Z"
+  });
+});
+
+test("lists AgentBackend run events through authenticated runtime API", async () => {
+  let eventsUrl = "";
+  const fetchImpl = async (url: string | URL | Request) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) return Response.json({ needs_setup: false });
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, { headers });
+    }
+    eventsUrl = textUrl;
+    return Response.json([{ event_type: "llm.tool.result", category: "message", seq: 1 }]);
+  };
+
+  const events = await listAgentBackendRunEvents({
+    threadId: "thread_1",
+    runId: "run_1",
+    limit: 50,
+    config: {
+      enabled: true,
+      baseUrl: "http://AgentBackend.local",
+      assistantId: "lead_agent",
+      auth: { email: "admin@example.com", password: "strong-password", autoSetup: false, timeoutMs: 5000 }
+    },
+    fetchImpl
+  });
+
+  assert.equal(eventsUrl, "http://AgentBackend.local/api/threads/thread_1/runs/run_1/events?limit=50");
+  assert.deepEqual(events, [{ event_type: "llm.tool.result", category: "message", seq: 1 }]);
 });
 
 test("surfaces stream chunk timeout retry metadata without creating tool events", async () => {
@@ -440,12 +610,22 @@ test("maps web fetch and read file tool results into sanitized progress payloads
 
 test("surfaces AgentBackend stream error events as runtime failures", async () => {
   const body = [
-    'event: error\ndata: {"message":"Recursion limit of 100 reached without hitting a stop condition."}\n\n'
+    'event: error\ndata: {"message":"Recursion limit of 100 reached without hitting a stop condition.","type":"budget_exhausted","recursion_limit":100,"estimated_steps_used":99}\n\n'
   ].join("");
 
   await assert.rejects(
     () => runWithBody(body),
-    /Recursion limit of 100 reached without hitting a stop condition/
+    (error) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /Recursion limit of 100 reached without hitting a stop condition/);
+      assert.deepEqual((error as Error & { facetwriteBudgetStatus?: unknown }).facetwriteBudgetStatus, {
+        status: "budget_exhausted",
+        canResume: true,
+        recursionLimit: 100,
+        estimatedStepsUsed: 99
+      });
+      return true;
+    }
   );
 });
 
@@ -702,11 +882,11 @@ test("sends progressive Canvas evidence controls for skill long tasks", () => {
       progressiveCanvasDelivery: {
         enabled: true,
         runtimeBudgetProfile: "medium",
-        recursionLimit: 140,
-        modelCallLimit: 32,
-        evidenceToolLimit: 16,
-        bodyDraftWriteLimit: 4,
-        synthesisReserveSteps: 28,
+        recursionLimit: 110,
+        modelCallLimit: 24,
+        evidenceToolLimit: 12,
+        bodyDraftWriteLimit: 3,
+        synthesisReserveSteps: 22,
         forceSynthesisAfterEvidence: true,
         evidenceTools: ["web_search", "web_fetch", "read_file", "bash"]
       }
@@ -716,13 +896,13 @@ test("sends progressive Canvas evidence controls for skill long tasks", () => {
 
   assert.equal(request.context.facetwrite_progressive_canvas_delivery_enabled, true);
   assert.equal(request.config.configurable.facetwrite_progressive_canvas_delivery_enabled, true);
-  assert.equal(request.config.recursion_limit, 140);
+  assert.equal(request.config.recursion_limit, 110);
   assert.equal(request.context.facetwrite_runtime_budget_profile, "medium");
-  assert.equal(request.context.facetwrite_recursion_limit, 140);
-  assert.equal(request.context.facetwrite_model_call_limit, 32);
-  assert.equal(request.context.facetwrite_evidence_tool_limit, 16);
-  assert.equal(request.context.facetwrite_body_draft_write_limit, 4);
-  assert.equal(request.context.facetwrite_synthesis_reserve_steps, 28);
+  assert.equal(request.context.facetwrite_recursion_limit, 110);
+  assert.equal(request.context.facetwrite_model_call_limit, 24);
+  assert.equal(request.context.facetwrite_evidence_tool_limit, 12);
+  assert.equal(request.context.facetwrite_body_draft_write_limit, 3);
+  assert.equal(request.context.facetwrite_synthesis_reserve_steps, 22);
   assert.equal(request.context.facetwrite_force_synthesis_after_evidence, true);
   assert.equal((request.context as Record<string, unknown>).facetwrite_force_synthesis_after_body_drafts, undefined);
   assert.equal(request.context.facetwrite_markdown_file_delivery_required, true);
@@ -761,11 +941,11 @@ test("preserves progressive Canvas budget after an answered skill clarification"
       progressiveCanvasDelivery: {
         enabled: true,
         runtimeBudgetProfile: "medium",
-        recursionLimit: 140,
-        modelCallLimit: 32,
-        evidenceToolLimit: 16,
-        bodyDraftWriteLimit: 4,
-        synthesisReserveSteps: 28,
+        recursionLimit: 110,
+        modelCallLimit: 24,
+        evidenceToolLimit: 12,
+        bodyDraftWriteLimit: 3,
+        synthesisReserveSteps: 22,
         forceSynthesisAfterEvidence: true,
         evidenceTools: ["web_search", "web_fetch", "read_file", "bash"]
       }
@@ -773,7 +953,7 @@ test("preserves progressive Canvas budget after an answered skill clarification"
     toolState: { web_search: true }
   }, { enabled: true, baseUrl: "http://127.0.0.1:8000", assistantId: "lead_agent" });
 
-  assert.equal(request.config.recursion_limit, 140);
+  assert.equal(request.config.recursion_limit, 110);
   assert.equal(request.context.facetwrite_progressive_canvas_delivery_enabled, true);
   assert.equal(request.context.facetwrite_runtime_budget_profile, "medium");
   assert.equal(request.context.facetwrite_allowed_tool_refs.includes("web_search"), true);
@@ -816,11 +996,11 @@ test("skill clarification guard exposes only ask_clarification even with progres
       progressiveCanvasDelivery: {
         enabled: true,
         runtimeBudgetProfile: "high",
-        recursionLimit: 220,
-        modelCallLimit: 56,
-        evidenceToolLimit: 32,
-        bodyDraftWriteLimit: 8,
-        synthesisReserveSteps: 44,
+        recursionLimit: 140,
+        modelCallLimit: 32,
+        evidenceToolLimit: 16,
+        bodyDraftWriteLimit: 4,
+        synthesisReserveSteps: 28,
         forceSynthesisAfterEvidence: true,
         evidenceTools: ["web_search", "web_fetch", "read_file", "bash"]
       }
@@ -872,6 +1052,21 @@ test("maps ask_clarification tool calls into structured Agent clarification even
   assert.equal(clarification.payload.question, "Which scope should I use?");
   assert.equal(Array.isArray(clarification.payload.options), true);
   assert.equal(result.text, "");
+});
+
+test("does not keep clarification_required after runtime continues with tools", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_clarify","name":"ask_clarification","args":{"question":"Which citation format?","options":[{"id":"apa","label":"APA","detail":"APA 7th","recommended":true},{"id":"ieee","label":"IEEE","detail":"IEEE style"}]}}]}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_search","name":"web_search","args":{"query":"recent AI agent survey"}}]}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"tool","name":"web_search","tool_call_id":"call_search","content":"[]"}]\n\n',
+    'event: end\ndata: null\n\n'
+  ].join("");
+
+  const result = await runWithBody(body);
+
+  assert.equal(result.finishReason, "agent_backend_completed");
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_agent_clarification_requested"));
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_tool_completed" && event.payload.toolName === "web_search"));
 });
 
 test("maps ask_clarification tool calls with JSON string args", async () => {
@@ -1083,6 +1278,46 @@ test("marks an answered Plan as the revision planning stage", () => {
   });
 
   assert.equal(request.context.facetwrite_plan_stage, "revise");
+});
+
+test("marks auto preflight Plan requests as planning with Plan-only tools", () => {
+  const card = getAgentCard("summary");
+  const request = buildRunRequest({
+    threadId: "thread_plan",
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings: defaultAgentSettings(card),
+    messages: [{ role: "user", content: "Research agent planning systems and write a report" }],
+    prompt: "Research agent planning systems and write a report",
+    chatInstruction: "Research agent planning systems and write a report",
+    planPhase: "preflight",
+    planId: "plan_1",
+    allowedToolRefs: ["plan_clarification_submit", "plan_revision_submit", "web_search", "canvas_write"],
+    toolState: {
+      plan_clarification_submit: true,
+      plan_revision_submit: true,
+      web_search: false,
+      canvas_write: false
+    }
+  }, {
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8000",
+    assistantId: "lead_agent"
+  });
+
+  assert.equal(request.context.facetwrite_plan_phase, "planning");
+  assert.equal(request.context.facetwrite_plan_stage, "preflight");
+  assert.equal(request.context.facetwrite_plan_id, "plan_1");
+  assert.ok(Array.isArray(request.context.facetwrite_allowed_tool_refs));
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("plan_clarification_submit"), true);
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("plan_revision_submit"), true);
+  assert.deepEqual(request.context.facetwrite_tool_state, {
+    plan_clarification_submit: true,
+    plan_revision_submit: true,
+    web_search: false,
+    canvas_write: false
+  });
 });
 
 test("returns only the last visible AI message across a tool loop", async () => {

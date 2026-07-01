@@ -1,5 +1,6 @@
 import type { StreamStatus } from "../../agentRunLoop.js";
 import type { AgentCard, AgentSettings, ConversationModelRuntimeSettings } from "../../agentCards.js";
+import type { GenerateRequest } from "../../contracts/generation.js";
 import type { ChatMessage } from "../../providerRuntime.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { ToolState } from "../../toolRegistry.js";
@@ -30,6 +31,10 @@ export type AgentBackendRunInput = {
   allowedToolRefs?: string[];
   toolState?: ToolState;
   selectedCanvasNodeId?: string;
+  planPhase?: GenerateRequest["planPhase"];
+  planId?: string;
+  stepId?: string;
+  planGeneration?: GenerateRequest["planGeneration"];
   contextValues?: Record<string, unknown>;
   chatInstruction?: string;
   facetwriteMemoryContent?: string;
@@ -50,7 +55,18 @@ export type AgentBackendRunResult = {
 };
 
 export type AgentBackendRuntimeSignal = {
-  type: "heartbeat" | "llm_retry" | "llm_call_start" | "llm_call_end" | "llm_call_error" | "synthesis_gate" | "waiting_for_user";
+  type:
+    | "heartbeat"
+    | "llm_retry"
+    | "llm_call_start"
+    | "llm_call_end"
+    | "llm_call_error"
+    | "run_metadata"
+    | "synthesis_gate"
+    | "waiting_for_user"
+    | "agent_progress_reported"
+    | "agent_intervention_checkpoint"
+    | "thinking_disabled_for_tool_choice_compatibility";
   label: string;
   payload?: Record<string, unknown>;
 };
@@ -71,10 +87,20 @@ type AgentBackendRunContext = {
   facetwrite_project_id: string;
   facetwrite_mcp_refs: string[];
   facetwrite_plan_phase: "chat" | "planning" | "execution";
-  facetwrite_plan_stage: "chat" | "intake" | "revise" | "execution";
+  facetwrite_plan_stage: "chat" | "intake" | "revise" | "preflight" | "execution";
   facetwrite_plan_phase_attempt_id?: string;
   facetwrite_plan_id?: string;
   facetwrite_plan_step_id?: string;
+  facetwrite_agent_plan_id?: string;
+  facetwrite_agent_plan_step_id?: string;
+  facetwrite_agent_plan_origin?: string;
+  facetwrite_agent_plan_phase?: string;
+  facetwrite_step_budget?: {
+    modelCallLimit?: number;
+    toolCallLimit?: number;
+    evidenceToolLimit?: number;
+    recursionLimit?: number;
+  };
   facetwrite_memory_content?: string;
   facetwrite_research_tool_limit?: number;
   facetwrite_progressive_canvas_delivery_enabled?: boolean;
@@ -128,6 +154,65 @@ export async function runAgentBackendAgent(input: AgentBackendRunInput): Promise
     onStatus: input.onStatus,
     onRuntimeSignal: input.onRuntimeSignal
   });
+}
+
+export async function requestAgentBackendRunIntervention(input: {
+  threadId: string;
+  runId: string;
+  text: string;
+  inputId?: string;
+  config?: AgentBackendRuntimeConfig;
+  fetchImpl?: typeof fetch;
+}): Promise<{ id: string; status: string }> {
+  const config = input.config ?? getAgentBackendRuntimeConfig();
+  if (!config.enabled) {
+    throw new Error("AgentBackend runtime is disabled");
+  }
+  const response = await authenticatedAgentBackendFetch({
+    config,
+    path: `/api/threads/${encodeURIComponent(input.threadId)}/runs/${encodeURIComponent(input.runId)}/interventions`,
+    fetchImpl: input.fetchImpl,
+    init: {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: input.text, input_id: input.inputId })
+    }
+  });
+  if (!response.ok) {
+    throw new Error(await formatRuntimeHttpError(response));
+  }
+  const payload = await response.json() as unknown;
+  return {
+    id: isRecord(payload) && typeof payload.id === "string" ? payload.id : input.inputId ?? "",
+    status: isRecord(payload) && typeof payload.status === "string" ? payload.status : "requested"
+  };
+}
+
+export async function listAgentBackendRunEvents(input: {
+  threadId: string;
+  runId: string;
+  limit?: number;
+  config?: AgentBackendRuntimeConfig;
+  fetchImpl?: typeof fetch;
+}): Promise<unknown[]> {
+  const config = input.config ?? getAgentBackendRuntimeConfig();
+  if (!config.enabled) {
+    throw new Error("AgentBackend runtime is disabled");
+  }
+  const limit = Number.isInteger(input.limit) && input.limit && input.limit > 0
+    ? Math.min(input.limit, 2000)
+    : 500;
+  const response = await authenticatedAgentBackendFetch({
+    config,
+    path: `/api/threads/${encodeURIComponent(input.threadId)}/runs/${encodeURIComponent(input.runId)}/events?limit=${limit}`,
+    fetchImpl: input.fetchImpl,
+    init: { method: "GET" }
+  });
+  if (!response.ok) {
+    throw new Error(await formatRuntimeHttpError(response));
+  }
+  const payload = await response.json() as unknown;
+  return Array.isArray(payload) ? payload : [];
 }
 
 async function formatRuntimeHttpError(response: Response) {
@@ -257,17 +342,20 @@ function withClarificationGuardContext(context: AgentBackendRunContext, policy: 
   };
 }
 
-function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId" | "projectId" | "configuredModelApiId" | "modelSettings" | "settings" | "facetwriteMemoryContent" | "chatInstruction" | "contextValues" | "toolState">): AgentBackendRunContext {
+function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId" | "projectId" | "configuredModelApiId" | "modelSettings" | "settings" | "facetwriteMemoryContent" | "chatInstruction" | "contextValues" | "toolState" | "planPhase" | "planId" | "stepId" | "planGeneration">): AgentBackendRunContext {
   const memoryEnabled = false;
   const memoryContent = memoryEnabled ? input.facetwriteMemoryContent?.trim() : "";
   const planPolicy = resolvePlanRequestPolicy({
     chatInstruction: input.chatInstruction,
     contextValues: input.contextValues,
-    toolState: input.toolState
+    toolState: input.toolState,
+    planPhase: input.planPhase,
+    planId: input.planId,
+    stepId: input.stepId
   });
-  const planGeneration = input.contextValues?.planGeneration && isRecord(input.contextValues.planGeneration)
+  const planGeneration = input.planGeneration ?? (input.contextValues?.planGeneration && isRecord(input.contextValues.planGeneration)
     ? input.contextValues.planGeneration
-    : undefined;
+    : undefined);
   const researchToolLimit = isDirectCanvasDeliveryIntent(input.chatInstruction ?? "") ? 8 : undefined;
   const progressiveDelivery = isRecord(input.contextValues?.progressiveCanvasDelivery)
     ? input.contextValues.progressiveCanvasDelivery
@@ -308,9 +396,15 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
   const evidenceTools = Array.isArray(progressiveDelivery?.evidenceTools)
     ? progressiveDelivery.evidenceTools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0)
     : undefined;
-  const planId = planGeneration ? String(planGeneration.planId ?? "").trim() : "";
-  const planStepId = planGeneration ? String(planGeneration.stepId ?? "").trim() : "";
+  const planId = planGeneration ? String(planGeneration.planId ?? "").trim() : String(input.planId ?? "").trim();
+  const planStepId = planGeneration ? String(planGeneration.stepId ?? "").trim() : String(input.stepId ?? "").trim();
   const phaseAttemptId = planGeneration ? String(planGeneration.phaseAttemptId ?? "").trim() : "";
+  const agentPlan = isRecord(input.contextValues?.agentPlan) ? input.contextValues.agentPlan : {};
+  const agentPlanId = readSourceString(agentPlan.id) || planId;
+  const agentPlanStepId = readSourceString(agentPlan.stepId) || planStepId;
+  const agentPlanOrigin = readSourceString(agentPlan.origin);
+  const agentPlanPhase = readSourceString(agentPlan.phase) || planPolicy.phase;
+  const stepBudget = readStepBudget(agentPlan.stepBudget);
   const modelSettings = input.modelSettings;
   if (!modelSettings) {
     return {
@@ -324,6 +418,11 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
       facetwrite_plan_phase_attempt_id: phaseAttemptId || undefined,
       facetwrite_plan_id: planId || undefined,
       facetwrite_plan_step_id: planStepId || undefined,
+      facetwrite_agent_plan_id: agentPlanId || undefined,
+      facetwrite_agent_plan_step_id: agentPlanStepId || undefined,
+      facetwrite_agent_plan_origin: agentPlanOrigin || undefined,
+      facetwrite_agent_plan_phase: agentPlanPhase || undefined,
+      facetwrite_step_budget: stepBudget,
       facetwrite_research_tool_limit: researchToolLimit,
       facetwrite_progressive_canvas_delivery_enabled: progressiveCanvasDeliveryEnabled,
       facetwrite_runtime_budget_profile: budgetProfile,
@@ -356,6 +455,11 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     facetwrite_plan_phase_attempt_id: phaseAttemptId || undefined,
     facetwrite_plan_id: planId || undefined,
     facetwrite_plan_step_id: planStepId || undefined,
+    facetwrite_agent_plan_id: agentPlanId || undefined,
+    facetwrite_agent_plan_step_id: agentPlanStepId || undefined,
+    facetwrite_agent_plan_origin: agentPlanOrigin || undefined,
+    facetwrite_agent_plan_phase: agentPlanPhase || undefined,
+    facetwrite_step_budget: stepBudget,
     facetwrite_research_tool_limit: researchToolLimit,
     facetwrite_progressive_canvas_delivery_enabled: progressiveCanvasDeliveryEnabled,
     facetwrite_runtime_budget_profile: budgetProfile,
@@ -382,6 +486,17 @@ function normalizeAgentBackendReasoningEffort(effort: ConversationModelRuntimeSe
   return undefined;
 }
 
+function readStepBudget(value: unknown): AgentBackendRunContext["facetwrite_step_budget"] {
+  if (!isRecord(value)) return undefined;
+  const budget = {
+    modelCallLimit: readPositiveInteger(value.modelCallLimit),
+    toolCallLimit: readPositiveInteger(value.toolCallLimit),
+    evidenceToolLimit: readPositiveInteger(value.evidenceToolLimit),
+    recursionLimit: readPositiveInteger(value.recursionLimit)
+  };
+  return Object.values(budget).some((entry) => entry !== undefined) ? budget : undefined;
+}
+
 async function readAgentBackendStream(
   body: ReadableStream<Uint8Array>,
   callbacks: {
@@ -405,10 +520,13 @@ async function readAgentBackendStream(
   let buffer = "";
   let sawWaitingForUser = false;
   let sawRuntimeEnd = false;
+  const trace = createAgentBackendStreamTrace();
+  trace("start");
 
   while (true) {
     const { value, done } = await reader.read();
     if (value) {
+      trace("chunk", { byteLength: value.byteLength });
       buffer += decoder.decode(value, { stream: !done });
       const splitAt = buffer.lastIndexOf("\n\n");
       if (splitAt >= 0) {
@@ -418,7 +536,10 @@ async function readAgentBackendStream(
         if (sawRuntimeEnd) break;
       }
     }
-    if (done || sawRuntimeEnd) break;
+    if (done || sawRuntimeEnd) {
+      trace(done ? "reader_done" : "runtime_end_break", { sawRuntimeEnd });
+      break;
+    }
   }
   if (sawRuntimeEnd) {
     try {
@@ -432,9 +553,15 @@ async function readAgentBackendStream(
     handleEvents(parseSseChunk(buffer));
   }
 
+  trace("complete", {
+    finishReason: sawWaitingForUser ? "clarification_required" : "agent_backend_completed",
+    eventCount: events.length,
+    sawRuntimeEnd,
+    textLength: (finalValuesText || (lastMessageId ? textByMessageId.get(lastMessageId)?.join("") : unkeyedText.join("")) || "").trim().length
+  });
   return {
     text: (finalValuesText || (lastMessageId ? textByMessageId.get(lastMessageId)?.join("") : unkeyedText.join("")) || "").trim(),
-    finishReason: "agent_backend_completed",
+    finishReason: sawWaitingForUser ? "clarification_required" : "agent_backend_completed",
     usage,
     events
   };
@@ -444,12 +571,20 @@ async function readAgentBackendStream(
       const runtimeError = extractRuntimeError(parsed.event, parsed.data);
       if (runtimeError) throw new Error(runtimeError);
       if (parsed.event === "end") {
+        trace("event", { event: parsed.event });
         sawRuntimeEnd = true;
         continue;
       }
       const runtimeSignal = runtimeSignalFromSseEvent(parsed.event, parsed.data);
       if (runtimeSignal) {
-        if (runtimeSignal.type === "waiting_for_user") {
+        trace("runtime_signal", {
+          event: parsed.event,
+          signalType: runtimeSignal.type,
+          payload: runtimeSignal.payload
+        });
+        if (runtimeSignal.type === "run_metadata") {
+          callbacks.onRuntimeSignal?.(runtimeSignal);
+        } else if (runtimeSignal.type === "waiting_for_user") {
           sawWaitingForUser = true;
           callbacks.onStatus?.({ phase: "finalizing", label: runtimeSignal.label });
           callbacks.onRuntimeSignal?.(runtimeSignal);
@@ -472,6 +607,7 @@ async function readAgentBackendStream(
       let toolEvents = mapToolEvents(parsed.event, parsed.data, toolCallArgsById);
       const text = extractText(parsed.event, parsed.data);
       if (text && !shouldSuppressAssistantText(toolEvents)) {
+        trace("text", { event: parsed.event, length: text.length });
         if (messageId) {
           const parts = textByMessageId.get(messageId) ?? [];
           parts.push(text);
@@ -502,7 +638,17 @@ async function readAgentBackendStream(
         if (key && emittedToolEventKeys.has(key)) continue;
         if (key) emittedToolEventKeys.add(key);
         events.push(event);
-        if (isAgentClarificationToolEvent(event)) sawWaitingForUser = true;
+        trace("tool_event", {
+          eventType: event.eventType,
+          structuredEvent: readSourceString(event.payload?.eventType) || readSourceString(event.payload?.type),
+          tool: readSourceString(event.payload?.tool) || readSourceString(event.payload?.toolName),
+          deliveryId: readSourceString(event.payload?.deliveryId)
+        });
+        if (isAgentClarificationToolEvent(event)) {
+          sawWaitingForUser = true;
+        } else if (isPostClarificationProgressEvent(event)) {
+          sawWaitingForUser = false;
+        }
         callbacks.onStatus?.(statusFromToolEvent(event));
         callbacks.onToolEvent?.(event);
       }
@@ -515,6 +661,25 @@ async function readAgentBackendStream(
 }
 
 function runtimeSignalFromSseEvent(event: string, data: unknown): AgentBackendRuntimeSignal | undefined {
+  if (event === "metadata" && isRecord(data)) {
+    const runId = readSourceString(data.run_id) || readSourceString(data.runId);
+    const threadId = readSourceString(data.thread_id) || readSourceString(data.threadId);
+    if (!runId || !threadId) return undefined;
+    return {
+      type: "run_metadata",
+      label: "Agent runtime run opened.",
+      payload: {
+        type: "agent_progress_reported",
+        runId,
+        threadId,
+        phase: "run",
+        status: "running",
+        summary: "Agent runtime run opened.",
+        visibility: "raw",
+        source: "agent_runtime_metadata"
+      }
+    };
+  }
   if (event === "comment") {
     const comment = typeof data === "string" ? data.trim().toLowerCase() : "";
     if (comment === "heartbeat") {
@@ -543,10 +708,33 @@ function runtimeSignalFromSseEvent(event: string, data: unknown): AgentBackendRu
       payload: sanitizeRuntimeSignalPayload(data)
     };
   }
+  if (type === "agent_progress_reported") {
+    const payload = sanitizeAgentProgressPayload(data);
+    return {
+      type,
+      label: readSourceString(payload.summary) || "Agent progress updated.",
+      payload
+    };
+  }
+  if (type === "agent_intervention_checkpoint") {
+    const payload = sanitizeAgentProgressPayload(data);
+    return {
+      type,
+      label: readSourceString(payload.summary) || "Agent reached an intervention checkpoint.",
+      payload
+    };
+  }
   if (type === "llm_retry" || type === "llm_call_retry") {
     return {
       type: "llm_retry",
       label: llmRetryStatusLabel(data),
+      payload: sanitizeRuntimeSignalPayload(data)
+    };
+  }
+  if (type === "thinking_disabled_for_tool_choice_compatibility") {
+    return {
+      type,
+      label: "Thinking disabled for this forced tool call because the selected model does not support thinking with tool_choice.",
       payload: sanitizeRuntimeSignalPayload(data)
     };
   }
@@ -607,7 +795,12 @@ function secondsFromMs(value: unknown) {
 }
 
 function sanitizeRuntimeSignalPayload(data: Record<string, unknown>) {
-  const allowed = ["type", "event", "phase", "attempt", "max_attempts", "maxAttempts", "elapsed_ms", "elapsedMs", "delay_seconds", "delaySeconds", "retry_after", "retryAfter", "wait_ms", "waitMs", "reason", "error_type", "errorType", "status_code", "statusCode", "status", "state", "next", "interrupt", "model", "provider_class", "providerClass", "base_url_host", "baseUrlHost", "timeout_s", "timeoutS", "stream_chunk_timeout_s", "streamChunkTimeoutS", "max_retries", "maxRetries", "completed_evidence_tools", "completedEvidenceTools", "evidence_limit", "evidenceLimit", "model_limit", "modelLimit", "model_calls", "modelCalls", "recursion_limit", "recursionLimit", "estimated_steps_used", "estimatedStepsUsed", "file_delivery_required", "fileDeliveryRequired", "second_handler", "secondHandler", "entered_second_handler", "enteredSecondHandler"];
+  const allowed = ["type", "event", "phase", "planId", "stepId", "agentPlanId", "agentPlanStepId", "attempt", "max_attempts", "maxAttempts", "elapsed_ms", "elapsedMs", "delay_seconds", "delaySeconds", "retry_after", "retryAfter", "wait_ms", "waitMs", "reason", "error_type", "errorType", "status_code", "statusCode", "status", "state", "next", "interrupt", "model", "provider_class", "providerClass", "base_url_host", "baseUrlHost", "timeout_s", "timeoutS", "stream_chunk_timeout_s", "streamChunkTimeoutS", "max_retries", "maxRetries", "tool_choice", "toolChoice", "completed_evidence_tools", "completedEvidenceTools", "evidence_limit", "evidenceLimit", "model_limit", "modelLimit", "model_calls", "modelCalls", "recursion_limit", "recursionLimit", "estimated_steps_used", "estimatedStepsUsed", "file_delivery_required", "fileDeliveryRequired", "second_handler", "secondHandler", "entered_second_handler", "enteredSecondHandler"];
+  return Object.fromEntries(allowed.filter((key) => key in data).map((key) => [key, data[key]]));
+}
+
+function sanitizeAgentProgressPayload(data: Record<string, unknown>) {
+  const allowed = ["type", "event", "runId", "threadId", "stageId", "loopId", "loopIndex", "stepKind", "actionId", "observationId", "completionStatus", "completionReasons", "missingRequirements", "phase", "status", "title", "summary", "next", "interventionHint", "visibility", "source", "createdAt"];
   return Object.fromEntries(allowed.filter((key) => key in data).map((key) => [key, data[key]]));
 }
 
@@ -617,6 +810,9 @@ function runtimeCustomStatusLabel(type: "llm_call_start" | "llm_call_end" | "llm
   if (type === "llm_call_error") {
     const reason = readSourceString(data.reason);
     if (reason === "stream_chunk_timeout") return "Model stream produced no content before timeout.";
+    if (isThinkingToolChoiceCompatibilityMessage(reason)) {
+      return "Current model does not support thinking with forced tool calls. Disable thinking for this step or switch models.";
+    }
     const errorType = readSourceString(data.error_type ?? data.errorType);
     return errorType ? `Model request failed: ${errorType}.` : "Model request failed.";
   }
@@ -629,6 +825,38 @@ function isAgentClarificationToolEvent(event: ToolEventRecord) {
   return /agent_clarification_requested$/.test(event.eventType) || type === "agent_clarification_requested";
 }
 
+function createAgentBackendStreamTrace() {
+  const traceId = `runtime_stream_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const startedAt = Date.now();
+  let lastAt = startedAt;
+  let heartbeatCount = 0;
+  return (phase: string, details: Record<string, unknown> = {}) => {
+    const now = Date.now();
+    const signalType = typeof details.signalType === "string" ? details.signalType : "";
+    if (signalType === "heartbeat") {
+      heartbeatCount += 1;
+      if (now - lastAt < 30_000) return;
+      details = { ...details, heartbeatCount };
+    }
+    if (phase === "chunk" && now - lastAt < 30_000) return;
+    console.info("[FacetWrite runtime stream trace]", {
+      traceId,
+      phase,
+      elapsedMs: now - startedAt,
+      sinceLastMs: now - lastAt,
+      ...details
+    });
+    lastAt = now;
+  };
+}
+
+function isPostClarificationProgressEvent(event: ToolEventRecord) {
+  const toolName = readSourceString(event.payload?.toolName) || readSourceString(event.payload?.tool);
+  return /(?:^|_)tool_(?:started|completed)$/.test(event.eventType)
+    || /^(?:write_file|present_files|web_search|web_fetch|knowledge_base)$/.test(toolName)
+    || /^canvas_delivery_/.test(readSourceString(event.payload?.eventType));
+}
+
 function shouldSuppressAssistantText(events: ToolEventRecord[]) {
   return events.some((event) => {
     const source = readSourceString(event.payload?.source);
@@ -639,10 +867,53 @@ function shouldSuppressAssistantText(events: ToolEventRecord[]) {
 
 function extractRuntimeError(event: string, data: unknown): string | undefined {
   if (event !== "error") return undefined;
-  if (typeof data === "string") return data.trim() || "AgentBackend runtime stream failed";
+  if (typeof data === "string") {
+    const message = data.trim() || "AgentBackend runtime stream failed";
+    if (isBudgetExhaustionMessage(message)) throw budgetExhaustedError({ message });
+    return actionableRuntimeErrorMessage(message);
+  }
   if (!isRecord(data)) return "AgentBackend runtime stream failed";
   const message = readSourceString(data.message) || readSourceString(data.error) || readSourceString(data.detail);
-  return message || "AgentBackend runtime stream failed";
+  if (isBudgetExhaustionPayload(data, message)) {
+    throw budgetExhaustedError({
+      message: message || "AgentBackend runtime step budget exhausted",
+      recursionLimit: readPositiveInteger(data.recursion_limit ?? data.recursionLimit),
+      estimatedStepsUsed: readPositiveInteger(data.estimated_steps_used ?? data.estimatedStepsUsed)
+    });
+  }
+  return actionableRuntimeErrorMessage(message || "AgentBackend runtime stream failed");
+}
+
+function actionableRuntimeErrorMessage(message: string) {
+  if (isThinkingToolChoiceCompatibilityMessage(message)) {
+    return "Current model does not support thinking with forced tool calls. Disable thinking for this step or switch to a model verified for thinking + tool use.";
+  }
+  return message;
+}
+
+function isThinkingToolChoiceCompatibilityMessage(message: string) {
+  return /thinking\b[\s\S]{0,120}\btool[_-]?choice|\btool[_-]?choice\b[\s\S]{0,120}\bthinking/i.test(message);
+}
+
+function budgetExhaustedError(input: { message: string; recursionLimit?: number; estimatedStepsUsed?: number }) {
+  return Object.assign(new Error(input.message), {
+    facetwriteBudgetStatus: {
+      status: "budget_exhausted",
+      canResume: true,
+      ...(input.recursionLimit ? { recursionLimit: input.recursionLimit } : {}),
+      ...(input.estimatedStepsUsed ? { estimatedStepsUsed: input.estimatedStepsUsed } : {})
+    }
+  });
+}
+
+function isBudgetExhaustionPayload(data: Record<string, unknown>, message: string | undefined) {
+  const status = readSourceString(data.status) || readSourceString(data.type) || readSourceString(data.code);
+  const name = readSourceString(data.name);
+  return status === "budget_exhausted" || name === "GraphRecursionError" || isBudgetExhaustionMessage(message ?? "");
+}
+
+function isBudgetExhaustionMessage(message: string) {
+  return /Recursion limit of \d+ reached|GRAPH_RECURSION_LIMIT|GraphRecursionError/i.test(message);
 }
 
 function extractMessageId(event: string, data: unknown) {

@@ -4,6 +4,7 @@ import type { GenerationService } from "../services/generationService.js";
 import type { CanvasDomainService } from "../domains/canvas/index.js";
 import { errorMessage, sendError, sendOk } from "../utils/http.js";
 import { GenerationError } from "../domains/generation/index.js";
+import { listAgentBackendRunEvents, requestAgentBackendRunIntervention } from "../runtime/agentBackendAdapter/client.js";
 import { sanitizeToolEventPayload } from "../services/generation/toolEventSanitizer.js";
 
 type GenerationRouteDeps = {
@@ -25,6 +26,7 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
   });
 
   app.post("/api/generate/stream", async (request, response) => {
+    const trace = createServerStreamTrace();
     response.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
@@ -33,14 +35,37 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
 
     try {
       const payload = parseGenerateRequest(request.body);
+      trace("start", { mode: payload.mode, threadId: payload.threadId, planId: payload.planId, stepId: payload.stepId });
       const result = await generationService.generateAndRecordStream(payload, {
-        onStatus: (status) => writeSse(response, "status", status),
-        onToken: (token) => writeSse(response, "token", { text: token }),
-        onReasoningToken: (token) => writeSse(response, "reasoning_token", { text: token }),
-        onTimelineEvent: (event) => writeSse(response, "timeline_event", event),
+        onStatus: (status) => {
+          trace("status", { label: status.label, statusPhase: status.phase });
+          writeSse(response, "status", status);
+        },
+        onToken: (token) => {
+          trace("token", { length: token.length });
+          writeSse(response, "token", { text: token });
+        },
+        onReasoningToken: (token) => {
+          trace("reasoning_token", { length: token.length });
+          writeSse(response, "reasoning_token", { text: token });
+        },
+        onTimelineEvent: (event) => {
+          trace("timeline_event", { eventType: event.eventType, status: event.status, sequence: event.sequence });
+          writeSse(response, "timeline_event", event);
+        },
+        onProgressEvent: (event) => {
+          trace("progress_event", { status: event.status, phase: event.phase });
+          writeSse(response, "progress_event", event);
+        },
         onToolEvent: (event) => {
           const safePayload = sanitizeToolEventPayload(event.payload);
           const safeEvent = { ...event, payload: safePayload };
+          trace("tool_event", {
+            eventType: event.eventType,
+            structuredEvent: typeof event.payload?.eventType === "string" ? event.payload.eventType : "",
+            tool: typeof event.payload?.tool === "string" ? event.payload.tool : typeof event.payload?.toolName === "string" ? event.payload.toolName : "",
+            deliveryId: typeof event.payload?.deliveryId === "string" ? event.payload.deliveryId : ""
+          });
           writeSse(response, "tool_event", safeEvent);
           const structuredEvent = typeof event.payload?.eventType === "string" ? event.payload.eventType : "";
           if (/^(?:plan_|artifact_)/.test(structuredEvent)) writeSse(response, structuredEvent, safePayload);
@@ -49,14 +74,57 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
           }
         }
       });
+      trace("final", { threadId: result.threadId, runId: result.runId, provider: result.provider, finishReason: result.finishReason });
       writeSse(response, "final", result);
     } catch (error) {
+      trace("error", { message: errorMessage(error, "Generation failed") });
       writeSse(response, "error", {
         code: error instanceof GenerationError ? error.code : error instanceof Error && (error.message.startsWith("Request body") || error.message.startsWith("mode ") || error.message.startsWith("locale ")) ? "bad_request" : "internal_error",
         message: errorMessage(error, "Generation failed")
       });
     } finally {
+      trace("end");
       response.end();
+    }
+  });
+
+  app.post("/api/generate/runs/:runId/interventions", async (request, response) => {
+    try {
+      const body = request.body as Record<string, unknown>;
+      const threadId = typeof body.threadId === "string" ? body.threadId.trim() : "";
+      const text = typeof body.text === "string" ? body.text.trim() : "";
+      const inputId = typeof body.inputId === "string" ? body.inputId : undefined;
+      if (!threadId || !text) {
+        sendError(response, 400, "bad_request", "threadId and text are required");
+        return;
+      }
+      sendOk(response, await requestAgentBackendRunIntervention({
+        threadId,
+        runId: request.params.runId,
+        text,
+        inputId
+      }));
+    } catch (error) {
+      sendError(response, 503, "runtime_unavailable", errorMessage(error, "Unable to request run intervention"));
+    }
+  });
+
+  app.get("/api/generate/runs/:runId/events", async (request, response) => {
+    try {
+      const threadId = typeof request.query.threadId === "string" ? request.query.threadId.trim() : "";
+      const limit = typeof request.query.limit === "string" ? Number.parseInt(request.query.limit, 10) : undefined;
+      if (!threadId) {
+        sendError(response, 400, "bad_request", "threadId is required");
+        return;
+      }
+      const events = await listAgentBackendRunEvents({
+        threadId,
+        runId: request.params.runId,
+        limit
+      });
+      sendOk(response, { events: sanitizeRuntimeRunEvents(events) });
+    } catch (error) {
+      sendError(response, 503, "runtime_unavailable", errorMessage(error, "Unable to load runtime run events"));
     }
   });
 
@@ -131,4 +199,88 @@ function readModelOverrides(value: unknown): GenerateRequest["modelOverrides"] {
 function writeSse(response: Response, event: string, payload: unknown) {
   response.write(`event: ${event}\n`);
   response.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+function sanitizeRuntimeRunEvents(events: unknown[]) {
+  return events
+    .flatMap((event) => sanitizeRuntimeRunEvent(event))
+    .slice(0, 500);
+}
+
+function sanitizeRuntimeRunEvent(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const source = value as Record<string, unknown>;
+  const eventType = readString(source.event_type ?? source.eventType);
+  if (!eventType || isHiddenRuntimeEventType(eventType)) return [];
+  const category = readString(source.category);
+  const content = sanitizeRuntimeRunValue(source.content, 0);
+  const metadata = sanitizeRuntimeRunValue(source.metadata, 0);
+  return [{
+    threadId: readString(source.thread_id ?? source.threadId),
+    runId: readString(source.run_id ?? source.runId),
+    eventType,
+    category,
+    content,
+    metadata: metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {},
+    sequence: readInteger(source.seq ?? source.sequence),
+    createdAt: readString(source.created_at ?? source.createdAt)
+  }];
+}
+
+function isHiddenRuntimeEventType(eventType: string) {
+  return /^(?:human_message|ai_message|llm\.human\.input|llm\.ai\.response)$/i.test(eventType);
+}
+
+function sanitizeRuntimeRunValue(value: unknown, depth: number): unknown {
+  if (depth > 4) return "[truncated]";
+  if (typeof value === "string") return redactSecretLikeText(value).replace(/\s+/g, " ").trim().slice(0, 900);
+  if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => sanitizeRuntimeRunValue(item, depth + 1));
+  if (!value || typeof value !== "object") return "";
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 40).map(([key, entry]) => (
+    secretKeyPattern.test(key)
+      ? [key, "[redacted]"]
+      : [key, sanitizeRuntimeRunValue(entry, depth + 1)]
+  )));
+}
+
+const secretKeyPattern = /(key|token|secret|password|credential|authorization|cookie)/i;
+
+function redactSecretLikeText(value: string) {
+  return value
+    .replace(/\b[A-Za-z0-9_]*(?:api[_-]?key|authorization|token|password|secret|cookie)\s*[:=]\s*\S+/gi, "[redacted credential]")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "[redacted credential]");
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readInteger(value: unknown) {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : 0;
+  return Number.isInteger(number) ? number : 0;
+}
+
+function createServerStreamTrace() {
+  const traceId = `server_stream_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const startedAt = Date.now();
+  let lastAt = startedAt;
+  return (phase: string, details: Record<string, unknown> = {}) => {
+    const now = Date.now();
+    const eventType = typeof details.eventType === "string" ? details.eventType : "";
+    const structuredEvent = typeof details.structuredEvent === "string" ? details.structuredEvent : "";
+    const shouldLog = phase !== "token"
+      || now - lastAt > 5000
+      || /^canvas_delivery_/.test(structuredEvent)
+      || /^agent_backend_/.test(eventType);
+    if (!shouldLog) return;
+    console.info("[FacetWrite server stream trace]", {
+      traceId,
+      phase,
+      elapsedMs: now - startedAt,
+      sinceLastMs: now - lastAt,
+      ...details
+    });
+    lastAt = now;
+  };
 }

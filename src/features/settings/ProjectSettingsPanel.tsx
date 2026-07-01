@@ -16,19 +16,19 @@ const runtimeBudgetPresets = {
   },
   medium: {
     runtimeBudgetProfile: "medium",
+    evidenceToolLimit: 12,
+    bodyDraftWriteLimit: 3,
+    modelCallLimit: 24,
+    recursionLimit: 110,
+    synthesisReserveSteps: 22
+  },
+  high: {
+    runtimeBudgetProfile: "high",
     evidenceToolLimit: 16,
     bodyDraftWriteLimit: 4,
     modelCallLimit: 32,
     recursionLimit: 140,
     synthesisReserveSteps: 28
-  },
-  high: {
-    runtimeBudgetProfile: "high",
-    evidenceToolLimit: 32,
-    bodyDraftWriteLimit: 8,
-    modelCallLimit: 56,
-    recursionLimit: 220,
-    synthesisReserveSteps: 44
   }
 } as const;
 

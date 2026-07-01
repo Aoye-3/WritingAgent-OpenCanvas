@@ -7,6 +7,7 @@ import type { OrchestrationPolicy } from "../services/generation/orchestrationPo
 
 export type GenerateRequest = {
   mode: "faceted" | "freeText" | "structured" | "chat";
+  clientRequestId?: string;
   taskId?: string;
   agentCardId?: string;
   projectId?: string;
@@ -26,11 +27,11 @@ export type GenerateRequest = {
   transientSkillRefs?: string[];
   disabledSkillRefs?: string[];
   selectedCanvasNodeId?: string;
-  planPhase?: "intake" | "revise" | "execution";
+  planPhase?: "intake" | "revise" | "preflight" | "execution";
   planId?: string;
   stepId?: string;
   planGeneration?: {
-    phase: "intake" | "revise" | "execution";
+    phase: "intake" | "revise" | "preflight" | "execution";
     planId: string;
     stepId?: string;
     phaseAttemptId: string;
@@ -50,7 +51,17 @@ export type GenerateResponse = {
   errorMessage?: string;
   events?: ToolEventRecord[];
   finishReason?: string;
+  completion?: RunCompletionVerdict;
   usage?: unknown;
+};
+
+export type RunCompletionStatus = "continue" | "waiting" | "finalizing" | "completed" | "partial" | "failed";
+
+export type RunCompletionVerdict = {
+  status: RunCompletionStatus;
+  reasons: string[];
+  missingRequirements: string[];
+  evaluatedAt: string;
 };
 
 export function parseGenerateRequest(value: unknown): GenerateRequest {
@@ -70,6 +81,7 @@ export function parseGenerateRequest(value: unknown): GenerateRequest {
 
   return {
     mode,
+    clientRequestId: readString(body.clientRequestId),
     locale,
     taskId: readString(body.taskId),
     agentCardId: readString(body.agentCardId),
@@ -86,7 +98,7 @@ export function parseGenerateRequest(value: unknown): GenerateRequest {
     transientSkillRefs: readStringList(body.transientSkillRefs),
     disabledSkillRefs: readStringList(body.disabledSkillRefs),
     selectedCanvasNodeId: readString(body.selectedCanvasNodeId)
-    ,planPhase: body.planPhase === "intake" || body.planPhase === "revise" || body.planPhase === "execution" ? body.planPhase : undefined
+    ,planPhase: body.planPhase === "intake" || body.planPhase === "revise" || body.planPhase === "preflight" || body.planPhase === "execution" ? body.planPhase : undefined
     ,planId: readString(body.planId)
     ,stepId: readString(body.stepId)
     ,planGeneration: readPlanGeneration(body.planGeneration)
@@ -110,7 +122,7 @@ function readPlanGeneration(value: unknown): GenerateRequest["planGeneration"] {
   const phase = record?.phase;
   const planId = readString(record?.planId);
   const phaseAttemptId = readString(record?.phaseAttemptId);
-  if ((phase !== "intake" && phase !== "revise" && phase !== "execution") || !planId || !phaseAttemptId) return undefined;
+  if ((phase !== "intake" && phase !== "revise" && phase !== "preflight" && phase !== "execution") || !planId || !phaseAttemptId) return undefined;
   return {
     phase,
     planId,

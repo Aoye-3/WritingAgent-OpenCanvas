@@ -1,5 +1,45 @@
 # FacetWrite Technical Decisions
 
+## 2026-06-30: Run Trace Is Safe Execution Narration, Not Chain-Of-Thought
+
+Decision: Treat visible Thinking/Run Trace UI as a public execution narration layer, not as model chain-of-thought. Low-level `tool_event` records remain audit data. User-facing trace entries should be safe `timeline_event` summaries that aggregate repetitive tool lifecycle events into readable milestones, decisions, and next-step narration.
+
+Reason: Raw tool lifecycle text explains which tool ran, but it is mechanical and lacks product intent. Exposing hidden model reasoning is not acceptable. A separate summary layer gives users useful progress context while preserving the boundary around prompts, provider reasoning, raw tool JSON, credentials, and internal context.
+
+Impact: Frontend trace rendering should prefer summarized `timeline_event` entries over raw tool-event streams. Backend/runtime adapters may continue to persist detailed tool events for audit and debugging, but any user-visible progress copy must be sanitized and phrased as execution status, not internal thought.
+
+## 2026-06-30: Agent Run Reporting Uses Final, Stage, And Raw Layers
+
+Decision: Split Agent run reporting into three projections. `final` is the authoritative assistant answer, processing summary, validation outcome, and deliverable entry points. `stage` is the public in-progress Agent work report shown in the right conversation run block, backed by `agent_progress_reported` and `progressSegments`. `raw` is the diagnostic layer for model steps, tool calls, command logs, safe-point lifecycle, stdout/stderr, and trace metadata. Progress text must not be written into final assistant `text`, `reasoningText`, or Canvas deliverable bodies.
+
+Reason: The first progress implementation proved the transport but promoted model/tool lifecycle sentences such as "Using write_file" and "Model step completed" into the main conversation. That recreated the old Thinking problem in a different slot: users saw a tool-event ledger rather than task-level work narration. The product needs the Codex-like shape where the completed answer is calm, the expandable run report explains what the Agent was doing and where a user could intervene, and raw command/tool details remain available only when explicitly expanded.
+
+Impact: Runtime `ProgressReportingMiddleware` must treat model/tool lifecycle and ordinary safe points as `visibility:"raw"` telemetry by default. Only semantic milestones, deliverable checkpoints, failure recovery, final synthesis, and explicit user-intervention hints may become `visibility:"stage"` reports. The Node generation service may aggregate raw runtime, tool, timeline, and Canvas facts into stage summaries as a fallback, but it must dedupe repeated events and never mirror the same low-level event as main progress and raw trace copy. The frontend renders stage reports inside the assistant run block and keeps raw logs behind the run details entry.
+
+## 2026-06-28: Runtime Budget Defaults Are Low-First
+
+Decision: Keep the low runtime budget at `8 evidence / 2 body drafts / 18 model calls / 80 recursion / 16 reserve`, make it the persisted Project default, set medium to `12 / 3 / 24 / 110 / 22`, and make high equal the previous medium cap, `16 / 4 / 32 / 140 / 28`.
+
+Reason: The latest long-task tests showed the old low profile was sufficient for normal progressive Canvas delivery, while the old medium profile was already large enough for the expanded run. The previous high profile made mixed stalls harder to reason about because it allowed too much waiting and tool-loop depth before synthesis.
+
+Impact: New Projects and invalid runtime settings fall back to `low`. The composer budget selector remains a one-run override unless Project runtime settings are saved. Existing Projects with saved numeric runtime settings keep those values until the user reselects or saves a profile.
+
+## 2026-06-28: Invalid Clarification Options Are Repaired By The Agent
+
+Decision: When Agent Runtime emits a structured `ask_clarification` payload with too many options, FacetWrite does not truncate the options. The generation service performs one clarification-only repair pass with the same Agent context and asks Runtime to regenerate a valid 2-3 option question. Only a second invalid result is exposed as an `agent_backend_agent_clarification_invalid` diagnostic.
+
+Reason: Truncating model-authored choices would silently change the Agent's intended decision space and could hide the option the user actually needed. Pausing immediately on a four-option payload made the task look stuck even though the Agent could usually repair its own protocol output.
+
+Impact: The composer still renders only valid persisted `agent_clarifications`. Frontend code must not infer buttons from Markdown or truncate option arrays. Run diagnostics should distinguish the first invalid payload, the repair attempt, and a final unrepaired invalid payload.
+
+## 2026-06-28: Thinking And Forced Tool Choice Are Model-Capability Gated
+
+Decision: Treat provider thinking/reasoning controls and forced `tool_choice` as a model-capability-gated combination. Model config now carries `supports_tool_choice_with_thinking` as `true`, `false`, or `"unknown"`. DeepSeek starts as `false`; Kimi, Qwen, and Moonshot-style providers remain `"unknown"` until they pass local smoke tests. When a Plan, clarification, Canvas, or Skill guard phase requires a specific tool and the selected model is known incompatible, FacetWrite disables thinking only for that forced-tool model call, clears provider reasoning effort, preserves the forced tool protocol, and emits `thinking_disabled_for_tool_choice_compatibility`.
+
+Reason: DeepSeek-compatible thinking endpoints can reject requests that combine thinking mode with explicit `tool_choice`, producing a 400 before Plan clarification or other forced-tool phases can persist recovery state. The product cannot relax forced tools for Plan intake, Plan revision, approved Plan execution, Canvas write protocols, or structured clarification, because those phases depend on deterministic tool output rather than ordinary prose.
+
+Impact: Forced tool contracts remain the priority. Ordinary non-forced tool search can keep thinking enabled, and any provider-level incompatibility discovered later should update the model capability matrix instead of removing tools. `PatchedChatDeepSeek` also strips `tool_choice` as a provider-level safety net whenever thinking is still enabled, but orchestrated forced-tool phases should avoid that path by disabling thinking before the call. User-facing errors for this class must explain that the current model does not support thinking with forced tool calls and should suggest disabling thinking for the phase or switching models, not surface a generic internal runtime output.
+
 ## 2026-06-24: Agent Runtime Uses Split LLM Timeout Controls
 
 Decision: Agent Runtime provider calls keep the total request timeout and the stream chunk timeout as separate controls. The validated local runtime baseline is `timeout:300.0`, `stream_chunk_timeout:45.0`, and unchanged `max_retries:2`.
@@ -94,7 +134,7 @@ Impact: `simple_chat` and `plan_intake` are conversation-only. `long_task` and `
 
 ## 2026-06-21: Long Agent Runs Use Explicit Runtime Budgets And Body Checkpoints
 
-Decision: Add a per-request `runtimeBudgetProfile` (`low`, `medium`, `high`, default `medium`) and keep long-task Canvas progress server-owned. The profile maps to LangGraph recursion limit, model-call budget, evidence-tool budget, and synthesis reserve steps. During batch-delivery runs the server updates a stable `正文草稿` / `Body draft` node with working checkpoints as evidence arrives, then writes final content to the separate `正文` / `Body` node only when the runtime succeeds.
+Decision: Add a per-request `runtimeBudgetProfile` (`low`, `medium`, `high`, now default `low`) and keep long-task Canvas progress server-owned. The profile maps to LangGraph recursion limit, model-call budget, evidence-tool budget, body-draft checkpoint budget, and synthesis reserve steps. During batch-delivery runs the server updates a stable `正文草稿` / `Body draft` node with working checkpoints as evidence arrives, then writes final content to the separate `正文` / `Body` node only when the runtime succeeds.
 
 Reason: Increasing LangGraph `recursion_limit` alone hides the symptom but does not force the Agent to stop searching and write. The observed failure mode was a long tool loop that produced many reference nodes, then hit `GRAPH_RECURSION_LIMIT` before final synthesis, leaving `正文` empty. Users need visible control over run depth and recoverable body progress even when the final Agent run fails.
 
@@ -397,3 +437,11 @@ Explicit Canvas actions are recognized and scheduled by product services instead
 Decision: The server creates Plan intake state, injects one phase-specific model contract, and runs approved steps through a leased persistent executor. React renders state and activities but does not initiate execution steps.
 
 Reason: Model-selected lifecycle actions and frontend-memory loops caused repeated clarification calls, silent stalls, and unrecoverable execution after refresh.
+
+## 2026-06-29: Claim Review Uses Create/Delete Selection Instead Of Accept/Reject Review Flow
+
+Decision: The Markdown Claim review queue presents candidates as selectable work items with `Create selected` and `Delete selected`. `Accept selected`, `Reject selected`, and `Create nodes from accepted` are no longer the primary UI flow. A real `DELETE /api/threads/:threadId/claims/:claimId` endpoint removes unwanted persisted candidates.
+
+Reason: The intermediate accepted/rejected state made the UI feel like a separate moderation workflow when the user intent is simpler: keep useful extracted summaries by creating nodes, or remove the candidates that should not continue. The existing source highlight interaction is the evidence inspection path, so the queue should not show large evidence blocks by default.
+
+Impact: Extraction remains non-mutating for Canvas. Creating nodes is an explicit user action from selected candidates. Candidate cards and created nodes use stable `摘要 N` display names; visible node bodies contain only `claimText`. `evidenceText`, source paths, and anchors remain persisted provenance/highlight data rather than default visible node content. Deleting a Claim candidate removes only the `claim_candidates` row and does not cascade to already-created Canvas nodes, because those nodes may have been edited, connected, or reused independently after creation. Legacy accepted-Claim create-node endpoints remain documented for compatibility and follow the same compact title/content policy.

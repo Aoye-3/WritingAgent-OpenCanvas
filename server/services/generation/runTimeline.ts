@@ -107,14 +107,21 @@ export function toolEventToTimelineEvent(builder: RunTimelineBuilder, event: Too
       ? builder.event("canvas_node_committed", "completed", displayTitle, summary, payload)
       : builder.event("tool_started", "running", displayTitle, summary, { ...payload, toolName });
   }
-  if (/(?:^|_)tool_failed$/.test(event.eventType) || /(?:^|_)canvas_mutation_failed$/.test(event.eventType)) {
+  if (false && (/(?:^|_)tool_failed$/.test(event.eventType) || /(?:^|_)canvas_mutation_failed$/.test(event.eventType))) {
     return builder.event("tool_completed", "failed", label, builder.locale === "zh" ? `${label}失败` : `${label} failed`, { ...payload, toolName });
+  }
+  if (/(?:^|_)tool_failed$/.test(event.eventType) || /(?:^|_)canvas_mutation_failed$/.test(event.eventType)) {
+    return builder.event("tool_completed", "failed", label, failureSummary(label, payload, builder.locale), { ...payload, toolName });
   }
   if (/(?:^|_)tool_completed$/.test(event.eventType)) {
     return builder.event("tool_completed", "completed", label, builder.locale === "zh" ? `${label}已完成` : `${label} completed`, { ...payload, toolName });
   }
   if (/(?:^|_)canvas_mutation_committed$/.test(event.eventType)) {
     return builder.event("canvas_node_committed", "completed", builder.locale === "zh" ? "Canvas 节点" : "Canvas node", builder.locale === "zh" ? "Canvas 节点已创建或更新" : "Canvas node was created or updated", payload);
+  }
+  if (/(?:^|_)runtime_failed$/.test(event.eventType) || /(?:^|_)plan_protocol_failed$/.test(event.eventType)) {
+    const message = string(payload.message) || string(payload.reason) || (builder.locale === "zh" ? "Agent Runtime 运行失败" : "Agent Runtime failed");
+    return builder.event("run_failed", "failed", builder.locale === "zh" ? "运行失败" : "Run failed", message, payload);
   }
   if (/(?:^|_)artifact_committed$/.test(event.eventType) || /(?:^|_)artifact_staged$/.test(event.eventType)) {
     return builder.event("artifact_committed", "completed", builder.locale === "zh" ? "Canvas 产物" : "Canvas artifact", builder.locale === "zh" ? "Canvas 产物已更新" : "Canvas artifact was updated", payload);
@@ -164,6 +171,13 @@ function toolLabel(toolName: string, locale: GenerateRequest["locale"]) {
   if (toolName === "canvas_write") return locale === "zh" ? "Canvas 写入" : "Canvas write";
   if (toolName === "artifact_stage") return locale === "zh" ? "产物暂存" : "Artifact staging";
   return toolName.replace(/[_-]+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function failureSummary(label: string, payload: Record<string, unknown>, locale: GenerateRequest["locale"]) {
+  const base = locale === "zh" ? `${label}失败` : `${label} failed`;
+  const detail = string(payload.reason) || string(payload.error) || string(payload.message) || string(payload.summary);
+  if (!detail) return base;
+  return `${base}: ${detail.replace(/\s+/g, " ").slice(0, 180)}`;
 }
 
 function clarificationOptions(value: unknown) {

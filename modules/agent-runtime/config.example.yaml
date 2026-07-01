@@ -15,7 +15,7 @@
 # ============================================================================
 # Bump this number when the config schema changes.
 # Run `make config-upgrade` to merge new fields into your local config.yaml.
-config_version: 9
+config_version: 10
 
 # ============================================================================
 # Logging
@@ -49,6 +49,7 @@ models:
     temperature: 0.7
     supports_thinking: true
     supports_reasoning_effort: true
+    supports_tool_choice_with_thinking: false
     supports_vision: false
     when_thinking_enabled:
       extra_body:

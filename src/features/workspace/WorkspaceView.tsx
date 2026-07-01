@@ -59,6 +59,8 @@ type WorkspaceViewProps = {
   onApproveCanvasWriteRequest: (requestId: string) => Promise<{ request: CanvasWriteRequest; node?: CanvasNode }>;
   onAcceptCanvasWorkflowSuggestion: (suggestionId: string) => Promise<void>;
   onChatSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => Promise<unknown>;
+  onQueueChatInput: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => string | undefined;
+  onRequestQueuedInputIntervention: (id: string) => void;
   onStopChatSend: () => void;
   onConvertCanvasWorkflowSuggestionToNode: (suggestionId: string, kind?: CanvasNodeKind) => Promise<void>;
   onCreateCanvasEdge: (draft: CanvasEdgeDraft) => Promise<CanvasEdge | undefined>;
@@ -137,6 +139,8 @@ export function WorkspaceView({
   onApproveCanvasWriteRequest,
   onAcceptCanvasWorkflowSuggestion,
   onChatSend,
+  onQueueChatInput,
+  onRequestQueuedInputIntervention,
   onStopChatSend,
   onConvertCanvasWorkflowSuggestionToNode,
   onCreateCanvasEdge,
@@ -418,14 +422,13 @@ export function WorkspaceView({
               extracting={claimReview.extracting}
               loading={claimReview.loading}
               locale={locale}
-              onAccept={(claim) => claimReview.setClaimStatus(claim, "accepted")}
               onCreateNode={claimReview.createNodeFromClaim}
-              onCreateNodesFromAccepted={claimReview.createNodesFromAccepted}
+              onCreateSelected={claimReview.createNodesFromClaims}
+              onDelete={claimReview.deleteClaimCandidate}
+              onDeleteSelected={claimReview.deleteClaimCandidates}
               onEdit={claimReview.editClaim}
               onExtract={claimReview.extractActiveDocumentClaims}
-              onReject={(claim) => claimReview.setClaimStatus(claim, "rejected")}
               onSendToChat={claimReview.sendClaimsToChat}
-              onSetStatus={claimReview.setClaimStatus}
               onShowSource={(claim) => claimReview.setSourceFocusClaim(claim)}
             />
           }
@@ -469,6 +472,8 @@ export function WorkspaceView({
           onRejectWriteRequest={onRejectCanvasWriteRequest}
           onUpdateCanvasNode={onUpdateCanvasNode}
           onSend={onChatSend}
+          onQueueInput={onQueueChatInput}
+          onRequestQueuedInputIntervention={onRequestQueuedInputIntervention}
           onStopSending={onStopChatSend}
           onSelectAgent={onSelectAgent}
           onSelectModel={onSelectModel}

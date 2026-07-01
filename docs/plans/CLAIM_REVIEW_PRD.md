@@ -15,7 +15,7 @@
 
 OpenCanvas already supports long-task generation, Skill-driven research workflows, progressive Canvas delivery, structured Agent clarification, and Markdown `file_document` preview nodes. After a long research task produces a complete Markdown document, the next product gap is helping the researcher turn that long-form output back into manageable research units.
 
-The current preview is useful for reading the full document, but it does not yet help the user extract, review, organize, and recombine claims from separate AI responses. The next step should make the first generated document actionable: users should be able to identify candidate claims, verify them against source context, and convert accepted claims into Canvas material for later synthesis.
+The current preview is useful for reading the full document, but it does not yet help the user extract, review, organize, and recombine claims from separate AI responses. The next step should make the first generated document actionable: users should be able to identify candidate claims, verify them against source context, and convert selected claims into Canvas material for later synthesis.
 
 ### User Problem
 
@@ -27,17 +27,17 @@ Provide a lightweight Claim review workflow that starts from the Markdown previe
 
 - see AI-extracted candidate claims;
 - inspect each claim in its original document context;
-- edit, accept, reject, or defer claims;
+- edit, create, or delete selected claims;
 - preserve evidence and source context;
 - create useful Canvas nodes only after user review.
 
 ### Success Metrics
 
 - Users can extract at least one reviewed Claim from a generated Markdown preview without leaving the workspace.
-- Users can accept or reject multiple candidate Claims in a single review session.
-- Accepted Claims retain a link back to the source document path and source text location.
+- Users can create or delete multiple selected candidate Claims in a single review session.
+- Created Claim nodes retain a link back to the source document path and source text location.
 - Canvas remains controlled: AI candidate extraction does not directly flood the board with nodes.
-- Users can send accepted Claims to the right collaboration drawer or create Canvas nodes for synthesis.
+- Users can send selected Claims to the right collaboration drawer or create Canvas nodes for synthesis.
 
 ## 3. Scope
 
@@ -52,9 +52,10 @@ Provide a lightweight Claim review workflow that starts from the Markdown previe
 - B: Right-side Claim review queue
   - Run AI-assisted Claim extraction against the current Markdown preview.
   - Show candidate Claims in a review queue.
-  - Let users edit, accept, reject, or mark a Claim as needing more evidence.
-  - Let users create Canvas nodes from accepted Claims.
-  - Preserve source document metadata for accepted Claims.
+  - Let users edit candidate Claims.
+  - Let users create Canvas nodes from selected Claims without an intermediate acceptance state.
+  - Let users delete selected candidates through the persistent Claim Delete API.
+  - Preserve source document metadata for created Claim nodes.
 
 ### Out Of Scope For This Phase
 
@@ -85,16 +86,16 @@ Researcher using OpenCanvas to run AI-assisted literature review, source synthes
 3. The user opens the Markdown preview.
 4. The user asks OpenCanvas to extract candidate Claims, or manually selects text and creates a Claim candidate.
 5. Candidate Claims appear in the right-side review queue.
-6. The user edits, accepts, rejects, or marks candidates as needing more evidence.
-7. Accepted Claims can be converted into Canvas nodes or sent to the AI drawer for synthesis.
+6. The user edits candidates, locates them in the source document, creates selected nodes, or deletes selected candidates.
+7. Selected Claims can be converted into Canvas nodes or sent to the AI drawer for synthesis.
 
 ### User Stories
 
 - As a researcher, I want AI to propose Claims from a generated document so that I do not need to manually scan and copy every important argument.
 - As a researcher, I want to inspect each Claim in its original context so that I can decide whether the Claim is accurate and worth keeping.
-- As a researcher, I want to edit AI-extracted Claims before accepting them so that the resulting research account reflects my judgment.
-- As a researcher, I want accepted Claims to preserve evidence context so that later synthesis does not lose traceability.
-- As a researcher, I want rejected Claims to stay out of my Canvas so that AI output does not clutter my workspace.
+- As a researcher, I want to edit AI-extracted Claims before creating nodes so that the resulting research account reflects my judgment.
+- As a researcher, I want created Claim nodes to preserve evidence context so that later synthesis does not lose traceability.
+- As a researcher, I want to delete unwanted candidates so that AI output does not clutter my workspace.
 
 ## 5. Functional Requirements
 
@@ -155,14 +156,13 @@ Researcher using OpenCanvas to run AI-assisted literature review, source synthes
 ### 5.3 Claim Review Queue
 
 - Location:
-  - The review queue appears in the right-side collaboration drawer or an adjacent review mode within that drawer.
+  - The review queue appears beside the Markdown preview as an adjacent review panel.
   - The queue should not cover the Markdown preview content.
 
 - Queue item fields:
-  - Claim text
-  - Evidence excerpt
+  - Stable display title such as `摘要 1`, `摘要 2`, `摘要 3`
+  - Compact Claim text preview
   - Source document file name
-  - Review status
   - Optional tags or type hints
 
 - Supported statuses:
@@ -173,62 +173,55 @@ Researcher using OpenCanvas to run AI-assisted literature review, source synthes
   - `edited`
 
 - Item actions:
-  - `Accept`
-  - `Reject`
   - `Edit`
-  - `Needs evidence`
   - `Show in document`
   - `Create Canvas node`
+  - `Delete`
   - `Send to chat`
 
 - Editing:
-  - Users can edit Claim text before accepting.
+  - Users can edit Claim text before creating a node.
   - Editing a Claim marks it as `edited`.
-  - Evidence excerpt remains visible while editing.
+  - Evidence text remains stored for source fallback and highlight matching, but is not shown as a persistent card block.
   - The user can cancel edit without losing the original candidate.
 
 - Batch actions:
-  - `Accept selected`
-  - `Reject selected`
-  - `Create nodes from accepted`
-  - Batch actions require explicit user selection; no automatic accept-all on extraction completion.
+  - `Create selected`
+  - `Delete selected`
+  - Batch actions require explicit user selection; no automatic create-all on extraction completion.
 
-### 5.4 Canvas Node Creation From Accepted Claims
+### 5.4 Canvas Node Creation From Selected Claims
 
 - Entry:
-  - User chooses `Create Canvas node` on an accepted Claim, or `Create nodes from accepted`.
+  - User chooses `Create Canvas node` on a Claim, or `Create selected` for checked candidates.
 
 - Node behavior:
   - MVP should create existing Canvas node kinds rather than introducing a new node kind immediately.
-  - Recommended mapping:
-    - accepted Claim -> `document` node if it is a synthesis-ready argument;
-    - evidence-heavy Claim -> `reference` node if source traceability is the main value;
-    - user-only working thought -> `note` if manually created as a private annotation.
-  - Node content should include:
-    - Claim;
-    - Evidence excerpt;
-    - Source document path;
-    - optional citation/source link;
-    - review status.
+  - Claim Review creates compact `document` nodes by default.
+  - Node titles use the same stable display name shown in the drawer, such as `摘要 1`.
+  - Node content contains only the selected Claim text.
+  - Source path, source anchor, and candidate id stay in node metadata for traceability and source highlight.
+  - Evidence excerpts, source path, citation URLs, and review status must not be written into the visible node body by default.
 
 - Layout:
   - Single-node creation places the node near the source `file_document` node when possible.
   - Batch creation places nodes in a readable vertical stack near the source document node or current viewport center.
 
 - Safety:
-  - Creating nodes from accepted Claims is a direct user action.
-  - Rejected and pending Claims must not create Canvas nodes.
+  - Creating nodes from selected Claims is a direct user action.
+  - Extraction alone must not create Canvas nodes.
+  - Deleting a Claim candidate removes the persisted `claim_candidates` row but does not delete any already-created Canvas node.
 
 ### 5.5 Chat And Synthesis Integration
 
-- `Send to chat` sends one Claim, selected Claims, or accepted Claims to the right collaboration composer.
+- `Send to chat` sends one Claim or selected Claims to the right collaboration composer.
 - The sent context should include:
   - Claim text;
   - evidence excerpts;
   - source document path;
   - current review status.
 - The action should not auto-send the message.
-- Follow-up prompts may ask the Agent to synthesize accepted Claims into a cohesive account.
+- Follow-up prompts may ask the Agent to synthesize selected or created Claim nodes into a cohesive account.
 
 ## 6. UX And Content Requirements
 
@@ -244,11 +237,11 @@ Researcher using OpenCanvas to run AI-assisted literature review, source synthes
 1. User opens Markdown preview.
 2. User clicks `Extract Claims`.
 3. Right drawer switches to `Claims` review mode or shows a Claim review section.
-4. User clicks a candidate Claim.
+4. User clicks `定位原文` / `Show source` on a candidate Claim.
 5. Markdown preview scrolls to and highlights the source context.
-6. User edits or accepts the Claim.
-7. User creates Canvas nodes from accepted Claims.
-8. User sends accepted Claims to chat for aggregate synthesis.
+6. User edits the Claim when needed.
+7. User creates selected Claim nodes or deletes selected candidates.
+8. User sends selected Claims to chat for aggregate synthesis.
 
 ### Required UI States
 
@@ -258,7 +251,7 @@ Researcher using OpenCanvas to run AI-assisted literature review, source synthes
 - Extraction failed: show retry and error summary.
 - No candidates found: show empty state with manual selection hint.
 - Candidates pending: show queue with review actions.
-- Claims accepted: show accepted count and create-node actions.
+- Claims selected: show selected count plus create/delete actions.
 - Source unavailable: show Claim but disable `Show in document` or show fallback message.
 
 ### Copy Guidelines
@@ -266,7 +259,7 @@ Researcher using OpenCanvas to run AI-assisted literature review, source synthes
 - Prefer `Claim` for the structured research unit.
 - Prefer `Evidence` for supporting excerpt/source context.
 - Prefer `Needs evidence` over vague labels such as `Unclear`.
-- Avoid implying AI extraction is authoritative. Use `Candidate Claim` before user acceptance.
+- Avoid implying AI extraction is authoritative. Use `Candidate Claim` before the user creates a node or deletes the candidate.
 
 ## 7. Data, Analytics, And Interfaces
 
@@ -324,22 +317,22 @@ type ClaimCandidate = {
   - Queue rendering should remain responsive with at least 50 candidates, though MVP should usually produce fewer.
 
 - Reliability:
-  - Existing accepted/rejected decisions must not be lost if a later extraction retry fails.
+  - Existing candidate edits and selections must not be lost if a later extraction retry fails.
   - Source anchoring should degrade gracefully when document content changes.
 
 - Safety:
-  - AI extraction results must be labeled as candidates until user acceptance.
+  - AI extraction results must be treated as candidates until the user explicitly creates or deletes them.
   - No AI extraction action should directly mutate Canvas nodes.
   - Source excerpts must not expose hidden prompts, raw tool JSON, credentials, or internal runtime events.
 
 - Accessibility:
   - Claim queue actions must be keyboard reachable.
   - Source highlight should not rely only on color.
-  - Status labels must be text-visible.
+  - Candidate selection controls must have accessible labels using the visible `摘要 N` display name.
 
 - Localization:
   - UI copy must support English and Chinese.
-  - Status labels should map cleanly across both languages.
+  - Candidate actions and source-location copy should map cleanly across both languages.
 
 ## 9. Acceptance Criteria
 
@@ -352,24 +345,25 @@ type ClaimCandidate = {
 ### AI Extraction
 
 - Given a Markdown preview is open, when the user clicks `Extract Claims`, then the system creates candidate Claims without creating Canvas nodes.
-- Given extraction succeeds, when candidates are shown, then each candidate has Claim text, evidence excerpt, and source metadata.
-- Given extraction fails, when the user views the queue, then the system shows retry without deleting existing reviewed Claims.
+- Given extraction succeeds, when candidates are shown, then each candidate has Claim text, source metadata, and a source-location action.
+- Given extraction fails, when the user views the queue, then the system shows retry without deleting existing candidates.
 
 ### Review Queue
 
-- Given candidate Claims are present, when the user accepts one, then its status becomes `accepted`.
-- Given a candidate is accepted, when the user edits it, then the edited text is saved and the status reflects review history.
-- Given a candidate is rejected, when the user creates Canvas nodes from accepted Claims, then the rejected candidate is not included.
+- Given candidate Claims are present, when the user selects one or more candidates, then `Create selected` and `Delete selected` act only on those checked candidates.
+- Given a candidate is edited, when the user saves it, then the edited text is persisted and the original text is retained for review history.
+- Given a candidate is deleted, when the queue reloads, then the deleted candidate is absent because the backend removed the persisted row.
 - Given a candidate has a source anchor, when the user clicks `Show in document`, then the Markdown preview scrolls to and highlights the source area.
 
 ### Canvas Creation
 
-- Given one or more accepted Claims, when the user creates Canvas nodes, then nodes are created with Claim, evidence, source path, and status content.
-- Given pending Claims, when the user uses batch node creation, then pending Claims are excluded unless explicitly accepted first.
+- Given one or more selected Claims, when the user creates Canvas nodes, then nodes use matching `摘要 N` titles and visible content from Claim text only.
+- Given nodes are created from Claims, then source document path and source anchor remain available in node metadata for traceability.
+- Given extraction creates candidates, when the user takes no create action, then no Canvas nodes are created.
 
 ### Chat Integration
 
-- Given one or more reviewed Claims, when the user chooses `Send to chat`, then the composer is populated but not auto-sent.
+- Given one or more selected Claims, when the user chooses `Send to chat`, then the composer is populated but not auto-sent.
 
 ## 10. Dependencies, Risks, And Open Questions
 
@@ -390,10 +384,9 @@ type ClaimCandidate = {
 
 ### Open Questions
 
-- Should Claim candidates be persisted immediately, or kept session-local until accepted?
-- Should accepted Claims become `document` nodes by default, or should the user choose `document` vs `reference` each time?
+- Should created Claims always become `document` nodes by default, or should the user choose `document` vs `reference` each time?
 - Should extraction run once per document version, or should users be able to compare Claims across regenerated versions?
-- Should `needs_more_evidence` trigger an Agent follow-up action in this phase, or only mark the Claim for later?
+- Should a future evidence action trigger an Agent follow-up, or should source highlighting remain the only evidence inspection path?
 - What is the maximum candidate count for the first extraction pass?
 
 ## 11. Future Considerations
@@ -404,4 +397,4 @@ type ClaimCandidate = {
 - Opposing Claim discovery and relationship edges.
 - Evidence strength scoring.
 - Claim-to-section synthesis for final aggregate account generation.
-- Export accepted Claims as a structured research brief.
+- Export selected or created Claims as a structured research brief.

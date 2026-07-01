@@ -23,5 +23,5 @@ function hasCanvasWriteResult(events: AgentRuntimeRunResult["events"]) {
 }
 
 function hasStructuredLifecycleEvent(events: AgentRuntimeRunResult["events"]) {
-  return events.some((event) => /(?:^|_)(?:plan|artifact|canvas)_/.test(event.eventType) || /agent_clarification_requested$/.test(event.eventType));
+  return events.some((event) => /(?:^|_)(?:plan|artifact|canvas)_/.test(event.eventType) || /agent_clarification_(?:requested|invalid)$/.test(event.eventType));
 }

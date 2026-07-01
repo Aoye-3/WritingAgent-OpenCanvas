@@ -30,6 +30,26 @@ test("server limits approved execution to the designated step", () => {
   assert.equal(policy.toolState.canvas_write, false);
 });
 
+test("server lets preflight submit a Plan or Plan clarification only", () => {
+  const policy = resolvePlanRequestPolicy({
+    chatInstruction: "Research agent planning",
+    planPhase: "preflight",
+    planId: "plan_1",
+    toolState: { web_search: true, canvas_write: true, plan_revision_submit: true }
+  });
+  assert.equal(policy.phase, "planning");
+  assert.equal(policy.stage, "preflight");
+  assert.deepEqual(policy.toolState, {
+    web_search: false,
+    artifact_stage: false,
+    knowledge_base: false,
+    clear_context: false,
+    canvas_write: false,
+    plan_clarification_submit: true,
+    plan_revision_submit: true
+  });
+});
+
 test("ordinary chat does not expose Plan lifecycle tools", () => {
   const policy = resolvePlanRequestPolicy({ chatInstruction: "Hello", toolState: { artifact_stage: true, web_search: true } });
   assert.equal(policy.phase, "chat");

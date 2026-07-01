@@ -5,6 +5,7 @@ import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { ToolState } from "../../toolRegistry.js";
 import { userMessageForRun } from "./promptRunBuilder.js";
 import { extractTopLevelListItems } from "../canvasDelivery.js";
+import { completionEvaluatedEvent, evaluateRunCompletion } from "./completionEvaluator.js";
 
 export type RecordRunInput = {
   storage: SQLiteStorageRepository;
@@ -27,8 +28,17 @@ export type RecordRunInput = {
 };
 
 export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
+  const completion = evaluateRunCompletion({
+    payload: input.payload,
+    text: input.text,
+    events: input.events,
+    finishReason: input.finishReason,
+    errorMessage: input.errorMessage
+  });
+  const events = appendCompletionEvent(input.events, completionEvaluatedEvent(completion));
   const saved = input.storage.recordRun({
     threadId: input.threadId,
+    clientRequestId: input.payload.clientRequestId,
     agentCardId: input.agentCardId,
     configuredModelApiId: input.configuredModelApiId,
     modelId: input.modelId,
@@ -40,7 +50,7 @@ export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
     errorMessage: input.errorMessage,
     userMessage: userMessageForRun(input.payload, input.agentTitle),
     toolState: input.toolState,
-    events: input.events,
+    events,
     finishReason: input.finishReason,
     usage: input.usage
   });
@@ -58,8 +68,14 @@ export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
     threadId: input.threadId,
     runId: saved.runId,
     errorMessage: input.errorMessage,
-    events: input.events,
+    events,
     finishReason: input.finishReason,
+    completion,
     usage: input.usage
   };
+}
+
+function appendCompletionEvent(events: ToolEventRecord[] | undefined, completionEvent: ToolEventRecord) {
+  const existing = events?.filter((event) => event.eventType !== "completion_evaluated") ?? [];
+  return [...existing, completionEvent];
 }

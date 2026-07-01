@@ -25,7 +25,7 @@ def _make_app_config(models: list[ModelConfig], loop_detection: LoopDetectionCon
     )
 
 
-def _make_model(name: str, *, supports_thinking: bool) -> ModelConfig:
+def _make_model(name: str, *, supports_thinking: bool, supports_tool_choice_with_thinking=True) -> ModelConfig:
     return ModelConfig(
         name=name,
         display_name=name,
@@ -33,6 +33,7 @@ def _make_model(name: str, *, supports_thinking: bool) -> ModelConfig:
         use="langchain_openai:ChatOpenAI",
         model=name,
         supports_thinking=supports_thinking,
+        supports_tool_choice_with_thinking=supports_tool_choice_with_thinking,
         supports_vision=False,
     )
 
@@ -248,7 +249,7 @@ def test_make_lead_agent_reads_runtime_options_from_context(monkeypatch):
 
 
 def test_make_lead_agent_disables_thinking_for_skill_scope_guard(monkeypatch):
-    app_config = _make_app_config([_make_model("deepseek-thinking", supports_thinking=True)])
+    app_config = _make_app_config([_make_model("deepseek-thinking", supports_thinking=True, supports_tool_choice_with_thinking=False)])
 
     import deerflow.tools as tools_module
 
@@ -292,7 +293,7 @@ def test_make_lead_agent_disables_thinking_for_skill_scope_guard(monkeypatch):
 
 
 def test_make_lead_agent_clears_reasoning_effort_for_skill_scope_guard_without_thinking_support(monkeypatch):
-    app_config = _make_app_config([_make_model("deepseek-synced", supports_thinking=False)])
+    app_config = _make_app_config([_make_model("deepseek-synced", supports_thinking=False, supports_tool_choice_with_thinking=False)])
 
     import deerflow.tools as tools_module
 
@@ -332,6 +333,47 @@ def test_make_lead_agent_clears_reasoning_effort_for_skill_scope_guard_without_t
     assert captured["reasoning_effort"] is None
     assert captured["app_config"] is app_config
     assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert result["model"] is not None
+
+
+def test_make_lead_agent_disables_thinking_for_incompatible_plan_tool_choice(monkeypatch):
+    app_config = _make_app_config([_make_model("deepseek-plan", supports_thinking=True, supports_tool_choice_with_thinking=False)])
+
+    import deerflow.tools as tools_module
+
+    monkeypatch.setattr(lead_agent_module, "get_app_config", lambda: app_config)
+    monkeypatch.setattr(tools_module, "get_available_tools", lambda **kwargs: [])
+    monkeypatch.setattr(lead_agent_module, "_build_middlewares", lambda config, model_name, agent_name=None, **kwargs: [])
+
+    captured: dict[str, object] = {}
+
+    def _fake_create_chat_model(*, name, thinking_enabled, reasoning_effort=None, app_config=None, **kwargs):
+        captured["name"] = name
+        captured["thinking_enabled"] = thinking_enabled
+        captured["reasoning_effort"] = reasoning_effort
+        captured["extra_body"] = kwargs.get("extra_body")
+        return object()
+
+    monkeypatch.setattr(lead_agent_module, "create_chat_model", _fake_create_chat_model)
+    monkeypatch.setattr(lead_agent_module, "create_agent", lambda **kwargs: kwargs)
+
+    config = {
+        "context": {
+            "model_name": "deepseek-plan",
+            "thinking_enabled": True,
+            "reasoning_effort": "high",
+            "facetwrite_plan_phase": "planning",
+            "facetwrite_plan_stage": "intake",
+        }
+    }
+    result = lead_agent_module.make_lead_agent(config)
+
+    assert captured["name"] == "deepseek-plan"
+    assert captured["thinking_enabled"] is False
+    assert captured["reasoning_effort"] is None
+    assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert config["context"]["facetwrite_thinking_disabled_for_tool_choice_compatibility"] is True
+    assert config["context"]["facetwrite_forced_tool_choice"] == "plan_clarification_submit"
     assert result["model"] is not None
 
 

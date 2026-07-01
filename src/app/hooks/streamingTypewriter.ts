@@ -10,6 +10,7 @@ type CollaborationMessageLike = {
   id: string;
   role: "user" | "assistant";
   text: string;
+  [key: string]: unknown;
   usedMock?: boolean;
   isStreaming?: boolean;
   status?: "thinking" | "searching" | "writing" | "finalizing" | "error" | "stopped";
@@ -64,6 +65,7 @@ export function sameVisibleMessages(left: CollaborationMessageLike[], right: Col
 
 export function storedMessagesToCollaborationMessages(messages: StoredMessageLike[]): CollaborationMessageLike[] {
   return messages.map((message) => ({
+    ...message,
     id: message.id,
     role: message.role,
     text: message.text,

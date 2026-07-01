@@ -39,6 +39,19 @@ class RunRecord:
     model_name: str | None = None
 
 
+@dataclass
+class RunIntervention:
+    """User input requested for injection at the next safe run checkpoint."""
+
+    id: str
+    run_id: str
+    thread_id: str
+    text: str
+    status: str
+    created_at: str
+    updated_at: str
+
+
 class RunManager:
     """In-memory run registry with optional persistent RunStore backing.
 
@@ -49,6 +62,7 @@ class RunManager:
 
     def __init__(self, store: RunStore | None = None) -> None:
         self._runs: dict[str, RunRecord] = {}
+        self._interventions: dict[str, RunIntervention] = {}
         self._lock = asyncio.Lock()
         self._store = store
 
@@ -150,6 +164,54 @@ class RunManager:
             record.updated_at = _now_iso()
         await self._persist_to_store(record)
         logger.info("Run %s model_name=%s", run_id, model_name)
+
+    async def request_intervention(self, run_id: str, *, thread_id: str, text: str, intervention_id: str | None = None) -> RunIntervention | None:
+        """Mark user input for safe-point injection into an active run."""
+
+        clean_text = text.strip()
+        if not clean_text:
+            return None
+        now = _now_iso()
+        async with self._lock:
+            record = self._runs.get(run_id)
+            if record is None or record.thread_id != thread_id or record.status not in (RunStatus.pending, RunStatus.running):
+                return None
+            intervention = RunIntervention(
+                id=intervention_id or str(uuid.uuid4()),
+                run_id=run_id,
+                thread_id=thread_id,
+                text=clean_text[:4000],
+                status="requested",
+                created_at=now,
+                updated_at=now,
+            )
+            self._interventions[run_id] = intervention
+        logger.info("Run %s intervention requested", run_id)
+        return intervention
+
+    async def take_requested_intervention(self, run_id: str) -> RunIntervention | None:
+        """Return and mark a requested intervention as injected."""
+
+        now = _now_iso()
+        async with self._lock:
+            intervention = self._interventions.get(run_id)
+            if intervention is None or intervention.status != "requested":
+                return None
+            intervention.status = "injected"
+            intervention.updated_at = now
+            return intervention
+
+    async def expire_requested_intervention(self, run_id: str) -> RunIntervention | None:
+        """Expire a pending intervention that was not injected before run completion."""
+
+        now = _now_iso()
+        async with self._lock:
+            intervention = self._interventions.get(run_id)
+            if intervention is None or intervention.status != "requested":
+                return None
+            intervention.status = "expired"
+            intervention.updated_at = now
+            return intervention
 
     async def cancel(self, run_id: str, *, action: str = "interrupt") -> bool:
         """Request cancellation of a run.
@@ -255,6 +317,7 @@ class RunManager:
             await asyncio.sleep(delay)
         async with self._lock:
             self._runs.pop(run_id, None)
+            self._interventions.pop(run_id, None)
         logger.debug("Run record %s cleaned up", run_id)
 
 

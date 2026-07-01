@@ -10,6 +10,7 @@ import type { SQLiteStorageRepository } from "../storage.js";
 import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
 import type { KnowledgeSearchInput } from "../knowledge/service.js";
 import type { ToolEventRecord } from "../toolRuntime.js";
+import type { AgentRuntimePort } from "../runtime/agentRuntimePort.js";
 
 function runtimeConfig(): AgentRuntimeConfig {
   const agentCard = agentCards[0];
@@ -111,22 +112,71 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
       getThread: () => ({ id: "thread_test", projectId: "project_test", title: "Test", configuredModelApiId: "configured-test", contextResetAt, updatedAt: "" }),
       getProject: () => ({ id: "project_test", title: "Test", summary: "", updatedAt: "" }),
       getProjectRuntimeSettings: () => ({
-        runtimeBudgetProfile: "medium",
-        evidenceToolLimit: 16,
-        bodyDraftWriteLimit: 4,
-        modelCallLimit: 32,
-        recursionLimit: 140,
-        synthesisReserveSteps: 28
+        runtimeBudgetProfile: "low",
+        evidenceToolLimit: 8,
+        bodyDraftWriteLimit: 2,
+        modelCallLimit: 18,
+        recursionLimit: 80,
+        synthesisReserveSteps: 16
       }),
       getProjectModelBindings: () => ["configured-test"],
       getProjectSharedContext: () => undefined,
       getProjectBrief: () => ({ brief: {}, revision: 0 }),
       getTaskBrief: () => ({ brief: {}, revision: 0 }),
-      createPlanIntake: () => ({ id: "plan_intake_test" }),
+      createPlanIntake: (_threadId: string, input?: Record<string, unknown>) => {
+        Object.assign(planState, input ?? {}, { id: "plan_intake_test" });
+        return { id: "plan_intake_test" };
+      },
+      updatePlanMetadata: (_threadId: string, _planId: string, input: Record<string, unknown>) => {
+        Object.assign(planState, input);
+        return planState;
+      },
       getPlanRun: (_threadId: string, planId: string) => planId === "plan_intake_test"
         ? planState
         : undefined,
+      setPlanRunStatus: (_threadId: string, _planId: string, status: string, message = "") => {
+        Object.assign(planState, { status, statusMessage: message });
+        return planState;
+      },
       listPlanRuns: () => [{ id: "plan_intake_test", status: "draft" }],
+      updatePlanStep: (_threadId: string, _planId: string, stepId: string, patch: Record<string, unknown>) => {
+        const steps = Array.isArray(planState.steps) ? planState.steps as Array<Record<string, unknown>> : [];
+        const step = steps.find((item) => item.id === stepId);
+        if (!step) return undefined;
+        Object.assign(step, patch);
+        if (patch.status === "completed") {
+          const next = steps.find((item) => item.status === "pending");
+          Object.assign(planState, {
+            currentStepId: next?.id,
+            status: next ? "running" : "completed"
+          });
+        }
+        return step;
+      },
+      stagePlanArtifact: (_threadId: string, _planId: string, input: Record<string, unknown>) => {
+        const artifacts = planState.artifacts as Array<Record<string, unknown>>;
+        const existing = artifacts.find((item) => item.artifactId === input.artifactId);
+        const artifact = {
+          ...existing,
+          ...input,
+          id: String(input.artifactId),
+          planRunId: "plan_intake_test",
+          status: "staged"
+        };
+        if (existing) {
+          Object.assign(existing, artifact);
+          return existing;
+        }
+        artifacts.push(artifact);
+        return artifact;
+      },
+      markPlanArtifactCommitted: (_threadId: string, _planId: string, artifactId: string, canvasTargetId: string) => {
+        const artifacts = planState.artifacts as Array<Record<string, unknown>>;
+        const artifact = artifacts.find((item) => item.artifactId === artifactId || item.id === artifactId);
+        if (!artifact) return undefined;
+        Object.assign(artifact, { status: "committed", canvasTargetId });
+        return artifact;
+      },
       recordPlanActivity: () => undefined,
       listMessages: () => messages.map((message, index) => ({
         id: `msg_${index}`,
@@ -241,12 +291,94 @@ test("generation facade records AgentBackend runs when AgentBackend is enabled",
     }
   });
 
-  const result = await service.generateAndRecord({ mode: "structured", locale: "en", agentCardId: "blog-post" });
+  const result = await service.generateAndRecord({ mode: "structured", locale: "en", agentCardId: "blog-post", clientRequestId: "request_1" });
 
   assert.equal(result.provider, "agent-backend");
   assert.equal(result.usedMock, false);
+  assert.equal(result.completion?.status, "completed");
   assert.equal((records[0] as { provider: string }).provider, "agent-backend");
   assert.equal((records[0] as { configuredModelApiId: string }).configuredModelApiId, "configured-test");
+  assert.equal((records[0] as { clientRequestId: string }).clientRequestId, "request_1");
+  assert.ok((records[0] as { events: ToolEventRecord[] }).events.some((event) => event.eventType === "completion_evaluated"));
+});
+
+test("complex chat automatically enters preflight Plan generation", async () => {
+  const { storage, planState } = fakeStorage();
+  let observedPlanPhase = "";
+  let observedPlanId = "";
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        observedPlanPhase = input.planPhase ?? "";
+        observedPlanId = input.planId ?? "";
+        Object.assign(planState, {
+          status: "awaiting_approval",
+          approval: "pending",
+          steps: [
+            { id: "step_1", title: "Gather evidence", status: "pending" },
+            { id: "step_2", title: "Synthesize findings", status: "pending" }
+          ]
+        });
+        return { text: "Plan ready", finishReason: "agent_backend_completed", events: [] };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Research agent planning systems and write a report with sources."
+  });
+
+  assert.equal(result.provider, "agent-backend");
+  assert.equal(observedPlanPhase, "preflight");
+  assert.equal(observedPlanId, "plan_intake_test");
+  assert.equal(planState.status, "awaiting_approval");
+  assert.equal((planState.steps as unknown[]).length, 2);
+});
+
+test("slash Plan with research skills keeps Plan clarification ownership", async () => {
+  const { storage, planState } = fakeStorage();
+  let allowedToolRefs: string[] = [];
+  let observedPlanPhase = "";
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        allowedToolRefs = input.allowedToolRefs ?? [];
+        observedPlanPhase = input.planGeneration?.phase ?? "";
+        Object.assign(planState, {
+          status: "awaiting_user",
+          clarification: {
+            question: "Which literature scope should I use?",
+            options: [
+              { id: "recent", label: "Recent", description: "Focus on recent Agent papers.", recommended: true },
+              { id: "broad", label: "Broad", description: "Cover a broader Agent literature range.", recommended: false }
+            ],
+            status: "pending"
+          }
+        });
+        return { text: "Which literature scope should I use?", finishReason: "agent_backend_completed", events: [] };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "chat-agent",
+    chatInstruction: "/plan 帮我查找最近Agent相关的文献，并且做文献综述。",
+    transientSkillRefs: ["database-lookup", "literature-review"]
+  });
+
+  assert.equal(result.provider, "agent-backend");
+  assert.equal(observedPlanPhase, "intake");
+  assert.ok(allowedToolRefs.includes("plan_clarification_submit"));
+  assert.notDeepEqual(allowedToolRefs, ["ask_clarification"]);
 });
 
 test("generation accepts the selected conversation model without a project binding", async () => {
@@ -378,6 +510,67 @@ test("direct Canvas delivery is committed by the server planner without copying 
   assert.equal(canvasEdges.length, 2);
 });
 
+test("non-stream Plan execution commits progressive Canvas delivery before completing the step", async () => {
+  const { storage, planState, canvasNodes } = fakeStorage();
+  Object.assign(planState, {
+    projectId: "project_test",
+    threadId: "thread_test",
+    status: "running",
+    approval: "approved",
+    currentStepId: "step_1",
+    executionVersion: 1,
+    steps: [{ id: "step_1", title: "Deliver research", status: "pending", attempt: 0 }],
+    artifacts: []
+  });
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: [
+          "# Result",
+          "",
+          "The requested research has been completed and written into Canvas.",
+          "",
+          "## Sources",
+          "- [News A](https://news.example/a)"
+        ].join("\n"),
+        finishReason: "stop",
+        events: [{
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "web_search",
+            sources: [{ title: "News A", url: "https://news.example/a" }]
+          }
+        }]
+      })
+    }
+  });
+
+  const result = await service.generateAndRecord({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Continue approved plan plan_intake_test. Execute only step step_1.",
+    planPhase: "execution",
+    planId: "plan_intake_test",
+    stepId: "step_1",
+    planGeneration: { phase: "execution", planId: "plan_intake_test", stepId: "step_1", phaseAttemptId: "exec_1" },
+    contextValues: {
+      planExecution: { planId: "plan_intake_test", stepId: "step_1" },
+      canvas: { workflow: { mode: "batch_delivery" } }
+    },
+    toolState: { web_search: true }
+  });
+
+  assert.equal(result.provider, "agent-backend");
+  assert.ok(canvasNodes.some((node) => node.kind === "document"));
+  assert.equal((planState.steps as Array<{ status: string }>)[0]?.status, "completed");
+  assert.equal(planState.status, "completed");
+  assert.equal((planState.artifacts as Array<{ status: string; canvasTargetId?: string }>)[0]?.status, "committed");
+  assert.ok((planState.artifacts as Array<{ status: string; canvasTargetId?: string }>)[0]?.canvasTargetId);
+});
+
 test("direct Canvas delivery treats process clarification text as recoverable output", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
@@ -459,26 +652,27 @@ test("streaming direct Canvas delivery keeps progressive placeholders when Agent
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
-      mode: "chat",
-      locale: "zh",
-      agentCardId: "chat-agent",
-      chatInstruction: "\u628a\u76f8\u5173\u4fe1\u606f\u6574\u7406\u5230Canvas\u91cc",
-      toolState: { web_search: true }
-    }, {
-      onToken: (token) => tokens.push(token),
-      onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /no visible assistant text or structured lifecycle events/i
-  );
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "chat-agent",
+    chatInstruction: "\u628a\u76f8\u5173\u4fe1\u606f\u6574\u7406\u5230Canvas\u91cc",
+    toolState: { web_search: true }
+  }, {
+    onToken: (token) => tokens.push(token),
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
 
   assert.equal(tokens.join(""), "");
+  assert.equal(result.provider, "agent-backend");
+  assert.equal(result.usedMock, false);
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /no visible assistant text or structured lifecycle events/i);
   assert.equal(canvasNodes.length, 3);
   assert.ok(canvasNodes.some((node) => node.metadata && (node.metadata as { phase?: string }).phase === "outline"));
   assert.ok(canvasNodes.some((node) => node.metadata && (node.metadata as { phase?: string }).phase === "body"));
   assert.ok(canvasNodes.some((node) => node.metadata && (node.metadata as { phase?: string }).phase === "failure"));
-  assert.equal(records.length, 0);
+  assert.equal(records.length, 1);
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_outline_committed"));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
   assert.ok(events.some((event) => event.eventType === "agent_backend_runtime_failed" && event.payload.fallback === "none"));
@@ -505,20 +699,19 @@ test("streaming direct Canvas delivery commits a link-only research reference af
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
-      mode: "chat",
-      locale: "zh",
-      agentCardId: "chat-agent",
-      chatInstruction: "\u9605\u8bfb\u6280\u672f\u6587\u6863\uff0c\u628a\u6bcf\u8f6e\u641c\u7d22\u548c\u67e5\u627e\u7684\u7ed3\u679c\u5b58\u5230\u753b\u5e03\uff0c\u6700\u540e\u751f\u6210\u6574\u4f53\u6982\u8ff0\u8282\u70b9",
-      toolState: { web_search: true }
-    }, {
-      onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /Recursion limit of 100 reached/
-  );
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "chat-agent",
+    chatInstruction: "\u9605\u8bfb\u6280\u672f\u6587\u6863\uff0c\u628a\u6bcf\u8f6e\u641c\u7d22\u548c\u67e5\u627e\u7684\u7ed3\u679c\u5b58\u5230\u753b\u5e03\uff0c\u6700\u540e\u751f\u6210\u6574\u4f53\u6982\u8ff0\u8282\u70b9",
+    toolState: { web_search: true }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
 
-  assert.equal(records.length, 0);
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /Recursion limit of 100 reached/);
+  assert.equal(records.length, 1);
   const researchNode = canvasNodes.find((node) => node.title === "\u7814\u7a76\u6458\u5f55 1");
   assert.ok(researchNode);
   assert.ok(String(researchNode.content).includes("[Agent Survey](https://example.com/agent-survey)"));
@@ -556,20 +749,19 @@ test("streaming direct Canvas delivery skips research references when search has
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
-      mode: "chat",
-      locale: "zh",
-      agentCardId: "chat-agent",
-      chatInstruction: "\u9605\u8bfb\u6280\u672f\u6587\u6863\uff0c\u628a\u6bcf\u8f6e\u641c\u7d22\u548c\u67e5\u627e\u7684\u7ed3\u679c\u5b58\u5230\u753b\u5e03\uff0c\u6700\u540e\u751f\u6210\u6574\u4f53\u6982\u8ff0\u8282\u70b9",
-      toolState: { web_search: true }
-    }, {
-      onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /Recursion limit of 100 reached/
-  );
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "chat-agent",
+    chatInstruction: "\u9605\u8bfb\u6280\u672f\u6587\u6863\uff0c\u628a\u6bcf\u8f6e\u641c\u7d22\u548c\u67e5\u627e\u7684\u7ed3\u679c\u5b58\u5230\u753b\u5e03\uff0c\u6700\u540e\u751f\u6210\u6574\u4f53\u6982\u8ff0\u8282\u70b9",
+    toolState: { web_search: true }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
 
-  assert.equal(records.length, 0);
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /Recursion limit of 100 reached/);
+  assert.equal(records.length, 1);
   assert.equal(canvasNodes.some((node) => node.title === "\u7814\u7a76\u6458\u5f55 1"), false);
   assert.equal(canvasNodes.some((node) => String(node.content).includes("Search completed")), false);
   assert.equal(events.some((event) => event.eventType === "canvas_delivery_research_committed"), false);
@@ -599,19 +791,18 @@ test("streaming direct Canvas delivery dedupes repeated research evidence keys",
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
-      mode: "chat",
-      locale: "zh",
-      agentCardId: "chat-agent",
-      chatInstruction: "\u9605\u8bfb\u6280\u672f\u6587\u6863\uff0c\u628a\u6bcf\u8f6e\u641c\u7d22\u548c\u67e5\u627e\u7684\u7ed3\u679c\u5b58\u5230\u753b\u5e03\uff0c\u6700\u540e\u751f\u6210\u6574\u4f53\u6982\u8ff0\u8282\u70b9",
-      toolState: { web_search: true }
-    }, {
-      onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /Recursion limit of 100 reached/
-  );
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "chat-agent",
+    chatInstruction: "\u9605\u8bfb\u6280\u672f\u6587\u6863\uff0c\u628a\u6bcf\u8f6e\u641c\u7d22\u548c\u67e5\u627e\u7684\u7ed3\u679c\u5b58\u5230\u753b\u5e03\uff0c\u6700\u540e\u751f\u6210\u6574\u4f53\u6982\u8ff0\u8282\u70b9",
+    toolState: { web_search: true }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
 
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /Recursion limit of 100 reached/);
   assert.equal(canvasNodes.filter((node) => String(node.title).startsWith("\u7814\u7a76\u6458\u5f55")).length, 1);
   assert.equal(events.filter((event) => event.eventType === "canvas_delivery_research_committed").length, 1);
 });
@@ -646,8 +837,7 @@ test("streaming skill long task creates Canvas progress without explicit Canvas 
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
+  const result = await service.generateAndRecordStream({
       mode: "chat",
       locale: "zh",
       agentCardId: "chat-agent",
@@ -658,11 +848,11 @@ test("streaming skill long task creates Canvas progress without explicit Canvas 
       toolState: { web_search: true }
     }, {
       onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /Recursion limit of 100 reached/
-  );
+  });
 
-  assert.equal(records.length, 0);
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /Recursion limit of 100 reached/);
+  assert.equal(records.length, 1);
   assert.ok(canvasNodes.some((node) => node.title === "整体概述"));
   assert.ok(canvasNodes.some((node) => node.title === "正文"));
   assert.equal(canvasNodes.some((node) => String(node.content).includes("literature-review/SKILL.md")), false);
@@ -841,6 +1031,82 @@ test("clarification-required AgentBackend run is waiting and deduplicates repeat
   assert.equal(events.filter((event) => event.eventType === "agent_backend_agent_clarification_requested").length, 1);
 });
 
+test("invalid Agent clarification options are repaired by retrying ask_clarification", async () => {
+  const { storage, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  let calls = 0;
+  let repairPolicy: Record<string, unknown> | undefined;
+  const invalidEvent: ToolEventRecord = {
+    eventType: "agent_backend_agent_clarification_invalid",
+    payload: {
+      type: "agent_clarification_invalid",
+      toolName: "ask_clarification",
+      toolCallId: "call_bad_options",
+      status: "failed",
+      reason: "too_many_options",
+      hasQuestion: true,
+      optionCount: 4,
+      summary: "Agent clarification payload was invalid"
+    }
+  };
+  const repairedEvent: ToolEventRecord = {
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      toolName: "ask_clarification",
+      toolCallId: "call_repaired_options",
+      question: "Which citation format should I use?",
+      options: [
+        { id: "apa", label: "APA 7th", detail: "Author-date references.", recommended: true },
+        { id: "ieee", label: "IEEE", detail: "Numbered engineering references." }
+      ]
+    }
+  };
+  const runtime: AgentRuntimePort = {
+    providerId: "agent-backend",
+    run: async (input) => {
+      calls += 1;
+      if (calls === 1) {
+        input.onToolEvent?.(invalidEvent);
+        return { text: "", finishReason: "clarification_required", events: [invalidEvent] };
+      }
+      repairPolicy = input.payload.contextValues?.facetwrite_clarification_policy as Record<string, unknown> | undefined;
+      input.onToolEvent?.(repairedEvent);
+      return { text: "", finishReason: "clarification_required", events: [repairedEvent] };
+    },
+    getStatus: async () => ({}),
+    getConfigOverview: async () => ({}),
+    getDashboard: async () => ({})
+  };
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentRuntime: runtime
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent agent literature",
+    transientSkillRefs: ["literature-review"],
+    toolState: { web_search: true }
+  }, {
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.finishReason, "clarification_required");
+  assert.equal(repairPolicy?.source, "server_clarification_repair");
+  assert.equal(repairPolicy?.invalidReason, "too_many_options");
+  assert.equal(repairPolicy?.invalidOptionCount, 4);
+  assert.equal(events.some((event) => event.eventType === "agent_backend_agent_clarification_invalid"), false);
+  assert.equal(events.filter((event) => event.eventType === "agent_backend_agent_clarification_requested").length, 1);
+  assert.equal(records.length, 1);
+  const record = records[0] as { events?: Array<{ eventType: string }> };
+  assert.equal(record.events?.some((event) => event.eventType === "agent_backend_agent_clarification_invalid"), false);
+  assert.equal(record.events?.filter((event) => event.eventType === "agent_backend_agent_clarification_requested").length, 1);
+});
+
 test("answered Agent clarification preserves resume context for follow-up clarification", async () => {
   const { storage, records } = fakeStorage();
   const originalInstruction = "Review recent Agent literature and write a survey.";
@@ -893,6 +1159,233 @@ test("answered Agent clarification preserves resume context for follow-up clarif
   assert.deepEqual(resumeContext?.transientSkillRefs, ["database-lookup", "literature-review"]);
   assert.equal(resumeContext?.runtimeBudgetProfile, "high");
   assert.deepEqual((resumeContext?.canvas as { workflow?: unknown } | undefined)?.workflow, { mode: "batch_delivery" });
+});
+
+test("answered intake clarification keeps research skills in clarification guard until scope is sufficient", async () => {
+  const { storage } = fakeStorage();
+  let allowedToolRefs: string[] = [];
+  let observedContextValues: Record<string, unknown> = {};
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        allowedToolRefs = input.allowedToolRefs ?? [];
+        observedContextValues = input.contextValues ?? {};
+        return {
+          text: "",
+          finishReason: "clarification_required",
+          events: [{
+            eventType: "agent_backend_agent_clarification_requested",
+            payload: {
+              type: "agent_clarification_requested",
+              toolCallId: "call_format",
+              question: "Which citation format should I use?",
+              options: [
+                { id: "apa", label: "APA 7", detail: "Use APA 7th edition.", recommended: true },
+                { id: "ieee", label: "IEEE", detail: "Use numeric IEEE citations." }
+              ]
+            }
+          }]
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent Agent literature\n\nSelected clarification: Multi-agent systems",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: {
+      canvas: { workflow: { mode: "batch_delivery" } },
+      agentClarification: {
+        clarificationId: "agent_clarification_scope",
+        question: "Which Agent scope?",
+        selectedOptionId: "multi_agent",
+        answer: "Multi-agent systems",
+        option: { id: "multi_agent", label: "Multi-agent systems", detail: "Coordination and workflows." }
+      }
+    },
+    toolState: { web_search: true, knowledge_base: true }
+  });
+
+  assert.equal(result.finishReason, "clarification_required");
+  assert.deepEqual(allowedToolRefs, ["ask_clarification"]);
+  const policy = observedContextValues.facetwrite_clarification_policy as Record<string, unknown>;
+  assert.equal(policy.mode, "skill_scope_guard");
+  assert.equal(policy.intakeState, "intake_collecting");
+  assert.equal(policy.intakeRound, 2);
+  assert.match(String(policy.answeredSummary), /Multi-agent systems/);
+});
+
+test("answered intake slot suppresses repeated citation-format clarification from backend", async () => {
+  const { storage, agentClarifications, records } = fakeStorage();
+  let observedContextValues: Record<string, unknown> = {};
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        observedContextValues = input.contextValues ?? {};
+        return {
+          text: "",
+          finishReason: "clarification_required",
+          events: [{
+            eventType: "agent_backend_agent_clarification_requested",
+            payload: {
+              type: "agent_clarification_requested",
+              toolCallId: "call_citation_repeat",
+              question: "Which citation style should I use?",
+              options: [
+                { id: "ieee", label: "IEEE", detail: "Use IEEE numeric citations." },
+                { id: "apa", label: "APA 7", detail: "Use APA 7th edition.", recommended: true },
+                { id: "nature", label: "Nature", detail: "Use Nature style." }
+              ]
+            }
+          }]
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "Prepare a bibliography about autonomous workflows.\n\nSelected clarification: APA 7",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: {
+      agentClarification: {
+        clarificationId: "agent_clarification_citation",
+        question: "Which citation format should the review use?",
+        selectedOptionId: "apa",
+        answer: "APA 7",
+        option: { id: "apa", label: "APA 7", detail: "Use APA 7th edition." },
+        resumeContext: {
+          intakeRound: 1,
+          answeredSummary: "Citation format: APA 7"
+        }
+      }
+    },
+    toolState: { web_search: true, knowledge_base: true }
+  });
+
+  const policy = observedContextValues.facetwrite_clarification_policy as Record<string, unknown>;
+  assert.deepEqual(policy.answeredSlots, ["citation_format"]);
+  assert.equal((policy.missingSlots as string[]).includes("citation format"), false);
+  assert.equal(result.finishReason, "clarification_required");
+  assert.equal(agentClarifications.length, 0);
+  const record = records[0] as { events?: Array<{ eventType: string; payload: Record<string, unknown> }> };
+  assert.ok(record.events?.some((event) => event.eventType === "agent_backend_duplicate_clarification_suppressed"));
+});
+
+test("research skill intake allows evidence tools after three answered clarification rounds", async () => {
+  const { storage } = fakeStorage();
+  let allowedToolRefs: string[] = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        allowedToolRefs = input.allowedToolRefs ?? [];
+        return {
+          text: "Continuing with the scoped literature review.",
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: [
+      "Review recent Agent literature.",
+      "",
+      "Selected clarification: Multi-agent systems",
+      "Selected clarification: 2023-2026",
+      "Selected clarification: 30 papers, APA format"
+    ].join("\n"),
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: {
+      agentClarification: {
+        clarificationId: "agent_clarification_format",
+        selectedOptionId: "format_apa",
+        answer: "30 papers, APA format",
+        resumeContext: {
+          intakeRound: 3,
+          answeredSummary: "Scope: Multi-agent systems; Time range: 2023-2026; Format: 30 papers, APA format"
+        }
+      }
+    },
+    toolState: { web_search: true, knowledge_base: true }
+  });
+
+  assert.equal(result.finishReason, "agent_backend_completed");
+  assert.ok(allowedToolRefs.includes("web_search"));
+  assert.ok(allowedToolRefs.includes("knowledge_base"));
+  assert.ok(allowedToolRefs.includes("ask_clarification"));
+});
+
+test("clarification process narration with appended sources is not recorded as assistant body text", async () => {
+  const { storage, records } = fakeStorage();
+  const clarificationEvent: ToolEventRecord = {
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      toolName: "ask_clarification",
+      toolCallId: "call_scope",
+      question: "Could you confirm the review scope?",
+      options: [
+        { id: "medium_20_apa", label: "20 papers, APA format", detail: "Moderate scope.", recommended: true },
+        { id: "full_30_apa", label: "30 papers, APA format", detail: "Fuller scope." }
+      ]
+    }
+  };
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            type: "tool_completed",
+            toolName: "web_search",
+            sources: [{ title: "Paper A", url: "https://example.com/a" }]
+          }
+        });
+        input.onToolEvent?.(clarificationEvent);
+        return {
+          text: "Now I have the full skill. Let me proceed with Phase 1 by clarifying the scope and format with the user.",
+          finishReason: "agent_backend_completed",
+          events: [clarificationEvent]
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent Agent literature",
+    transientSkillRefs: ["literature-review"],
+    contextValues: { agentClarification: answeredAgentClarification() },
+    toolState: { web_search: true }
+  });
+
+  assert.equal(result.finishReason, "clarification_required");
+  assert.equal(result.text, "");
+  assert.equal((records[0] as { output: string }).output, "");
 });
 
 test("answered Agent clarification falls back to matching pending question when ids differ", async () => {
@@ -1042,12 +1535,12 @@ test("skill scope guard fills default budget and Canvas resume context when runt
   const resumeContext = clarification?.payload.resumeContext as Record<string, unknown> | undefined;
   assert.equal(resumeContext?.originalInstruction, originalInstruction);
   assert.deepEqual(resumeContext?.transientSkillRefs, ["database-lookup", "literature-review"]);
-  assert.equal(resumeContext?.runtimeBudgetProfile, "medium");
+  assert.equal(resumeContext?.runtimeBudgetProfile, "low");
   assert.deepEqual((resumeContext?.canvas as { workflow?: unknown } | undefined)?.workflow, { mode: "batch_delivery" });
   assert.equal((resumeContext?.canvas as { runtimeMarker?: boolean } | undefined)?.runtimeMarker, true);
 });
 
-test("skill scope guard rejects plain text clarification without creating Canvas nodes", async () => {
+test("skill scope guard routes process narration through Canvas recovery instead of assistant body", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
@@ -1062,8 +1555,7 @@ test("skill scope guard rejects plain text clarification without creating Canvas
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
+  const result = await service.generateAndRecordStream({
       mode: "chat",
       locale: "zh",
       agentCardId: "chat-agent",
@@ -1071,13 +1563,13 @@ test("skill scope guard rejects plain text clarification without creating Canvas
       transientSkillRefs: ["database-lookup", "literature-review"],
       contextValues: { canvas: { workflow: { mode: "batch_delivery" } } },
       toolState: { web_search: true }
-    }, { onToolEvent: (event) => events.push(event) }),
-    /skill scope guard requires a structured ask_clarification response/i
-  );
+    }, { onToolEvent: (event) => events.push(event) });
 
-  assert.equal(canvasNodes.length, 0);
-  assert.equal(records.length, 0);
-  assert.ok(events.some((event) => event.eventType === "agent_backend_runtime_failed"));
+  assert.equal(result.text.includes("\u9700\u8981\u5148\u660e\u786e"), false);
+  assert.ok(canvasNodes.length > 0);
+  assert.equal(canvasNodes.some((node) => String(node.content).includes("\u9700\u8981\u5148\u660e\u786e")), false);
+  assert.equal(records.length, 1);
+  assert.ok(events.some((event) => event.eventType.startsWith("canvas_")));
 });
 
 test("skill scope guard covers installed research skills beyond literature and database lookup", async () => {
@@ -1151,6 +1643,7 @@ test("skill scope guard does not block ordinary writing skills", async () => {
     agentCardId: "chat-agent",
     chatInstruction: "Research a topic and draft a blog post outline",
     transientSkillRefs: ["blog-post"],
+    contextValues: { autoPreflightPlan: { enabled: false } },
     toolState: { web_search: true }
   });
 
@@ -1181,20 +1674,19 @@ test("streaming generic long task creates Canvas progress from evidence tools", 
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
+  const result = await service.generateAndRecordStream({
       mode: "chat",
       locale: "en",
       agentCardId: "chat-agent",
       chatInstruction: "Audit dependency risks and report what you find",
-      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
     }, {
       onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /Recursion limit of 100 reached/
-  );
+  });
 
-  assert.equal(records.length, 0);
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /Recursion limit of 100 reached/);
+  assert.equal(records.length, 1);
   assert.ok(canvasNodes.some((node) => node.title === "Overview"));
   assert.ok(canvasNodes.some((node) => node.title === "Body draft" && String(node.content).includes("Working body draft")));
   const progressNode = canvasNodes.find((node) => node.title === "Progress note 1");
@@ -1230,20 +1722,19 @@ test("streaming generic long task skips web fetch references without linked sour
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
+  const result = await service.generateAndRecordStream({
       mode: "chat",
       locale: "en",
       agentCardId: "chat-agent",
       chatInstruction: "Audit dependency risks and report what you find",
-      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
     }, {
       onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /Recursion limit of 100 reached/
-  );
+  });
 
-  assert.equal(records.length, 0);
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /Recursion limit of 100 reached/);
+  assert.equal(records.length, 1);
   assert.ok(canvasNodes.some((node) => node.title === "Overview"));
   assert.equal(canvasNodes.some((node) => node.title === "Progress note 1"), false);
   assert.equal(canvasNodes.some((node) => String(node.content).includes("Fetched runtime notes")), false);
@@ -1285,7 +1776,7 @@ test("progressive Canvas keeps body drafts until evidence budget and finalizes B
     locale: "en",
     agentCardId: "chat-agent",
     chatInstruction: "Research and summarize agent runtime budgets",
-    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
   }, {
     onToolEvent: (event) => events.push(event as typeof events[number])
   });
@@ -1293,18 +1784,20 @@ test("progressive Canvas keeps body drafts until evidence budget and finalizes B
   assert.equal(result.usedMock, false);
   assert.equal(records.length, 1);
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_synthesis_started"));
-  assert.equal(events.filter((event) => event.eventType === "canvas_delivery_body_checkpoint_committed").length, 4);
-  const checkpoint = events.find((event) => event.eventType === "canvas_delivery_body_checkpoint_committed");
-  assert.ok(String(checkpoint?.payload.nodeId).endsWith("_4"));
+  const checkpoints = events.filter((event) => event.eventType === "canvas_delivery_body_checkpoint_committed");
+  assert.equal(checkpoints.length, 2);
+  const checkpoint = checkpoints.at(-1);
+  assert.equal(checkpoint?.payload.draftIndex, 2);
+  assert.equal(checkpoint?.payload.draftLimit, 2);
   assert.equal((checkpoint?.payload.node as { title?: string } | undefined)?.title, "Body draft");
   assert.ok(String((checkpoint?.payload.node as { content?: string } | undefined)?.content ?? "").includes("Working body draft"));
   assert.ok(String((checkpoint?.payload.node as { content?: string } | undefined)?.content ?? "").startsWith("# Body draft"));
   assert.ok(canvasNodes.some((node) => node.title === "Progress note 3"));
-  assert.ok(canvasNodes.some((node) => node.title === "Progress note 16"));
+  assert.ok(canvasNodes.some((node) => node.title === "Progress note 8"));
   const draft = canvasNodes.find((node) => node.title === "Body draft");
   assert.ok(draft);
-  assert.ok(String(draft.content).includes("Evidence 4"));
-  assert.equal(String(draft.content).includes("Evidence 16"), false);
+  assert.ok(String(draft.content).includes("Evidence 2"));
+  assert.equal(String(draft.content).includes("Evidence 8"), false);
   const body = canvasNodes.find((node) => node.title === "Body");
   assert.ok(body);
   assert.equal(String(body.content).includes("Working body draft"), false);
@@ -1355,18 +1848,114 @@ test("progressive Canvas creates a file document node for Markdown output files"
       threadId: "thread_runtime_archive",
       agentCardId: "chat-agent",
       chatInstruction: "Research and write a detailed report",
-      contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
     });
 
     const fileNodes = canvasNodes.filter((node) => node.kind === "file_document");
     assert.equal(fileNodes.length, 1);
     assert.equal((fileNodes[0]?.metadata as { fileDocument?: { status?: string } }).fileDocument?.status, "presented");
+    assert.equal((fileNodes[0]?.metadata as { fileDocument?: { threadId?: string } }).fileDocument?.threadId, "thread_runtime_archive");
     assert.equal(fileNodes[0]?.includeInProjectContext, false);
     assert.equal(String(fileNodes[0]?.content).includes("Long section content."), false);
     assert.ok(String(fileNodes[0]?.content).includes("/mnt/user-data/outputs/report.md"));
     assert.ok(canvasEdges.some((edge) => edge.targetNodeId === fileNodes[0]?.id));
     const saved = await readFile(path.resolve(process.cwd(), appRoot, "threads", "thread_runtime_archive", "user-data", "outputs", "report.md"), "utf8");
     assert.ok(saved.includes("Long section content."));
+  } finally {
+    if (previousRoot === undefined) {
+      delete process.env.FACETWRITE_APP_ROOT;
+    } else {
+      process.env.FACETWRITE_APP_ROOT = previousRoot;
+    }
+    await rm(path.resolve(process.cwd(), appRoot), { recursive: true, force: true });
+  }
+});
+
+test("progressive Canvas finalizes files after clarification when runtime keeps working", async () => {
+  const appRoot = `.facetwrite-test/md-after-clarification-${Date.now()}`;
+  const previousRoot = process.env.FACETWRITE_APP_ROOT;
+  process.env.FACETWRITE_APP_ROOT = appRoot;
+  try {
+    const { storage, canvasNodes, records } = fakeStorage();
+    const reportPath = "/mnt/user-data/outputs/Systematic_Literature_Review_AI_Agents.md";
+    const reportMarkdown = `# Systematic Literature Review\n\n${"Agent literature synthesis. ".repeat(160)}`;
+    const service = createGenerationService(storage, fakeAgentRuntime(), {
+      modelRuntime: fakeModelRuntime,
+      archiveMarkdownOutput: (threadId, virtualPath) => archiveMarkdownForTest(threadId, virtualPath, reportMarkdown),
+      agentBackend: {
+        getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+        runAgent: async (input) => {
+          const emitted: ToolEventRecord[] = [];
+          const emit = (event: ToolEventRecord) => {
+            emitted.push(event);
+            input.onToolEvent?.(event);
+          };
+          emit({
+            eventType: "agent_backend_agent_clarification_requested",
+            payload: {
+              type: "agent_clarification_requested",
+              toolCallId: "call_citation_format",
+              question: "您希望文献综述使用哪种引用格式？",
+              options: [
+                { id: "apa", label: "APA 7th", detail: "社会科学常用格式", recommended: true },
+                { id: "ieee", label: "IEEE", detail: "工程领域常用格式" }
+              ]
+            }
+          });
+          emit({
+            eventType: "agent_backend_tool_started",
+            payload: { type: "tool_started", toolName: "web_search", toolCallId: "call_search" }
+          });
+          emit({
+            eventType: "agent_backend_tool_completed",
+            payload: {
+              type: "tool_completed",
+              toolName: "web_search",
+              toolCallId: "call_search",
+              query: "recent AI agent survey",
+              sources: [{ title: "Agent survey", url: "https://example.com/agent-survey" }]
+            }
+          });
+          emit({
+            eventType: "agent_backend_tool_completed",
+            payload: { type: "tool_completed", toolName: "write_file", toolCallId: "call_write", path: reportPath }
+          });
+          emit({
+            eventType: "agent_backend_tool_completed",
+            payload: { type: "tool_completed", toolName: "present_files", toolCallId: "call_present", filepaths: [reportPath] }
+          });
+          return {
+            text: "",
+            finishReason: "clarification_required",
+            events: emitted
+          };
+        }
+      }
+    });
+
+    const result = await service.generateAndRecordStream({
+      mode: "chat",
+      locale: "zh",
+      threadId: "thread_after_clarification",
+      agentCardId: "chat-agent",
+      chatInstruction: "帮我查找最近Agent相关的文献，并且做文献综述。",
+      transientSkillRefs: ["database-lookup", "literature-review"],
+      contextValues: {
+        canvas: { workflow: { mode: "batch_delivery" } },
+        agentClarification: answeredAgentClarification()
+      },
+      toolState: { web_search: true }
+    });
+
+    assert.notEqual(result.finishReason, "clarification_required");
+    assert.equal(records.length, 1);
+    assert.notEqual((records[0] as { finishReason?: string }).finishReason, "clarification_required");
+    const fileNode = canvasNodes.find((node) => node.kind === "file_document");
+    assert.ok(fileNode);
+    assert.ok(String(fileNode.content).includes(reportPath));
+    assert.ok(canvasNodes.some((node) => node.title === "正文"));
+    const body = canvasNodes.find((node) => node.title === "正文");
+    assert.ok(String(body?.content).includes("Systematic Literature Review"));
   } finally {
     if (previousRoot === undefined) {
       delete process.env.FACETWRITE_APP_ROOT;
@@ -1417,7 +2006,7 @@ test("progressive Canvas does not create a file document node when runtime Markd
     threadId: "thread_runtime_archive_missing",
     agentCardId: "chat-agent",
     chatInstruction: "Research and write a detailed report",
-    contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
   }, {
     onToolEvent: (event) => events.push(event as typeof events[number])
   });
@@ -2035,8 +2624,7 @@ test("progressive Canvas blocks leaked skill DSML as final body", async () => {
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
+  const result = await service.generateAndRecordStream({
       mode: "chat",
       locale: "zh",
       agentCardId: "chat-agent",
@@ -2046,11 +2634,11 @@ test("progressive Canvas blocks leaked skill DSML as final body", async () => {
     }, {
       onToken: (token) => tokens.push(token),
       onToolEvent: (event) => events.push(event as typeof events[number])
-    }),
-    /internal runtime output/
-  );
+  });
 
-  assert.equal(records.length, 0);
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /internal runtime output/);
+  assert.equal(records.length, 1);
   assert.equal(tokens.join("").includes("webfetch"), false);
   assert.equal(canvasNodes.some((node) => /DSML|tool_calls|webfetch|invoke|parameter|maxcontentlength|2504\.19678/i.test(String(node.content))), false);
   assert.ok(canvasNodes.some((node) => node.title === "正文草稿" && String(node.content).includes("工作正文草稿")));
@@ -2078,18 +2666,17 @@ test("progressive Canvas notes sanitize unsafe tool snippets", async () => {
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecordStream({
+  const result = await service.generateAndRecordStream({
       mode: "chat",
       locale: "en",
       agentCardId: "chat-agent",
       chatInstruction: "Audit the project files",
       transientSkillRefs: ["database-lookup"],
       contextValues: { canvas: { workflow: { mode: "batch_delivery" } } }
-    }),
-    /Recursion limit of 100 reached/
-  );
+  });
 
+  assert.equal(result.completion?.status, "failed");
+  assert.match(result.errorMessage ?? "", /Recursion limit of 100 reached/);
   const text = canvasNodes.map((node) => String(node.content)).join("\n");
   assert.equal(text.includes("sk-secret"), false);
   assert.equal(text.includes("OPENAI_API_KEY"), false);
@@ -2128,6 +2715,7 @@ test("streaming direct Canvas delivery progressively creates placeholders and fi
     }
   });
 
+  const progressEvents: Array<{ title?: string; summary: string; visibility?: string }> = [];
   const result = await service.generateAndRecordStream({
     mode: "chat",
     locale: "en",
@@ -2136,14 +2724,17 @@ test("streaming direct Canvas delivery progressively creates placeholders and fi
     toolState: { web_search: true }
   }, {
     onReasoningToken: (token) => reasoningTokens.push(token),
+    onProgressEvent: (event) => progressEvents.push(event),
     onToolEvent: (event) => events.push(event as typeof events[number])
   });
 
   assert.equal(result.usedMock, false);
   assert.equal(result.text.includes("Creating outline"), false);
-  assert.ok(reasoningTokens.join("").includes("Preparing context"));
-  assert.ok(reasoningTokens.join("").includes("creating outline and body placeholders"));
-  assert.ok(reasoningTokens.join("").includes("reconciling Canvas nodes"));
+  assert.equal(reasoningTokens.join("").includes("Preparing context"), false);
+  assert.ok(progressEvents.every((event) => event.visibility !== "raw"));
+  assert.ok(progressEvents.some((event) => event.title === "Preparing run" && event.summary.includes("Preparing task context")));
+  assert.ok(progressEvents.some((event) => event.title === "Deliverable update" && event.summary.includes("Canvas updates")));
+  assert.ok(progressEvents.some((event) => event.summary.includes("reconciling Canvas nodes")));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_outline_committed"));
   assert.ok(canvasNodes.length >= 3);
   assert.ok(canvasEdges.length >= 2);
@@ -2245,8 +2836,25 @@ test("generation accepts a persisted Plan clarification when the stream event is
   assert.equal(result.provider, "agent-backend");
 });
 
-test("generation rejects a Plan success event when the repository was not updated", async () => {
-  const { storage } = fakeStorage();
+test("generation records recovery when a Plan success event was not persisted", async () => {
+  const { storage, planState } = fakeStorage();
+  const activities: Array<Record<string, unknown>> = [];
+  storage.recordPlanActivity = (_threadId, _planId, input) => {
+    activities.push(input);
+    return {
+      id: `activity_${activities.length}`,
+      threadId: _threadId,
+      planRunId: _planId,
+      runId: input.runId,
+      stepId: input.stepId,
+      type: input.type,
+      status: input.status,
+      summary: String(input.summary ?? ""),
+      detail: input.detail ?? {},
+      sequence: activities.length,
+      createdAt: new Date(0).toISOString()
+    };
+  };
   const service = createGenerationService(storage, fakeAgentRuntime(), {
     modelRuntime: fakeModelRuntime,
     agentBackend: {
@@ -2259,10 +2867,13 @@ test("generation rejects a Plan success event when the repository was not update
     }
   });
 
-  await assert.rejects(
-    () => service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "/plan Compare laptops" }),
-    /persisted clarification/
-  );
+  const result = await service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "/plan Compare laptops" });
+
+  assert.equal(result.provider, "agent-backend");
+  assert.equal(planState.status, "failed");
+  assert.match(String(planState.statusMessage), /persisted clarification/);
+  assert.equal(activities.at(-1)?.type, "plan_failed");
+  assert.equal(activities.at(-1)?.status, "needs_recovery");
 });
 
 test("generation facade blocks AgentBackend internal prompt output before recording", async () => {
@@ -2501,7 +3112,8 @@ test("streaming generation applies transient skills without saving them to Agent
     locale: "zh",
     agentCardId: "chat-agent",
     chatInstruction: "帮我总结一下",
-    transientSkillRefs: ["summary"]
+    transientSkillRefs: ["summary"],
+    contextValues: { autoPreflightPlan: { enabled: false } }
   }, {
     onTimelineEvent: (event) => timelineEvents.push(event)
   });

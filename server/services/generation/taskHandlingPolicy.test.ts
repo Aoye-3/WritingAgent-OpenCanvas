@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isProcessClarificationText, resolveTaskHandlingPolicy } from "./taskHandlingPolicy.js";
+import { isProcessClarificationText, resolveTaskHandlingPolicy, shouldAutoPreflightPlan } from "./taskHandlingPolicy.js";
 
 test("classifies ordinary short questions as simple chat without Canvas", () => {
   const policy = resolveTaskHandlingPolicy({
@@ -49,6 +49,29 @@ test("classifies slash plan requests as Plan intake without Canvas", () => {
 
   assert.equal(policy.kind, "plan_intake");
   assert.equal(policy.canvasDeliveryMode, "none");
+});
+
+test("auto preflight triggers only for complex ordinary chat tasks", () => {
+  assert.equal(shouldAutoPreflightPlan({
+    payload: { mode: "chat", locale: "en", chatInstruction: "Research current agent planning systems and write a report with sources." }
+  }), true);
+  assert.equal(shouldAutoPreflightPlan({
+    payload: { mode: "chat", locale: "en", chatInstruction: "What is a mutex?" }
+  }), false);
+  assert.equal(shouldAutoPreflightPlan({
+    payload: { mode: "chat", locale: "en", chatInstruction: "/plan Research current agent planning systems." }
+  }), false);
+});
+
+test("auto preflight respects an explicit server-side opt-out", () => {
+  assert.equal(shouldAutoPreflightPlan({
+    payload: {
+      mode: "chat",
+      locale: "en",
+      chatInstruction: "Research current agent planning systems and write a report with sources.",
+      contextValues: { autoPreflightPlan: { enabled: false } }
+    }
+  }), false);
 });
 
 test("detects process clarification text that must not become Canvas content", () => {

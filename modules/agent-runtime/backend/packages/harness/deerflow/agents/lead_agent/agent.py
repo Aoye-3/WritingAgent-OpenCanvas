@@ -10,6 +10,7 @@ from deerflow.agents.middlewares.clarification_middleware import ClarificationMi
 from deerflow.agents.middlewares.loop_detection_middleware import LoopDetectionMiddleware
 from deerflow.agents.middlewares.memory_middleware import MemoryMiddleware
 from deerflow.agents.middlewares.plan_tool_choice_middleware import PlanToolChoiceMiddleware
+from deerflow.agents.middlewares.progress_reporting_middleware import ProgressReportingMiddleware
 from deerflow.agents.middlewares.subagent_limit_middleware import SubagentLimitMiddleware
 from deerflow.agents.middlewares.summarization_middleware import BeforeSummarizationHook, DeerFlowSummarizationMiddleware
 from deerflow.agents.middlewares.title_middleware import TitleMiddleware
@@ -46,8 +47,31 @@ def _is_skill_scope_guard(cfg: dict) -> bool:
     return isinstance(policy, dict) and policy.get("mode") == "skill_scope_guard"
 
 
-def _guard_model_kwargs(model_config: ModelConfig, *, skill_scope_guard: bool) -> dict:
-    if not skill_scope_guard:
+def _forced_tool_choice_reason(cfg: dict) -> tuple[str, str] | None:
+    if _is_skill_scope_guard(cfg):
+        return ("skill_scope_guard", "ask_clarification")
+    canvas_action = cfg.get("facetwrite_canvas_action")
+    if cfg.get("facetwrite_plan_phase") == "chat" and isinstance(canvas_action, dict) and canvas_action.get("requiresTool") is True:
+        return ("canvas_write", "canvas_write")
+    if cfg.get("facetwrite_plan_phase") != "planning":
+        return None
+    stage = cfg.get("facetwrite_plan_stage")
+    if stage in (None, "intake"):
+        return ("plan_intake", "plan_clarification_submit")
+    if stage == "revise":
+        return ("plan_revision", "plan_revision_submit")
+    return None
+
+
+def _set_runtime_context_value(config: RunnableConfig, key: str, value: object) -> None:
+    for section in ("context", "configurable"):
+        target = config.setdefault(section, {})
+        if isinstance(target, dict):
+            target[key] = value
+
+
+def _guard_model_kwargs(model_config: ModelConfig, *, disable_thinking_for_tool_choice: bool) -> dict:
+    if not disable_thinking_for_tool_choice:
         return {}
     disabled_settings = model_config.when_thinking_disabled
     if isinstance(disabled_settings, dict):
@@ -332,6 +356,8 @@ def _build_middlewares(
     if loop_detection_config.enabled:
         middlewares.append(LoopDetectionMiddleware.from_config(loop_detection_config))
 
+    middlewares.append(ProgressReportingMiddleware())
+
     # Inject custom middlewares before ClarificationMiddleware
     if custom_middlewares:
         middlewares.extend(custom_middlewares)
@@ -399,12 +425,24 @@ def _make_lead_agent(config: RunnableConfig, *, app_config: AppConfig):
 
     if model_config is None:
         raise ValueError("No chat model could be resolved. Please configure at least one model in config.yaml or provide a valid 'model_name'/'model' in the request.")
-    skill_scope_guard = _is_skill_scope_guard(cfg)
-    model_kwargs = _guard_model_kwargs(model_config, skill_scope_guard=skill_scope_guard)
-    if skill_scope_guard:
-        logger.info("Skill scope guard disables thinking for forced ask_clarification compatibility.")
+    forced_tool_choice = _forced_tool_choice_reason(cfg)
+    disable_thinking_for_tool_choice = (
+        thinking_enabled
+        and forced_tool_choice is not None
+        and model_config.supports_tool_choice_with_thinking is False
+    )
+    model_kwargs = _guard_model_kwargs(
+        model_config,
+        disable_thinking_for_tool_choice=disable_thinking_for_tool_choice,
+    )
+    if disable_thinking_for_tool_choice:
+        reason, tool_name = forced_tool_choice
+        logger.info("Disabling thinking for forced tool_choice compatibility: reason=%s tool=%s model=%s", reason, tool_name, model_name)
         thinking_enabled = False
         reasoning_effort = None
+        _set_runtime_context_value(config, "facetwrite_thinking_disabled_for_tool_choice_compatibility", True)
+        _set_runtime_context_value(config, "facetwrite_thinking_disabled_reason", reason)
+        _set_runtime_context_value(config, "facetwrite_forced_tool_choice", tool_name)
     if thinking_enabled and not model_config.supports_thinking:
         logger.warning(f"Thinking mode is enabled but model '{model_name}' does not support it; fallback to non-thinking mode.")
         thinking_enabled = False

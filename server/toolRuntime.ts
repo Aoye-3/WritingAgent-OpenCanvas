@@ -60,6 +60,8 @@ export type ToolEventRecord = {
     | "tool_call_completed"
     | "tool_call_failed"
     | "tool_loop_stopped"
+    | "completion_evaluated"
+    | "todo_completion_incomplete"
     | "internal_output_blocked"
     | "knowledge_search_completed"
     | "knowledge_search_failed"
@@ -156,6 +158,9 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
     const plan = planId && context.getPlanRun?.(planId);
     if (!plan || plan.approval !== "pending" || !context.revisePlanRun || !Array.isArray(args.steps)) {
       return { ok: false, content: "Only the specified pending Plan can be revised.", payload: { tool: name, reason: "plan_not_pending", planId } };
+    }
+    if (args.steps.length < 2 || args.steps.length > 5) {
+      return { ok: false, content: "Plan revisions must contain 2-5 executable steps.", payload: { tool: name, reason: "invalid_step_count", planId, stepCount: args.steps.length } };
     }
     const revised = context.revisePlanRun(planId, { title: args.title, goal: args.goal, steps: args.steps as Array<{ id?: string; title: unknown; detail?: unknown }> });
     return revised

@@ -26,6 +26,7 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
 
     def __init__(self):
         self._forced_attempts: set[str] = set()
+        self._compatibility_events: set[str] = set()
 
     def _prepare(self, request: ModelRequest) -> ModelRequest:
         runtime = getattr(request, "runtime", None)
@@ -39,10 +40,10 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         request = PlanToolChoiceMiddleware._apply_runtime_budget(request, context)
         if PlanToolChoiceMiddleware._is_skill_scope_guard(context):
             if not PlanToolChoiceMiddleware._has_tool_result(request, "ask_clarification") and PlanToolChoiceMiddleware._has_tool(request, "ask_clarification"):
-                return request.override(tool_choice="ask_clarification")
+                return self._force_tool_choice(request, context, "ask_clarification")
         if phase == "chat" and isinstance(canvas_action, dict) and canvas_action.get("requiresTool") is True:
             if not PlanToolChoiceMiddleware._has_tool_result(request, "canvas_write") and PlanToolChoiceMiddleware._has_tool(request, "canvas_write"):
-                return request.override(tool_choice="canvas_write")
+                return self._force_tool_choice(request, context, "canvas_write")
         if phase != "planning":
             return request
 
@@ -61,7 +62,28 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         }
         if contract not in tool_names:
             return request
-        return request.override(tool_choice=contract)
+        return self._force_tool_choice(request, context, contract)
+
+    def _force_tool_choice(self, request: ModelRequest, context: object, tool_choice: str) -> ModelRequest:
+        self._emit_tool_choice_compatibility_event(context, tool_choice)
+        return request.override(tool_choice=tool_choice)
+
+    def _emit_tool_choice_compatibility_event(self, context: object, tool_choice: str) -> None:
+        if not isinstance(context, dict) or context.get("facetwrite_thinking_disabled_for_tool_choice_compatibility") is not True:
+            return
+        reason = context.get("facetwrite_thinking_disabled_reason")
+        key = f"{context.get('thread_id')}:{context.get('facetwrite_plan_phase_attempt_id')}:{tool_choice}:{reason}"
+        if key in self._compatibility_events:
+            return
+        self._compatibility_events.add(key)
+        PlanToolChoiceMiddleware._emit_synthesis_event({
+            "type": "thinking_disabled_for_tool_choice_compatibility",
+            "phase": context.get("facetwrite_plan_phase"),
+            "planId": context.get("facetwrite_plan_id") or context.get("facetwrite_agent_plan_id"),
+            "stepId": context.get("facetwrite_plan_step_id") or context.get("facetwrite_agent_plan_step_id"),
+            "tool_choice": tool_choice,
+            "reason": reason or "forced_tool_choice",
+        })
 
     @staticmethod
     def _filter_tools(request: ModelRequest, context: object) -> ModelRequest:
@@ -100,6 +122,8 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             allowed = {"plan_clarification_submit"}
         elif phase == "planning" and stage == "revise":
             allowed = {"plan_revision_submit"}
+        elif phase == "planning" and stage == "preflight":
+            allowed = {"plan_clarification_submit", "plan_revision_submit"}
         filtered = [
             tool for tool in request.tools
             if PlanToolChoiceMiddleware._tool_name(tool) in allowed
@@ -121,12 +145,14 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         evidence_tools_raw = context.get("facetwrite_evidence_tools")
         evidence_tools = {value for value in evidence_tools_raw if isinstance(value, str)} if isinstance(evidence_tools_raw, list) else set()
         completed_evidence_tools = PlanToolChoiceMiddleware._completed_tool_count(request, evidence_tools)
+        completed_tools = PlanToolChoiceMiddleware._completed_tool_count(request, None)
         model_calls = sum(1 for message in request.messages if isinstance(message, AIMessage))
-        estimated_steps_used = len(request.messages)
+        estimated_steps_used = max(len(request.messages), model_calls * 4 + completed_tools * 3)
+        effective_reserve_steps = max(reserve_steps, recursion_limit // 3 if recursion_limit else 0)
 
         evidence_exhausted = bool(evidence_limit and completed_evidence_tools >= evidence_limit and context.get("facetwrite_force_synthesis_after_evidence") is True)
-        model_exhausting = bool(model_limit and model_calls >= max(model_limit - 1, 1))
-        recursion_exhausting = bool(recursion_limit and reserve_steps and recursion_limit - estimated_steps_used <= reserve_steps)
+        model_exhausting = bool(model_limit and model_calls >= max(model_limit - 4, 1))
+        recursion_exhausting = bool(recursion_limit and effective_reserve_steps and recursion_limit - estimated_steps_used <= effective_reserve_steps)
         if not (evidence_exhausted or model_exhausting or recursion_exhausting):
             return request
 
@@ -141,6 +167,7 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             "model_calls": model_calls,
             "recursion_limit": recursion_limit,
             "estimated_steps_used": estimated_steps_used,
+            "reserve_steps": effective_reserve_steps,
             "file_delivery_required": context.get("facetwrite_markdown_file_delivery_required") is True,
             "second_handler": False,
             "entered_second_handler": False,
@@ -220,13 +247,13 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         return value if isinstance(value, int) and value > 0 else None
 
     @staticmethod
-    def _completed_tool_count(request: ModelRequest, tool_names: set[str]) -> int:
-        if not tool_names:
+    def _completed_tool_count(request: ModelRequest, tool_names: set[str] | None) -> int:
+        if tool_names is not None and not tool_names:
             return 0
         return sum(
             1
             for message in request.messages
-            if isinstance(message, ToolMessage) and getattr(message, "name", None) in tool_names
+            if isinstance(message, ToolMessage) and (tool_names is None or getattr(message, "name", None) in tool_names)
         )
 
     @staticmethod

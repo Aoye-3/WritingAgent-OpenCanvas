@@ -55,7 +55,7 @@ test("orchestrator attributes tool activity to the only running plan when the ad
     stepId: undefined,
     type: "tool_started",
     status: "running",
-    summary: "Tool started: web_search"
+    summary: "Checking sources"
   }]);
 });
 

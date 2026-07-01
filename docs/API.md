@@ -18,6 +18,33 @@ When a run uses `web_search`, completed search tool events may include sanitized
 
 The backend derives Plan phase independently of frontend flags. `/plan` forces planning-only tools; approved continuation forces Plan execution tools and a single step id. Ordinary chat keeps the active Agent's configured tool state.
 
+## Claim Review
+
+- `GET /api/threads/:threadId/claims`
+  - Optional query: `sourceNodeId`.
+  - Returns `{ claims }` ordered newest first. Claims are review candidates for the current Markdown preview, not Canvas nodes.
+- `POST /api/threads/:threadId/claims/from-selection`
+  - Body: `{ sourceNodeId, sourceDocumentPath, sourceFileName?, selectedText, sourceAnchor?, surroundingContext?, citationUrls? }`.
+  - Creates a persisted candidate Claim from selected Markdown preview text and returns `{ claim }`.
+- `POST /api/threads/:threadId/claims/extract`
+  - Body: `{ sourceNodeId, sourceDocumentPath, sourceFileName?, configuredModelApiId?, maxCandidates? }`.
+  - Extracts a bounded set of candidate Claims from the current Markdown preview. Extraction does not create Canvas nodes.
+- `PATCH /api/threads/:threadId/claims/:claimId`
+  - Body accepts `{ claimText?, evidenceText?, status? }`.
+  - Updates the candidate and returns `{ claim }`. Editing text preserves `originalClaimText` and marks the candidate `edited` unless an explicit status is supplied.
+- `DELETE /api/threads/:threadId/claims/:claimId`
+  - Deletes the persisted candidate row and returns `{ deleted: true }`.
+  - Deleting a Claim candidate does not delete any Canvas node that may already have been created from it.
+- `POST /api/threads/:threadId/claims/:claimId/create-node`
+  - Legacy accepted-Claim path. Creates one Canvas node only when the Claim is `accepted`.
+  - Created nodes use compact `摘要 N` titles and write only `claimText` into visible node content; source path and anchor remain metadata/provenance.
+- `POST /api/threads/:threadId/claims/create-nodes`
+  - Legacy accepted-Claim batch path. Body may include `{ claimIds?, kind? }` and creates nodes only for accepted Claims matching the optional id filter.
+  - Batch-created nodes follow the same compact title/content policy as the single create-node path.
+
+The current Markdown preview UI uses direct user actions for `Create selected` and `Delete selected`: selected candidates are converted through the normal Canvas node creation callback, while deletion calls the persistent `DELETE` route above.
+The direct UI path also creates compact document nodes: visible content is the candidate `claimText`; `evidenceText` is retained only for source fallback/highlight behavior.
+
 ## Canvas Objects And Assets
 
 - `GET /api/threads/:threadId/canvas`

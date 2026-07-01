@@ -252,6 +252,15 @@ export type RunTimelineEvent = {
   createdAt: string;
 };
 
+export type RunCompletionStatus = "continue" | "waiting" | "finalizing" | "completed" | "partial" | "failed";
+
+export type RunCompletionVerdict = {
+  status: RunCompletionStatus;
+  reasons: string[];
+  missingRequirements: string[];
+  evaluatedAt: string;
+};
+
 export type CanvasNodeKind = "document" | "note" | "reference" | "role" | "plan" | "file_document" | "clarification";
 export type CanvasWriteOperation = "create" | "replace" | "append" | "replace_range";
 export type CanvasWriteRequestStatus = "pending" | "approved" | "rejected" | "stale";
@@ -325,6 +334,7 @@ export type CanvasWriteRequest = {
 };
 
 export type PlanStepStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+export type PlanRunOrigin = "explicit_plan" | "auto_complex_task" | "approved_execution";
 export type PlanClarification = {
   question: string;
   options: Array<{ id: string; label: string; description: string; recommended: boolean }>;
@@ -337,6 +347,7 @@ export type PlanRun = {
   status: "draft" | "awaiting_approval" | "running" | "paused" | "awaiting_user" | "completed" | "failed" | "cancelled";
   approval: "pending" | "approved" | "rejected"; statusMessage: string;
   canvasNodeId?: string; currentStepId?: string; executionVersion: number;
+  origin?: PlanRunOrigin; complexity?: unknown; budget?: unknown; preflight?: unknown;
   clarification?: PlanClarification;
   steps: Array<{ id: string; title: string; detail: string; status: PlanStepStatus; attempt: number; error?: string }>;
   artifacts: Array<{ id: string; stepId: string; type: "text" | "image"; status: "staged" | "committing" | "committed" | "failed"; title: string; canvasTargetId?: string; error?: string }>;
@@ -385,6 +396,7 @@ export type ThreadStateResponse = {
   toolEvents: StoredToolEvent[];
   agentClarifications?: AgentClarification[];
   runTimelineEvents?: RunTimelineEvent[];
+  runCompletion?: RunCompletionVerdict;
   canvasNodes?: CanvasNode[];
   canvasEdges?: CanvasEdge[];
   canvasObjects?: CanvasObject[];

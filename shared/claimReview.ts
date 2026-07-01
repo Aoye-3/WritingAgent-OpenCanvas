@@ -60,7 +60,7 @@ export type CreateClaimCanvasNodeInput = {
 
 export type ClaimCanvasNodeContentInput = Pick<
   ClaimCandidate,
-  "claimText" | "evidenceText" | "sourceDocumentPath" | "status"
+  "claimText"
 >;
 
 export function isClaimStatus(value: unknown): value is ClaimStatus {
@@ -68,12 +68,10 @@ export function isClaimStatus(value: unknown): value is ClaimStatus {
 }
 
 export function createClaimCanvasNodeContent(claim: ClaimCanvasNodeContentInput) {
-  return [
-    `Claim: ${claim.claimText}`,
-    "",
-    `Evidence: ${claim.evidenceText}`,
-    "",
-    `Source: ${claim.sourceDocumentPath}`,
-    `Status: ${claim.status}`
-  ].join("\n");
+  return claim.claimText.trim();
+}
+
+export function claimSummaryTitle(sequence: number) {
+  const safeSequence = Number.isFinite(sequence) ? Math.max(1, Math.trunc(sequence)) : 1;
+  return `摘要 ${safeSequence}`;
 }

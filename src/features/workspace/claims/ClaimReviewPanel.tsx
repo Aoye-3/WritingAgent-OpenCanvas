@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
-import type { ClaimCandidate, ClaimStatus } from "../../../../shared/claimReview";
+import { ChevronRightIcon, SearchIcon } from "../../../shared/icons";
+import type { ClaimCandidate } from "../../../../shared/claimReview";
+import { claimSummaryTitle } from "../../../../shared/claimReview";
 
 type ClaimReviewPanelProps = {
   claims: ClaimCandidate[];
@@ -8,14 +10,13 @@ type ClaimReviewPanelProps = {
   extracting: boolean;
   loading: boolean;
   locale: "en" | "zh";
-  onAccept: (claim: ClaimCandidate) => Promise<unknown>;
   onCreateNode: (claim: ClaimCandidate) => Promise<unknown>;
-  onCreateNodesFromAccepted: () => Promise<unknown>;
+  onCreateSelected: (claims: ClaimCandidate[]) => Promise<unknown>;
+  onDelete: (claim: ClaimCandidate) => Promise<unknown>;
+  onDeleteSelected: (claims: ClaimCandidate[]) => Promise<unknown>;
   onEdit: (claim: ClaimCandidate, claimText: string) => Promise<unknown>;
   onExtract: () => Promise<unknown>;
-  onReject: (claim: ClaimCandidate) => Promise<unknown>;
   onSendToChat: (claims: ClaimCandidate[]) => void;
-  onSetStatus: (claim: ClaimCandidate, status: ClaimStatus) => Promise<unknown>;
   onShowSource: (claim: ClaimCandidate) => void;
 };
 
@@ -26,20 +27,19 @@ export function ClaimReviewPanel({
   extracting,
   loading,
   locale,
-  onAccept,
   onCreateNode,
-  onCreateNodesFromAccepted,
+  onCreateSelected,
+  onDelete,
+  onDeleteSelected,
   onEdit,
   onExtract,
-  onReject,
   onSendToChat,
-  onSetStatus,
   onShowSource
 }: ClaimReviewPanelProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
-  const acceptedCount = claims.filter((claim) => claim.status === "accepted").length;
   const selectedClaims = useMemo(() => claims.filter((claim) => selectedIds.has(claim.id)), [claims, selectedIds]);
   const copy = claimCopy(locale);
 
@@ -50,6 +50,21 @@ export function ClaimReviewPanel({
       else next.add(claimId);
       return next;
     });
+  };
+
+  const toggleExpanded = (claimId: string) => {
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      if (next.has(claimId)) next.delete(claimId);
+      else next.add(claimId);
+      return next;
+    });
+  };
+
+  const beginEditing = (claim: ClaimCandidate) => {
+    setEditingId(claim.id);
+    setEditText(claim.claimText);
+    setExpandedIds((current) => new Set(current).add(claim.id));
   };
 
   return (
@@ -65,17 +80,12 @@ export function ClaimReviewPanel({
       </header>
 
       <div className="claim-review-batch">
-        <button className="button button-secondary button-small" type="button" disabled={!selectedClaims.length} onClick={() => void Promise.all(selectedClaims.map((claim) => onAccept(claim)))}>
-          {copy.acceptSelected}
+        <span>{copy.selectedCount(selectedClaims.length)}</span>
+        <button className="button button-secondary button-small" type="button" disabled={!selectedClaims.length} onClick={() => void onCreateSelected(selectedClaims)}>
+          {copy.createSelected}
         </button>
-        <button className="button button-secondary button-small" type="button" disabled={!selectedClaims.length} onClick={() => void Promise.all(selectedClaims.map((claim) => onReject(claim)))}>
-          {copy.rejectSelected}
-        </button>
-        <button className="button button-secondary button-small" type="button" disabled={!acceptedCount} onClick={() => void onCreateNodesFromAccepted()}>
-          {copy.createAccepted}
-        </button>
-        <button className="button button-secondary button-small" type="button" disabled={!selectedClaims.length} onClick={() => onSendToChat(selectedClaims)}>
-          {copy.sendSelected}
+        <button className="button button-secondary button-small" type="button" disabled={!selectedClaims.length} onClick={() => void onDeleteSelected(selectedClaims).then(() => setSelectedIds(new Set()))}>
+          {copy.deleteSelected}
         </button>
       </div>
 
@@ -84,42 +94,66 @@ export function ClaimReviewPanel({
       {!loading && !claims.length ? <p className="claim-review-empty">{copy.empty}</p> : null}
 
       <div className="claim-review-list">
-        {claims.map((claim) => {
+        {claims.map((claim, index) => {
           const editing = editingId === claim.id;
+          const expanded = expandedIds.has(claim.id) || editing;
+          const detailId = `claim-review-detail-${claim.id}`;
+          const summaryTitle = claimSummaryTitle(index + 1);
+          const sourceLabel = claim.sourceFileName || claim.sourceDocumentPath;
           return (
-            <article className="claim-review-item" data-status={claim.status} key={claim.id}>
-              <label className="claim-review-select">
-                <input checked={selectedIds.has(claim.id)} onChange={() => toggleSelected(claim.id)} type="checkbox" />
-                <span>{statusLabel(claim.status, locale)}</span>
-              </label>
-              {editing ? (
-                <textarea className="claim-review-edit" value={editText} onChange={(event) => setEditText(event.target.value)} />
-              ) : (
-                <p className="claim-review-text">{claim.claimText}</p>
-              )}
-              <blockquote>{claim.evidenceText}</blockquote>
-              <span className="claim-review-source">{claim.sourceFileName || claim.sourceDocumentPath}</span>
-              <div className="claim-review-actions">
-                {editing ? (
-                  <>
-                    <button className="button button-primary button-small" type="button" onClick={() => void onEdit(claim, editText).then(() => setEditingId(null))}>{copy.save}</button>
-                    <button className="button button-secondary button-small" type="button" onClick={() => setEditingId(null)}>{copy.cancel}</button>
-                  </>
-                ) : (
-                  <>
-                    <button className="button button-secondary button-small" type="button" onClick={() => void onAccept(claim)}>{copy.accept}</button>
-                    <button className="button button-secondary button-small" type="button" onClick={() => void onReject(claim)}>{copy.reject}</button>
-                    <button className="button button-secondary button-small" type="button" onClick={() => void onSetStatus(claim, "needs_more_evidence")}>{copy.needsEvidence}</button>
-                    <button className="button button-secondary button-small" type="button" onClick={() => {
-                      setEditingId(claim.id);
-                      setEditText(claim.claimText);
-                    }}>{copy.edit}</button>
-                    <button className="button button-secondary button-small" type="button" onClick={() => onShowSource(claim)}>{copy.showSource}</button>
-                    <button className="button button-secondary button-small" type="button" disabled={claim.status !== "accepted"} onClick={() => void onCreateNode(claim)}>{copy.createNode}</button>
-                    <button className="button button-secondary button-small" type="button" onClick={() => onSendToChat([claim])}>{copy.send}</button>
-                  </>
-                )}
+            <article className="claim-review-item" data-expanded={expanded} data-status={claim.status} key={claim.id}>
+              <div className="claim-review-item-summary">
+                <label className="claim-review-select">
+                  <input aria-label={copy.selectSummary(summaryTitle)} checked={selectedIds.has(claim.id)} onChange={() => toggleSelected(claim.id)} type="checkbox" />
+                </label>
+                <button
+                  aria-controls={detailId}
+                  aria-expanded={expanded}
+                  className="claim-review-expand"
+                  type="button"
+                  onClick={() => toggleExpanded(claim.id)}
+                >
+                  <span className="claim-review-title">{summaryTitle}</span>
+                  <span className="claim-review-preview">{claim.claimText}</span>
+                  <span className="claim-review-meta">
+                    {sourceLabel ? <span>{sourceLabel}</span> : null}
+                  </span>
+                  <ChevronRightIcon aria-hidden="true" className="claim-review-chevron" size={16} />
+                </button>
+                <button className="claim-review-source-action" type="button" title={copy.showSource} onClick={() => onShowSource(claim)}>
+                  <SearchIcon aria-hidden="true" size={14} />
+                  <span>{copy.showSource}</span>
+                </button>
               </div>
+              {expanded ? (
+                <div className="claim-review-item-body" id={detailId}>
+                  {editing ? (
+                    <textarea className="claim-review-edit" value={editText} onChange={(event) => setEditText(event.target.value)} />
+                  ) : (
+                    <p className="claim-review-text">{claim.claimText}</p>
+                  )}
+                  <span className="claim-review-source">{sourceLabel}</span>
+                  <div className="claim-review-actions">
+                    {editing ? (
+                      <>
+                        <button className="button button-primary button-small" type="button" onClick={() => void onEdit(claim, editText).then(() => setEditingId(null))}>{copy.save}</button>
+                        <button className="button button-secondary button-small" type="button" onClick={() => setEditingId(null)}>{copy.cancel}</button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="button button-secondary button-small" type="button" onClick={() => beginEditing(claim)}>{copy.edit}</button>
+                        <button className="button button-secondary button-small" type="button" onClick={() => void onCreateNode(claim)}>{copy.createNode}</button>
+                        <button className="button button-secondary button-small" type="button" onClick={() => void onDelete(claim).then(() => setSelectedIds((current) => {
+                          const next = new Set(current);
+                          next.delete(claim.id);
+                          return next;
+                        }))}>{copy.deleteClaim}</button>
+                        <button className="button button-secondary button-small" type="button" onClick={() => onSendToChat([claim])}>{copy.send}</button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : null}
             </article>
           );
         })}
@@ -128,61 +162,46 @@ export function ClaimReviewPanel({
   );
 }
 
-function statusLabel(status: ClaimStatus, locale: "en" | "zh") {
-  const labels = {
-    pending_review: { en: "Pending", zh: "待审查" },
-    accepted: { en: "Accepted", zh: "已接受" },
-    rejected: { en: "Rejected", zh: "已拒绝" },
-    needs_more_evidence: { en: "Needs evidence", zh: "需要证据" },
-    edited: { en: "Edited", zh: "已编辑" }
-  } as const;
-  return labels[status][locale];
-}
-
 function claimCopy(locale: "en" | "zh") {
   if (locale === "zh") {
     return {
-      accept: "接受",
-      acceptSelected: "接受所选",
       cancel: "取消",
-      createAccepted: "从已接受创建节点",
       createNode: "创建节点",
+      createSelected: "创建所选",
+      deleteClaim: "删除",
+      deleteSelected: "删除所选",
       edit: "编辑",
       empty: "打开 Markdown 预览后抽取 Claim，或选择文本创建候选 Claim。",
       extract: "抽取 Claims",
       extracting: "抽取中",
       loading: "正在加载 Claims...",
-      needsEvidence: "需要证据",
       noDocument: "未打开 Markdown 预览",
       panelLabel: "Claim 审查队列",
-      reject: "拒绝",
-      rejectSelected: "拒绝所选",
       save: "保存",
       send: "发送到聊天",
-      sendSelected: "发送所选",
+      selectSummary: (title: string) => `选择 ${title}`,
+      selectedCount: (count: number) => `已选择 ${count} 条`,
       showSource: "定位原文",
       title: "Claims"
     };
   }
   return {
-    accept: "Accept",
-    acceptSelected: "Accept selected",
     cancel: "Cancel",
-    createAccepted: "Create nodes from accepted",
     createNode: "Create node",
+    createSelected: "Create selected",
+    deleteClaim: "Delete",
+    deleteSelected: "Delete selected",
     edit: "Edit",
     empty: "Open a Markdown preview, then extract Claims or select text to create a candidate.",
     extract: "Extract Claims",
     extracting: "Extracting",
     loading: "Loading Claims...",
-    needsEvidence: "Needs evidence",
     noDocument: "No Markdown preview open",
     panelLabel: "Claim review queue",
-    reject: "Reject",
-    rejectSelected: "Reject selected",
     save: "Save",
     send: "Send to chat",
-    sendSelected: "Send selected",
+    selectSummary: (title: string) => `Select ${title}`,
+    selectedCount: (count: number) => `${count} selected`,
     showSource: "Show source",
     title: "Claims"
   };

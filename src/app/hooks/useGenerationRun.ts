@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentCard, AgentClarification, CanvasNode, CanvasWriteSuggestion, PlanRun, RunTimelineEvent, StoredOutputVersion, StoredToolEvent, ThreadStateResponse } from "../../features/agents/types";
-import { generateText, generateTextStream } from "../../features/generation/generationClient";
-import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../../features/generation/types";
+import { generateText, generateTextStream, requestRunIntervention } from "../../features/generation/generationClient";
+import type { AgentProgressEvent, CollaborationMessage, GenerateRequest, GenerateResponse, QueuedRunInput } from "../../features/generation/types";
 import type { Locale } from "../../features/i18n/types";
 import { buildRequestToolState } from "../../features/workspace/planUiPolicy";
 import {
@@ -43,6 +43,15 @@ type UseGenerationRunOptions = {
 
 type TypewriterTarget = "editable" | `message:${string}`;
 
+type QueuedChatInput = {
+  id: string;
+  text: string;
+  status: QueuedRunInput["status"];
+  createdAt: string;
+  modelOverrides?: GenerateRequest["modelOverrides"];
+  requestContext?: Record<string, unknown>;
+};
+
 type LiveThreadStateRefreshRequest = {
   threadId: string;
   operationId: number;
@@ -56,18 +65,43 @@ export function createLiveThreadStateRefreshScheduler() {
   let inFlight: Promise<void> | null = null;
   let pending: LiveThreadStateRefreshRequest | null = null;
   let generation = 0;
+  let sequence = 0;
 
   const run = (request: LiveThreadStateRefreshRequest, runGeneration = generation) => {
+    const refreshId = `live_refresh_${++sequence}`;
+    const startedAt = performance.now();
+    traceLiveRefresh("start", refreshId, request, { generation: runGeneration });
     const refresh = request.fetchAndApply(request.threadId)
       .then((state) => {
-        if (runGeneration !== generation || request.operationId !== request.currentOperationId() || state.thread.id !== request.threadId) return;
+        if (runGeneration !== generation || request.operationId !== request.currentOperationId() || state.thread.id !== request.threadId) {
+          traceLiveRefresh("skip_stale", refreshId, request, {
+            elapsedMs: Math.round(performance.now() - startedAt),
+            generation: runGeneration,
+            currentOperationId: request.currentOperationId(),
+            stateThreadId: state.thread.id
+          });
+          return;
+        }
         request.apply(state);
+        traceLiveRefresh("applied", refreshId, request, {
+          elapsedMs: Math.round(performance.now() - startedAt),
+          planCount: state.plans?.length ?? 0,
+          messageCount: state.messages.length
+        });
       })
       .catch((error) => {
         console.warn("Live thread state refresh failed", error instanceof Error ? error.message : "Unknown error");
+        traceLiveRefresh("failed", refreshId, request, {
+          elapsedMs: Math.round(performance.now() - startedAt),
+          error: error instanceof Error ? error.message : "Unknown error"
+        });
       })
       .finally(() => {
         request.onSettled?.();
+        traceLiveRefresh("settled", refreshId, request, {
+          elapsedMs: Math.round(performance.now() - startedAt),
+          hasPending: Boolean(pending)
+        });
         if (runGeneration !== generation) return;
         if (inFlight === refresh) inFlight = null;
         const next = pending;
@@ -80,6 +114,7 @@ export function createLiveThreadStateRefreshScheduler() {
   return {
     request(request: LiveThreadStateRefreshRequest) {
       if (inFlight) {
+        traceLiveRefresh("queued", `live_refresh_pending_${sequence + 1}`, request);
         pending = request;
         return;
       }
@@ -89,6 +124,7 @@ export function createLiveThreadStateRefreshScheduler() {
       generation += 1;
       inFlight = null;
       pending = null;
+      console.info("[FacetWrite live refresh trace]", { phase: "reset", generation });
     }
   };
 }
@@ -111,6 +147,9 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   const operationIdRef = useRef(0);
   const chatAbortControllerRef = useRef<AbortController | null>(null);
   const activeChatMessageIdRef = useRef<string | null>(null);
+  const activeRunRef = useRef<{ threadId: string; runId: string } | null>(null);
+  const queuedInputsRef = useRef<QueuedChatInput[]>([]);
+  const drainingQueuedInputsRef = useRef(false);
   const blockedReasoningMessageIdsRef = useRef<Set<string>>(new Set());
   const liveToolEventStateRef = useRef(createLiveToolEventState());
   const liveStateRefreshRef = useRef(createLiveThreadStateRefreshScheduler());
@@ -119,6 +158,9 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     chatAbortControllerRef.current?.abort();
     chatAbortControllerRef.current = null;
     activeChatMessageIdRef.current = null;
+    activeRunRef.current = null;
+    queuedInputsRef.current = [];
+    drainingQueuedInputsRef.current = false;
     blockedReasoningMessageIdsRef.current = new Set();
     liveToolEventStateRef.current = createLiveToolEventState();
     liveStateRefreshRef.current.reset();
@@ -138,6 +180,9 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     chatAbortControllerRef.current?.abort();
     chatAbortControllerRef.current = null;
     activeChatMessageIdRef.current = null;
+    activeRunRef.current = null;
+    queuedInputsRef.current = [];
+    drainingQueuedInputsRef.current = false;
     blockedReasoningMessageIdsRef.current = new Set();
     liveToolEventStateRef.current = createLiveToolEventState();
     liveStateRefreshRef.current.reset();
@@ -242,6 +287,46 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         .sort((left, right) => left.sequence - right.sequence);
       return { ...message, timeline };
     }));
+  };
+
+  const appendProgressEvent = (event: AgentProgressEvent, assistantMessageId = activeChatMessageIdRef.current) => {
+    if (event.runId && event.threadId) {
+      activeRunRef.current = { runId: event.runId, threadId: event.threadId };
+      if (assistantMessageId) {
+        setCollaborationMessages((messages) => messages.map((message) => (
+          message.id === assistantMessageId
+            ? { ...message, runtimeRun: { runId: event.runId!, threadId: event.threadId! } }
+            : message
+        )));
+      }
+    }
+    if (event.phase === "intervention" && event.status === "completed") {
+      markFirstRequestedInterventionInjected();
+    }
+    if (event.visibility === "raw") return;
+    if (!assistantMessageId || !event.summary.trim()) return;
+    setCollaborationMessages((messages) => messages.map((message) => {
+      if (message.id !== assistantMessageId) return message;
+      const progressSegments = [...(message.progressSegments ?? []).filter((item) => item.id !== event.id), event]
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      return { ...message, progressSegments };
+    }));
+  };
+
+  const markQueuedInputStatus = (id: string, status: QueuedRunInput["status"]) => {
+    queuedInputsRef.current = queuedInputsRef.current.map((item) => (
+      item.id === id ? { ...item, status } : item
+    ));
+    setCollaborationMessages((messages) => messages.map((message) => (
+      message.queuedInput?.id === id
+        ? { ...message, queuedInput: { ...message.queuedInput, status } }
+        : message
+    )));
+  };
+
+  const markFirstRequestedInterventionInjected = () => {
+    const requested = queuedInputsRef.current.find((item) => item.status === "intervention_requested");
+    if (requested) markQueuedInputStatus(requested.id, "injected");
   };
 
   const updateStreamingMessage = (messageId: string, patch: Partial<CollaborationMessage>) => {
@@ -354,7 +439,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   };
 
   const applyCollaborationMessagesFromThreadState = (state: ThreadStateResponse) => {
-    const activityMessages = (state.planActivities ?? []).map((activity) => ({
+    const activityMessages = dedupePlanActivities(state.planActivities ?? []).map((activity) => ({
       id: `activity:${activity.id}`,
       role: "assistant" as const,
       text: activity.summary,
@@ -362,7 +447,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       kind: "activity" as const,
       createdAt: activity.createdAt
     }));
-    const messagesWithTimeline = attachTimelineToLatestAssistant(state.messages, state.runTimelineEvents ?? []);
+    const messagesWithTimeline = attachRunStateToLatestAssistant(state.messages, state.runTimelineEvents ?? [], state.runCompletion);
     const timelineMessages = [...messagesWithTimeline, ...activityMessages].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     setCollaborationMessages((current) => reconcileCollaborationMessages(current, timelineMessages));
     setPlans(state.plans ?? []);
@@ -379,6 +464,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       const threadId = await options.ensureThreadId();
       const payload: GenerateRequest = {
         mode: "structured",
+        clientRequestId: crypto.randomUUID(),
         agentCardId: options.activeAgent.id,
         projectId: options.currentProjectId,
         threadId,
@@ -431,7 +517,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     activeChatMessageIdRef.current = assistantMessageId;
     blockedReasoningMessageIdsRef.current.delete(assistantMessageId);
     const startedAt = new Date().toISOString();
-    const suppressUserMessage = hasAgentClarificationContext(requestContext);
+    const suppressUserMessage = hasAgentClarificationContext(requestContext) || typeof requestContext?.queuedInputMessageId === "string";
     const userMessage: CollaborationMessage = {
       id: userMessageId,
       role: "user",
@@ -456,17 +542,20 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         createdAt: startedAt
       }
     ]);
+    let threadId: string | undefined;
     try {
-      const threadId = await options.ensureThreadId();
+      threadId = await options.ensureThreadId();
+      const activeThreadId = threadId;
       const transientSkillRefs = readSkillRefs(requestContext?.transientSkillRefs);
       const disabledSkillRefs = readSkillRefs(requestContext?.disabledSkillRefs);
       const runtimeBudgetProfile = readRuntimeBudgetProfile(requestContext?.runtimeBudgetProfile);
       const requestContextValues = omitSkillOverrideRefs(requestContext);
       const payload: GenerateRequest = {
         mode: "chat",
+        clientRequestId: assistantMessageId,
         agentCardId: options.activeAgent.id,
         projectId: options.currentProjectId,
-        threadId,
+        threadId: activeThreadId,
         locale: options.locale,
         contextValues: { ...options.getContextValues(), ...requestContextValues },
         chatInstruction: text,
@@ -498,8 +587,9 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
           enqueueStreamingText(`message:${assistantMessageId}`, token);
         },
         onReasoningToken: (token) => appendReasoningToken(assistantMessageId, token),
-        onToolEvent: (event) => appendToolEvent(event, threadId, operationId),
-        onTimelineEvent: appendTimelineEvent
+        onToolEvent: (event) => appendToolEvent(event, activeThreadId, operationId),
+        onTimelineEvent: appendTimelineEvent,
+        onProgressEvent: (event) => appendProgressEvent(event, assistantMessageId)
       }, { signal: abortController.signal });
       if (operationId !== operationIdRef.current) return;
 
@@ -508,10 +598,12 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       updateStreamingMessage(assistantMessageId, {
         isStreaming: false,
         isReasoningStreaming: false,
+        completion: result.completion,
         status: "finalizing",
         statusLabel: undefined
       });
       setGeneration(result);
+      activeRunRef.current = result.runId ? { threadId: result.threadId, runId: result.runId } : null;
       options.onPersistThreadId(result.threadId);
 
       const state = await options.onFetchAndApplyThreadState(result.threadId);
@@ -543,10 +635,97 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         status: "error",
         statusLabel: undefined
       });
+      if (threadId) {
+        try {
+          const state = await options.onFetchAndApplyThreadState(threadId);
+          if (operationId === operationIdRef.current) applyCollaborationMessagesFromThreadState(state);
+        } catch {
+          // Keep the visible stream failure when persisted recovery state cannot be refreshed.
+        }
+      }
     } finally {
       if (chatAbortControllerRef.current === abortController) chatAbortControllerRef.current = null;
       if (activeChatMessageIdRef.current === assistantMessageId) activeChatMessageIdRef.current = null;
-      if (operationId === operationIdRef.current) setIsChatSending(false);
+      activeRunRef.current = null;
+      if (operationId === operationIdRef.current) {
+        setIsChatSending(false);
+        if (!drainingQueuedInputsRef.current) {
+          window.setTimeout(() => { void drainQueuedChatInputs(); }, 0);
+        }
+      }
+    }
+  };
+
+  const queueChatInput = (
+    text: string,
+    modelOverrides?: GenerateRequest["modelOverrides"],
+    requestContext?: Record<string, unknown>
+  ) => {
+    const trimmed = text.trim();
+    if (!trimmed) return undefined;
+    if (!isChatSending && !activeChatMessageIdRef.current && !drainingQueuedInputsRef.current) {
+      void handleChatSend(trimmed, modelOverrides, requestContext);
+      return undefined;
+    }
+    const id = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const queued: QueuedChatInput = {
+      id,
+      text: trimmed,
+      status: "queued_after_run",
+      createdAt,
+      modelOverrides,
+      requestContext
+    };
+    queuedInputsRef.current = [...queuedInputsRef.current, queued];
+    setCollaborationMessages((current) => [...current, {
+      id,
+      role: "user",
+      text: trimmed,
+      usedMock: false,
+      createdAt,
+      queuedInput: {
+        id,
+        status: "queued_after_run",
+        createdAt
+      }
+    }]);
+    return id;
+  };
+
+  const requestQueuedInputIntervention = (id: string) => {
+    markQueuedInputStatus(id, "intervention_requested");
+    const queued = queuedInputsRef.current.find((item) => item.id === id);
+    const activeRun = activeRunRef.current;
+    if (!queued || !activeRun) return;
+    requestRunIntervention({
+      threadId: activeRun.threadId,
+      runId: activeRun.runId,
+      text: queued.text,
+      inputId: id
+    }).catch((error) => {
+      console.warn("Unable to request run intervention", error);
+    });
+  };
+
+  const drainQueuedChatInputs = async () => {
+    if (drainingQueuedInputsRef.current) return;
+    const next = queuedInputsRef.current.find((item) => item.status === "queued_after_run" || item.status === "intervention_requested");
+    if (!next) return;
+    drainingQueuedInputsRef.current = true;
+    try {
+      markQueuedInputStatus(next.id, "sent_after_run");
+      queuedInputsRef.current = queuedInputsRef.current.filter((item) => item.id !== next.id);
+      await handleChatSend(next.text, next.modelOverrides, {
+        ...(next.requestContext ?? {}),
+        queuedInputMessageId: next.id,
+        queuedInputStatus: next.status
+      });
+    } finally {
+      drainingQueuedInputsRef.current = false;
+      if (queuedInputsRef.current.some((item) => item.status === "queued_after_run" || item.status === "intervention_requested")) {
+        window.setTimeout(() => { void drainQueuedChatInputs(); }, 0);
+      }
     }
   };
 
@@ -592,12 +771,24 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     applyCollaborationMessagesFromThreadState,
     handleGenerate,
     handleChatSend,
+    queueChatInput,
+    requestQueuedInputIntervention,
     restoreVersion
   };
 }
 
 function isPlanInstruction(text: string) {
   return /^\s*\/plan\b/i.test(text) || /^\s*continue approved plan\b/i.test(text);
+}
+
+function dedupePlanActivities<T extends { planRunId: string; stepId?: string; type: string; status: string; summary: string }>(activities: T[]) {
+  const seen = new Set<string>();
+  return activities.filter((activity) => {
+    const key = [activity.planRunId, activity.stepId ?? "", activity.type, activity.status, activity.summary].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function readSkillRefs(value: unknown) {
@@ -663,13 +854,32 @@ function reasoningBlockedMessage(locale: Locale) {
     : "Thinking hidden because internal runtime data was detected.";
 }
 
-function attachTimelineToLatestAssistant<T extends CollaborationMessage>(messages: T[], events: RunTimelineEvent[]) {
-  if (events.length === 0) return messages;
+function attachRunStateToLatestAssistant<T extends CollaborationMessage>(
+  messages: T[],
+  events: RunTimelineEvent[],
+  completion: ThreadStateResponse["runCompletion"]
+) {
+  if (events.length === 0 && !completion) return messages;
   const latestAssistantIndex = [...messages].reverse().findIndex((message) => message.role === "assistant");
   if (latestAssistantIndex < 0) return messages;
   const targetIndex = messages.length - 1 - latestAssistantIndex;
   const timeline = [...events].sort((left, right) => left.sequence - right.sequence);
   return messages.map((message, index) => (
-    index === targetIndex ? { ...message, timeline } : message
+    index === targetIndex ? { ...message, timeline, ...(completion ? { completion } : {}) } : message
   ));
+}
+
+function traceLiveRefresh(
+  phase: string,
+  refreshId: string,
+  request: LiveThreadStateRefreshRequest,
+  details: Record<string, unknown> = {}
+) {
+  console.info("[FacetWrite live refresh trace]", {
+    phase,
+    refreshId,
+    threadId: request.threadId,
+    operationId: request.operationId,
+    ...details
+  });
 }

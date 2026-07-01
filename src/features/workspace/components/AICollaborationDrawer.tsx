@@ -1,16 +1,18 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, LightbulbIcon, ModelConfigIcon, SearchIcon, SendIcon, StopIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
-import type { AgentCard, AgentClarification, CanvasNode, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
+import type { AgentCard, AgentClarification, CanvasNode, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, RunTimelineEvent, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
 import type { CanvasNodePatch } from "../../canvas/canvasClient";
-import type { CollaborationMessage, GenerateRequest } from "../../generation/types";
+import { fetchRuntimeRunEvents } from "../../generation/generationClient";
+import type { CollaborationMessage, GenerateRequest, RuntimeRunEvent } from "../../generation/types";
 import { useI18n } from "../../i18n/I18nProvider";
 import { AnnotationChipRow, CanvasWriteProposalPanel, type MessageAnnotation } from "./CanvasWriteProposalPanel";
 import { AssistantRunTrace } from "./AssistantRunTrace";
 import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain";
-import { PlanTaskBoard } from "./PlanTaskBoard";
+import { AgentPlanBoard } from "./AgentPlanBoard";
 import { PlanClarificationCard } from "./PlanClarificationCard";
 import { acceptCanvasWriteSuggestion, answerPlan, dismissCanvasWriteSuggestion, pausePlan } from "../../agents/agentClient";
 import { visibleComposerTools } from "../planUiPolicy";
@@ -80,6 +82,8 @@ type AICollaborationDrawerProps = {
   onRemoveMindChainContext: () => void;
   onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onSend: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => Promise<unknown>;
+  onQueueInput: (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => string | undefined;
+  onRequestQueuedInputIntervention: (id: string) => void;
   onStopSending: () => void;
   onSelectAgent: (agentCardId: string) => void;
   onSelectModel: (configuredModelApiId: string) => Promise<void>;
@@ -106,6 +110,10 @@ const toolMeta: Record<string, { en: string; zh: string; hint: string }> = {
 
 const COMPOSER_MIN_HEIGHT = 72;
 const COMPOSER_MAX_HEIGHT = 240;
+
+export function shouldShowStopControl(isSending: boolean, input: string) {
+  return isSending && input.trim().length === 0;
+}
 
 export function AICollaborationDrawer({
   allowedTools,
@@ -144,6 +152,8 @@ export function AICollaborationDrawer({
   onRemoveMindChainContext,
   onResizeStart,
   onSend,
+  onQueueInput,
+  onRequestQueuedInputIntervention,
   onStopSending,
   onSelectAgent,
   onSelectModel,
@@ -162,7 +172,7 @@ export function AICollaborationDrawer({
   const [input, setInput] = useState("");
   const supportsThinking = modelSettings?.providerId === "deepseek";
   const [thinkingChoice, setThinkingChoice] = useState<ThinkingChoice>(modelSettingsToThinkingChoice(modelSettings));
-  const [runtimeBudgetChoice, setRuntimeBudgetChoice] = useState<RuntimeBudgetChoice>(runtimeBudgetProfile ?? "medium");
+  const [runtimeBudgetChoice, setRuntimeBudgetChoice] = useState<RuntimeBudgetChoice>(runtimeBudgetProfile ?? "low");
   const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
   const [annotations, setAnnotations] = useState<MessageAnnotation[]>([]);
   const [writeDraft, setWriteDraft] = useState<WriteDraft | null>(null);
@@ -174,6 +184,7 @@ export function AICollaborationDrawer({
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [contextResetNotice, setContextResetNotice] = useState(false);
   const [clarificationBusy, setClarificationBusy] = useState(false);
+  const [planPanelCollapsed, setPlanPanelCollapsed] = useState(false);
   const [submittedAgentClarificationKeys, setSubmittedAgentClarificationKeys] = useState<Set<string>>(() => new Set());
   const [optimisticAgentClarifications, setOptimisticAgentClarifications] = useState<AgentClarification[]>([]);
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -211,6 +222,13 @@ export function AICollaborationDrawer({
     [answeredAgentClarificationKeys, messages, pendingAgentClarification]
   );
   const budgetLimitFailure = useMemo(() => latestBudgetLimitFailure(messages), [messages]);
+  const floatingBoardPlan = useMemo(
+    () => plans.find((plan) => plan.status === "awaiting_approval" || plan.status === "running" || plan.status === "paused"),
+    [plans]
+  );
+  const floatingPlan = pendingClarificationPlan ?? floatingBoardPlan;
+  const floatingPlanPanelStyle = { "--plan-panel-bottom": `${pendingClarificationPlan || pendingAgentClarification ? 142 : composerHeight + 142}px` } as CSSProperties;
+  const showStopControl = shouldShowStopControl(isSending, input);
 
   useEffect(() => {
     setThinkingChoice(modelSettingsToThinkingChoice(modelSettings));
@@ -221,7 +239,7 @@ export function AICollaborationDrawer({
   }, [supportsThinking]);
 
   useEffect(() => {
-    setRuntimeBudgetChoice(runtimeBudgetProfile ?? "medium");
+    setRuntimeBudgetChoice(runtimeBudgetProfile ?? "low");
   }, [runtimeBudgetProfile]);
 
   useEffect(() => {
@@ -238,7 +256,11 @@ export function AICollaborationDrawer({
   useEffect(() => {
     setSubmittedAgentClarificationKeys(new Set());
     setOptimisticAgentClarifications([]);
+    setPlanPanelCollapsed(false);
   }, [currentThreadId]);
+  useEffect(() => {
+    setPlanPanelCollapsed(false);
+  }, [floatingPlan?.id, floatingPlan?.status, pendingAgentClarification?.clarificationId]);
 
   useEffect(() => {
     if (skillPickerOpen) onRequestSkillCatalog();
@@ -295,6 +317,23 @@ export function AICollaborationDrawer({
     if (!text) return;
     if (pendingAgentClarification) return;
     setInput("");
+    const runtimeBudgetOverride = runtimeBudgetChoice === (runtimeBudgetProfile ?? "low")
+      ? undefined
+      : runtimeBudgetChoice;
+    const messageModelOverrides = supportsThinking ? thinkingOverridesFromChoice(thinkingChoice) : undefined;
+    const messageRequestContext = {
+      ...(mindChainContext ? { canvasMindChain: mindChainContext.text } : {}),
+      ...(enabledSkillRefs.length ? { transientSkillRefs: enabledSkillRefs } : {}),
+      ...(disabledSkillRefs.length ? { disabledSkillRefs } : {}),
+      ...(runtimeBudgetOverride ? { runtimeBudgetProfile: runtimeBudgetOverride } : {})
+    };
+    if (isSending) {
+      onQueueInput(text, messageModelOverrides, messageRequestContext);
+      onSkillOverridesConsumed();
+      setSkillPickerOpen(false);
+      if (mindChainContext) onMindChainContextConsumed();
+      return;
+    }
     if (isWriteConfirmation(text)) {
       if (pendingWriteSuggestion) {
         await acceptCanvasWriteSuggestion(currentThreadId, pendingWriteSuggestion.id);
@@ -314,16 +353,10 @@ export function AICollaborationDrawer({
       await onPlansChanged();
     }
     try {
-      const runtimeBudgetOverride = runtimeBudgetChoice === (runtimeBudgetProfile ?? "medium")
-        ? undefined
-        : runtimeBudgetChoice;
       const sendResult = await onSend(text, supportsThinking ? thinkingOverridesFromChoice(thinkingChoice) : undefined, {
-        ...(mindChainContext ? { canvasMindChain: mindChainContext.text } : {}),
+        ...messageRequestContext,
         ...(awaitingPlan ? { awaitingPlan: { id: awaitingPlan.id, answer: text } } : {}),
-        ...(revisePlan ? { awaitingPlan: { id: revisePlan.id, revise: true } } : {}),
-        ...(enabledSkillRefs.length ? { transientSkillRefs: enabledSkillRefs } : {}),
-        ...(disabledSkillRefs.length ? { disabledSkillRefs } : {}),
-        ...(runtimeBudgetOverride ? { runtimeBudgetProfile: runtimeBudgetOverride } : {})
+        ...(revisePlan ? { awaitingPlan: { id: revisePlan.id, revise: true } } : {})
       });
       if (sendResult) {
         if (!isAgentClarificationRequired(sendResult)) {
@@ -407,63 +440,30 @@ export function AICollaborationDrawer({
     }
   };
 
-  const answerAgentClarification = async (clarification: AgentClarificationPrompt, optionId: string) => {
-    const option = clarification.options.find((item) => item.id === optionId);
-    if (!option) return;
-    const resume = clarification.resumeContext;
-    const transientSkillRefs = resume?.transientSkillRefs.length ? resume.transientSkillRefs : enabledSkillRefs;
-    const resumeDisabledSkillRefs = resume?.disabledSkillRefs.length ? resume.disabledSkillRefs : disabledSkillRefs;
-    const resumeRuntimeContext = resume
-      ? {
-        runtimeBudgetProfile: resume.runtimeBudgetProfile ?? runtimeBudgetChoice ?? runtimeBudgetProfile ?? "medium",
-        ...(Object.keys(resume.canvas).length ? { canvas: resume.canvas } : {})
-      }
-      : { runtimeBudgetProfile: runtimeBudgetChoice ?? runtimeBudgetProfile ?? "medium" };
-    const selectedText = `${option.label}${option.detail ? ` - ${option.detail}` : ""}`;
-    const instructionText = resume?.originalInstruction
-      ? `${resume.originalInstruction}\n\nSelected clarification: ${selectedText}`
-      : option.label;
-    const submittedKeys = agentClarificationSubmittedKeys(clarification);
-    const answeredAt = new Date().toISOString();
-    const optimisticClarification: AgentClarification = {
-      id: clarification.clarificationId,
-      threadId: currentThreadId,
-      runId: "pending",
-      status: "answered",
-      question: clarification.question,
-      options: clarification.options,
-      ...(resume ? { resumeContext: resume } : {}),
-      selectedOptionId: option.id,
-      selectedOptionLabel: option.label,
-      answer: option.label,
-      createdAt: answeredAt,
-      updatedAt: answeredAt
-    };
+  const answerAgentClarification = async (clarification: AgentClarificationPrompt, answer: { optionId?: string; customAnswer?: string }) => {
+    const submission = buildAgentClarificationSubmission({
+      clarification,
+      currentThreadId,
+      optionId: answer.optionId,
+      answerText: answer.customAnswer,
+      enabledSkillRefs,
+      disabledSkillRefs,
+      runtimeBudgetChoice,
+      runtimeBudgetProfile
+    });
+    if (!submission) return;
     setClarificationBusy(true);
-    setSubmittedAgentClarificationKeys((current) => new Set([...current, ...submittedKeys]));
-    setOptimisticAgentClarifications((current) => [...current, optimisticClarification]);
+    setSubmittedAgentClarificationKeys((current) => new Set([...current, ...submission.submittedKeys]));
+    setOptimisticAgentClarifications((current) => [...current, submission.optimisticClarification]);
     try {
-      await onSend(instructionText, undefined, {
-        ...(transientSkillRefs.length ? { transientSkillRefs } : {}),
-        ...(resumeDisabledSkillRefs.length ? { disabledSkillRefs: resumeDisabledSkillRefs } : {}),
-        ...resumeRuntimeContext,
-        agentClarification: {
-          clarificationId: clarification.clarificationId,
-          question: clarification.question,
-          selectedOptionId: option.id,
-          answer: option.label,
-          option,
-          ...(resume ? { resumeContext: resume } : {}),
-          ...(resume?.originalInstruction ? { originalInstruction: resume.originalInstruction } : {})
-        }
-      });
+      await onSend(submission.instructionText, undefined, submission.requestContext);
     } catch (error) {
       setSubmittedAgentClarificationKeys((current) => {
         const next = new Set(current);
-        for (const key of submittedKeys) next.delete(key);
+        for (const key of submission.submittedKeys) next.delete(key);
         return next;
       });
-      setOptimisticAgentClarifications((current) => current.filter((item) => item !== optimisticClarification));
+      setOptimisticAgentClarifications((current) => current.filter((item) => item !== submission.optimisticClarification));
       throw error;
     } finally {
       setClarificationBusy(false);
@@ -596,13 +596,14 @@ export function AICollaborationDrawer({
           }
           if (entry.kind === "plan") {
             const plan = entry.value;
+            if (floatingPlan?.id === plan.id) return null;
             if (plan.clarification && plan.status === "awaiting_user") {
               return pendingClarificationPlan?.id === plan.id ? null : <PlanClarificationCard busy={clarificationBusy} key={`plan:${plan.id}`} plan={plan} onAnswer={(answer) => answerClarification(plan, answer)} />;
             }
             if (plan.clarification?.status === "answered" && plan.status === "draft") {
               return <PlanClarificationCard busy key={`plan:${plan.id}`} plan={plan} onAnswer={async () => {}} />;
             }
-            const board = <PlanTaskBoard plan={plan} threadId={currentThreadId} onChanged={onPlansChanged} onFocusArtifact={onFocusPlanArtifact} onRevise={(value) => setInput(`/plan revise ${value.id}: `)} />;
+            const board = <AgentPlanBoard plan={plan} threadId={currentThreadId} onChanged={onPlansChanged} onFocusArtifact={onFocusPlanArtifact} onRevise={(value) => setInput(`/plan revise ${value.id}: `)} />;
             return <div key={`plan:${plan.id}`}>
               {plan.clarification?.status === "answered" ? <PlanClarificationCard busy plan={plan} onAnswer={async () => {}} /> : null}
               {board}
@@ -614,30 +615,64 @@ export function AICollaborationDrawer({
           }
           const messageAnnotations = annotations.filter((annotation) => annotation.messageId === message.id);
           const isPendingAssistant = message.role === "assistant" && message.isStreaming && !message.text.trim();
-          const hasRunTrace = message.role === "assistant" && Boolean(message.timeline?.length);
+          const progressSegments = message.role === "assistant" ? progressSegmentsForMessage(message) : [];
+          const rawRunLogEvents = message.role === "assistant" ? rawRunLogEventsForMessage(message) : [];
+          const rawRunTarget = message.role === "assistant" ? runtimeRunTargetForMessage(message, rawRunLogEvents) : undefined;
+          const hasProgressSegments = progressSegments.length > 0;
+          const hasRunTrace = message.role === "assistant" && Boolean(message.timeline?.some((event) => !isProgressTimelineEvent(event)));
           const hasReasoningText = message.role === "assistant" && Boolean(message.reasoningText?.trim());
-          const usesThinkingStatus = isPendingAssistant && !hasRunTrace && !hasReasoningText;
-          return (
-            <article className={`message message-${message.role}${message.isStreaming ? " message-streaming" : ""}${usesThinkingStatus ? " message-thinking" : ""}`} key={message.id}>
-              <div className="message-avatar" aria-hidden="true">{message.role === "user" ? "U" : "F"}</div>
-              <div className={usesThinkingStatus ? "message-thinking-status" : "message-bubble"}>
-                {message.role === "assistant" && message.isStreaming && !message.text.trim() ? (
-                  <>
-                    <AssistantRunTrace events={message.timeline} onFocusNode={onFocusPlanArtifact} />
-                    <ReasoningStreamPanel message={message} />
-                    <StreamingStatus label={streamingStatusLabel(message, t("workspace.preparingResponse"))} />
-                  </>
-                ) : message.role === "assistant" ? (
-                  <div className="assistant-selectable-text" onMouseUp={(event) => captureSelection(event, message)}>
-                    <AssistantRunTrace events={message.timeline} onFocusNode={onFocusPlanArtifact} />
-                    <ReasoningStreamPanel message={message} />
-                    <MarkdownText text={message.text} highlights={messageAnnotations.map((annotation) => annotation.text)} />
-                    {message.isStreaming ? <span className="typing-caret" aria-hidden="true" /> : null}
-                  </div>
-                ) : <p>{message.text}</p>}
-                {message.usedMock ? <span className="message-meta">{t("workspace.mockFallback")}</span> : null}
+          const hasRuntimePanel = message.role === "assistant" && (hasProgressSegments || hasRunTrace || hasReasoningText || Boolean(rawRunTarget) || Boolean(message.completion));
+          const usesThinkingStatus = isPendingAssistant && !hasRunTrace && !hasReasoningText && !hasProgressSegments;
+          const traceTarget = agentPlanTraceTarget(message.timeline, plans);
+          const runtimePanel = hasRuntimePanel ? (
+            <AgentLoopRunPanel
+              completed={!message.isStreaming && Boolean(message.text.trim())}
+              fallbackEvents={rawRunLogEvents}
+              isStreaming={Boolean(message.isStreaming)}
+              key={`${message.id}:runtime`}
+              message={message}
+              onFocusPlanArtifact={onFocusPlanArtifact}
+              progressSegments={progressSegments}
+              runTarget={rawRunTarget}
+              traceTarget={traceTarget}
+            />
+          ) : null;
+          if (message.role === "assistant" && !message.text.trim()) {
+            return (
+              <div className="agent-loop-message-frame" key={message.id}>
+                {runtimePanel}
+                {message.isStreaming && !runtimePanel ? (
+                  <article className="message message-assistant message-streaming message-thinking">
+                    <div className="message-avatar" aria-hidden="true">F</div>
+                    <div className="message-thinking-status">
+                      <StreamingStatus label={streamingStatusLabel(message, t("workspace.preparingResponse"))} />
+                    </div>
+                  </article>
+                ) : null}
               </div>
-            </article>
+            );
+          }
+          return (
+            <div className="agent-loop-message-frame" key={message.id}>
+              {runtimePanel}
+              <article className={`message message-${message.role}${message.isStreaming ? " message-streaming" : ""}${usesThinkingStatus ? " message-thinking" : ""}`}>
+                <div className="message-avatar" aria-hidden="true">{message.role === "user" ? "U" : "F"}</div>
+                <div className={usesThinkingStatus ? "message-thinking-status" : "message-bubble"}>
+                  {message.role === "assistant" ? (
+                    <div className="assistant-selectable-text" onMouseUp={(event) => captureSelection(event, message)}>
+                      <MarkdownText text={message.text} highlights={messageAnnotations.map((annotation) => annotation.text)} />
+                      {message.isStreaming ? <span className="typing-caret" aria-hidden="true" /> : null}
+                    </div>
+                  ) : (
+                    <>
+                      <p>{message.text}</p>
+                      <QueuedInputStatus message={message} onRequestIntervention={onRequestQueuedInputIntervention} />
+                    </>
+                  )}
+                  {message.usedMock ? <span className="message-meta">{t("workspace.mockFallback")}</span> : null}
+                </div>
+              </article>
+            </div>
           );
         })}
         {pendingWriteSuggestion ? (
@@ -674,7 +709,50 @@ export function AICollaborationDrawer({
         </button>
       ) : null}
 
-      <form className={pendingClarificationPlan || pendingAgentClarification ? "drawer-chat-composer drawer-chat-composer-clarification" : "drawer-chat-composer"} onSubmit={submit}>
+      {floatingPlan || pendingAgentClarification ? (
+        <section
+          className={planPanelCollapsed ? "floating-plan-panel is-collapsed" : "floating-plan-panel"}
+          style={floatingPlanPanelStyle}
+        >
+          <button
+            aria-expanded={!planPanelCollapsed}
+            className="floating-plan-panel-toggle"
+            onClick={() => setPlanPanelCollapsed((value) => !value)}
+            type="button"
+          >
+            <strong>{floatingPlan ? t("plan.progress") : locale === "zh" ? "补充信息" : "Clarification"}</strong>
+            <span>{planPanelCollapsed ? "+" : "-"}</span>
+          </button>
+          {!planPanelCollapsed && pendingClarificationPlan ? (
+            <PlanClarificationCard
+              busy={clarificationBusy}
+              plan={pendingClarificationPlan}
+              variant="composer"
+              onAnswer={(answer) => answerClarification(pendingClarificationPlan, answer)}
+            />
+          ) : null}
+          {!planPanelCollapsed && floatingPlan && floatingPlan.id !== pendingClarificationPlan?.id ? (
+            <AgentPlanBoard
+              plan={floatingPlan}
+              threadId={currentThreadId}
+              onChanged={onPlansChanged}
+              onFocusArtifact={onFocusPlanArtifact}
+              onRevise={(value) => setInput(`/plan revise ${value.id}: `)}
+            />
+          ) : null}
+          {!planPanelCollapsed && pendingAgentClarification ? (
+            <AgentClarificationChoiceCard
+              busy={clarificationBusy}
+              clarification={pendingAgentClarification}
+              locale={locale}
+              variant="composer"
+              onAnswer={(answer) => answerAgentClarification(pendingAgentClarification, answer)}
+            />
+          ) : null}
+        </section>
+      ) : null}
+
+      <form className="drawer-chat-composer" onSubmit={submit}>
         <div className="composer-control-row" data-testid="composer-control-row">
           <div className="composer-agent-section">
             <AgentIcon aria-hidden="true" size={16} />
@@ -723,23 +801,6 @@ export function AICollaborationDrawer({
               </span>
             ))}
           </div>
-        ) : null}
-        {pendingClarificationPlan ? (
-          <PlanClarificationCard
-            busy={clarificationBusy}
-            plan={pendingClarificationPlan}
-            variant="composer"
-            onAnswer={(answer) => answerClarification(pendingClarificationPlan, answer)}
-          />
-        ) : null}
-        {pendingAgentClarification ? (
-          <AgentClarificationChoiceCard
-            busy={clarificationBusy}
-            clarification={pendingAgentClarification}
-            locale={locale}
-            variant="composer"
-            onAnswer={(optionId) => answerAgentClarification(pendingAgentClarification, optionId)}
-          />
         ) : null}
         {mindChainContext ? (
           <div className="mind-chain-context-chip" data-testid="mind-chain-context-chip">
@@ -839,13 +900,99 @@ export function AICollaborationDrawer({
           <button className="tool-icon-button plan-command-button" type="button" onClick={() => setInput((value) => value.startsWith("/plan") ? value : `/plan ${value}`)} aria-label={t("workspace.createTaskPlan")} title={t("workspace.createTaskPlan")}>
             <ModelConfigIcon aria-hidden="true" size={15} />
           </button>
-          <button className={isSending ? "button button-primary chat-send chat-send-icon is-stopping" : "button button-primary chat-send chat-send-icon"} type={isSending ? "button" : "submit"} disabled={writeBusy} onClick={isSending ? onStopSending : undefined}
-            aria-label={t("workspace.send")} title={isSending ? t("workspace.sending") : t("workspace.send")}>
-            {isSending ? <StopIcon aria-hidden="true" size={18} /> : <SendIcon aria-hidden="true" size={18} />}
+          <button className={showStopControl ? "button button-primary chat-send chat-send-icon is-stopping" : "button button-primary chat-send chat-send-icon"} type={showStopControl ? "button" : "submit"} disabled={writeBusy} onClick={showStopControl ? onStopSending : undefined}
+            aria-label={showStopControl ? (locale === "zh" ? "停止" : "Stop") : t("workspace.send")} title={showStopControl ? (locale === "zh" ? "停止当前任务" : "Stop current run") : isSending ? (locale === "zh" ? "发送并排队" : "Send and queue") : t("workspace.send")}>
+            {showStopControl ? <StopIcon aria-hidden="true" size={18} /> : <SendIcon aria-hidden="true" size={18} />}
           </button>
         </div>
       </form>
     </motion.aside>
+  );
+}
+
+function ProgressSegmentList({ completed, rawEvents, runTarget, segments }: {
+  completed: boolean;
+  rawEvents: RunTimelineEvent[];
+  runTarget?: { threadId: string; runId: string };
+  segments: ReturnType<typeof progressSegmentsForMessage>;
+}) {
+  const { locale } = useI18n();
+  if (!segments.length) return null;
+  const body = (
+    <>
+      <div className="progress-segment-list">
+        {segments.map((segment) => (
+          <div className="progress-segment" key={segment.id}>
+            {segment.title ? <strong>{segment.title}</strong> : null}
+            <p>{segment.summary}</p>
+            {segment.next ? <small>{segment.next}</small> : null}
+            {segment.interventionHint ? <em>{segment.interventionHint}</em> : null}
+          </div>
+        ))}
+      </div>
+      <RawRunLogDetails fallbackEvents={rawEvents} runTarget={runTarget} />
+    </>
+  );
+  if (!completed) return body;
+  return (
+    <details className="progress-segment-history">
+      <summary>{locale === "zh" ? "\u9636\u6bb5\u6c47\u62a5" : "Stage reports"}</summary>
+      {body}
+    </details>
+  );
+}
+
+function RawRunLogDetails({ fallbackEvents, runTarget }: { fallbackEvents: RunTimelineEvent[]; runTarget?: { threadId: string; runId: string } }) {
+  const { locale } = useI18n();
+  const [events, setEvents] = useState<RuntimeRunEvent[]>([]);
+  const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "failed">("idle");
+  if (!runTarget && !fallbackEvents.length) return null;
+  const displayEvents = events.length ? events : fallbackEvents.map(runtimeRunEventFromTimeline);
+  const count = displayEvents.length;
+  const label = locale === "zh" ? "\u5df2\u8fd0\u884c\u547d\u4ee4/\u5de5\u5177" : "Raw tool log";
+  const loadEvents = () => {
+    if (!runTarget || status !== "idle") return;
+    setStatus("loading");
+    fetchRuntimeRunEvents({ ...runTarget, limit: 500 })
+      .then((nextEvents) => {
+        setEvents(nextEvents);
+        setStatus("loaded");
+      })
+      .catch(() => setStatus("failed"));
+  };
+  return (
+    <details className="raw-run-log-details" onToggle={(event) => { if (event.currentTarget.open) loadEvents(); }}>
+      <summary>
+        {label}{count ? ` ${count}` : ""}
+        {status === "loading" ? (locale === "zh" ? " \u52a0\u8f7d\u4e2d" : " loading") : null}
+        {status === "failed" ? (locale === "zh" ? " \u4f7f\u7528\u6458\u8981" : " using summary") : null}
+      </summary>
+      <div className="raw-run-log-list">
+        {displayEvents.length ? displayEvents.map((event, index) => (
+          <div className="raw-run-log-item" key={`${event.sequence ?? index}:${event.eventType}`}>
+            <strong>{runtimeRunEventTitle(event)}</strong>
+            {runtimeRunEventDetail(event) ? <p>{runtimeRunEventDetail(event)}</p> : null}
+          </div>
+        )) : <div className="raw-run-log-item"><p>{locale === "zh" ? "\u6682\u65e0\u53ef\u5c55\u793a\u7684\u540e\u53f0\u65e5\u5fd7\u3002" : "No displayable raw events yet."}</p></div>}
+      </div>
+    </details>
+  );
+}
+
+function QueuedInputStatus({ message, onRequestIntervention }: { message: CollaborationMessage; onRequestIntervention: (id: string) => void }) {
+  const { locale } = useI18n();
+  const queued = message.queuedInput;
+  if (!queued) return null;
+  const labels = queuedInputLabels(locale, queued.status);
+  return (
+    <div className="queued-input-status">
+      <span>{labels.status}</span>
+      {queued.status === "queued_after_run" ? (
+        <button type="button" onClick={() => onRequestIntervention(queued.id)}>
+          {labels.action}
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -974,11 +1121,27 @@ function latestBudgetLimitFailure(messages: CollaborationMessage[]) {
     ...(latestAssistant.timeline ?? []).flatMap((event) => [
       event.title,
       event.summary,
+      String(event.payload?.status ?? ""),
+      String(event.payload?.type ?? ""),
+      String(event.payload?.canResume ?? ""),
       String(event.payload?.error ?? ""),
       String(event.payload?.message ?? "")
     ])
   ].join("\n");
-  return /Recursion limit of \d+ reached|GRAPH_RECURSION_LIMIT/i.test(haystack);
+  return /budget_exhausted|Recursion limit of \d+ reached|GRAPH_RECURSION_LIMIT/i.test(haystack);
+}
+
+export function agentPlanTraceTarget(events: RunTimelineEvent[] | undefined, plans: PlanRun[] = []) {
+  const indexedPlans = new Map(plans.map((plan) => [plan.id, plan]));
+  for (const event of [...(events ?? [])].sort((left, right) => right.sequence - left.sequence)) {
+    const payload = event.payload ?? {};
+    const planId = readString(payload.planId) || readString(payload.agentPlanId);
+    if (!planId || !indexedPlans.has(planId)) continue;
+    const plan = indexedPlans.get(planId);
+    const stepId = readString(payload.stepId) || readString(payload.agentPlanStepId) || plan?.currentStepId || "";
+    return { planId, stepId };
+  }
+  return {};
 }
 
 export type AgentClarificationPrompt = {
@@ -993,8 +1156,86 @@ type AgentClarificationResumeContext = {
   transientSkillRefs: string[];
   disabledSkillRefs: string[];
   runtimeBudgetProfile?: GenerateRequest["runtimeBudgetProfile"];
+  intakeState?: string;
+  intakeRound?: number;
+  maxIntakeRounds?: number;
+  answeredSummary?: string;
+  missingSlots?: string[];
   canvas: Record<string, unknown>;
 };
+
+type AgentClarificationSubmissionInput = {
+  clarification: AgentClarificationPrompt;
+  currentThreadId: string;
+  optionId?: string;
+  answerText?: string;
+  enabledSkillRefs: string[];
+  disabledSkillRefs: string[];
+  runtimeBudgetChoice?: RuntimeBudgetChoice;
+  runtimeBudgetProfile?: GenerateRequest["runtimeBudgetProfile"];
+};
+
+export function buildAgentClarificationSubmission(input: AgentClarificationSubmissionInput) {
+  const option = input.optionId ? input.clarification.options.find((item) => item.id === input.optionId) : undefined;
+  const customAnswer = (option ? "" : input.answerText ?? "").trim();
+  if (!option && !customAnswer) return undefined;
+  const selectedOption = option ?? {
+    id: "custom",
+    label: "Custom answer",
+    detail: customAnswer,
+    recommended: false
+  };
+  const resume = input.clarification.resumeContext;
+  const transientSkillRefs = resume?.transientSkillRefs.length ? resume.transientSkillRefs : input.enabledSkillRefs;
+  const resumeDisabledSkillRefs = resume?.disabledSkillRefs.length ? resume.disabledSkillRefs : input.disabledSkillRefs;
+  const resumeRuntimeContext = resume
+    ? {
+      runtimeBudgetProfile: resume.runtimeBudgetProfile ?? input.runtimeBudgetChoice ?? input.runtimeBudgetProfile ?? "low",
+      ...(Object.keys(resume.canvas).length ? { canvas: resume.canvas } : {})
+    }
+    : { runtimeBudgetProfile: input.runtimeBudgetChoice ?? input.runtimeBudgetProfile ?? "low" };
+  const selectedText = option
+    ? `${option.label}${option.detail ? ` - ${option.detail}` : ""}`
+    : customAnswer;
+  const answerValue = option ? option.label : customAnswer;
+  const instructionText = resume?.originalInstruction
+    ? `${resume.originalInstruction}\n\nSelected clarification: ${selectedText}`
+    : selectedText;
+  const answeredAt = new Date().toISOString();
+  const optimisticClarification: AgentClarification = {
+    id: input.clarification.clarificationId,
+    threadId: input.currentThreadId,
+    runId: "pending",
+    status: "answered",
+    question: input.clarification.question,
+    options: input.clarification.options,
+    ...(resume ? { resumeContext: resume } : {}),
+    selectedOptionId: selectedOption.id,
+    selectedOptionLabel: selectedOption.label,
+    answer: answerValue,
+    createdAt: answeredAt,
+    updatedAt: answeredAt
+  };
+  return {
+    instructionText,
+    submittedKeys: agentClarificationSubmittedKeys(input.clarification),
+    optimisticClarification,
+    requestContext: {
+      ...(transientSkillRefs.length ? { transientSkillRefs } : {}),
+      ...(resumeDisabledSkillRefs.length ? { disabledSkillRefs: resumeDisabledSkillRefs } : {}),
+      ...resumeRuntimeContext,
+      agentClarification: {
+        clarificationId: input.clarification.clarificationId,
+        question: input.clarification.question,
+        selectedOptionId: selectedOption.id,
+        answer: answerValue,
+        option: selectedOption,
+        ...(resume ? { resumeContext: resume } : {}),
+        ...(resume?.originalInstruction ? { originalInstruction: resume.originalInstruction } : {})
+      }
+    }
+  };
+}
 
 type PlanTimelineEntry =
   | { kind: "message"; value: CollaborationMessage }
@@ -1020,6 +1261,82 @@ function buildAgentClarificationTimeline(entries: PlanTimelineEntry[], clarifica
   return result;
 }
 
+function AgentLoopRunPanel({
+  completed,
+  fallbackEvents,
+  isStreaming,
+  message,
+  onFocusPlanArtifact,
+  progressSegments,
+  runTarget,
+  traceTarget
+}: {
+  completed: boolean;
+  fallbackEvents: RunTimelineEvent[];
+  isStreaming: boolean;
+  message: CollaborationMessage;
+  onFocusPlanArtifact: (targetId: string) => void;
+  progressSegments: ReturnType<typeof progressSegmentsForMessage>;
+  runTarget?: { threadId: string; runId: string };
+  traceTarget: { planId?: string; stepId?: string };
+}) {
+  const { locale, t } = useI18n();
+  const completion = message.completion;
+  const statusLabel = completion
+    ? completionStatusLabel(locale, completion.status)
+    : isStreaming
+      ? t("workspace.preparingResponse")
+      : locale === "zh" ? "运行记录" : "Run record";
+  return (
+    <section className="agent-loop-run" aria-label={locale === "zh" ? "Agent 运行循环" : "Agent run loop"}>
+      <div className="agent-loop-run-header">
+        <span>{statusLabel}</span>
+        {isStreaming ? <i aria-hidden="true" /> : null}
+      </div>
+      {completion ? <CompletionVerdictSummary completion={completion} locale={locale} /> : null}
+      {progressSegments.length ? (
+        <ProgressSegmentList completed={completed} rawEvents={fallbackEvents} runTarget={runTarget} segments={progressSegments} />
+      ) : (
+        <>
+          <AssistantRunTrace events={message.timeline} planId={traceTarget.planId} stepId={traceTarget.stepId} onFocusNode={onFocusPlanArtifact} />
+          <ReasoningStreamPanel message={message} />
+          <RawRunLogDetails fallbackEvents={fallbackEvents} runTarget={runTarget} />
+        </>
+      )}
+      {isStreaming ? <StreamingStatus label={streamingStatusLabel(message, t("workspace.preparingResponse"))} /> : null}
+    </section>
+  );
+}
+
+function CompletionVerdictSummary({ completion, locale }: { completion: NonNullable<CollaborationMessage["completion"]>; locale: "en" | "zh" }) {
+  const reason = completion.reasons[0];
+  const missing = completion.missingRequirements[0];
+  return (
+    <div className="completion-verdict" data-status={completion.status}>
+      <strong>{completionStatusLabel(locale, completion.status)}</strong>
+      {reason ? <span>{reason}</span> : null}
+      {missing ? <em>{missing}</em> : null}
+    </div>
+  );
+}
+
+function completionStatusLabel(locale: "en" | "zh", status: NonNullable<CollaborationMessage["completion"]>["status"]) {
+  if (locale === "zh") {
+    if (status === "completed") return "完成";
+    if (status === "partial") return "部分完成";
+    if (status === "waiting") return "等待用户";
+    if (status === "failed") return "失败";
+    if (status === "finalizing") return "最终整理";
+    return "继续运行";
+  }
+  if (status === "completed") return "Completed";
+  if (status === "partial") return "Partial";
+  if (status === "waiting") return "Waiting";
+  if (status === "failed") return "Failed";
+  if (status === "finalizing") return "Finalizing";
+  return "Continuing";
+}
+
 export function mergeAgentClarificationDisplayRecords(records: AgentClarification[], optimisticRecords: AgentClarification[]) {
   const persistedAnsweredKeys = new Set(records
     .filter((record) => record.status === "answered")
@@ -1035,8 +1352,14 @@ function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "
   busy: boolean;
   locale: "en" | "zh";
   variant?: "message" | "composer";
-  onAnswer: (optionId: string) => Promise<void>;
+  onAnswer: (answer: { optionId?: string; customAnswer?: string }) => Promise<void>;
 }) {
+  const [customAnswer, setCustomAnswer] = useState("");
+  const submitCustomAnswer = () => {
+    const answer = customAnswer.trim();
+    if (!answer) return;
+    void onAnswer({ customAnswer: answer });
+  };
   return (
     <section className={`plan-clarification-card plan-clarification-card-${variant}`} data-status="pending">
       <div className="plan-clarification-heading">
@@ -1050,7 +1373,7 @@ function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "
             aria-label={`${option.label}${option.detail ? `: ${option.detail}` : ""}`}
             disabled={busy}
             key={option.id}
-            onClick={() => void onAnswer(option.id)}
+            onClick={() => void onAnswer({ optionId: option.id })}
             title={option.detail}
             type="button"
           >
@@ -1062,8 +1385,162 @@ function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "
           </button>
         ))}
       </div>
+      <div className="plan-clarification-custom-entry">
+        <label>
+          <span>{locale === "zh" ? "\u81ea\u7531\u8f93\u5165" : "Custom answer"}</span>
+          <textarea
+            disabled={busy}
+            onChange={(event) => setCustomAnswer(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.ctrlKey || event.metaKey) && event.key === "Enter") submitCustomAnswer();
+            }}
+            placeholder={locale === "zh" ? "\u8f93\u5165\u4f60\u81ea\u5df1\u7684\u7b54\u6848..." : "Type your own answer..."}
+            rows={2}
+            value={customAnswer}
+          />
+        </label>
+        <button disabled={busy || !customAnswer.trim()} onClick={submitCustomAnswer} type="button">
+          {locale === "zh" ? "\u63d0\u4ea4" : "Submit"}
+        </button>
+      </div>
     </section>
   );
+}
+
+function progressSegmentsForMessage(message: CollaborationMessage) {
+  const byId = new Map<string, NonNullable<CollaborationMessage["progressSegments"]>[number]>();
+  for (const segment of message.progressSegments ?? []) {
+    if (segment.visibility === "raw") continue;
+    byId.set(segment.id, segment);
+  }
+  for (const event of message.timeline ?? []) {
+    if (!isProgressTimelineEvent(event)) continue;
+    const segment = progressSegmentFromTimelineEvent(event);
+    byId.set(segment.id, segment);
+  }
+  return [...byId.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+function isProgressTimelineEvent(event: RunTimelineEvent) {
+  return event.payload?.kind === "progress_report" && event.payload?.visibility !== "raw";
+}
+
+function progressSegmentFromTimelineEvent(event: RunTimelineEvent): NonNullable<CollaborationMessage["progressSegments"]>[number] {
+  const payload = event.payload ?? {};
+  return {
+    id: typeof payload.progressId === "string" ? payload.progressId : event.id,
+    threadId: event.threadId,
+    runId: event.runId,
+    stageId: typeof payload.stageId === "string" ? payload.stageId : undefined,
+    loopId: typeof payload.loopId === "string" ? payload.loopId : undefined,
+    loopIndex: typeof payload.loopIndex === "number" ? payload.loopIndex : undefined,
+    stepKind: readStepKind(payload.stepKind),
+    actionId: typeof payload.actionId === "string" ? payload.actionId : undefined,
+    observationId: typeof payload.observationId === "string" ? payload.observationId : undefined,
+    completionStatus: readCompletionStatus(payload.completionStatus),
+    completionReasons: readStringArray(payload.completionReasons),
+    missingRequirements: readStringArray(payload.missingRequirements),
+    phase: typeof payload.phase === "string" ? payload.phase : undefined,
+    status: event.status,
+    title: event.title,
+    summary: event.summary,
+    next: typeof payload.next === "string" ? payload.next : undefined,
+    interventionHint: typeof payload.interventionHint === "string" ? payload.interventionHint : undefined,
+    source: typeof payload.source === "string" ? payload.source : undefined,
+    createdAt: event.createdAt
+  };
+}
+
+function readStepKind(value: unknown): NonNullable<CollaborationMessage["progressSegments"]>[number]["stepKind"] | undefined {
+  return value === "intake" || value === "context" || value === "decide" || value === "act" || value === "observe" || value === "evaluate" || value === "checkpoint" || value === "complete" || value === "fail"
+    ? value
+    : undefined;
+}
+
+function readCompletionStatus(value: unknown): NonNullable<CollaborationMessage["progressSegments"]>[number]["completionStatus"] | undefined {
+  return value === "continue" || value === "waiting" || value === "finalizing" || value === "completed" || value === "partial" || value === "failed"
+    ? value
+    : undefined;
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()) : undefined;
+}
+
+function rawRunLogEventsForMessage(message: CollaborationMessage) {
+  return [...(message.timeline ?? [])]
+    .filter((event) => !isProgressTimelineEvent(event))
+    .filter((event) => event.eventType === "tool_started" || event.eventType === "tool_completed" || event.status === "failed" || event.payload?.visibility === "raw")
+    .sort((left, right) => left.sequence - right.sequence);
+}
+
+function runtimeRunTargetForMessage(message: CollaborationMessage, rawEvents: RunTimelineEvent[]) {
+  if (message.runtimeRun?.threadId && message.runtimeRun.runId) return message.runtimeRun;
+  const candidates = [
+    ...(message.progressSegments ?? []).map((event) => ({ threadId: event.threadId, runId: event.runId })),
+    ...rawEvents.map((event) => ({ threadId: event.threadId, runId: event.runId }))
+  ].reverse();
+  return candidates.find((candidate): candidate is { threadId: string; runId: string } => Boolean(candidate.threadId && candidate.runId));
+}
+
+function runtimeRunEventFromTimeline(event: RunTimelineEvent): RuntimeRunEvent {
+  return {
+    threadId: event.threadId,
+    runId: event.runId,
+    eventType: event.eventType,
+    category: "timeline",
+    content: event.summary,
+    metadata: event.payload,
+    sequence: event.sequence,
+    createdAt: event.createdAt
+  };
+}
+
+function runtimeRunEventTitle(event: RuntimeRunEvent) {
+  const label = event.eventType.replace(/[_:.]+/g, " ").trim();
+  return event.category ? `${label} / ${event.category}` : label;
+}
+
+function runtimeRunEventDetail(event: RuntimeRunEvent) {
+  const content = compactRuntimeValue(event.content);
+  if (content) return content;
+  return compactRuntimeValue(event.metadata);
+}
+
+function compactRuntimeValue(value: unknown): string {
+  if (typeof value === "string") return value.trim().slice(0, 500);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (!value) return "";
+  try {
+    return JSON.stringify(value).replace(/\s+/g, " ").slice(0, 500);
+  } catch {
+    return "";
+  }
+}
+
+function queuedInputLabels(locale: string, status: NonNullable<CollaborationMessage["queuedInput"]>["status"]) {
+  if (status === "intervention_requested") {
+    return {
+      status: locale === "zh" ? "\u5df2\u6807\u8bb0\u4ecb\u5165\uff0c\u5c06\u5728\u5b89\u5168\u70b9\u5904\u7406" : "Intervention requested; it will be handled at a safe point.",
+      action: ""
+    };
+  }
+  if (status === "sent_after_run") {
+    return {
+      status: locale === "zh" ? "\u5df2\u5728\u5f53\u524d\u8fd0\u884c\u540e\u53d1\u9001" : "Sent after the current run.",
+      action: ""
+    };
+  }
+  if (status === "injected") {
+    return {
+      status: locale === "zh" ? "\u5df2\u4ecb\u5165\u5f53\u524d\u8fd0\u884c" : "Injected into the current run.",
+      action: ""
+    };
+  }
+  return {
+    status: locale === "zh" ? "\u5df2\u6392\u961f\uff0c\u5c06\u5728\u5f53\u524d\u8fd0\u884c\u540e\u5904\u7406" : "Queued; it will run after the current task.",
+    action: locale === "zh" ? "\u4ecb\u5165\u5f53\u524d\u8fd0\u884c" : "Intervene current run"
+  };
 }
 
 function AgentClarificationAnswerCard({ clarification, locale }: {
@@ -1195,7 +1672,9 @@ function readClarificationOptions(value: unknown): AgentClarificationPrompt["opt
 }
 
 function readString(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  return /^(?:undefined|null|none|nan)$/i.test(text) ? "" : text;
 }
 
 export function agentClarificationRecordKeys(clarification: AgentClarification) {
@@ -1256,8 +1735,13 @@ function readAgentClarificationResumeContext(value: unknown): AgentClarification
   const transientSkillRefs = readStringList(record.transientSkillRefs);
   const disabledSkillRefs = readStringList(record.disabledSkillRefs);
   const runtimeBudgetProfile = readRuntimeBudgetProfile(record.runtimeBudgetProfile);
+  const intakeState = readString(record.intakeState);
+  const intakeRound = readPositiveInteger(record.intakeRound);
+  const maxIntakeRounds = readPositiveInteger(record.maxIntakeRounds);
+  const answeredSummary = readString(record.answeredSummary);
+  const missingSlots = readStringList(record.missingSlots);
   const canvas = readRecord(record.canvas);
-  if (!originalInstruction && transientSkillRefs.length === 0 && disabledSkillRefs.length === 0 && !runtimeBudgetProfile && Object.keys(canvas).length === 0) {
+  if (!originalInstruction && transientSkillRefs.length === 0 && disabledSkillRefs.length === 0 && !runtimeBudgetProfile && !intakeState && !intakeRound && !maxIntakeRounds && !answeredSummary && missingSlots.length === 0 && Object.keys(canvas).length === 0) {
     return undefined;
   }
   return {
@@ -1265,6 +1749,11 @@ function readAgentClarificationResumeContext(value: unknown): AgentClarification
     transientSkillRefs,
     disabledSkillRefs,
     ...(runtimeBudgetProfile ? { runtimeBudgetProfile } : {}),
+    ...(intakeState ? { intakeState } : {}),
+    ...(intakeRound ? { intakeRound } : {}),
+    ...(maxIntakeRounds ? { maxIntakeRounds } : {}),
+    ...(answeredSummary ? { answeredSummary } : {}),
+    ...(missingSlots.length ? { missingSlots } : {}),
     canvas
   };
 }
@@ -1275,6 +1764,10 @@ function readRecord(value: unknown) {
 
 function readStringList(value: unknown) {
   return Array.isArray(value) ? value.map(readString).filter(Boolean) : [];
+}
+
+function readPositiveInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 function readRuntimeBudgetProfile(value: unknown): GenerateRequest["runtimeBudgetProfile"] | undefined {

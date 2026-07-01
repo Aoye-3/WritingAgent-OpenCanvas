@@ -6,6 +6,7 @@ const blockedKey = /(?:prompt|reasoning|thinking|chain.?of.?thought|authorizatio
 
 export function sanitizeToolEventPayload(value: unknown, depth = 0): JsonValue {
   if (depth > 4) return "[truncated]";
+  if (value === undefined) return null;
   if (value === null || typeof value === "boolean" || typeof value === "number") return value;
   if (typeof value === "string") return containsInternalRuntimeProtocol(value) ? "[redacted internal runtime protocol]" : value.slice(0, 500);
   if (Array.isArray(value)) return value.slice(0, 20).map((item) => sanitizeToolEventPayload(item, depth + 1));
@@ -15,7 +16,7 @@ export function sanitizeToolEventPayload(value: unknown, depth = 0): JsonValue {
     return sanitizeCheckpointPayload(record, depth);
   }
   return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-    .filter(([key]) => !blockedKey.test(key))
+    .filter(([key, item]) => item !== undefined && !blockedKey.test(key))
     .slice(0, 30)
     .map(([key, item]) => [key, sanitizeToolEventPayload(item, depth + 1)]));
 }
@@ -24,7 +25,7 @@ function sanitizeCheckpointPayload(payload: Record<string, unknown>, depth: numb
   const node = payload.node as Record<string, unknown>;
   const content = typeof node.content === "string" ? node.content : "";
   return Object.fromEntries(Object.entries(payload)
-    .filter(([key]) => !blockedKey.test(key))
+    .filter(([key, item]) => item !== undefined && !blockedKey.test(key))
     .slice(0, 30)
     .map(([key, item]) => key === "node"
       ? [key, {

@@ -56,6 +56,18 @@ def canvas_write(operation: str, content: str) -> str:
 
 
 @tool
+def write_file(path: str, content: str) -> str:
+    """Write a file."""
+    return path
+
+
+@tool
+def present_files(paths: list) -> str:
+    """Present generated files."""
+    return ",".join(paths)
+
+
+@tool
 def ask_clarification(question: str, options: list) -> str:
     """Ask a structured clarification."""
     return question
@@ -65,7 +77,8 @@ def request(*, phase: str, stage: str | None = None, messages=None, canvas_actio
             allowed_tool_refs=None, tool_state=None, evidence_tool_limit=None, evidence_tools=None,
             progressive_enabled=None, model_call_limit=None, recursion_limit=None, synthesis_reserve_steps=None,
             force_synthesis_after_evidence=None, body_draft_write_limit=None, body_draft_writes_used=None,
-            force_synthesis_after_body_drafts=None, clarification_policy=None):
+            force_synthesis_after_body_drafts=None, clarification_policy=None, markdown_file_delivery_required=None,
+            thinking_disabled_for_tool_choice_compatibility=None):
     runtime = SimpleNamespace(context={
         "facetwrite_plan_phase": phase,
         "facetwrite_plan_stage": stage,
@@ -84,9 +97,12 @@ def request(*, phase: str, stage: str | None = None, messages=None, canvas_actio
         "facetwrite_force_synthesis_after_evidence": force_synthesis_after_evidence,
         "facetwrite_force_synthesis_after_body_drafts": force_synthesis_after_body_drafts,
         "facetwrite_clarification_policy": clarification_policy,
+        "facetwrite_markdown_file_delivery_required": markdown_file_delivery_required,
+        "facetwrite_thinking_disabled_for_tool_choice_compatibility": thinking_disabled_for_tool_choice_compatibility,
+        "facetwrite_thinking_disabled_reason": "plan_intake",
     })
     initial_messages = messages or [HumanMessage(content="Plan this task")]
-    initial_tools = [plan_update, plan_clarification_submit, plan_revision_submit, web_search, web_fetch, read_file, artifact_stage, canvas_write, ask_clarification]
+    initial_tools = [plan_update, plan_clarification_submit, plan_revision_submit, web_search, web_fetch, read_file, artifact_stage, canvas_write, write_file, present_files, ask_clarification]
 
     def build(current_messages, current_tools, current_tool_choice=None):
         return SimpleNamespace(
@@ -119,6 +135,28 @@ def test_filters_intake_tools_to_the_phase_contract():
     )
 
     assert [tool.name for tool in captured["request"].tools] == ["plan_clarification_submit"]
+
+
+def test_filters_preflight_tools_to_plan_or_plan_clarification_only():
+    middleware = PlanToolChoiceMiddleware()
+    captured = {}
+
+    middleware.wrap_model_call(
+        request(
+            phase="planning",
+            stage="preflight",
+            allowed_tool_refs=["plan_clarification_submit", "plan_revision_submit", "web_search", "canvas_write"],
+            tool_state={
+                "plan_clarification_submit": True,
+                "plan_revision_submit": True,
+                "web_search": True,
+                "canvas_write": True,
+            },
+        ),
+        lambda model_request: captured.setdefault("request", model_request),
+    )
+
+    assert [tool.name for tool in captured["request"].tools] == ["plan_clarification_submit", "plan_revision_submit"]
 
 
 def test_filters_chat_tools_using_allowed_refs_and_disabled_state():
@@ -240,6 +278,66 @@ def test_emits_synthesis_gate_event_after_evidence_budget_reached(monkeypatch: p
     assert events[0]["second_handler"] is False
 
 
+def test_emits_synthesis_gate_when_runtime_step_reserve_is_reached(monkeypatch: pytest.MonkeyPatch):
+    middleware = PlanToolChoiceMiddleware()
+    events = []
+    messages = [
+        HumanMessage(content="Research this"),
+        AIMessage(content="Searching"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+        AIMessage(content="Drafting"),
+    ]
+
+    monkeypatch.setattr("langgraph.config.get_stream_writer", lambda: events.append)
+
+    middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            allowed_tool_refs=["web_search", "read_file"],
+            tool_state={"web_search": True, "read_file": True},
+            progressive_enabled=True,
+            recursion_limit=6,
+            synthesis_reserve_steps=2,
+        ),
+        lambda model_request: AIMessage(content="Final answer"),
+    )
+
+    assert events[0]["type"] == "synthesis_gate"
+    assert events[0]["reason"] == "runtime step reserve reached"
+    assert events[0]["recursion_limit"] == 6
+    assert events[0]["estimated_steps_used"] == 4
+
+
+def test_runtime_budget_file_delivery_keeps_only_write_and_present_tools():
+    middleware = PlanToolChoiceMiddleware()
+    captured = {}
+    messages = [
+        HumanMessage(content="Write a complete report"),
+        AIMessage(content="Searching"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+        AIMessage(content="Drafting"),
+    ]
+
+    middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            allowed_tool_refs=["web_search", "read_file", "write_file", "present_files"],
+            tool_state={"web_search": True, "read_file": True, "write_file": True, "present_files": True},
+            progressive_enabled=True,
+            recursion_limit=6,
+            synthesis_reserve_steps=2,
+            markdown_file_delivery_required=True,
+        ),
+        lambda model_request: captured.setdefault("request", model_request),
+    )
+
+    assert [tool.name for tool in captured["request"].tools] == ["write_file", "present_files"]
+    assert "complete user deliverable" in captured["request"].messages[-1].content
+    assert "Do not write a delivery note" in captured["request"].messages[-1].content
+
+
 def test_forces_final_answer_near_model_call_budget():
     middleware = PlanToolChoiceMiddleware()
     captured = {}
@@ -304,6 +402,31 @@ def test_forces_stage_specific_contract_for_the_first_planning_model_call():
     )
 
     assert captured["request"].tool_choice == "plan_clarification_submit"
+
+
+def test_forced_tool_choice_emits_thinking_compatibility_signal(monkeypatch: pytest.MonkeyPatch):
+    middleware = PlanToolChoiceMiddleware()
+    events = []
+    captured = {}
+    monkeypatch.setattr("langgraph.config.get_stream_writer", lambda: events.append)
+
+    middleware.wrap_model_call(
+        request(
+            phase="planning",
+            thinking_disabled_for_tool_choice_compatibility=True,
+        ),
+        lambda model_request: captured.setdefault("request", model_request),
+    )
+
+    assert captured["request"].tool_choice == "plan_clarification_submit"
+    assert events == [{
+        "type": "thinking_disabled_for_tool_choice_compatibility",
+        "phase": "planning",
+        "planId": None,
+        "stepId": None,
+        "tool_choice": "plan_clarification_submit",
+        "reason": "plan_intake",
+    }]
 
 
 def test_does_not_repeat_force_after_any_stage_contract_result():

@@ -22,11 +22,16 @@ test("Canvas Plan nodes prefer structured projection metadata before content fal
   assert.match(source, /node\.content\.split/);
 });
 
-test("pending Plan clarification is rendered as the composer form", async () => {
+test("pending Plan clarification is rendered in a floating composer-adjacent panel", async () => {
   const source = await readFile("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
   assert.match(source, /pendingClarificationPlan/);
   assert.match(source, /pendingAgentClarification/);
-  assert.match(source, /drawer-chat-composer-clarification/);
+  assert.match(source, /floatingBoardPlan/);
+  assert.match(source, /floatingPlan\?\.id === plan\.id/);
+  assert.match(source, /<AgentPlanBoard/);
+  assert.match(source, /floating-plan-panel/);
+  assert.match(source, /planPanelCollapsed/);
+  assert.match(source, /setPlanPanelCollapsed/);
   assert.match(source, /variant="composer"/);
   assert.match(source, /hidden=\{Boolean\(pendingClarificationPlan \|\| pendingAgentClarification\)\}/);
   assert.match(source, /disabled=\{Boolean\(pendingClarificationPlan \|\| pendingAgentClarification\)\}/);
@@ -44,7 +49,8 @@ test("Agent clarification timeline events render the composer choice card", asyn
   assert.match(source, /readAgentClarificationResumeContext/);
   assert.match(source, /function AgentClarificationChoiceCard/);
   assert.match(source, /clarification\.options\.map/);
-  assert.match(source, /onAnswer=\{\(optionId\) => answerAgentClarification\(pendingAgentClarification, optionId\)\}/);
+  assert.match(source, /onAnswer=\{\(answer\) => answerAgentClarification\(pendingAgentClarification, answer\)\}/);
+  assert.match(source, /plan-clarification-custom-entry/);
   assert.doesNotMatch(source, /onUpdateCanvasNode\(node\.id/);
   assert.doesNotMatch(source, /agentClarificationAnsweredCanvasContent/);
 });
@@ -63,7 +69,9 @@ test("Agent clarification continuation preserves original task and skill overrid
   assert.match(source, /disabledSkillRefs: resumeDisabledSkillRefs/);
   assert.match(source, /runtimeBudgetProfile: resume\.runtimeBudgetProfile/);
   assert.match(source, /canvas: resume\.canvas/);
-  assert.match(source, /selectedOptionId: option\.id/);
+  assert.match(source, /buildAgentClarificationSubmission/);
+  assert.match(source, /selectedOptionId: selectedOption\.id/);
+  assert.match(source, /answerText/);
   assert.match(source, /isAgentClarificationRequired\(sendResult\)/);
   assert.doesNotMatch(source, /await onSend\(option\.label, undefined, \{\s*agentClarification/s);
 });
@@ -98,5 +106,5 @@ test("chat generation can be stopped while the agent is thinking", async () => {
   assert.match(hookSource, /chatAbortControllerRef\.current\?\.abort\(\)/);
   assert.match(drawerSource, /onStopSending/);
   assert.match(drawerSource, /StopIcon/);
-  assert.match(drawerSource, /type=\{isSending \? "button" : "submit"\}/);
+  assert.match(drawerSource, /type=\{showStopControl \? "button" : "submit"\}/);
 });

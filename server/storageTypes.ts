@@ -7,6 +7,7 @@ export type JsonValue = Record<string, unknown> | unknown[] | string | number | 
 
 export type RunRecordInput = {
   threadId: string;
+  clientRequestId?: string;
   agentCardId: string;
   configuredModelApiId?: string;
   modelId?: string;
@@ -92,6 +93,7 @@ export type PlanRunStatus = "draft" | "awaiting_approval" | "running" | "paused"
 export type PlanStepStatus = "pending" | "running" | "completed" | "failed" | "skipped";
 export type PlanArtifactStatus = "staged" | "committing" | "committed" | "failed";
 export type PlanArtifactType = "text" | "image";
+export type PlanRunOrigin = "explicit_plan" | "auto_complex_task" | "approved_execution";
 
 export type PlanStep = {
   id: string;
@@ -187,6 +189,10 @@ export type PlanRun = {
   canvasNodeId?: string;
   currentStepId?: string;
   executionVersion: number;
+  origin?: PlanRunOrigin;
+  complexity?: JsonValue;
+  budget?: JsonValue;
+  preflight?: JsonValue;
   clarification?: PlanClarification;
   steps: PlanStep[];
   artifacts: PlanArtifact[];

@@ -1,8 +1,33 @@
-import type { GenerateRequest, GenerateResponse, RunTimelineEvent, StreamStatus } from "./types";
-import { apiPost } from "../../shared/apiClient";
+import type { AgentProgressEvent, GenerateRequest, GenerateResponse, RuntimeRunEvent, RunTimelineEvent, StreamStatus } from "./types";
+import { apiGet, apiPost } from "../../shared/apiClient";
 
 export async function generateText(payload: GenerateRequest): Promise<GenerateResponse> {
   return apiPost<GenerateResponse>("/api/generate", payload);
+}
+
+export async function requestRunIntervention(payload: {
+  threadId: string;
+  runId: string;
+  text: string;
+  inputId: string;
+}): Promise<{ id: string; status: string }> {
+  return apiPost<{ id: string; status: string }>(`/api/generate/runs/${encodeURIComponent(payload.runId)}/interventions`, {
+    threadId: payload.threadId,
+    text: payload.text,
+    inputId: payload.inputId
+  });
+}
+
+export async function fetchRuntimeRunEvents(payload: {
+  threadId: string;
+  runId: string;
+  limit?: number;
+}): Promise<RuntimeRunEvent[]> {
+  const limit = payload.limit && Number.isInteger(payload.limit) ? `&limit=${encodeURIComponent(String(payload.limit))}` : "";
+  const response = await apiGet<{ events: RuntimeRunEvent[] }>(
+    `/api/generate/runs/${encodeURIComponent(payload.runId)}/events?threadId=${encodeURIComponent(payload.threadId)}${limit}`
+  );
+  return response.events;
 }
 
 export async function generateTextStream(
@@ -13,17 +38,21 @@ export async function generateTextStream(
     onStatus?: (status: StreamStatus) => void;
     onToolEvent?: (event: unknown) => void;
     onTimelineEvent?: (event: RunTimelineEvent) => void;
+    onProgressEvent?: (event: AgentProgressEvent) => void;
   } = {},
   options: { signal?: AbortSignal } = {}
 ): Promise<GenerateResponse> {
+  const trace = createStreamTrace(payload);
   const response = await fetch("/api/generate/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
     signal: options.signal
   });
+  trace("response", { status: response.status, ok: response.ok });
 
   if (!response.ok || !response.body) {
+    trace("response_error", { status: response.status });
     throw new Error(`Streaming generation request failed with ${response.status}`);
   }
 
@@ -34,13 +63,20 @@ export async function generateTextStream(
 
   while (true) {
     const { value, done } = await reader.read();
-    if (done) break;
+    if (done) {
+      trace("reader_done");
+      break;
+    }
     buffer += decoder.decode(value, { stream: true });
     const events = buffer.split("\n\n");
     buffer = events.pop() ?? "";
     for (const rawEvent of events) {
       const parsed = parseSseEvent(rawEvent);
       if (!parsed) continue;
+      trace("event", {
+        event: parsed.event,
+        type: eventTypeFromData(parsed.data)
+      });
       if (parsed.event === "token") {
         handlers.onToken?.(String((parsed.data as { text?: unknown }).text ?? ""));
       } else if (parsed.event === "reasoning_token") {
@@ -51,19 +87,25 @@ export async function generateTextStream(
         handlers.onToolEvent?.(parsed.data);
       } else if (parsed.event === "timeline_event") {
         handlers.onTimelineEvent?.(parsed.data as RunTimelineEvent);
+      } else if (parsed.event === "progress_event") {
+        handlers.onProgressEvent?.(parsed.data as AgentProgressEvent);
       } else if (parsed.event === "final") {
         finalResult = parsed.data as GenerateResponse;
+        trace("final", { threadId: finalResult.threadId, runId: finalResult.runId });
       } else if (parsed.event === "error") {
         const message = String((parsed.data as { message?: unknown }).message ?? "Streaming generation failed");
+        trace("error", { message });
         throw new Error(message);
       }
     }
   }
 
   if (!finalResult) {
+    trace("missing_final");
     throw new Error("Streaming generation ended without a final response");
   }
 
+  trace("complete", { threadId: finalResult.threadId, runId: finalResult.runId });
   return finalResult;
 }
 
@@ -72,4 +114,52 @@ function parseSseEvent(raw: string) {
   const dataLine = raw.split("\n").find((line) => line.startsWith("data: "));
   if (!event || !dataLine) return null;
   return { event, data: JSON.parse(dataLine.slice(6)) as unknown };
+}
+
+function createStreamTrace(payload: GenerateRequest) {
+  const traceId = `client_stream_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const startedAt = performance.now();
+  let lastAt = startedAt;
+  return (phase: string, details: Record<string, unknown> = {}) => {
+    const now = performance.now();
+    const event = typeof details.event === "string" ? details.event : "";
+    const type = typeof details.type === "string" ? details.type : "";
+    const shouldLog = phase !== "event"
+      || event === "final"
+      || event === "error"
+      || event === "status"
+      || event === "tool_event"
+      || event === "progress_event"
+      || event === "activity"
+      || /^canvas_delivery_/.test(type)
+      || /^agent_backend_/.test(type)
+      || /llm_|heartbeat|waiting/i.test(type);
+    if (!shouldLog) return;
+    console.info("[FacetWrite stream trace]", {
+      traceId,
+      phase,
+      mode: payload.mode,
+      threadId: payload.threadId,
+      planId: payload.planId,
+      stepId: payload.stepId,
+      elapsedMs: Math.round(now - startedAt),
+      sinceLastMs: Math.round(now - lastAt),
+      ...details
+    });
+    lastAt = now;
+  };
+}
+
+function eventTypeFromData(data: unknown) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return "";
+  const record = data as Record<string, unknown>;
+  const payload = record.payload;
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const nested = payload as Record<string, unknown>;
+    if (typeof nested.eventType === "string") return nested.eventType;
+    if (typeof nested.type === "string") return nested.type;
+  }
+  return typeof record.eventType === "string"
+    ? record.eventType
+    : typeof record.type === "string" ? record.type : "";
 }
