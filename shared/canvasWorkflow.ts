@@ -98,16 +98,21 @@ export function updateCanvasWorkflowStage(workflow: CanvasWorkflowState, stage: 
 }
 
 export function nextCanvasWorkflowNodeMetadata(
-  workflow: Pick<CanvasWorkflowState, "stage">,
+  _workflow: Pick<CanvasWorkflowState, "stage">,
   metadata: CanvasWorkflowNodeMetadata = {}
 ): CanvasWorkflowNodeMetadata {
+  const { stage: _stage, roles, ...workflowMetadata } = metadata.workflow ?? {};
+  const workflow = {
+    ...workflowMetadata,
+    ...(roles ? { roles } : {})
+  };
+  if (Object.keys(workflow).length === 0) {
+    const { workflow: _workflowMetadata, ...rest } = metadata;
+    return rest;
+  }
   return {
     ...metadata,
-    workflow: {
-      ...(metadata.workflow ?? {}),
-      stage: metadata.workflow?.stage ?? workflow.stage,
-      ...(metadata.workflow?.roles ? { roles: metadata.workflow.roles } : {})
-    }
+    workflow
   };
 }
 
@@ -169,7 +174,6 @@ export function buildCanvasWorkflowContext(input: {
   stage?: CanvasWorkflowStage;
   roleIds?: string[];
 }): CanvasWorkflowContext {
-  const mode = input.workflow.mode;
   const stage = input.stage ?? input.workflow.stage;
   const roleIds = input.roleIds ?? [];
   const chain = input.chainNodeIds ? new Set(input.chainNodeIds) : undefined;
@@ -177,8 +181,6 @@ export function buildCanvasWorkflowContext(input: {
   const nodes = input.nodes.filter((node) => {
     if (node.kind === "role") return false;
     if (chain && !chain.has(node.id)) return false;
-    const metadata = readWorkflowMetadata(node.metadata);
-    if (mode === "batch_delivery" && metadata.stage !== stage) return false;
     return true;
   });
   const targetNodeIds = nodes.map((node) => node.id);

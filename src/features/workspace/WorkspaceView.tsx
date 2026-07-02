@@ -98,7 +98,6 @@ type WorkspaceViewProps = {
   onUpdateCanvasNodePositions: (updates: CanvasNodePositionUpdate[]) => Promise<unknown>;
   onUpdateCanvasObject: (objectId: string, patch: CanvasObjectPatch) => Promise<unknown>;
   onUploadCanvasAsset: (input: { fileName: string; fileBase64: string }) => Promise<unknown>;
-  onUpdateCanvasNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflow["stage"]; roles?: string[] }) => Promise<unknown>;
   onUpdateCanvasWorkflow: (patch: { mode?: CanvasWorkflow["mode"]; stage?: CanvasWorkflow["stage"]; roles?: CanvasWorkflow["roles"] }) => Promise<unknown>;
   onUndoCanvas: () => Promise<void>;
   onPlansChanged: () => Promise<void>;
@@ -192,7 +191,6 @@ export function WorkspaceView({
   onUpdateCanvasNodePositions,
   onUpdateCanvasObject,
   onUploadCanvasAsset,
-  onUpdateCanvasNodeWorkflow,
   onUpdateCanvasWorkflow,
   onUndoCanvas,
   promptPreview,
@@ -364,7 +362,6 @@ export function WorkspaceView({
           onRejectWriteRequest={onRejectCanvasWriteRequest}
           onUpdateObject={onUpdateCanvasObject}
           onUploadAsset={onUploadCanvasAsset}
-          onUpdateNodeWorkflow={onUpdateCanvasNodeWorkflow}
           onUpdateWorkflow={onUpdateCanvasWorkflow}
           onToolChange={setActiveCanvasTool}
           claimSourceFocus={claimReview.sourceFocusClaim}
@@ -420,7 +417,9 @@ export function WorkspaceView({
           selectedModelConfigId={selectedModelConfigId}
           modelSettings={{
             providerId: selectedConfiguredModel?.providerId,
-            thinkingMode: selectedConfiguredModel?.providerId === "deepseek" && selectedConfiguredModel.modelId === "deepseek-reasoner" ? "enabled" : undefined
+            modelId: selectedConfiguredModel?.modelId,
+            modelName: selectedConfiguredModel?.modelName,
+            supportsThinking: selectedConfiguredModel?.supportsThinking
           }}
           onApproveWriteRequest={async (requestId) => { await onApproveCanvasWriteRequest(requestId); }}
             onCreateConversation={onCreateConversation}

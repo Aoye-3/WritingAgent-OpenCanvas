@@ -38,7 +38,7 @@ test("canvas response includes workflow and node suggestions", async () => {
   assert.equal((response.body.suggestions as unknown[]).length, 1);
 });
 
-test("canvas workflow route updates mode, stage, and node workflow metadata", async () => {
+test("canvas workflow route updates mode while node stage patch remains compatible", async () => {
   const threadId = "thread_route_canvas_workflow";
   const app = express();
   app.use(express.json());
@@ -55,7 +55,7 @@ test("canvas workflow route updates mode, stage, and node workflow metadata", as
   assert.equal((workflow.body.workflow as { mode: string }).mode, "batch_delivery");
   assert.equal((workflow.body.workflow as { stage: string }).stage, "research");
   assert.equal(nodeWorkflow.status, 200);
-  assert.deepEqual(((nodeWorkflow.body.node as { metadata: { workflow: unknown } }).metadata.workflow), { stage: "research" });
+  assert.equal(((nodeWorkflow.body.node as { metadata: { workflow?: unknown } }).metadata.workflow), undefined);
 });
 
 test("canvas workflow suggestion routes create, accept, ignore, and convert suggestions", async () => {
@@ -200,9 +200,9 @@ function fakeCanvasStorage() {
       node: { ...node, id: "node_from_suggestion", kind: "note" }
     }),
     updateCanvasWorkflow: (_threadId: string, input: { mode?: string; stage?: string }) => ({ ...workflow, mode: input.mode ?? workflow.mode, stage: input.stage ?? workflow.stage }),
-    updateCanvasNodeWorkflow: (_threadId: string, _nodeId: string, input: { stage: string }) => ({
+    updateCanvasNodeWorkflow: (_threadId: string, _nodeId: string, _input: { stage: string }) => ({
       ...node,
-      metadata: { workflow: { stage: input.stage } }
+      metadata: {}
     })
   };
 }

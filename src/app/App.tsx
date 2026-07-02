@@ -19,7 +19,7 @@ import { ProjectsView } from "../features/projects/ProjectsView";
 import { useProjects } from "../features/projects/hooks/useProjects";
 import { WorkspaceView } from "../features/workspace/WorkspaceView";
 import type { AIComposerSubmitPayload } from "../features/workspace/components/AIComposer";
-import { thinkingOverridesFromChoice } from "../features/workspace/components/AIComposer";
+import { isThinkingSupportedModel, thinkingOverridesFromChoice } from "../features/workspace/components/AIComposer";
 import { useSkillCatalogControls } from "../features/workspace/hooks/useSkillCatalogControls";
 import { CanvasNodeSettingsView } from "../features/canvas/CanvasNodeSettingsView";
 import { useCanvasState } from "./hooks/useCanvasState";
@@ -194,13 +194,11 @@ function AppContent() {
           id: node.id,
           kind: node.kind,
           title: node.title,
-          workflow: (node.metadata as { workflow?: unknown } | undefined)?.workflow,
           preview: node.content.slice(0, 600),
           content: node.kind === "reference" ? node.content : undefined
         })),
         workflow: canvasState.canvasWorkflow ? {
           mode: canvasState.canvasWorkflow.mode,
-          stage: canvasState.canvasWorkflow.stage,
           roles: workflowContext?.roles ?? []
         } : undefined,
         selectedNode: selectedCanvasNode && selectedCanvasNode.kind !== "note" ? {
@@ -356,7 +354,7 @@ function AppContent() {
         setSelectedModelConfigId(thread.configuredModelApiId ?? null);
       }
       const model = configuredModels.find((item) => item.id === payload.selectedModelConfigId);
-      const modelOverrides = model?.providerId === "deepseek" ? thinkingOverridesFromChoice(payload.thinkingChoice) : undefined;
+      const modelOverrides = isThinkingSupportedModel(model) ? thinkingOverridesFromChoice(payload.thinkingChoice) : undefined;
       const requestContext = {
         ...(payload.enabledSkillRefs.length ? { transientSkillRefs: payload.enabledSkillRefs } : {}),
         ...(payload.disabledSkillRefs.length ? { disabledSkillRefs: payload.disabledSkillRefs } : {}),
@@ -517,7 +515,9 @@ function AppContent() {
   const selectedConfiguredModel = configuredModels.find((model) => model.id === selectedModelConfigId);
   const homeModelSettings = {
     providerId: selectedConfiguredModel?.providerId,
-    thinkingMode: selectedConfiguredModel?.providerId === "deepseek" && selectedConfiguredModel.modelId === "deepseek-reasoner" ? "enabled" as const : undefined
+    modelId: selectedConfiguredModel?.modelId,
+    modelName: selectedConfiguredModel?.modelName,
+    supportsThinking: selectedConfiguredModel?.supportsThinking
   };
 
   const handleAgentSaved = (agentCard: AgentCard) => {
@@ -698,7 +698,6 @@ function AppContent() {
         onUpdateCanvasNodePositions={canvasState.handleUpdateCanvasNodePositions}
         onUpdateCanvasObject={canvasState.handleUpdateCanvasObject}
         onUploadCanvasAsset={canvasState.handleUploadCanvasAsset}
-        onUpdateCanvasNodeWorkflow={canvasState.handleUpdateCanvasNodeWorkflow}
         onUpdateCanvasWorkflow={canvasState.handleUpdateCanvasWorkflow}
         onUndoCanvas={canvasState.undoCanvas}
         promptPreview={promptPreview}

@@ -119,7 +119,7 @@ async function pushConfiguredModels(models: RuntimeModel[]) {
 }
 
 function toRuntimeModel(config: SyncModel): RuntimeModel {
-  const thinkingConfig = providerThinkingConfig(config.providerId);
+  const thinkingConfig = config.supportsThinking === true ? modelThinkingConfig() : undefined;
   return {
     name: config.id,
     display_name: config.modelName ?? config.modelId,
@@ -136,14 +136,13 @@ function toRuntimeModel(config: SyncModel): RuntimeModel {
 }
 
 function providerToolChoiceThinkingSupport(providerId: string, modelId: string): RuntimeModel["supports_tool_choice_with_thinking"] {
-  if (providerId === "deepseek") return false;
+  if (providerId === "deepseek" || modelId.toLowerCase().includes("deepseek")) return false;
   const normalized = modelId.toLowerCase();
   if (providerId === "moonshot" || normalized.includes("kimi") || normalized.includes("qwen")) return "unknown";
   return "unknown";
 }
 
-function providerThinkingConfig(providerId: string): Pick<RuntimeModel, "when_thinking_enabled" | "when_thinking_disabled"> | undefined {
-  if (providerId !== "deepseek") return undefined;
+function modelThinkingConfig(): Pick<RuntimeModel, "when_thinking_enabled" | "when_thinking_disabled"> {
   return {
     when_thinking_enabled: {
       extra_body: {

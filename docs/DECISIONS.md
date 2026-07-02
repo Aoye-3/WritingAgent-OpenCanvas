@@ -1,5 +1,21 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-02: Composer Thinking UI Uses Shared Model Capability Detection
+
+Decision: Home and Workspace chat inputs share `AIComposer` as the only maintained composer surface for per-message thinking controls. The composer must decide whether to render the thinking button through the shared model capability helper, not by provider id alone and not by the model list group label. The visible trigger uses the `thinking-mode-button` CSS contract; `thinking-mode-menu` is reserved for the popover menu.
+
+Reason: A frontend cleanup moved Home and Workspace onto the shared composer, but old tests still inspected dead drawer markup and missed a class-name regression. The trigger was rendered with a menu class, while the CSS positioned that class as an absolute popover. Separately, some configured DeepSeek-compatible reasoning models can be grouped as `reasoning` without an explicit persisted `supportsThinking:true` flag, so strict flag-only checks hide the thinking UI even when the model id is recognizable.
+
+Impact: `shared/modelCapabilities.ts` is the cross-layer fallback for known model thinking support. `AIComposer` is the regression-test target for thinking UI markup, model selection, Skill controls, and Plan controls. Tests must not use obsolete `AICollaborationDrawer` form remnants as evidence that the current composer UI works. Future thinking UI changes need both capability tests and rendered-component coverage.
+
+## 2026-07-02: Canvas Stage Is Compatibility Data, Canvas Mode Drives Delivery Strategy
+
+Decision: Retire Canvas batch Stage from the main user and runtime workflow. The top-toolbar Canvas Mode remains the user-facing strategy selector for batch delivery and diagram-oriented modes. The frontend must not render the bottom batch-step control or ordinary node stage badges. New Canvas nodes and suggestion-converted nodes must not write `metadata.workflow.stage`. Generation context may include Canvas Mode and connected Role perspectives, but must not include workflow or node stage and must not filter nodes by stage.
+
+Reason: Stage began as a coarse delivery/context categorization, but it became weak signal once Canvas Mode and Role nodes provided more explicit strategy and targeted perspective controls. Keeping Stage visible attached stale terms such as inspiration/research/writing to nodes, encouraged users and agents to treat those labels as meaningful context, and could hide useful nodes from runtime context when historical stage metadata no longer matched the current task.
+
+Impact: `canvas_workflows.stage/stages`, `CanvasWorkflowStage`, and compatibility routes remain so older local data and callers do not break. Existing stored `metadata.workflow.stage` values are not migrated away in this pass, but they are inert: hidden from node UI, stripped from new writes, omitted from generation context, and ignored by `buildCanvasWorkflowContext`. Role influence continues through `role` nodes plus directed `Role -> content` edges. Future delivery strategies should extend `CanvasWorkflowMode` or introduce explicit nodes/edges, not revive node-level Stage badges.
+
 ## 2026-06-30: Run Trace Is Safe Execution Narration, Not Chain-Of-Thought
 
 Decision: Treat visible Thinking/Run Trace UI as a public execution narration layer, not as model chain-of-thought. Low-level `tool_event` records remain audit data. User-facing trace entries should be safe `timeline_event` summaries that aggregate repetitive tool lifecycle events into readable milestones, decisions, and next-step narration.
@@ -157,6 +173,8 @@ Reason: FigJam-style visual annotations must not silently affect Agent context, 
 Impact: The floating toolbar can create saved visual objects, but Agent selection actions remain proposal-oriented and Agent-originated content writes continue through the existing approval boundary.
 
 ## 2026-06-15: Canvas Mode Is The User-Facing Workflow Layer
+Status: Superseded for Stage behavior by "2026-07-02: Canvas Stage Is Compatibility Data, Canvas Mode Drives Delivery Strategy".
+
 Decision: Add `CanvasWorkflowMode` and expose `batch_delivery` as the first Canvas Mode. The existing writing stage remains as mode-specific batch-step state instead of the primary workspace concept.
 
 Reason: The product centers on text nodes, batch delivery, and the canvas. Presenting inspiration/research/writing as the top-level control made the workspace look like a linear writing-stage product, while the stage data is still valuable for context filtering and node inheritance.
@@ -171,6 +189,8 @@ Reason: A FacetWrite request reached AgentBackend `/api/runs/stream` successfull
 Impact: `modules/agent-runtime/config.yaml` and `config.example.yaml` must stay aligned with `facetwrite_bridge.py`, `server/tools/catalog.ts`, and frontend tool types. `server/agentRuntimeConfig.test.ts` loads both YAML files and verifies every configured `tools[*].use` target resolves to a real exported LangChain tool. Runtime/model failures remain visible failures and must not be converted into fake Canvas delivery nodes or Mock assistant output.
 
 ## 2026-05-30: Canvas Role Controls Are Function Nodes
+Status: Superseded for Stage filtering and node-stage preservation by "2026-07-02: Canvas Stage Is Compatibility Data, Canvas Mode Drives Delivery Strategy".
+
 Decision: Model Canvas Workflow Roles as first-class `role` Canvas nodes that apply only through directed `Role -> content` edges. Stage remains a single project/thread state and does not become a normal duplicable node.
 
 Reason: Role is an influence relationship, not another property to pile onto every document, note, and reference node. Keeping Role as a function node preserves Canvas spatial reuse, drag/resize/delete/undo behavior, and prevents ordinary content nodes from becoming large containers for workflow controls.
@@ -178,6 +198,8 @@ Reason: Role is an influence relationship, not another property to pile onto eve
 Impact: Role data lives in `canvas_nodes.metadata.workflowRole`; Role effect is computed from `canvas_edges`; suggestions are anchored to the Role node while retaining `targetNodeId`; Agent context filtering reads connected Role prompts only after chain and stage filtering. New Workflow control capabilities should follow the same nodeized/relationship-driven bias when they need targeted influence, rather than adding more controls to content-node UI. Legacy `metadata.workflow.roles` is migrated into Role nodes and edges, then removed from content node metadata while preserving node stage.
 
 ## 2026-05-28: Canvas Workflow Is A Separate Layer Over Canvas V2
+Status: Superseded for Stage filtering and node-stage metadata by "2026-07-02: Canvas Stage Is Compatibility Data, Canvas Mode Drives Delivery Strategy".
+
 Decision: Add Canvas Workflow as a project-level writing-stage, node-stage, Role, and suggestion layer over the existing Canvas V2 spatial model, without adding new node kinds in v1.
 
 Reason: The Canvas needs writing-process awareness so Agents can work on the relevant chain, stage, and Role perspective without reading the entire board. Keeping Workflow separate from React Flow spatial behavior prevents the Canvas UI, Agent orchestration, and suggestion lifecycle from becoming one tangled module.

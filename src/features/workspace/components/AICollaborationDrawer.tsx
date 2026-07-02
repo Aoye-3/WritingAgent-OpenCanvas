@@ -18,7 +18,7 @@ import { acceptCanvasWriteSuggestion, answerPlan, dismissCanvasWriteSuggestion, 
 import { visibleComposerTools } from "../planUiPolicy";
 import { buildPlanTimeline } from "../planTimeline";
 import type { ConfiguredModelApiSummary } from "../../settings/types";
-import { AIComposer, type AIComposerSubmitPayload, type ConversationModelControls, type RuntimeBudgetChoice } from "./AIComposer";
+import { AIComposer, isThinkingSupportedModel, type AIComposerSubmitPayload, type ConversationModelControls, type RuntimeBudgetChoice } from "./AIComposer";
 import { SkillFolderPicker } from "./SkillFolderPicker";
 
 export type { ConversationModelControls } from "./AIComposer";
@@ -165,7 +165,7 @@ export function AICollaborationDrawer({
   const { locale, t } = useI18n();
   const reduceMotion = useReducedMotion();
   const [input, setInput] = useState("");
-  const supportsThinking = modelSettings?.providerId === "deepseek";
+  const supportsThinking = isThinkingSupportedModel(modelSettings);
   const [thinkingChoice, setThinkingChoice] = useState<ThinkingChoice>(modelSettingsToThinkingChoice(modelSettings));
   const [runtimeBudgetChoice, setRuntimeBudgetChoice] = useState<RuntimeBudgetChoice>(runtimeBudgetProfile ?? "low");
   const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
@@ -227,7 +227,7 @@ export function AICollaborationDrawer({
 
   useEffect(() => {
     setThinkingChoice(modelSettingsToThinkingChoice(modelSettings));
-  }, [modelSettings?.providerId, modelSettings?.thinkingMode, modelSettings?.reasoningEffort]);
+  }, [modelSettings?.providerId, modelSettings?.modelId, modelSettings?.modelName, modelSettings?.supportsThinking, modelSettings?.thinkingMode, modelSettings?.reasoningEffort]);
 
   useEffect(() => {
     if (!supportsThinking) setThinkingMenuOpen(false);
@@ -1854,7 +1854,7 @@ function isWriteConfirmation(text: string) {
 }
 
 function modelSettingsToThinkingChoice(modelSettings?: ConversationModelControls): ThinkingChoice {
-  if (modelSettings?.providerId !== "deepseek" || modelSettings.thinkingMode !== "enabled") return "disabled";
+  if (!isThinkingSupportedModel(modelSettings) || modelSettings?.thinkingMode !== "enabled") return "disabled";
   return modelSettings.reasoningEffort === "max" || modelSettings.reasoningEffort === "xhigh" ? "max" : "high";
 }
 

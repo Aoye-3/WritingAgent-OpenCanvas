@@ -170,10 +170,11 @@ export function useModelConfig(activeView: AppView, zh: boolean) {
       const modelRef = models.find((item) => item.id === model.trim());
       const payload = {
         providerId: selectedProvider.id,
-        modelId: model.trim() || selectedProvider.defaultModel || selectedProvider.models[0]?.id || "",
-        modelName: modelRef?.name,
-        modelType: modelRef?.modelType,
-        apiKey: apiKey.trim() || undefined,
+	        modelId: model.trim() || selectedProvider.defaultModel || selectedProvider.models[0]?.id || "",
+	        modelName: modelRef?.name,
+	        modelType: modelRef?.modelType,
+        supportsThinking: modelRef?.supportsThinking,
+	        apiKey: apiKey.trim() || undefined,
         baseURL: baseURL.trim() || undefined,
         enabled: true,
         confirmLocalKeyWrite: Boolean(apiKey.trim())

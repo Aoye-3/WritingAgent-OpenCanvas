@@ -328,7 +328,7 @@ test("stores role nodes as first-class canvas nodes", async () => {
   assert.equal(edge.targetNodeId, draft.id);
 });
 
-test("canvas workflow mode and stage are thread-scoped and inherited by new nodes", async () => {
+test("canvas workflow mode and stage stay thread-scoped without annotating new nodes", async () => {
   const storage = await createStorage();
   const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;
   await storage.ensureThread(threadId, "blog-post");
@@ -341,7 +341,7 @@ test("canvas workflow mode and stage are thread-scoped and inherited by new node
   assert.equal(workflow.mode, "batch_delivery");
   assert.equal(storage.getCanvasWorkflow(threadId).mode, "batch_delivery");
   assert.equal(workflow.stage, "structure");
-  assert.deepEqual((node.metadata as { workflow?: unknown }).workflow, { stage: "structure" });
+  assert.equal((node.metadata as { workflow?: unknown }).workflow, undefined);
 });
 
 test("legacy node role metadata migrates to role nodes and role edges", async () => {
@@ -366,7 +366,7 @@ test("legacy node role metadata migrates to role nodes and role edges", async ()
   assert.equal(migrated.createdRoleNodes, 1);
   assert.equal(roleNode?.title, "Claims");
   assert.deepEqual((roleNode?.metadata as { workflowRole: unknown }).workflowRole, { roleId: "claims", label: "Claims", prompt: "Challenge unsupported claims." });
-  assert.deepEqual((migratedTarget?.metadata as { workflow: { stage: string; roles?: string[] } }).workflow, { stage: "writing" });
+  assert.equal((migratedTarget?.metadata as { workflow?: unknown }).workflow, undefined);
   assert.equal(storage.listCanvasEdges(threadId).some((edge) => edge.sourceNodeId === roleNode?.id && edge.targetNodeId === node.id), true);
 });
 

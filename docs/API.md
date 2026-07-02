@@ -157,7 +157,7 @@ Request contract validation errors should return HTTP 400 with `code:"bad_reques
   - `contextValues`, when present, represents explicit transient workspace state such as draft or Canvas node data. Project Brief and Current Task Brief are loaded from storage by Thread identity and are not accepted from the generation request.
   - `transientSkillRefs`, when present, is a per-request string array of public Skill ids selected from `/api/skills/catalog`. The backend trims, deduplicates, and ignores invalid entries. These Skills apply only to the current generation request and are not written to Agent settings.
   - `disabledSkillRefs`, when present, is a per-request string array of Agent/default Skill ids to disable for only this request. Server-forced Plan Skills are added after this exclusion and cannot be disabled by the UI.
-  - `modelOverrides`, when present, is a per-run override for runtime-safe model controls such as `thinkingMode` and `reasoningEffort`. It does not mutate saved Agent settings.
+  - `modelOverrides`, when present, is a per-run override for runtime-safe model controls such as `thinkingMode` and `reasoningEffort`. The composer may expose these controls only for the selected Thread model when its configured flag or shared model-capability detection says thinking is supported. Overrides do not mutate saved Agent settings or configured model records.
   - Model identity is resolved from the Thread's selected `configuredModelApiId`; Agents do not own model selection.
   - Runs generation, records the result, and returns generation metadata and output.
   - Uses Agent Runtime as the only real generation path. Runtime/model failures return stable error codes and do not record an assistant message, output version, or Mock result.
@@ -280,7 +280,11 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
 
 ## Projects
 - `GET /api/projects`
-  - Returns active Project summaries, model bindings, Thread counts, and asset counts.
+  - Returns active Project summaries, model bindings, Thread counts, asset counts, and optional lightweight Canvas previews.
+  - `ProjectSummary.canvasPreview` is present only when the Project has previewable Canvas nodes or objects. It contains at most 8 `nodes` and at most 8 `objects`.
+  - Preview nodes expose only `id`, `kind`, `title`, `x`, `y`, `width`, and `height`; they must not include node `content`.
+  - Preview objects expose only `id`, `kind`, `geometry`, and minimal safe `data`. They must not include uploaded file bytes, full table contents, large text payloads, or Thread state.
+  - Home uses this summary preview for project cards. It must not issue one full `GET /api/threads/:threadId/canvas` request per card.
 - `GET /api/projects/trash`
   - Returns trashed project/thread summaries.
 - `GET /api/projects/:projectId/threads`
@@ -296,7 +300,7 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
   - Resolves the Thread's Project, then returns the Project-owned `{ nodes, edges, objects, writeRequests, workflow, suggestions }`.
 - `POST /api/threads/:threadId/canvas/nodes`
   - Creates a Canvas node. Body accepts the existing node draft fields: `id`, `kind`, `title`, `content`, `x`, `y`, `width`, `height`, and `metadata`. `id` is optional and is used by session undo restore paths.
-  - New nodes inherit the current batch-delivery stage into `metadata.workflow.stage` unless the request supplies explicit workflow metadata.
+  - New nodes do not inherit or persist batch stage. If request metadata contains `metadata.workflow.stage`, the server strips that field while preserving supported non-stage workflow metadata such as legacy `roles` migration input.
 - `POST /api/threads/:threadId/canvas/write-requests`
   - Creates a pending Canvas write request from explicit user action, annotated assistant snippets, or Agent runtime intent. The request is not applied until approved.
 - `PATCH /api/threads/:threadId/canvas/nodes/:nodeId`
@@ -314,9 +318,9 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
 - `POST /api/threads/:threadId/canvas/write-requests/:requestId/reject`
   - Rejects a pending write request without changing Canvas nodes.
 - `PUT /api/threads/:threadId/canvas/workflow`
-  - Updates project-level Canvas Workflow state. Body may include `{ mode, stage, roles }`. `mode` currently supports `batch_delivery`; `stage` must be one of `inspiration`, `research`, `structure`, `writing`, `polish`, or `publish`. Returns `{ workflow }`.
+  - Updates project-level Canvas Workflow state. Body may include `{ mode, stage, roles }`. `mode` supports `batch_delivery`, `mind_map`, `user_flow`, and `freeform_diagram`; it is the active delivery/context strategy surfaced by the top Canvas toolbar. `stage` is still accepted for compatibility and must be one of `inspiration`, `research`, `structure`, `writing`, `polish`, or `publish`, but it no longer drives node metadata, node UI, or generation context filtering. Returns `{ workflow }`.
 - `PATCH /api/threads/:threadId/canvas/nodes/:nodeId/workflow`
-  - Updates one content node's batch-step metadata. Body may include `{ stage }`. Legacy `{ roles }` input may still be migrated, but Role membership is no longer read from content node metadata.
+  - Compatibility endpoint for old node workflow callers. Body may include `{ stage }`, but stage is stripped from node metadata on write. Legacy `{ roles }` input may still be migrated, but Role membership is no longer read from content node metadata.
 - `POST /api/threads/:threadId/canvas/suggestions`
   - Creates a Role-anchored suggestion. Body: `{ roleNodeId, targetNodeId, roleId?, content, rationale? }`. The Role node must be connected to the target content node by a directed `Role -> target` edge. Returns `{ suggestion }`.
 - `POST /api/threads/:threadId/canvas/suggestions/:suggestionId/accept`

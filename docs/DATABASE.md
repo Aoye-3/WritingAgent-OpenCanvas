@@ -78,7 +78,7 @@ Knowledge Base vector stores and uploads are created under:
 - `canvas_objects`
   - Saved non-semantic board artifacts. `kind` is `arrow`, `shape`, `table`, or `asset`; geometry and type-specific data are stored as JSON.
 - `canvas_workflows`
-  - One project-level Canvas Workflow row per thread with current mode, batch-delivery stage, Role library JSON, and update timestamp.
+  - One project-level Canvas Workflow row per thread with current mode, compatibility `stage/stages`, Role library JSON, and update timestamp.
 - `canvas_workflow_suggestions`
   - Role-anchored suggestions with role node id, target content node id, role id, content, rationale, pending/accepted/ignored status, and timestamps.
 - `canvas_write_requests`
@@ -108,7 +108,7 @@ Direct user write intent does not add a new table or bypass the request table. T
 
 Canvas V2 stores node geometry in the existing `x`, `y`, `width`, and `height` fields. Dragging updates position; resizing updates dimensions and may also update position when resizing from north or west handles. These are presentation/editor interactions and do not require a schema migration.
 
-Canvas Workflow stores the project/thread current Canvas mode in `canvas_workflows.mode`; the initial user-facing mode is `batch_delivery`. Batch delivery stores its current writing stage in `canvas_workflows.stage`. Per-node stage is stored in `canvas_nodes.metadata.workflow.stage`. Role behavior is represented by first-class `role` rows in `canvas_nodes`, `metadata.workflowRole`, and directed `Role -> content` rows in `canvas_edges`. Legacy `metadata.workflow.roles` is migration input only and is removed from content nodes after Role nodes and edges are created. New content nodes inherit the current batch-delivery stage when created.
+Canvas Workflow stores the project/thread current Canvas mode in `canvas_workflows.mode`; the initial user-facing mode is `batch_delivery`, and diagram delivery modes are also persisted there. `canvas_workflows.stage/stages` remain in the schema for compatibility with older local data and callers, but Stage is retired from the main workflow and should not drive delivery strategy, node UI, or context filtering. New content nodes do not write `canvas_nodes.metadata.workflow.stage`; historical node stage metadata may remain in existing databases as inert compatibility data. Role behavior is represented by first-class `role` rows in `canvas_nodes`, `metadata.workflowRole`, and directed `Role -> content` rows in `canvas_edges`. Legacy `metadata.workflow.roles` is migration input only and is removed from content nodes after Role nodes and edges are created; empty `metadata.workflow` objects should be removed during that cleanup.
 
 Canvas Workflow suggestions are separate rows in `canvas_workflow_suggestions` because they have their own status lifecycle. Suggestions are anchored to the Role node (`role_node_id`) but keep the target content node (`target_node_id`). Accepting appends suggestion content to the target node and marks the suggestion accepted. Ignoring changes only suggestion status. Converting creates a new node from the suggestion and marks it accepted.
 
@@ -129,6 +129,8 @@ Free arrows, shapes, tables, and asset cards are explicit saved user artifacts a
 Projects are backed by `projects` and renamed independently from their Threads. Threads are conversations inside a Project and own the explicit `configured_model_api_id` for model selection; they do not own Agent identity, Canvas resources, project model bindings, or project shared context.
 
 Project runtime settings are Project-owned defaults, not Thread state. Generation reads them when the request does not provide a one-run `runtimeBudgetProfile` override, so changing one Project's Agent run budget does not affect other Projects or existing Thread history.
+
+Home project thumbnails are derived from existing `canvas_nodes` and `canvas_objects` rows. `ProjectSummary.canvasPreview` is assembled by `ProjectRepository.list()` with bounded projection queries over the current Project list. It is not a persisted thumbnail table, bitmap cache, or schema migration. The preview query reads only node geometry/title/kind and object geometry/minimal safe data; it must not call the full Canvas read path or return node `content`, uploaded file bytes, full table contents, or large text payloads.
 
 ## Migration Notes
 Schema creation and migration live in `server/db/schema.ts`. Schema version 3 completed the Project-owned Canvas migration. Schema version 4 adds `threads.context_reset_at` without deleting conversation history. Model Config, Agent definitions, and Knowledge data are retained.

@@ -33,7 +33,7 @@ The Canvas has two separate responsibilities:
 Current frontend responsibilities:
 
 - Map persisted `CanvasNode` records into React Flow nodes through `components/canvas/flowMapping.ts`.
-- Keep status node, context menu, selection bar, and selected-node workflow chrome in `components/canvas/CanvasChrome.tsx`.
+- Keep status node, context menu, and selection bar in `components/canvas/CanvasChrome.tsx`.
 - Compose common node frame behavior from `components/canvas/CanvasNodeFrame.tsx`.
 - Render directed edges through `components/canvas/CanvasCurveEdge.tsx`.
 - Format explicit user-sent mind chains through the shared pure helper in `shared/canvasMindChain.ts`.
@@ -171,28 +171,28 @@ Reference and note nodes use the same read-only Markdown renderer through `Edita
 `file_document` nodes do not use the editable document renderer. They render through a compact file-card renderer with a preview action. The preview calls `GET /api/threads/:threadId/canvas/document-preview?path=...` using the source Thread id recorded in `metadata.fileDocument.threadId`, or a recovered legacy source Thread from `deliveryId`; manual nodes without source metadata fall back to the currently selected Thread. The endpoint reads only Markdown files under that Thread's `/mnt/user-data/outputs/` virtual directory, rejects path traversal, non-Markdown extensions, and oversized reads, and keeps full Markdown in the preview panel instead of Canvas node `content`.
 
 ## Canvas Workflow
-Canvas Workflow is a layer on top of Canvas V2. Canvas Mode is the user-facing workspace mode; the current implementation exposes `batch_delivery` as the first mode. Stage remains mode-specific project state for batch delivery, while Role is represented as an independent Canvas function node. Workflow control capabilities should be modeled as nodes and relationships when they need spatial behavior or targeted influence, instead of being stacked into ordinary content-node UI.
+Canvas Workflow is a layer on top of Canvas V2. Canvas Mode is the user-facing delivery strategy selector; it drives batch delivery, mind-map, user-flow, and freeform diagram behavior. Legacy Stage remains readable project state for compatibility with existing `canvas_workflows.stage/stages` rows, but it is retired from the main Canvas workflow: the frontend no longer shows the bottom batch-step control, ordinary nodes no longer show stage badges, new nodes do not inherit stage, and runtime context is not narrowed by `metadata.workflow.stage`. Role is represented as an independent Canvas function node. Workflow control capabilities should be modeled as nodes and relationships when they need spatial behavior or targeted influence, instead of being stacked into ordinary content-node UI.
 
 Workflow responsibilities are deliberately split:
 
 - Canvas Spatial layer owns React Flow, node and edge rendering, drag, zoom, resize, selection, and connection behavior. It must not decide writing-stage rules.
-- Canvas Workflow layer owns the project mode, batch-delivery stage, node stage metadata, Role function nodes, Role-to-content edges, and suggestions.
+- Canvas Workflow layer owns the project mode, Role function nodes, Role-to-content edges, and suggestions. Legacy stage fields remain compatibility data only.
 - Agent Orchestration layer converts Workflow state into runtime context and approval-aware operations.
 - Suggestion UI layer renders node suggestions and exposes accept, ignore, and convert-to-node actions.
 
 The project/thread has exactly one current Canvas mode:
 
 ```ts
-type CanvasWorkflowMode = "batch_delivery";
+type CanvasWorkflowMode = "batch_delivery" | "mind_map" | "user_flow" | "freeform_diagram";
 ```
 
-In `batch_delivery` mode, the project/thread has exactly one current batch stage:
+`CanvasWorkflowStage` still exists as a compatibility type and route/storage field:
 
 ```ts
 type CanvasWorkflowStage = "inspiration" | "research" | "structure" | "writing" | "polish" | "publish";
 ```
 
-The frontend displays Canvas Mode as the primary toolbar selector. A new Canvas node inherits the current batch stage into `metadata.workflow.stage`. Users can override an individual node's batch step without changing the project stage.
+New code must not use Stage as a delivery or context strategy. The frontend displays Canvas Mode as the primary toolbar selector and persists it through `PUT /api/threads/:threadId/canvas/workflow`. New Canvas nodes strip incoming `metadata.workflow.stage`; conversion from suggestions also does not write stage metadata. Existing stored node stage data may remain in local databases, but it is not shown on nodes, sent in generation context, or used to filter Canvas context.
 
 Roles are suggestion perspectives, not Agent cards and not content-node decorations. A Role is a `role` Canvas node whose role data lives in `metadata.workflowRole`:
 
@@ -211,11 +211,11 @@ A Role applies only through a directed edge from the Role node to a content node
 Role node -> document | note | reference
 ```
 
-Reverse edges, content-to-content edges, and Role-to-Role edges do not grant a Role perspective. Ordinary content nodes keep `metadata.workflow.stage`, but new logic must not use `metadata.workflow.roles` as the source of Role membership. Legacy `metadata.workflow.roles` is migrated into Role nodes plus Role-to-content edges, then removed from the content node while preserving `workflow.stage`.
+Reverse edges, content-to-content edges, and Role-to-Role edges do not grant a Role perspective. New logic must not use `metadata.workflow.roles` as the source of Role membership. Legacy `metadata.workflow.roles` is migrated into Role nodes plus Role-to-content edges, then removed from the content node; if the remaining workflow metadata is empty, the `workflow` object is removed as well. Existing `workflow.stage` values are treated as inert compatibility data.
 
 Suggestions are anchored to the Role node that produced the perspective while retaining the target content node id. Pending suggestions render below the Role node. Accepting a suggestion appends it to the target content node and marks it accepted. Ignoring marks it ignored. Converting creates a new Canvas node from the suggestion content and marks it accepted. These are low-risk Canvas operations; destructive replace, overwrite, and delete behavior remains outside the suggestion path.
 
-Pure Workflow types and filters live in `shared/canvasWorkflow.ts` so frontend context selection, backend storage behavior, and tests use the same mode/stage/Role vocabulary.
+Pure Workflow types and filters live in `shared/canvasWorkflow.ts` so frontend context selection, backend storage behavior, and tests use the same mode/Role vocabulary while keeping stage compatibility centralized.
 
 ## Resize Behavior
 Canvas V2 uses a custom four-edge resize frame rather than the default React Flow `NodeResizer`.
@@ -259,7 +259,7 @@ Edges can be selected on the Canvas. Selecting an edge shows a delete action in 
 
 When the user right-clicks a connected node and chooses to send the mind chain, the frontend walks to the start of the directed chain, follows outgoing edges, and writes an ordered summary into the right AI collaboration composer. This does not auto-send the message. Because this action is explicit user intent, `note` nodes included in that chain may be sent even though notes are excluded from default AI context.
 
-Agent context uses Workflow filters before the runtime sees Canvas data. The default order is selected/specified chain, current or user-specified batch-delivery stage, then Role nodes connected to the selected/filtered content nodes. Only prompts from `Role -> content` edges enter the runtime as advice perspectives. The Agent should not default to reading the entire Canvas. If no explicit chain is sent, the frontend still excludes notes and narrows by the current batch-delivery stage.
+Agent context uses Workflow filters before the runtime sees Canvas data. The default order is selected/specified chain, then Role nodes connected to the selected/filtered content nodes. Only prompts from `Role -> content` edges enter the runtime as advice perspectives. The Agent should not default to reading the entire Canvas. If no explicit chain is sent, the frontend still excludes notes, but it does not narrow by legacy batch stage.
 
 Deleting a node removes attached edges. Deleting an edge does not modify either node.
 
@@ -344,11 +344,13 @@ Before claiming Canvas work is complete, verify:
 - Directed node edges persist and can be deleted.
 - Sending a mind chain populates the right collaboration composer without auto-sending, and deleted edges no longer pull disconnected nodes into that draft.
 - Note nodes are excluded from default AI context.
-- New nodes inherit the current batch-delivery stage.
-- Node stage override persists in node metadata.
+- Canvas Mode can be changed from the top toolbar and persists after reload.
+- The retired bottom batch-step control is not rendered.
+- Ordinary content nodes do not render stage badges.
+- New nodes do not write `metadata.workflow.stage`, and generation context does not include node or workflow stage.
 - Role nodes can be created from the Canvas menu and connected to content nodes.
 - Pending Role suggestions render below the Role node, and accept/ignore/convert actions update their status.
-- Agent context is filtered by selected chain, batch-delivery stage, and connected Role nodes before runtime execution.
+- Agent context is filtered by selected chain and connected Role nodes before runtime execution.
 - Canvas undo works for node and edge operations up to the configured cache depth.
 - Approval still applies destructive writes through the backend approve path.
 - QA nodes created during browser tests are deleted.

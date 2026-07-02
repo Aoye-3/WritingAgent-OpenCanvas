@@ -752,8 +752,7 @@ export class CanvasRepository {
     const node = this.createCanvasNode(projectId, {
       kind: validateNodeKind(input.kind ?? "note"),
       title: input.title ?? "Role suggestion",
-      content: suggestion.content,
-      metadata: { workflow: { stage: this.getCanvasWorkflow(projectId).stage } }
+      content: suggestion.content
     });
     const accepted = this.applySuggestionStatus(projectId, suggestionId, "accepted", false);
     return accepted ? { suggestion: accepted, node } : undefined;
@@ -866,7 +865,11 @@ function stripLegacyWorkflowRoles(metadata: unknown) {
   if (workflow && typeof workflow === "object" && !Array.isArray(workflow)) {
     const cleanWorkflow = { ...(workflow as Record<string, unknown>) };
     delete cleanWorkflow.roles;
-    next.workflow = cleanWorkflow;
+    if (Object.keys(cleanWorkflow).length > 0) {
+      next.workflow = cleanWorkflow;
+    } else {
+      delete next.workflow;
+    }
   }
   return next;
 }

@@ -66,6 +66,7 @@ export type ConfiguredModelApiSummary = {
   modelId: string;
   modelName: string;
   modelType?: string;
+  supportsThinking: boolean;
   keyConfigured: boolean;
   keyHint?: string;
   baseURL: string;
@@ -98,6 +99,7 @@ export type ConfiguredModelApiSaveRequest = {
   modelId?: string;
   modelName?: string;
   modelType?: string;
+  supportsThinking?: boolean;
   apiKey?: string;
   baseURL?: string;
   enabled?: boolean;
@@ -110,6 +112,7 @@ export type ModelReference = {
   provider: string;
   group: string;
   modelType?: string;
+  supportsThinking?: boolean;
   description?: string;
   ownedBy?: string;
   supportedEndpointTypes?: string[];

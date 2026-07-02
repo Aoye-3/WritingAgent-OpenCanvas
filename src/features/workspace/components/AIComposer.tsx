@@ -7,6 +7,7 @@ import { useI18n } from "../../i18n/I18nProvider";
 import type { ConfiguredModelApiSummary } from "../../settings/types";
 import { visibleComposerTools } from "../planUiPolicy";
 import { SkillFolderPicker } from "./SkillFolderPicker";
+import { supportsModelThinking } from "../../../../shared/modelCapabilities";
 
 type ToolKey = NonNullable<GenerateRequest["toolState"]> extends Partial<Record<infer Key, boolean>> ? Key : never;
 
@@ -15,6 +16,9 @@ export type RuntimeBudgetChoice = NonNullable<GenerateRequest["runtimeBudgetProf
 
 export type ConversationModelControls = {
   providerId?: string;
+  modelId?: string;
+  modelName?: string;
+  supportsThinking?: boolean;
   thinkingMode?: NonNullable<GenerateRequest["modelOverrides"]>["thinkingMode"];
   reasoningEffort?: NonNullable<GenerateRequest["modelOverrides"]>["reasoningEffort"];
 };
@@ -103,7 +107,7 @@ export function AIComposer({
   onValueChange
 }: AIComposerProps) {
   const { locale, t } = useI18n();
-  const supportsThinking = modelSettings?.providerId === "deepseek";
+  const supportsThinking = isThinkingSupportedModel(modelSettings);
   const [thinkingChoice, setThinkingChoice] = useState<ThinkingChoice>(modelSettingsToThinkingChoice(modelSettings));
   const [runtimeBudgetChoice, setRuntimeBudgetChoice] = useState<RuntimeBudgetChoice>(runtimeBudgetProfile ?? "low");
   const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
@@ -113,7 +117,7 @@ export function AIComposer({
 
   useEffect(() => {
     setThinkingChoice(modelSettingsToThinkingChoice(modelSettings));
-  }, [modelSettings?.providerId, modelSettings?.thinkingMode, modelSettings?.reasoningEffort]);
+  }, [modelSettings?.providerId, modelSettings?.modelId, modelSettings?.modelName, modelSettings?.supportsThinking, modelSettings?.thinkingMode, modelSettings?.reasoningEffort]);
 
   useEffect(() => {
     if (!supportsThinking) setThinkingMenuOpen(false);
@@ -310,8 +314,12 @@ function shouldShowStopControl(isSending: boolean, input: string) {
 }
 
 export function modelSettingsToThinkingChoice(modelSettings?: ConversationModelControls): ThinkingChoice {
-  if (modelSettings?.providerId !== "deepseek" || modelSettings.thinkingMode !== "enabled") return "disabled";
+  if (!isThinkingSupportedModel(modelSettings) || modelSettings?.thinkingMode !== "enabled") return "disabled";
   return modelSettings.reasoningEffort === "max" || modelSettings.reasoningEffort === "xhigh" ? "max" : "high";
+}
+
+export function isThinkingSupportedModel(modelSettings?: ConversationModelControls) {
+  return modelSettings?.supportsThinking === true || supportsModelThinking(modelSettings);
 }
 
 export function thinkingOverridesFromChoice(choice: ThinkingChoice): GenerateRequest["modelOverrides"] {
@@ -372,19 +380,19 @@ function ThinkingModeButton({
   const { locale } = useI18n();
   const label = thinkingLabel(locale, choice);
   return (
-    <div className="thinking-mode-menu">
+    <div className="thinking-mode-control">
       <button
         aria-expanded={open}
         aria-label={locale === "zh" ? "\u601d\u8003\u6a21\u5f0f" : "Thinking mode"}
-        className={choice === "disabled" ? "thinking-mode-trigger" : "thinking-mode-trigger is-active"}
+        className={choice === "disabled" ? "thinking-mode-button" : "thinking-mode-button is-active"}
         onClick={() => onOpenChange(!open)}
         type="button"
       >
-        <LightbulbIcon aria-hidden="true" size={16} />
-        <span>{label}</span>
+        <span><LightbulbIcon aria-hidden="true" size={16} /></span>
+        <strong>{label}</strong>
       </button>
       {open ? (
-        <div className="thinking-mode-options" role="menu">
+        <div className="thinking-mode-menu" role="menu">
           {(["disabled", "high", "max"] as ThinkingChoice[]).map((option) => (
             <button
               className={option === choice ? "is-active" : ""}

@@ -4,6 +4,7 @@ export type ModelReference = {
   provider: string;
   group: string;
   modelType?: "chat" | "embedding" | "vision" | "rerank" | "image" | "audio";
+  supportsThinking?: boolean;
   description?: string;
   ownedBy?: string;
   supportedEndpointTypes?: string[];
