@@ -12,7 +12,7 @@ import { randomThreadId, safeId } from "../../utils/ids.js";
 import type { AgentBackendRunnerDeps } from "./agentBackendRunner.js";
 import { runAgentRuntimeGeneration } from "./agentRuntimeRunner.js";
 import { mockText } from "./mockFallback.js";
-import { normalizeAgentRunOutput } from "./outputNormalizer.js";
+import { isInternalOutputBlockedText, normalizeAgentRunOutput } from "./outputNormalizer.js";
 import { buildGenerationRunContext } from "./promptRunBuilder.js";
 import { createProgressiveTextGate } from "./progressiveTextGate.js";
 import type { ProviderRunnerDeps } from "./providerRunner.js";
@@ -267,13 +267,16 @@ export function createGenerationService(
           source: "agent-backend",
           events: agentBackendRun.events
         });
-        if (hasBlockedInternalOutput(normalized.events)) {
+        const normalizedEvents = (normalized.events ?? []).map((event) => withAgentPlanEventContext(withAgentClarificationResumeContext(event, payload, deliveryId), payload));
+        const blockedInternalOutput = hasBlockedInternalOutput(normalized.events);
+        const visibleText = blockedInternalOutput ? visibleTextAfterInternalOutputBlock(normalized.text, payload.locale) : normalized.text;
+        const baseEvents = dedupeToolEvents([...runtimeEvents, ...normalizedEvents]);
+        if (blockedInternalOutput && !hasVisibleAgentDeliveryEvidence(visibleText, baseEvents)) {
           const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend returned internal runtime output"), isMockFallbackEnabled(deps));
-          runtimeEvents.push(...(normalized.events ?? []), event);
+          runtimeEvents.push(...normalizedEvents, event);
           observeToolEvent(event);
         } else {
-          const baseEvents = dedupeToolEvents([...runtimeEvents, ...(normalized.events ?? []).map((event) => withAgentPlanEventContext(withAgentClarificationResumeContext(event, payload, deliveryId), payload))]);
-          if (isBlockingAgentClarificationRun(baseEvents, normalized.text, agentBackendRun.finishReason)) {
+          if (isBlockingAgentClarificationRun(baseEvents, visibleText, agentBackendRun.finishReason)) {
             agentPlanOrchestrator.complete(threadId, payload, baseEvents);
             return recordGenerationRun({
               storage,
@@ -300,7 +303,7 @@ export function createGenerationService(
             projectId: selection.projectId,
             storage,
             deliveryId,
-            text: normalized.text,
+            text: visibleText,
             events: baseEvents,
             timeline,
             emitTimeline
@@ -311,7 +314,7 @@ export function createGenerationService(
             projectId: selection.projectId,
             storage,
             deliveryId,
-            text: finalized.text || normalized.text,
+            text: finalized.text || visibleText,
             events: baseEvents,
             timeline,
             emitTimeline,
@@ -659,11 +662,15 @@ export function createGenerationService(
           source: "agent-backend",
           events: agentBackendRun.events
         });
-        if (hasBlockedInternalOutput(normalized.events)) {
+        const normalizedEvents = (normalized.events ?? []).map((event) => withAgentPlanEventContext(withAgentClarificationResumeContext(event, payload, deliveryId), payload));
+        const blockedInternalOutput = hasBlockedInternalOutput(normalized.events);
+        const visibleText = blockedInternalOutput ? visibleTextAfterInternalOutputBlock(normalized.text, payload.locale) : normalized.text;
+        const baseEvents = dedupeToolEvents([...runtimeEvents, ...normalizedEvents]);
+        if (blockedInternalOutput && !hasVisibleAgentDeliveryEvidence(visibleText, baseEvents)) {
           const internalOutputError = new Error("AgentBackend returned internal runtime output");
           runtimeFailureError = internalOutputError;
           const event = createRuntimeFallbackEvent("agent-backend", internalOutputError, isMockFallbackEnabled(deps));
-          runtimeEvents.push(...(normalized.events ?? []), event);
+          runtimeEvents.push(...normalizedEvents, event);
           observeToolEvent(event);
           if (isProgressiveCanvasDeliveryEnabled(payload)) {
             ensureProgressiveDeliveryStarted();
@@ -682,7 +689,13 @@ export function createGenerationService(
           emitRunFailedTimeline(internalOutputError);
           textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
         } else {
-          textGate.flush();
+          if (blockedInternalOutput) {
+            textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
+            if (visibleText) textGate.push(visibleText);
+            textGate.flush();
+          } else {
+            textGate.flush();
+          }
           callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
           stageProgress.emit(
             "run:finalizing",
@@ -690,8 +703,7 @@ export function createGenerationService(
             payload.locale === "zh" ? "下一步会给出最终答复和可查看的交付物。" : "Next, the final answer and deliverables will be ready.",
             { phase: "finalizing", title: payload.locale === "zh" ? "最终整理" : "Final review" }
           );
-          const baseEvents = dedupeToolEvents([...runtimeEvents, ...(normalized.events ?? []).map((event) => withAgentPlanEventContext(withAgentClarificationResumeContext(event, payload, deliveryId), payload))]);
-          if (shouldRepairAgentClarification(baseEvents, normalized.text, agentBackendRun.finishReason)) {
+          if (shouldRepairAgentClarification(baseEvents, visibleText, agentBackendRun.finishReason)) {
             callbacks.onStatus?.({ phase: "thinking", label: payload.locale === "zh" ? "正在重新生成澄清选项..." : "Regenerating clarification choices..." });
             const repairPayload = withAgentClarificationRepairPolicy(payload, latestInvalidAgentClarificationEvent(baseEvents));
             const repairRun = await runAgentRuntimeGeneration({
@@ -746,7 +758,7 @@ export function createGenerationService(
             }
             emitSuppressedInvalidClarifications();
           }
-          if (isBlockingAgentClarificationRun(baseEvents, normalized.text, agentBackendRun.finishReason)) {
+          if (isBlockingAgentClarificationRun(baseEvents, visibleText, agentBackendRun.finishReason)) {
             textGate.flush();
             callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
             const events = [...baseEvents, ...timelineEvents.map(timelineEventToToolEvent)];
@@ -776,7 +788,7 @@ export function createGenerationService(
             projectId: selection.projectId,
             storage,
             deliveryId,
-            text: normalized.text,
+            text: visibleText,
             events: baseEvents,
             timeline,
             emitTimeline
@@ -787,7 +799,7 @@ export function createGenerationService(
             projectId: selection.projectId,
             storage,
             deliveryId,
-            text: finalized.text || normalized.text,
+            text: finalized.text || visibleText,
             events: baseEvents,
             timeline,
             emitTimeline,
@@ -976,6 +988,50 @@ function isLowValueRuntimeProgress(summary: string, phase: string, signalType: A
 
 function hasBlockedInternalOutput(events?: ToolEventRecord[]) {
   return events?.some((event) => event.eventType === "internal_output_blocked") ?? false;
+}
+
+function visibleTextAfterInternalOutputBlock(text: string, locale: GenerateRequest["locale"]) {
+  if (
+    isInternalOutputBlockedText(text, locale)
+    || isInternalOutputBlockedText(text, "en")
+    || isInternalOutputBlockedText(text, "zh")
+  ) {
+    return "";
+  }
+  return text;
+}
+
+function hasVisibleAgentDeliveryEvidence(text: string, events: ToolEventRecord[]) {
+  if (
+    hasBlockedInternalOutput(events)
+    && (
+      isInternalOutputBlockedText(text, "en")
+      || isInternalOutputBlockedText(text, "zh")
+    )
+  ) {
+    return false;
+  }
+  if (text.trim()) return true;
+  if (outputMarkdownPathsFromEvents(events).length > 0) return true;
+  return events.some((event) => {
+    if (event.eventType === "internal_output_blocked") return false;
+    if (event.eventType === "canvas_delivery_failed_summary_committed") return false;
+    if (isFinalCanvasDeliveryEvidence(event)) return true;
+    if (isAgentClarificationEvent(event)) return true;
+    if (/(?:^|_)artifact_(?:staged|committed)$/.test(event.eventType)) return true;
+    if (/(?:^|_)tool_completed$/.test(event.eventType)) {
+      const payload = record(event.payload);
+      const toolName = readString(payload.toolName) || readString(payload.tool);
+      return toolName === "write_file" || toolName === "present_files";
+    }
+    return false;
+  });
+}
+
+function isFinalCanvasDeliveryEvidence(event: ToolEventRecord) {
+  return /^canvas_delivery_(?:body_final|file_document|clarification)_committed$/.test(event.eventType)
+    || /(?:^|_)canvas_mutation_committed$/.test(event.eventType)
+    || /(?:^|_)canvas_node_committed$/.test(event.eventType);
 }
 
 function createRuntimeFallbackEvent(source: "agent-backend", error: unknown, mockFallbackEnabled: boolean, modelErrorSignal?: AgentBackendRuntimeSignal): ToolEventRecord {
@@ -1716,10 +1772,11 @@ function finalizeCanvasDelivery(input: {
   if (!isDirectCanvasDeliveryIntent(instruction)) return { text: input.text, timelineEvents: [] as RunTimelineEvent[] };
   const assistantText = input.text.trim();
   if (!assistantText) {
+    if (hasVisibleAgentDeliveryEvidence("", input.events)) return { text: input.text, timelineEvents: [] as RunTimelineEvent[] };
     throw new Error("Direct Canvas delivery completed without assistant content.");
   }
   if (containsInternalRuntimeProtocol(assistantText)) {
-    throw new Error("AgentBackend returned internal runtime output");
+    return { text: "", timelineEvents: [] as RunTimelineEvent[] };
   }
   const timeline = input.timeline ?? createRunTimelineBuilder({ threadId: input.threadId, locale: input.payload.locale });
   const localTimelineEvents: RunTimelineEvent[] = [];
@@ -1790,11 +1847,12 @@ async function finalizeProgressiveCanvasDelivery(input: {
   if (!isProgressiveCanvasDeliveryEnabled(input.payload)) return { text: input.text, events: [] as ToolEventRecord[] };
   const instruction = input.payload.chatInstruction ?? input.payload.freeTextPrompt ?? "";
   if (isDirectCanvasDeliveryIntent(instruction)) return { text: input.text, events: [] as ToolEventRecord[] };
-  const assistantText = input.text.trim();
+  let assistantText = input.text.trim();
   const existingFilePaths = outputMarkdownPathsFromEvents(input.events);
   if (!assistantText && existingFilePaths.length === 0) return { text: input.text, events: [] as ToolEventRecord[] };
   if (containsInternalRuntimeProtocol(assistantText)) {
-    throw new Error("AgentBackend returned internal runtime output");
+    if (existingFilePaths.length === 0) return { text: "", events: [] as ToolEventRecord[] };
+    assistantText = "";
   }
   const timeline = input.timeline ?? createRunTimelineBuilder({ threadId: input.payload.threadId ?? "pending", locale: input.payload.locale });
   const emit = input.emitTimeline ?? (() => undefined);

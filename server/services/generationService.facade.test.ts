@@ -2597,6 +2597,54 @@ test("progressive Canvas treats process clarification text as recoverable output
   assert.equal(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"), false);
 });
 
+test("progressive Canvas completes internal output block when Canvas delivery exists", async () => {
+  const { storage, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const tokens: string[] = [];
+  const committedEvent: ToolEventRecord = {
+    eventType: "canvas_delivery_body_final_committed",
+    payload: { deliveryId: "delivery_internal_output", title: "Body" }
+  };
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToken?.('< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">');
+        input.onToolEvent?.(committedEvent);
+        return {
+          text: '< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">',
+          finishReason: "agent_backend_completed",
+          events: [committedEvent]
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent Agent literature and summarize the findings",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, agentClarification: answeredAgentClarification() }
+  }, {
+    onToken: (token) => tokens.push(token),
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
+
+  assert.notEqual(result.completion?.status, "failed");
+  assert.notEqual(result.finishReason, "runtime_failed");
+  assert.equal(records.length, 1);
+  const record = records[0] as { events?: Array<{ eventType: string }> };
+  assert.ok(record.events?.some((event) => event.eventType === "internal_output_blocked"));
+  assert.ok(record.events?.some((event) => event.eventType === "canvas_delivery_body_final_committed"));
+  assert.equal(record.events?.some((event) => event.eventType === "agent_backend_runtime_failed"), false);
+  assert.equal(record.events?.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"), false);
+  assert.equal(events.some((event) => event.eventType === "agent_backend_runtime_failed"), false);
+  assert.equal(tokens.join("").includes("webfetch"), false);
+});
+
 test("progressive Canvas blocks leaked skill DSML as final body", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
@@ -2644,6 +2692,9 @@ test("progressive Canvas blocks leaked skill DSML as final body", async () => {
   assert.ok(canvasNodes.some((node) => node.title === "正文草稿" && String(node.content).includes("工作正文草稿")));
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
   assert.equal(events.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
+  const record = records[0] as { events?: Array<{ eventType: string }> };
+  assert.ok(record.events?.some((event) => event.eventType === "internal_output_blocked"));
+  assert.ok(record.events?.some((event) => event.eventType === "agent_backend_runtime_failed"));
 });
 
 test("progressive Canvas notes sanitize unsafe tool snippets", async () => {
