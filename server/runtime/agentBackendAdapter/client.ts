@@ -800,7 +800,7 @@ function sanitizeRuntimeSignalPayload(data: Record<string, unknown>) {
 }
 
 function sanitizeAgentProgressPayload(data: Record<string, unknown>) {
-  const allowed = ["type", "event", "runId", "threadId", "stageId", "loopId", "loopIndex", "stepKind", "actionId", "observationId", "completionStatus", "completionReasons", "missingRequirements", "phase", "status", "title", "summary", "next", "interventionHint", "visibility", "source", "createdAt"];
+  const allowed = ["type", "event", "runId", "threadId", "stageId", "loopId", "loopIndex", "stepKind", "actionId", "observationId", "completionStatus", "completionReasons", "missingRequirements", "phase", "status", "title", "summary", "next", "evidence", "interventionHint", "visibility", "source", "createdAt"];
   return Object.fromEntries(allowed.filter((key) => key in data).map((key) => [key, data[key]]));
 }
 

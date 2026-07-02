@@ -88,7 +88,8 @@ export async function generateTextStream(
       } else if (parsed.event === "timeline_event") {
         handlers.onTimelineEvent?.(parsed.data as RunTimelineEvent);
       } else if (parsed.event === "progress_event") {
-        handlers.onProgressEvent?.(parsed.data as AgentProgressEvent);
+        const progress = normalizeAgentProgressEvent(parsed.data);
+        if (progress) handlers.onProgressEvent?.(progress);
       } else if (parsed.event === "final") {
         finalResult = parsed.data as GenerateResponse;
         trace("final", { threadId: finalResult.threadId, runId: finalResult.runId });
@@ -110,10 +111,113 @@ export async function generateTextStream(
 }
 
 function parseSseEvent(raw: string) {
-  const event = raw.split("\n").find((line) => line.startsWith("event: "))?.slice(7).trim();
-  const dataLine = raw.split("\n").find((line) => line.startsWith("data: "));
-  if (!event || !dataLine) return null;
-  return { event, data: JSON.parse(dataLine.slice(6)) as unknown };
+  const lines = raw.replace(/\r\n/g, "\n").split("\n");
+  const event = lines.find((line) => line.startsWith("event:"))?.slice(6).trim();
+  const dataLines = lines.filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart());
+  if (!event || !dataLines.length) return null;
+  return { event, data: JSON.parse(dataLines.join("\n")) as unknown };
+}
+
+function normalizeAgentProgressEvent(data: unknown): AgentProgressEvent | null {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const source = data as Record<string, unknown>;
+  const id = safeProgressString(source.id, 160);
+  const summary = safeProgressText(source.summary, 360);
+  const createdAt = safeProgressString(source.createdAt, 80) || new Date().toISOString();
+  if (!id || !summary) return null;
+  const visibility = readProgressVisibility(source.visibility);
+  const status = readProgressStatus(source.status);
+  const loopIndex = typeof source.loopIndex === "number" && Number.isInteger(source.loopIndex) ? source.loopIndex : undefined;
+  return {
+    id,
+    ...(safeProgressString(source.threadId, 160) ? { threadId: safeProgressString(source.threadId, 160) } : {}),
+    ...(safeProgressString(source.runId, 160) ? { runId: safeProgressString(source.runId, 160) } : {}),
+    ...(safeProgressString(source.stageId, 180) ? { stageId: safeProgressString(source.stageId, 180) } : {}),
+    ...(safeProgressString(source.loopId, 180) ? { loopId: safeProgressString(source.loopId, 180) } : {}),
+    ...(loopIndex !== undefined ? { loopIndex } : {}),
+    ...(readStepKind(source.stepKind) ? { stepKind: readStepKind(source.stepKind) } : {}),
+    ...(safeProgressString(source.actionId, 180) ? { actionId: safeProgressString(source.actionId, 180) } : {}),
+    ...(safeProgressString(source.observationId, 180) ? { observationId: safeProgressString(source.observationId, 180) } : {}),
+    ...(readCompletionStatus(source.completionStatus) ? { completionStatus: readCompletionStatus(source.completionStatus) } : {}),
+    ...(readStringList(source.completionReasons).length ? { completionReasons: readStringList(source.completionReasons) } : {}),
+    ...(readStringList(source.missingRequirements).length ? { missingRequirements: readStringList(source.missingRequirements) } : {}),
+    ...(safeProgressString(source.phase, 80) ? { phase: safeProgressString(source.phase, 80) } : {}),
+    ...(status ? { status } : {}),
+    ...(safeProgressText(source.title, 160) ? { title: safeProgressText(source.title, 160) } : {}),
+    summary,
+    ...(safeProgressText(source.next, 360) ? { next: safeProgressText(source.next, 360) } : {}),
+    ...(readProgressEvidence(source.evidence).length ? { evidence: readProgressEvidence(source.evidence) } : {}),
+    ...(safeProgressText(source.interventionHint, 240) ? { interventionHint: safeProgressText(source.interventionHint, 240) } : {}),
+    ...(visibility ? { visibility } : {}),
+    ...(safeProgressString(source.source, 120) ? { source: safeProgressString(source.source, 120) } : {}),
+    createdAt
+  };
+}
+
+function safeProgressText(value: unknown, max: number) {
+  const text = safeProgressString(value, max);
+  if (/prompt|reasoning|chain[_\s-]?of[_\s-]?thought|messages?|tool[_\s-]?calls?|arguments?|contextValues|api.?key|token|secret|password|authorization/i.test(text)) {
+    return "";
+  }
+  return text;
+}
+
+function safeProgressString(value: unknown, max: number) {
+  if (typeof value !== "string") return "";
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text || /^(?:undefined|null|none|nan)$/i.test(text)) return "";
+  return text.slice(0, max);
+}
+
+function readProgressVisibility(value: unknown): AgentProgressEvent["visibility"] | undefined {
+  return value === "stage" || value === "raw" || value === "public" ? value : undefined;
+}
+
+function readProgressStatus(value: unknown): AgentProgressEvent["status"] | undefined {
+  return value === "running" || value === "completed" || value === "failed" || value === "waiting" ? value : undefined;
+}
+
+function readStepKind(value: unknown): AgentProgressEvent["stepKind"] | undefined {
+  return value === "intake" || value === "context" || value === "decide" || value === "act" || value === "observe" || value === "evaluate" || value === "checkpoint" || value === "complete" || value === "fail"
+    ? value
+    : undefined;
+}
+
+function readCompletionStatus(value: unknown): AgentProgressEvent["completionStatus"] | undefined {
+  return value === "continue" || value === "waiting" || value === "finalizing" || value === "completed" || value === "partial" || value === "failed"
+    ? value
+    : undefined;
+}
+
+function readStringList(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => safeProgressText(item, 160)).filter(Boolean).slice(0, 20)
+    : [];
+}
+
+function readProgressEvidence(value: unknown): NonNullable<AgentProgressEvent["evidence"]> {
+  if (!Array.isArray(value)) return [];
+  const evidence: NonNullable<AgentProgressEvent["evidence"]> = [];
+  for (const item of value) {
+    if (typeof item === "string") {
+      const label = safeProgressText(item, 120);
+      if (label) evidence.push({ kind: "runtime", label });
+    } else if (item && typeof item === "object" && !Array.isArray(item)) {
+      const source = item as Record<string, unknown>;
+      const kind = readProgressEvidenceKind(source.kind);
+      const label = safeProgressText(source.label, 120);
+      const ref = safeProgressString(source.ref, 160);
+      if (kind && label) evidence.push({ kind, label, ...(ref ? { ref } : {}) });
+    }
+    if (evidence.length >= 5) break;
+  }
+  return evidence;
+}
+
+function readProgressEvidenceKind(value: unknown): NonNullable<AgentProgressEvent["evidence"]>[number]["kind"] | undefined {
+  return value === "tool" || value === "subagent" || value === "codegraph" || value === "search" || value === "file" || value === "runtime"
+    ? value
+    : undefined;
 }
 
 function createStreamTrace(payload: GenerateRequest) {

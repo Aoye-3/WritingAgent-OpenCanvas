@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-03: Agent Public Updates Are Sanitized Progress Events
+
+Decision: Use the existing Runtime custom `agent_progress_reported` and frontend `progress_event` path for public Agent progress narration. Public updates are identified by `visibility:"public"` and `source:"agent_public_update"`, not a new SSE event type. They may include `summary`, optional `next`, and bounded `evidence` records. Runtime keeps raw lifecycle telemetry as `visibility:"raw"` and may additionally emit public narration at real execution boundaries.
+
+Reason: Users need natural "I have done X; next I will do Y" work updates without exposing hidden chain-of-thought, prompts, raw tool arguments, raw outputs, or replayed messages. Reusing the existing progress path preserves compatibility with `status`, `tool_event`, `timeline_event`, and raw run logs while making the public-vs-raw boundary explicit.
+
+Impact: Any public progress source must pass the Runtime, server, and frontend sanitizers. Frontend `generationClient` normalizes `progress_event` payloads before appending progress segments, and `AICollaborationDrawer` renders evidence as short chips. Tests must cover Python public payload sanitization, adapter signal mapping, frontend SSE multiline parsing, invalid or sensitive progress dropping, and raw/run-trace separation. Do not promote `run.end`, tool outputs, `reasoning_content`, `messages`, or `tool_calls.arguments` into public progress.
+
 ## 2026-07-02: Runtime Budget And Internal Output Are Completion Signals, Not Hard Stops
 
 Decision: Treat runtime budget gates as advisory synthesis signals and internal-output blocks as redaction diagnostics. `synthesis_gate`, model-call waiting, retry, and other ordinary `run_timeline_decision` events with `status:"waiting"` must not imply pending user clarification. A valid Agent Runtime clarification requires a structured `agent_backend_agent_clarification_requested` payload with a question and at least two options, and later substantive progress clears the waiting interpretation. `internal_output_blocked` removes unsafe visible text but does not automatically create `agent_backend_runtime_failed`; completion still depends on final text, durable Canvas/file/Artifact delivery, valid clarification, or a real runtime error.

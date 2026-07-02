@@ -996,7 +996,16 @@ function ProgressSegmentList({ completed, rawEvents, runTarget, segments }: {
           <div className="progress-segment" key={segment.id}>
             {segment.title ? <strong>{segment.title}</strong> : null}
             <p>{segment.summary}</p>
-            {segment.next ? <small>{segment.next}</small> : null}
+            {segment.next && segment.next !== segment.summary ? <small>{segment.next}</small> : null}
+            {segment.evidence?.length ? (
+              <div className="progress-evidence-list" aria-label={locale === "zh" ? "进展依据" : "Progress evidence"}>
+                {segment.evidence.slice(0, 3).map((item) => (
+                  <span className="progress-evidence-chip" key={`${segment.id}:${item.kind}:${item.label}:${item.ref ?? ""}`} title={item.ref ?? item.label}>
+                    {progressEvidenceLabel(item)}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             {segment.interventionHint ? <em>{segment.interventionHint}</em> : null}
           </div>
         ))}
@@ -1516,6 +1525,7 @@ function progressSegmentFromTimelineEvent(event: RunTimelineEvent): NonNullable<
     title: event.title,
     summary: event.summary,
     next: typeof payload.next === "string" ? payload.next : undefined,
+    evidence: readProgressEvidence(payload.evidence),
     interventionHint: typeof payload.interventionHint === "string" ? payload.interventionHint : undefined,
     source: typeof payload.source === "string" ? payload.source : undefined,
     createdAt: event.createdAt
@@ -1856,6 +1866,32 @@ function isWriteConfirmation(text: string) {
 function modelSettingsToThinkingChoice(modelSettings?: ConversationModelControls): ThinkingChoice {
   if (!isThinkingSupportedModel(modelSettings) || modelSettings?.thinkingMode !== "enabled") return "disabled";
   return modelSettings.reasoningEffort === "max" || modelSettings.reasoningEffort === "xhigh" ? "max" : "high";
+}
+
+function readProgressEvidence(value: unknown): NonNullable<CollaborationMessage["progressSegments"]>[number]["evidence"] {
+  if (!Array.isArray(value)) return undefined;
+  const evidence = value.flatMap((item) => {
+    if (typeof item === "string" && item.trim()) {
+      return [{ kind: "runtime" as const, label: item.trim().slice(0, 120) }];
+    }
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const source = item as Record<string, unknown>;
+    const kind = readProgressEvidenceKind(source.kind);
+    const label = typeof source.label === "string" ? source.label.trim().slice(0, 120) : "";
+    const ref = typeof source.ref === "string" ? source.ref.trim().slice(0, 160) : "";
+    return kind && label ? [{ kind, label, ...(ref ? { ref } : {}) }] : [];
+  }).slice(0, 5);
+  return evidence.length ? evidence : undefined;
+}
+
+function readProgressEvidenceKind(value: unknown): NonNullable<NonNullable<CollaborationMessage["progressSegments"]>[number]["evidence"]>[number]["kind"] | undefined {
+  return value === "tool" || value === "subagent" || value === "codegraph" || value === "search" || value === "file" || value === "runtime"
+    ? value
+    : undefined;
+}
+
+function progressEvidenceLabel(item: NonNullable<NonNullable<CollaborationMessage["progressSegments"]>[number]["evidence"]>[number]) {
+  return `${item.kind}: ${item.label}`;
 }
 
 function thinkingOverridesFromChoice(choice: ThinkingChoice): GenerateRequest["modelOverrides"] {

@@ -85,8 +85,13 @@ export type AgentProgressEvent = {
   title?: string;
   summary: string;
   next?: string;
+  evidence?: Array<{
+    kind: "tool" | "subagent" | "codegraph" | "search" | "file" | "runtime";
+    label: string;
+    ref?: string;
+  }>;
   interventionHint?: string;
-  visibility?: "stage" | "raw";
+  visibility?: "stage" | "raw" | "public";
   source?: string;
   createdAt: string;
 };
@@ -905,6 +910,7 @@ function progressEventFromRuntimeSignal(signal: AgentBackendRuntimeSignal, threa
     ...(readString(payload.title) ? { title: safeProgressText(readString(payload.title)) } : {}),
     summary,
     ...(readString(payload.next) ? { next: safeProgressText(readString(payload.next)) } : {}),
+    ...(readProgressEvidence(payload.evidence).length ? { evidence: readProgressEvidence(payload.evidence) } : {}),
     ...(readString(payload.interventionHint) ? { interventionHint: safeProgressText(readString(payload.interventionHint)) } : {}),
     visibility: visibility ?? "stage",
     ...(readString(payload.source) ? { source: readString(payload.source) } : {}),
@@ -925,7 +931,32 @@ function readProgressStatus(value: unknown): AgentProgressEvent["status"] | unde
 }
 
 function readProgressVisibility(value: unknown): AgentProgressEvent["visibility"] | undefined {
-  return value === "stage" || value === "raw" ? value : undefined;
+  return value === "stage" || value === "raw" || value === "public" ? value : undefined;
+}
+
+function readProgressEvidence(value: unknown): NonNullable<AgentProgressEvent["evidence"]> {
+  if (!Array.isArray(value)) return [];
+  const evidence: NonNullable<AgentProgressEvent["evidence"]> = [];
+  for (const item of value) {
+    if (typeof item === "string") {
+      const label = safeProgressText(item);
+      if (label) evidence.push({ kind: "runtime", label: label.slice(0, 120) });
+    } else if (item && typeof item === "object" && !Array.isArray(item)) {
+      const source = item as Record<string, unknown>;
+      const kind = readProgressEvidenceKind(source.kind);
+      const label = safeProgressText(readString(source.label)).slice(0, 120);
+      const ref = safeProgressText(readString(source.ref)).slice(0, 160);
+      if (kind && label) evidence.push({ kind, label, ...(ref ? { ref } : {}) });
+    }
+    if (evidence.length >= 5) break;
+  }
+  return evidence;
+}
+
+function readProgressEvidenceKind(value: unknown): NonNullable<AgentProgressEvent["evidence"]>[number]["kind"] | undefined {
+  return value === "tool" || value === "subagent" || value === "codegraph" || value === "search" || value === "file" || value === "runtime"
+    ? value
+    : undefined;
 }
 
 function readStepKind(value: unknown): AgentProgressEvent["stepKind"] | undefined {
@@ -3088,6 +3119,7 @@ function createStageProgressEmitter(input: {
         missingRequirements: progress.missingRequirements,
         phase: progress.phase,
         next: progress.next,
+        evidence: progress.evidence,
         interventionHint: progress.interventionHint,
         source: progress.source,
         visibility: progress.visibility ?? "stage",

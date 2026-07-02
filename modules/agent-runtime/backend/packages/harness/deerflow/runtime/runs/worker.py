@@ -94,7 +94,8 @@ async def _publish_progress(
     summary: str,
     status: Literal["running", "completed", "failed", "waiting"] = "running",
     next: str | None = None,
-    visibility: Literal["stage", "raw"] = "stage",
+    visibility: Literal["stage", "raw", "public"] = "stage",
+    source: str | None = "agent_runtime",
     event_type: Literal["agent_progress_reported", "agent_intervention_checkpoint"] = "agent_progress_reported",
 ) -> None:
     await bridge.publish(
@@ -109,6 +110,7 @@ async def _publish_progress(
             summary=summary,
             next=next,
             visibility=visibility,
+            source=source,
         ),
     )
 
@@ -260,6 +262,16 @@ async def run_agent(
             next="Preparing the agent runtime.",
             visibility="raw",
         )
+        await _publish_progress(
+            bridge,
+            run_id=run_id,
+            thread_id=thread_id,
+            phase="intake",
+            summary="I have accepted the run and am preparing the agent runtime.",
+            next="Next I will initialize the tools and execution context for this request.",
+            visibility="public",
+            source="agent_public_update",
+        )
 
         # 3. Build the agent
         from langchain_core.runnables import RunnableConfig
@@ -293,6 +305,16 @@ async def run_agent(
             summary="Agent runtime is ready.",
             next="Starting model and tool execution.",
             visibility="raw",
+        )
+        await _publish_progress(
+            bridge,
+            run_id=run_id,
+            thread_id=thread_id,
+            phase="context",
+            summary="I have prepared the runtime and tools for this request.",
+            next="Next I will work through the task and report useful checkpoints.",
+            visibility="public",
+            source="agent_public_update",
         )
 
         # Capture the effective (resolved) model name from the agent's metadata.

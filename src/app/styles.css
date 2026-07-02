@@ -5194,6 +5194,27 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   line-height: 1.45;
 }
 
+.progress-evidence-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.progress-evidence-chip {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 6px;
+  border: 1px solid rgba(102, 115, 134, 0.2);
+  border-radius: 6px;
+  background: var(--color-surface-subtle);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .progress-segment em {
   color: var(--color-primary);
   font-size: 12px;

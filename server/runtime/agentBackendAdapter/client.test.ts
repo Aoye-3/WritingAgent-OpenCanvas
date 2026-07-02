@@ -433,6 +433,38 @@ test("surfaces public agent progress custom events with display fields intact", 
   });
 });
 
+test("surfaces agent_public_update progress without creating tool events", async () => {
+  const signals: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+  const toolEvents: unknown[] = [];
+  const body = [
+    'event: custom\ndata: {"type":"agent_progress_reported","runId":"run_public","threadId":"thread_1","phase":"research","status":"running","summary":"I split the work into two checks.","next":"Next I will verify the frontend stream.","evidence":[{"kind":"subagent","label":"frontend explorer","ref":"agent:trace"}],"visibility":"public","source":"agent_public_update","createdAt":"2026-06-14T00:00:00.000Z","prompt":"hidden"}\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"Done"}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body, {
+    onRuntimeSignal: (signal) => signals.push(signal),
+    onToolEvent: (event) => toolEvents.push(event)
+  });
+
+  assert.equal(result.text, "Done");
+  assert.equal(toolEvents.length, 0);
+  assert.equal(result.events.length, 0);
+  assert.equal(signals.length, 1);
+  assert.deepEqual(signals[0]?.payload, {
+    type: "agent_progress_reported",
+    runId: "run_public",
+    threadId: "thread_1",
+    phase: "research",
+    status: "running",
+    summary: "I split the work into two checks.",
+    next: "Next I will verify the frontend stream.",
+    evidence: [{ kind: "subagent", label: "frontend explorer", ref: "agent:trace" }],
+    visibility: "public",
+    source: "agent_public_update",
+    createdAt: "2026-06-14T00:00:00.000Z"
+  });
+});
+
 test("lists AgentBackend run events through authenticated runtime API", async () => {
   let eventsUrl = "";
   const fetchImpl = async (url: string | URL | Request) => {

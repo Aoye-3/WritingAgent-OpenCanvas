@@ -1539,6 +1539,74 @@ test("streaming generation suppresses Canvas active heartbeat after Agent clarif
   assert.equal(timelineEvents.some((event) => event.payload?.eventType === "agent_backend_agent_clarification_requested" && event.status === "waiting"), true);
 });
 
+test("streaming generation forwards public runtime progress evidence through progress and timeline", async () => {
+  const { storage } = fakeStorage();
+  const progressEvents: Array<{ summary: string; visibility?: string; source?: string; evidence?: unknown }> = [];
+  const timelineEvents: Array<{ summary: string; payload?: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onRuntimeSignal?.({
+          type: "agent_progress_reported",
+          label: "I verified the public update stream.",
+          payload: {
+            type: "agent_progress_reported",
+            runId: "runtime_run_public",
+            threadId: "thread_test",
+            phase: "verification",
+            status: "running",
+            summary: "I verified the public update stream.",
+            next: "Next I will run the focused tests.",
+            evidence: [
+              { kind: "subagent", label: "frontend explorer", ref: "agent:trace" },
+              { kind: "tool", label: "tool arguments hidden" },
+              { kind: "unknown", label: "ignored" },
+              "runtime checkpoint"
+            ],
+            visibility: "public",
+            source: "agent_public_update",
+            createdAt: "2026-07-03T00:00:00.000Z",
+            prompt: "hidden"
+          }
+        });
+        return {
+          text: "Done.",
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "Check public progress updates"
+  }, {
+    onProgressEvent: (event) => progressEvents.push(event),
+    onTimelineEvent: (event) => timelineEvents.push(event)
+  });
+
+  const publicProgress = progressEvents.find((event) => event.source === "agent_public_update");
+  const publicTimeline = timelineEvents.find((event) => event.payload?.source === "agent_public_update");
+
+  assert.equal(result.text, "Done.");
+  assert.equal(publicProgress?.visibility, "public");
+  assert.equal(publicProgress?.summary, "I verified the public update stream.");
+  assert.deepEqual(publicProgress?.evidence, [
+    { kind: "subagent", label: "frontend explorer", ref: "agent:trace" },
+    { kind: "runtime", label: "runtime checkpoint" }
+  ]);
+  assert.equal(publicTimeline?.summary, "I verified the public update stream.");
+  assert.deepEqual(publicTimeline?.payload?.evidence, publicProgress?.evidence);
+  assert.equal(JSON.stringify(publicProgress).includes("prompt"), false);
+  assert.equal(JSON.stringify(publicProgress).includes("arguments"), false);
+});
+
 test("skill scope guard fills default budget and Canvas resume context when runtime sends a partial resume", async () => {
   const { storage } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];

@@ -26,6 +26,7 @@ _ALLOWED_KEYS = {
     "title",
     "summary",
     "next",
+    "evidence",
     "interventionHint",
     "visibility",
     "source",
@@ -33,6 +34,7 @@ _ALLOWED_KEYS = {
 }
 
 _BLOCKED_KEY_RE = ("prompt", "reasoning", "chain", "token", "secret", "password", "authorization", "context", "argument", "message")
+_EVIDENCE_KINDS = {"tool", "subagent", "codegraph", "search", "file", "runtime"}
 
 
 def public_progress_payload(
@@ -54,8 +56,9 @@ def public_progress_payload(
     title: str | None = None,
     summary: str,
     next: str | None = None,
+    evidence: list[dict[str, Any] | str] | None = None,
     intervention_hint: str | None = None,
-    visibility: Literal["stage", "raw"] = "stage",
+    visibility: Literal["stage", "raw", "public"] = "stage",
     source: str | None = "agent_runtime",
     created_at: str | None = None,
 ) -> dict[str, Any]:
@@ -80,12 +83,43 @@ def public_progress_payload(
         "title": title,
         "summary": summary,
         "next": next,
+        "evidence": evidence,
         "interventionHint": intervention_hint,
         "visibility": visibility,
         "source": source,
         "createdAt": created_at or datetime.now(UTC).isoformat(),
     }
     return sanitize_public_progress_payload(payload)
+
+
+def public_update_payload(
+    *,
+    run_id: str | None = None,
+    thread_id: str | None = None,
+    phase: str | None = None,
+    status: ProgressStatus = "running",
+    summary: str,
+    next: str | None = None,
+    evidence: list[dict[str, Any] | str] | None = None,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    """Build a sanitized public narration event payload."""
+
+    if not _public_text(summary):
+        raise ValueError("public update summary is required")
+    return public_progress_payload(
+        "agent_progress_reported",
+        run_id=run_id,
+        thread_id=thread_id,
+        phase=phase,
+        status=status,
+        summary=summary,
+        next=next,
+        evidence=evidence,
+        visibility="public",
+        source="agent_public_update",
+        created_at=created_at,
+    )
 
 
 def sanitize_public_progress_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -107,6 +141,11 @@ def sanitize_public_progress_payload(payload: dict[str, Any]) -> dict[str, Any]:
             if items:
                 sanitized[key] = items[:20]
             continue
+        if key == "evidence":
+            evidence = _public_evidence(value)
+            if evidence:
+                sanitized[key] = evidence
+            continue
         text = _public_text(str(value).strip())
         if not text:
             continue
@@ -117,6 +156,30 @@ def sanitize_public_progress_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def _public_text(value: str) -> str:
     text = value.strip()
     return "" if text.lower() in {"undefined", "null", "none", "nan"} else text
+
+
+def _public_evidence(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    evidence: list[dict[str, str]] = []
+    for item in value:
+        if isinstance(item, str):
+            label = _public_text(item)[:120]
+            if label:
+                evidence.append({"kind": "runtime", "label": label})
+        elif isinstance(item, dict):
+            kind = _public_text(str(item.get("kind", "runtime")).strip()).lower()
+            label = _public_text(str(item.get("label", "")).strip())[:120]
+            ref = _public_text(str(item.get("ref", "")).strip())[:160]
+            if kind not in _EVIDENCE_KINDS or not label:
+                continue
+            record = {"kind": kind, "label": label}
+            if ref:
+                record["ref"] = ref
+            evidence.append(record)
+        if len(evidence) >= 5:
+            break
+    return evidence
 
 
 def emit_public_progress(payload: dict[str, Any]) -> bool:
