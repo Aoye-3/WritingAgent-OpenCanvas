@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, LightbulbIcon, ModelConfigIcon, SearchIcon, SendIcon, StopIcon } from "../../../shared/icons";
@@ -18,9 +18,13 @@ import { acceptCanvasWriteSuggestion, answerPlan, dismissCanvasWriteSuggestion, 
 import { visibleComposerTools } from "../planUiPolicy";
 import { buildPlanTimeline } from "../planTimeline";
 import type { ConfiguredModelApiSummary } from "../../settings/types";
+import { AIComposer, type AIComposerSubmitPayload, type ConversationModelControls, type RuntimeBudgetChoice } from "./AIComposer";
 import { SkillFolderPicker } from "./SkillFolderPicker";
 
+export type { ConversationModelControls } from "./AIComposer";
+
 type ToolKey = NonNullable<GenerateRequest["toolState"]> extends Partial<Record<infer Key, boolean>> ? Key : never;
+type ThinkingChoice = "disabled" | "high" | "max";
 
 type SelectionAction = {
   messageId: string;
@@ -32,15 +36,6 @@ type SelectionAction = {
 type WriteDraft = {
   messageId?: string;
   text: string;
-};
-
-type ThinkingChoice = "disabled" | "high" | "max";
-type RuntimeBudgetChoice = NonNullable<GenerateRequest["runtimeBudgetProfile"]>;
-
-export type ConversationModelControls = {
-  providerId?: string;
-  thinkingMode?: NonNullable<GenerateRequest["modelOverrides"]>["thinkingMode"];
-  reasoningEffort?: NonNullable<GenerateRequest["modelOverrides"]>["reasoningEffort"];
 };
 
 type AICollaborationDrawerProps = {
@@ -311,20 +306,19 @@ export function AICollaborationDrawer({
     }
   };
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const text = input.trim();
+  const submitComposerPayload = async (payload: AIComposerSubmitPayload) => {
+    const text = payload.text.trim();
     if (!text) return;
     if (pendingAgentClarification) return;
     setInput("");
-    const runtimeBudgetOverride = runtimeBudgetChoice === (runtimeBudgetProfile ?? "low")
+    const runtimeBudgetOverride = payload.runtimeBudgetProfile === (runtimeBudgetProfile ?? "low")
       ? undefined
-      : runtimeBudgetChoice;
-    const messageModelOverrides = supportsThinking ? thinkingOverridesFromChoice(thinkingChoice) : undefined;
+      : payload.runtimeBudgetProfile;
+    const messageModelOverrides = supportsThinking ? thinkingOverridesFromChoice(payload.thinkingChoice) : undefined;
     const messageRequestContext = {
       ...(mindChainContext ? { canvasMindChain: mindChainContext.text } : {}),
-      ...(enabledSkillRefs.length ? { transientSkillRefs: enabledSkillRefs } : {}),
-      ...(disabledSkillRefs.length ? { disabledSkillRefs } : {}),
+      ...(payload.enabledSkillRefs.length ? { transientSkillRefs: payload.enabledSkillRefs } : {}),
+      ...(payload.disabledSkillRefs.length ? { disabledSkillRefs: payload.disabledSkillRefs } : {}),
       ...(runtimeBudgetOverride ? { runtimeBudgetProfile: runtimeBudgetOverride } : {})
     };
     if (isSending) {
@@ -368,6 +362,20 @@ export function AICollaborationDrawer({
     } catch {
       setInput(text);
     }
+  };
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await submitComposerPayload({
+      text: input.trim(),
+      agentId: activeAgent.id,
+      enabledSkillRefs,
+      disabledSkillRefs,
+      selectedModelConfigId,
+      runtimeBudgetProfile: runtimeBudgetChoice,
+      thinkingChoice,
+      toolState
+    });
   };
 
   const captureSelection = (event: React.MouseEvent<HTMLDivElement>, message: CollaborationMessage) => {
@@ -752,6 +760,68 @@ export function AICollaborationDrawer({
         </section>
       ) : null}
 
+      <div className="drawer-chat-composer-context">
+        <AnnotationChipRow annotations={annotations} compact onRemoveAnnotation={removeAnnotation} />
+        {mindChainContext ? (
+          <div className="mind-chain-context-chip" data-testid="mind-chain-context-chip">
+            <span>{t("workspace.mindChainContext", { count: mindChainContext?.nodeCount ?? 0 })}</span>
+            <button
+              aria-label={t("workspace.removeMindChain")}
+              onClick={onRemoveMindChainContext}
+              type="button"
+            >
+              x
+            </button>
+          </div>
+        ) : null}
+        {missingAgentClarificationPayload && !pendingClarificationPlan ? (
+          <div className="budget-continuation-chip">
+            <span>{locale === "zh" ? "\u7b49\u5f85\u8865\u5145\u4fe1\u606f\uff0c\u4f46\u7f3a\u5c11\u53ef\u64cd\u4f5c\u9009\u9879\u3002" : "Clarification is waiting, but no choices were saved."}</span>
+            <button type="button" onClick={fillClarificationRecovery}>
+              {locale === "zh" ? "\u586b\u5165\u6062\u590d" : "Draft recovery"}
+            </button>
+          </div>
+        ) : null}
+        {budgetLimitFailure && !pendingClarificationPlan && !pendingAgentClarification && !missingAgentClarificationPayload ? (
+          <div className="budget-continuation-chip">
+            <span>{locale === "zh" ? "\u4e0a\u6b21\u8fd0\u884c\u8fbe\u5230\u6b65\u9aa4\u9884\u7b97\uff0c\u53ef\u7ee7\u7eed\u5b8c\u6210\u3002" : "The last run reached its step budget."}</span>
+            <button type="button" onClick={fillBudgetContinuation}>
+              {locale === "zh" ? "\u586b\u5165\u7ee7\u7eed" : "Draft continue"}
+            </button>
+          </div>
+        ) : null}
+      </div>
+      {pendingClarificationPlan || pendingAgentClarification ? null : (
+        <AIComposer
+          activeAgent={activeAgent}
+          agentCards={agentCards}
+          allowedTools={allowedTools}
+          configuredModels={configuredModels}
+          disabled={writeBusy}
+          disabledSkillRefs={disabledSkillRefs}
+          enabledSkillRefs={enabledSkillRefs}
+          isSending={isSending}
+          modelSelectionDisabled={modelSelectionDisabled}
+          modelSettings={modelSettings}
+          placeholder={t("workspace.askAiPlaceholder")}
+          runtimeBudgetProfile={runtimeBudgetProfile}
+          selectedModelConfigId={selectedModelConfigId}
+          skillCatalog={skillCatalog}
+          skillCatalogStatus={skillCatalogStatus}
+          skillFolders={skillFolders}
+          toolState={toolState}
+          value={input}
+          onRequestSkillCatalog={onRequestSkillCatalog}
+          onSelectAgent={onSelectAgent}
+          onSelectModel={onSelectModel}
+          onStopSending={onStopSending}
+          onSubmit={submitComposerPayload}
+          onToggleSkill={onToggleSkill}
+          onToolStateChange={onToolStateChange}
+          onValueChange={setInput}
+        />
+      )}
+      {false ? (
       <form className="drawer-chat-composer" onSubmit={submit}>
         <div className="composer-control-row" data-testid="composer-control-row">
           <div className="composer-agent-section">
@@ -804,7 +874,7 @@ export function AICollaborationDrawer({
         ) : null}
         {mindChainContext ? (
           <div className="mind-chain-context-chip" data-testid="mind-chain-context-chip">
-            <span>{t("workspace.mindChainContext", { count: mindChainContext.nodeCount })}</span>
+            <span>{t("workspace.mindChainContext", { count: mindChainContext?.nodeCount ?? 0 })}</span>
             <button
               aria-label={t("workspace.removeMindChain")}
               onClick={onRemoveMindChainContext}
@@ -906,6 +976,7 @@ export function AICollaborationDrawer({
           </button>
         </div>
       </form>
+      ) : null}
     </motion.aside>
   );
 }

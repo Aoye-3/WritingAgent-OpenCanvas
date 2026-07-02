@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { ProjectRuntimeSettings, ProjectSummary, RuntimeBudgetProfile } from "../storageTypes.js";
-import { nowIso } from "./storageRepositoryUtils.js";
+import type { JsonValue, ProjectCanvasPreview, ProjectRuntimeSettings, ProjectSummary, RuntimeBudgetProfile } from "../storageTypes.js";
+import { nowIso, parseJson } from "./storageRepositoryUtils.js";
 
 const runtimeBudgetDefaults: Record<RuntimeBudgetProfile, ProjectRuntimeSettings> = {
   low: {
@@ -62,16 +62,103 @@ export class ProjectRepository {
        LEFT JOIN canvas_objects ON canvas_objects.project_id = projects.id
        WHERE ${where}
        GROUP BY projects.id
-       ORDER BY projects.updated_at DESC`
-    ).all() as ProjectRow[];
+      ORDER BY projects.updated_at DESC`
+    ).all() as unknown as ProjectRow[];
     const bindings = this.db.prepare(`SELECT configured_model_api_id as id FROM project_model_bindings WHERE project_id = ? ORDER BY created_at ASC`);
+    const previews = this.listCanvasPreviews(rows.filter((row) => Number(row.assetCount) > 0).map((row) => row.id));
     return rows.map((row) => ({
       ...row,
       assetCount: Number(row.assetCount),
       threadCount: Number(row.threadCount),
       provider: row.provider ?? undefined,
-      modelConfigIds: (bindings.all(row.id) as { id: string }[]).map((binding) => binding.id)
+      modelConfigIds: (bindings.all(row.id) as { id: string }[]).map((binding) => binding.id),
+      ...(previews.get(row.id) ? { canvasPreview: previews.get(row.id) } : {})
     }));
+  }
+
+  private listCanvasPreviews(projectIds: string[]) {
+    const uniqueProjectIds = [...new Set(projectIds)].filter(Boolean);
+    const previews = new Map<string, ProjectCanvasPreview>();
+    if (!uniqueProjectIds.length) return previews;
+    const placeholders = uniqueProjectIds.map(() => "?").join(", ");
+    type NodeRow = {
+      id: string;
+      projectId: string;
+      kind: ProjectCanvasPreview["nodes"][number]["kind"];
+      title: string;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      updatedAt: string;
+    };
+    type ObjectRow = {
+      id: string;
+      projectId: string;
+      kind: ProjectCanvasPreview["objects"][number]["kind"];
+      geometryJson: string;
+      dataJson: string;
+      updatedAt: string;
+    };
+    const nodes = this.db.prepare(
+      `SELECT id, projectId, kind, title, x, y, width, height, updatedAt FROM (
+         SELECT id,
+                project_id as projectId,
+                kind,
+                title,
+                x,
+                y,
+                width,
+                height,
+                updated_at as updatedAt,
+                ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY updated_at DESC, created_at DESC) as previewRank
+         FROM canvas_nodes
+         WHERE project_id IN (${placeholders})
+       )
+       WHERE previewRank <= 8`
+    ).all(...uniqueProjectIds) as unknown as NodeRow[];
+    const objects = this.db.prepare(
+      `SELECT id, projectId, kind, geometryJson, dataJson, updatedAt FROM (
+         SELECT id,
+                project_id as projectId,
+                kind,
+                geometry_json as geometryJson,
+                data_json as dataJson,
+                updated_at as updatedAt,
+                ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY updated_at DESC, created_at DESC) as previewRank
+         FROM canvas_objects
+         WHERE project_id IN (${placeholders})
+       )
+       WHERE previewRank <= 8`
+    ).all(...uniqueProjectIds) as unknown as ObjectRow[];
+
+    for (const node of nodes) {
+      const preview = ensurePreview(previews, node.projectId);
+      preview.nodes.push({
+        id: node.id,
+        kind: node.kind,
+        title: node.title,
+        x: Number(node.x),
+        y: Number(node.y),
+        width: Number(node.width),
+        height: Number(node.height)
+      });
+      preview.updatedAt = maxIso(preview.updatedAt, node.updatedAt);
+    }
+    for (const object of objects) {
+      const preview = ensurePreview(previews, object.projectId);
+      preview.objects.push({
+        id: object.id,
+        kind: object.kind,
+        geometry: parseJson(object.geometryJson) as JsonValue,
+        data: readPreviewObjectData(object.kind, parseJson(object.dataJson))
+      });
+      preview.updatedAt = maxIso(preview.updatedAt, object.updatedAt);
+    }
+    for (const [projectId, preview] of previews) {
+      if (!preview.nodes.length && !preview.objects.length) previews.delete(projectId);
+    }
+    return previews;
   }
 
   rename(projectId: string, title: string) {
@@ -140,6 +227,29 @@ export class ProjectRepository {
 
 export function defaultRuntimeBudgetSettings(profile: RuntimeBudgetProfile = "low"): ProjectRuntimeSettings {
   return { ...runtimeBudgetDefaults[profile] };
+}
+
+function ensurePreview(previews: Map<string, ProjectCanvasPreview>, projectId: string) {
+  const existing = previews.get(projectId);
+  if (existing) return existing;
+  const preview: ProjectCanvasPreview = { nodes: [], objects: [], updatedAt: "" };
+  previews.set(projectId, preview);
+  return preview;
+}
+
+function maxIso(left: string, right: string) {
+  if (!left) return right;
+  return right > left ? right : left;
+}
+
+function readPreviewObjectData(kind: ProjectCanvasPreview["objects"][number]["kind"], value: unknown): JsonValue | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (kind === "shape" && typeof record.shapeId === "string") return { shapeId: record.shapeId };
+  if (kind === "table") return { table: true };
+  if (kind === "text" && typeof record.color === "string") return { color: record.color };
+  if (kind === "asset") return { previewable: record.previewable === true };
+  return undefined;
 }
 
 function normalizeRuntimeSettings(input: Partial<ProjectRuntimeSettings> | undefined): ProjectRuntimeSettings {

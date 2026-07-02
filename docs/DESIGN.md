@@ -156,6 +156,15 @@ Purpose:
 
 Help users choose a text generation task without starting from a blank prompt box.
 
+OpenCanvas homepage update:
+
+- The Home page is a workbench surface, not a marketing hero. Keep the left app navigation unchanged and make the right main panel immediately useful.
+- The top Home composer must be the same interaction family as the in-canvas AI collaboration composer. Do not maintain a second decorative prompt box with different buttons or dead controls.
+- Submitting a non-empty Home composer prompt creates a new board, opens the workspace, and sends that prompt into the new board thread. Submitting with no prompt still creates a blank board.
+- The Home project browser may borrow the structure of Figma Recents: light tabs, filter controls, sort control, and grid/list switching.
+- Borrow the Figma Recents information architecture only. Do not copy Figma's black-and-white brand system, extreme pill geometry, negative letter spacing, or marketing typography.
+- Remove or hide ineffective actions. If a button appears on Home, it must either create a board, open a project, filter/sort/switch view, open project actions, or navigate to a working section.
+
 Layout:
 
 - Top bar with product name `FacetWrite`, optional project label, and comparison mode entry.

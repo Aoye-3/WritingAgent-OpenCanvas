@@ -48,6 +48,42 @@ test("storage facade records thread runs, messages, versions, events, projects, 
   assert.equal(await storage.hardDeleteThread(threadId), true);
 });
 
+test("project summaries include lightweight Canvas previews without node content", async () => {
+  const storage = await createStorage();
+  const projectId = `project_preview_${Date.now()}`;
+  storage.createProject(projectId, "Preview project");
+
+  for (let index = 0; index < 10; index += 1) {
+    storage.createCanvasNode(projectId, {
+      kind: index % 2 === 0 ? "document" : "note",
+      title: `Node ${index}`,
+      content: `Sensitive content ${index}`,
+      x: index * 40,
+      y: index * 24,
+      width: 220,
+      height: 140
+    });
+  }
+
+  storage.createCanvasObject(projectId, {
+    kind: "shape",
+    geometry: { x: 120, y: 260, width: 160, height: 80 },
+    data: { shapeId: "rectangle" }
+  });
+
+  const project = storage.listProjects(agentCards).find((item) => item.id === projectId);
+  assert.ok(project?.canvasPreview);
+  assert.equal(project.canvasPreview.nodes.length, 8);
+  assert.equal(project.canvasPreview.objects.length, 1);
+  assert.equal("content" in (project.canvasPreview.nodes[0] as Record<string, unknown>), false);
+  assert.equal(project.canvasPreview.objects[0].kind, "shape");
+
+  const emptyProjectId = `project_empty_preview_${Date.now()}`;
+  storage.createProject(emptyProjectId, "Empty preview project");
+  const emptyProject = storage.listProjects(agentCards).find((item) => item.id === emptyProjectId);
+  assert.equal(emptyProject?.canvasPreview, undefined);
+});
+
 test("storage facade preserves Canvas write approval semantics", async () => {
   const storage = await createStorage();
   const threadId = `thread_canvas_facade_${Date.now()}`;
