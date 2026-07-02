@@ -271,65 +271,9 @@ export function createGenerationService(
         const blockedInternalOutput = hasBlockedInternalOutput(normalized.events);
         const visibleText = blockedInternalOutput ? visibleTextAfterInternalOutputBlock(normalized.text, payload.locale) : normalized.text;
         const baseEvents = dedupeToolEvents([...runtimeEvents, ...normalizedEvents]);
-        if (blockedInternalOutput && !hasVisibleAgentDeliveryEvidence(visibleText, baseEvents)) {
-          const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend returned internal runtime output"), isMockFallbackEnabled(deps));
-          runtimeEvents.push(...normalizedEvents, event);
-          observeToolEvent(event);
-        } else {
-          if (isBlockingAgentClarificationRun(baseEvents, visibleText, agentBackendRun.finishReason)) {
-            agentPlanOrchestrator.complete(threadId, payload, baseEvents);
-            return recordGenerationRun({
-              storage,
-              payload,
-              threadId,
-              agentCardId: agentCard.id,
-              agentTitle: agentCard.title[payload.locale],
-              configuredModelApiId: context.modelSettings.configuredModelApiId,
-              modelId: context.modelSettings.model,
-              mode: context.mode,
-              prompt: context.prompt,
-              text: "",
-              provider: "agent-backend",
-              usedMock: false,
-              toolState: context.effectiveToolState,
-              events: baseEvents,
-              finishReason: "clarification_required",
-              usage: agentBackendRun.usage
-            });
-          }
-          const finalized = finalizeCanvasDelivery({
-            payload,
-            threadId,
-            projectId: selection.projectId,
-            storage,
-            deliveryId,
-            text: visibleText,
-            events: baseEvents,
-            timeline,
-            emitTimeline
-          });
-          const progressiveFinalized = await finalizeProgressiveCanvasDelivery({
-            payload,
-            threadId,
-            projectId: selection.projectId,
-            storage,
-            deliveryId,
-            text: finalized.text || visibleText,
-            events: baseEvents,
-            timeline,
-            emitTimeline,
-            archiveMarkdownOutput: deps.archiveMarkdownOutput
-          });
-          for (const finalEvent of progressiveFinalized.events) {
-            emitRuntimeToolEvent(finalEvent);
-          }
-          const completed = timeline.event("run_completed", "completed", payload.locale === "zh" ? "运行完成" : "Run completed", payload.locale === "zh" ? "最终内容已生成。" : "Final content is ready.");
-          emitTimeline(completed);
-          const events = [...baseEvents, ...progressiveFinalized.events, ...timelineEvents.map(timelineEventToToolEvent)];
-          agentPlanOrchestrator.assertPostcondition(threadId, payload, events);
-          agentPlanOrchestrator.complete(threadId, payload, events);
-          const finishReason = finalFinishReason(agentBackendRun.finishReason, events);
-          const recorded = recordGenerationRun({
+        if (isBlockingAgentClarificationRun(baseEvents, visibleText, agentBackendRun.finishReason)) {
+          agentPlanOrchestrator.complete(threadId, payload, baseEvents);
+          return recordGenerationRun({
             storage,
             payload,
             threadId,
@@ -339,16 +283,66 @@ export function createGenerationService(
             modelId: context.modelSettings.model,
             mode: context.mode,
             prompt: context.prompt,
-            text: progressiveFinalized.text || finalized.text,
+            text: "",
             provider: "agent-backend",
             usedMock: false,
             toolState: context.effectiveToolState,
-            events,
-            finishReason,
+            events: baseEvents,
+            finishReason: "clarification_required",
             usage: agentBackendRun.usage
           });
-          return recorded;
         }
+        const finalized = finalizeCanvasDelivery({
+          payload,
+          threadId,
+          projectId: selection.projectId,
+          storage,
+          deliveryId,
+          text: visibleText,
+          events: baseEvents,
+          timeline,
+          emitTimeline
+        });
+        const progressiveFinalized = await finalizeProgressiveCanvasDelivery({
+          payload,
+          threadId,
+          projectId: selection.projectId,
+          storage,
+          deliveryId,
+          text: finalized.text || visibleText,
+          events: baseEvents,
+          timeline,
+          emitTimeline,
+          archiveMarkdownOutput: deps.archiveMarkdownOutput
+        });
+        for (const finalEvent of progressiveFinalized.events) {
+          emitRuntimeToolEvent(finalEvent);
+        }
+        const completed = timeline.event("run_completed", "completed", payload.locale === "zh" ? "运行完成" : "Run completed", payload.locale === "zh" ? "最终内容已生成。" : "Final content is ready.");
+        emitTimeline(completed);
+        const events = [...baseEvents, ...progressiveFinalized.events, ...timelineEvents.map(timelineEventToToolEvent)];
+        agentPlanOrchestrator.assertPostcondition(threadId, payload, events);
+        agentPlanOrchestrator.complete(threadId, payload, events);
+        const finishReason = finalFinishReason(agentBackendRun.finishReason, events);
+        const recorded = recordGenerationRun({
+          storage,
+          payload,
+          threadId,
+          agentCardId: agentCard.id,
+          agentTitle: agentCard.title[payload.locale],
+          configuredModelApiId: context.modelSettings.configuredModelApiId,
+          modelId: context.modelSettings.model,
+          mode: context.mode,
+          prompt: context.prompt,
+          text: progressiveFinalized.text || finalized.text,
+          provider: "agent-backend",
+          usedMock: false,
+          toolState: context.effectiveToolState,
+          events,
+          finishReason,
+          usage: agentBackendRun.usage
+        });
+        return recorded;
       } else {
         const event = createRuntimeFallbackEvent("agent-backend", new Error("AgentBackend is disabled or unavailable"), isMockFallbackEnabled(deps));
         runtimeEvents.push(event);
@@ -666,36 +660,13 @@ export function createGenerationService(
         const blockedInternalOutput = hasBlockedInternalOutput(normalized.events);
         const visibleText = blockedInternalOutput ? visibleTextAfterInternalOutputBlock(normalized.text, payload.locale) : normalized.text;
         const baseEvents = dedupeToolEvents([...runtimeEvents, ...normalizedEvents]);
-        if (blockedInternalOutput && !hasVisibleAgentDeliveryEvidence(visibleText, baseEvents)) {
-          const internalOutputError = new Error("AgentBackend returned internal runtime output");
-          runtimeFailureError = internalOutputError;
-          const event = createRuntimeFallbackEvent("agent-backend", internalOutputError, isMockFallbackEnabled(deps));
-          runtimeEvents.push(...normalizedEvents, event);
-          observeToolEvent(event);
-          if (isProgressiveCanvasDeliveryEnabled(payload)) {
-            ensureProgressiveDeliveryStarted();
-            for (const failureEvent of commitProgressiveFailureDelivery({
-              payload,
-              projectId: selection.projectId,
-              storage,
-              deliveryId,
-              error: internalOutputError,
-              entries: progressiveEvidenceEntries
-            })) {
-              runtimeEvents.push(failureEvent);
-              emitRuntimeToolEvent(failureEvent);
-            }
-          }
-          emitRunFailedTimeline(internalOutputError);
+        if (blockedInternalOutput) {
           textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
+          if (visibleText) textGate.push(visibleText);
+          textGate.flush();
         } else {
-          if (blockedInternalOutput) {
-            textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
-            if (visibleText) textGate.push(visibleText);
-            textGate.flush();
-          } else {
-            textGate.flush();
-          }
+          textGate.flush();
+        }
           callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
           stageProgress.emit(
             "run:finalizing",
@@ -833,7 +804,6 @@ export function createGenerationService(
             usage: agentBackendRun.usage
           });
           return recorded;
-        }
       } else {
         runtimeFailureError = new Error("AgentBackend is disabled or unavailable");
         const event = createRuntimeFallbackEvent("agent-backend", runtimeFailureError, isMockFallbackEnabled(deps));

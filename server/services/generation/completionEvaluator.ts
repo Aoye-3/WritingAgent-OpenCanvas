@@ -18,7 +18,7 @@ export function evaluateRunCompletion(input: {
     return verdict("failed", [`Runtime failed: ${input.errorMessage}`], ["Recover or retry the failed run."]);
   }
 
-  if (hasPendingClarification(events) || input.finishReason === "clarification_required") {
+  if (hasPendingClarification(events)) {
     reasons.push("The run is waiting for user clarification.");
     missingRequirements.push("Answer the pending clarification before completion.");
     return verdict("waiting", reasons, missingRequirements);
@@ -36,13 +36,15 @@ export function evaluateRunCompletion(input: {
     return verdict("failed", reasons, missingRequirements);
   }
 
-  if (!text) {
+  const durableDelivery = hasDurableDelivery(events);
+
+  if (!text && !durableDelivery) {
     reasons.push("No final user-facing answer was produced.");
     missingRequirements.push("Produce a final answer or an explicit clarification request.");
     return verdict("partial", reasons, missingRequirements);
   }
 
-  if (requiresDurableCanvasCommit(input.payload) && !hasDurableDelivery(events)) {
+  if (requiresDurableCanvasCommit(input.payload) && !durableDelivery) {
     reasons.push("The request requires a durable Canvas or artifact update.");
     missingRequirements.push("Commit the required Canvas node, artifact, or file delivery.");
     return verdict("partial", reasons, missingRequirements);
@@ -56,6 +58,10 @@ export function evaluateRunCompletion(input: {
 
   if (hasBudgetSynthesisSignal(events)) {
     reasons.push("The runtime reached a budget gate and synthesized from available evidence.");
+    if (text || durableDelivery) {
+      reasons.push("Final answer or durable delivery exists and no rule-first blockers remain.");
+      return verdict("completed", reasons, []);
+    }
     return verdict("partial", reasons, []);
   }
 
@@ -85,13 +91,50 @@ function verdict(status: RunCompletionVerdict["status"], reasons: string[], miss
 }
 
 function hasPendingClarification(events: ToolEventRecord[]) {
-  return events.some((event) => {
-    const payload = record(event.payload);
-    const type = string(payload.type) || string(payload.eventType);
-    return /agent_clarification_requested$/.test(event.eventType)
-      || type === "agent_clarification_requested"
-      || event.eventType === "run_timeline_decision" && string(payload.status) === "waiting";
-  });
+  let pending = false;
+  for (const event of events) {
+    if (pending && isPostClarificationProgress(event)) {
+      pending = false;
+      continue;
+    }
+    if (isExplicitClarificationRequest(event)) {
+      pending = true;
+    }
+  }
+  return pending;
+}
+
+function isExplicitClarificationRequest(event: ToolEventRecord) {
+  const payload = record(event.payload);
+  const type = string(payload.type) || string(payload.eventType);
+  if (!/agent_clarification_requested$/.test(event.eventType) && type !== "agent_clarification_requested") {
+    return false;
+  }
+  return Boolean(string(payload.question) && clarificationOptionCount(payload.options) >= 2);
+}
+
+function clarificationOptionCount(value: unknown) {
+  if (!Array.isArray(value)) return 0;
+  return value.filter((item) => {
+    if (typeof item === "string") return Boolean(item.trim());
+    const option = record(item);
+    return Boolean(string(option.label) || string(option.title));
+  }).length;
+}
+
+function isPostClarificationProgress(event: ToolEventRecord) {
+  if (isExplicitClarificationRequest(event)) return false;
+  const payload = record(event.payload);
+  const toolName = string(payload.toolName) || string(payload.tool);
+  const payloadEventType = string(payload.eventType) || string(payload.type);
+  return event.eventType === "run_timeline_run_completed"
+    || payloadEventType === "run_completed"
+    || /(?:^|_)tool_(?:started|completed)$/.test(event.eventType)
+    || /^(?:write_file|present_files|web_search|web_fetch|knowledge_base|canvas_write)$/.test(toolName)
+    || /^canvas_delivery_(?:research|body_checkpoint|body_final|file_document)_committed$/.test(event.eventType)
+    || /^canvas_delivery_(?:research|body_checkpoint|body_final|file_document)_committed$/.test(payloadEventType)
+    || /(?:^|_)canvas_mutation_committed$/.test(event.eventType)
+    || /(?:^|_)artifact_(?:staged|committed)$/.test(event.eventType);
 }
 
 function hasUnfinishedToolCall(events: ToolEventRecord[]) {

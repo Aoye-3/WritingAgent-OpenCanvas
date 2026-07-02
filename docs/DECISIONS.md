@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-02: Runtime Budget And Internal Output Are Completion Signals, Not Hard Stops
+
+Decision: Treat runtime budget gates as advisory synthesis signals and internal-output blocks as redaction diagnostics. `synthesis_gate`, model-call waiting, retry, and other ordinary `run_timeline_decision` events with `status:"waiting"` must not imply pending user clarification. A valid Agent Runtime clarification requires a structured `agent_backend_agent_clarification_requested` payload with a question and at least two options, and later substantive progress clears the waiting interpretation. `internal_output_blocked` removes unsafe visible text but does not automatically create `agent_backend_runtime_failed`; completion still depends on final text, durable Canvas/file/Artifact delivery, valid clarification, or a real runtime error.
+
+Reason: The previous hard-stop behavior made budget notices and internal-output redaction look like broken task chains. Budget gates were intended to nudge synthesis, but downstream completion logic treated generic waiting timeline entries as user clarification and treated redacted internal text as runtime failure. That caused runs to stall with "Answer the pending clarification before completion" even when the Agent was only synthesizing, waiting for a model response, or had already produced Canvas/file delivery evidence.
+
+Impact: `completionEvaluator` owns this distinction. Tests should cover ordinary waiting timeline entries, stale clarification followed by tool/Canvas progress, budget synthesis with final text, empty assistant text with durable delivery, and internal-output blocking without runtime failure. Frontend code should render choice cards from persisted valid clarifications first and use timeline inference only as fallback. Runtime middleware may continue emitting budget notices and telemetry, but it must not clear tools, force a second model pass, or throw solely because the model continues after a notice.
+
 ## 2026-07-02: Composer Thinking UI Uses Shared Model Capability Detection
 
 Decision: Home and Workspace chat inputs share `AIComposer` as the only maintained composer surface for per-message thinking controls. The composer must decide whether to render the thinking button through the shared model capability helper, not by provider id alone and not by the model list group label. The visible trigger uses the `thinking-mode-button` CSS contract; `thinking-mode-menu` is reserved for the popover menu.
