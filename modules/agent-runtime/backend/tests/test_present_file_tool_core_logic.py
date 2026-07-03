@@ -27,7 +27,10 @@ def test_present_files_normalizes_host_outputs_path(tmp_path):
     )
 
     assert result.update["artifacts"] == ["/mnt/user-data/outputs/report.md"]
-    assert result.update["messages"][0].content == "Successfully presented files"
+    message = result.update["messages"][0].content
+    assert "Successfully presented files" in message
+    assert "concise final answer" in message
+    assert "do not call more tools" in message
 
 
 def test_present_files_keeps_virtual_outputs_path(tmp_path, monkeypatch):
@@ -76,7 +79,9 @@ def test_present_files_uses_config_thread_id_when_context_missing(tmp_path, monk
     )
 
     assert result.update["artifacts"] == ["/mnt/user-data/outputs/summary.json"]
-    assert result.update["messages"][0].content == "Successfully presented files"
+    message = result.update["messages"][0].content
+    assert "Successfully presented files" in message
+    assert "do not call more tools" in message
 
 
 def test_present_files_rejects_paths_outside_outputs(tmp_path):

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   createLiveToolEventState,
   readLiveCanvasNodeSnapshot,
@@ -80,6 +81,15 @@ test("Canvas delivery committed events expose live node snapshots for checkpoint
     eventType: "canvas_delivery_body_checkpoint_committed",
     payload: { node: { id: "body_draft", title: "Body draft" } }
   }), undefined);
+});
+
+test("Canvas synced status communicates that the final response is still pending", () => {
+  const source = readFileSync("src/app/hooks/useGenerationRun.ts", "utf8");
+
+  assert.match(source, /Canvas synced; waiting for final response\.\.\./);
+  assert.match(source, /Canvas 已同步，等待最终回复\.\.\./);
+  assert.doesNotMatch(source, /Canvas state synced\./);
+  assert.match(source, /isStreaming:\s*false,[\s\S]*statusLabel:\s*undefined/);
 });
 
 test("reasoning stream blocks leaked Agent Runtime DSML", () => {

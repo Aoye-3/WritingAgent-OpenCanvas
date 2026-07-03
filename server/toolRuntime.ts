@@ -264,7 +264,7 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
         const node = context.commitCanvasWrite(writeInput, { shortProgressStableNodeId });
         return {
           ok: true,
-          content: `Canvas ${operation} committed successfully. Node id: ${node.id}.`,
+          content: `Canvas ${operation} committed successfully. Node id: ${node.id}. If this satisfies the user request, respond with a concise final confirmation and do not call more tools.`,
           payload: {
             tool: name,
             eventType: "canvas_mutation_committed",
@@ -285,7 +285,7 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
       });
       return {
         ok: true,
-        content: `A Canvas write proposal (${request.operation}) is ready for user confirmation. Request id: ${request.id}. Do not say it has been applied yet.`,
+        content: `A Canvas write proposal (${request.operation}) is ready for user confirmation. Request id: ${request.id}. It is waiting for user approval; do not say it has been applied yet. End this response by telling the user it is waiting for confirmation, and do not call more tools.`,
         payload: {
           tool: name,
           eventType: "canvas_write_pending_approval",

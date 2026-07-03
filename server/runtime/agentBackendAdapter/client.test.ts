@@ -1092,7 +1092,9 @@ test("sends progressive Canvas evidence controls for skill long tasks", () => {
   assert.equal((request.context.facetwrite_canvas_write_policy as { maxContentChars?: number }).maxContentChars, 2400);
   assert.equal((request.context.facetwrite_context_values as Record<string, unknown>).facetwrite_canvas_write_scope, "short_progress_nodes");
   assert.match(String(request.context.facetwrite_markdown_file_delivery_policy), /Use canvas_write only for short progressive nodes/);
+  assert.match(String(request.context.facetwrite_markdown_file_delivery_policy), /After present_files succeeds, produce the final chat response without further tool calls/);
   assert.match(String(request.context.facetwrite_task_completion_policy), /exactly one structured multiple-choice clarification/);
+  assert.match(String(request.context.facetwrite_task_completion_policy), /After canvas_write commits successfully or present_files succeeds/);
   assert.match(String(request.context.facetwrite_clarification_policy), /ask_clarification/);
   assert.deepEqual(request.context.facetwrite_evidence_tools, ["web_search", "web_fetch", "read_file", "bash"]);
 });

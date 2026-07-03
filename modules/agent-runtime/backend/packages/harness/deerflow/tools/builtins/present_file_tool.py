@@ -121,6 +121,6 @@ def present_file_tool(
     return Command(
         update={
             "artifacts": normalized_paths,
-            "messages": [ToolMessage("Successfully presented files", tool_call_id=tool_call_id)],
+            "messages": [ToolMessage("Successfully presented files. If this satisfies the user request, respond with a concise final answer and do not call more tools.", tool_call_id=tool_call_id)],
         },
     )

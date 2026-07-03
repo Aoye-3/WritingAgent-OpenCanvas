@@ -209,6 +209,8 @@ test("canvas_write keeps delete operations pending for approval", async () => {
 
   assert.equal(result.ok, true);
   assert.equal(result.payload.eventType, "canvas_write_pending_approval");
+  assert.match(result.content, /waiting for user approval/i);
+  assert.match(result.content, /do not call more tools/i);
 });
 
 test("canvas_write commits low-risk create operations and returns the real node id", async () => {
@@ -230,6 +232,8 @@ test("canvas_write commits low-risk create operations and returns the real node 
   assert.equal(result.payload.eventType, "canvas_mutation_committed");
   assert.equal(result.payload.nodeId, "node_identity");
   assert.equal(result.payload.status, "committed");
+  assert.match(result.content, /concise final confirmation/i);
+  assert.match(result.content, /do not call more tools/i);
 });
 
 test("canvas_write commits short progressive summary nodes with a stable node id", async () => {

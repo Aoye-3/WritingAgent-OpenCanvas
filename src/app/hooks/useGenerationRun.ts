@@ -836,7 +836,7 @@ function canvasSyncingLabel(locale: Locale) {
 }
 
 function canvasSyncedLabel(locale: Locale) {
-  return locale === "zh" ? "Canvas state synced." : "Canvas state synced.";
+  return locale === "zh" ? "Canvas 已同步，等待最终回复..." : "Canvas synced; waiting for final response...";
 }
 
 function recoverableGenerationError(message: string, locale: Locale) {

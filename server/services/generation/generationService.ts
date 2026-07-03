@@ -492,7 +492,12 @@ export function createGenerationService(
             "running",
             payload.locale === "zh" ? "Agent Runtime 仍在运行" : "Agent Runtime active",
             payload.locale === "zh" ? "Canvas 已更新，正在等待下一次模型决策或工具调用。" : "Canvas is updated; waiting for the next model decision or tool call.",
-            { ...agentPlanPayload(payload), signal: signal.type, elapsedMsSinceCanvasCommit: Date.now() - lastCanvasCommitAt }
+            {
+              ...agentPlanPayload(payload),
+              signal: "canvas_committed_runtime_still_active",
+              runtimeSignal: signal.type,
+              elapsedMsSinceCanvasCommit: Date.now() - lastCanvasCommitAt
+            }
           ));
         }
         return;
