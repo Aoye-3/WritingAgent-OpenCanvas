@@ -120,6 +120,7 @@ type AgentBackendRunContext = {
   facetwrite_task_completion_policy?: string;
   facetwrite_clarification_policy?: string | Record<string, unknown>;
   facetwrite_clarification_phase?: "clarification_guard";
+  facetwrite_intake_phase?: "intake" | "execution";
 };
 
 export async function runAgentBackendAgent(input: AgentBackendRunInput): Promise<AgentBackendRunResult> {
@@ -338,7 +339,8 @@ function withClarificationGuardContext(context: AgentBackendRunContext, policy: 
     thinking_enabled: false,
     reasoning_effort: undefined,
     facetwrite_clarification_policy: policy,
-    facetwrite_clarification_phase: "clarification_guard"
+    facetwrite_clarification_phase: "clarification_guard",
+    facetwrite_intake_phase: "intake"
   };
 }
 
@@ -438,7 +440,8 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
       facetwrite_canvas_write_scope: canvasWriteScope,
       facetwrite_canvas_write_policy: canvasWriteScope ? SHORT_PROGRESS_CANVAS_WRITE_POLICY : undefined,
       facetwrite_task_completion_policy: taskCompletionPolicy,
-      facetwrite_clarification_policy: clarificationPolicy
+      facetwrite_clarification_policy: clarificationPolicy,
+      facetwrite_intake_phase: "execution"
     };
   }
   const thinkingMode = modelSettings.thinkingMode ?? (modelSettings.providerId === "deepseek" && modelSettings.model === "deepseek-reasoner" ? "enabled" : "disabled");
@@ -476,6 +479,7 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     facetwrite_canvas_write_policy: canvasWriteScope ? SHORT_PROGRESS_CANVAS_WRITE_POLICY : undefined,
     facetwrite_task_completion_policy: taskCompletionPolicy,
     facetwrite_clarification_policy: clarificationPolicy,
+    facetwrite_intake_phase: "execution",
     ...(memoryContent ? { facetwrite_memory_content: memoryContent } : {})
   };
 }

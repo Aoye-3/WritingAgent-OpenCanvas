@@ -456,14 +456,14 @@ export function AICollaborationDrawer({
     setSubmittedAgentClarificationKeys((current) => new Set([...current, ...submission.submittedKeys]));
     setOptimisticAgentClarifications((current) => [...current, submission.optimisticClarification]);
     try {
-      await onSend(submission.instructionText, undefined, submission.requestContext);
+      const result = await onSend(submission.instructionText, undefined, submission.requestContext);
+      if (isFailedSendResult(result)) {
+        setSubmittedAgentClarificationKeys((current) => removeSubmittedAgentClarificationKeys(current, submission.submittedKeys));
+        setOptimisticAgentClarifications((current) => removeOptimisticAgentClarification(current, submission.optimisticClarification));
+      }
     } catch (error) {
-      setSubmittedAgentClarificationKeys((current) => {
-        const next = new Set(current);
-        for (const key of submission.submittedKeys) next.delete(key);
-        return next;
-      });
-      setOptimisticAgentClarifications((current) => current.filter((item) => item !== submission.optimisticClarification));
+      setSubmittedAgentClarificationKeys((current) => removeSubmittedAgentClarificationKeys(current, submission.submittedKeys));
+      setOptimisticAgentClarifications((current) => removeOptimisticAgentClarification(current, submission.optimisticClarification));
       throw error;
     } finally {
       setClarificationBusy(false);
@@ -1347,6 +1347,16 @@ export function mergeAgentClarificationDisplayRecords(records: AgentClarificatio
   return [...records, ...optimistic];
 }
 
+export function removeSubmittedAgentClarificationKeys(current: ReadonlySet<string>, submittedKeys: string[]) {
+  const next = new Set(current);
+  for (const key of submittedKeys) next.delete(key);
+  return next;
+}
+
+export function removeOptimisticAgentClarification(current: AgentClarification[], optimisticClarification: AgentClarification) {
+  return current.filter((item) => item !== optimisticClarification);
+}
+
 function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "message", onAnswer }: {
   clarification: AgentClarificationPrompt;
   busy: boolean;
@@ -1776,6 +1786,10 @@ function readRuntimeBudgetProfile(value: unknown): GenerateRequest["runtimeBudge
 
 function isAgentClarificationRequired(value: unknown) {
   return readRecord(value).finishReason === "clarification_required";
+}
+
+function isFailedSendResult(value: unknown) {
+  return readRecord(value).ok === false;
 }
 
 function isWriteConfirmation(text: string) {

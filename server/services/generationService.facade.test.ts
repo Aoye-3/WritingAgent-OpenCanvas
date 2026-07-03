@@ -1283,6 +1283,97 @@ test("answered intake slot suppresses repeated citation-format clarification fro
   assert.ok(record.events?.some((event) => event.eventType === "agent_backend_duplicate_clarification_suppressed"));
 });
 
+test("agent intake suppresses equivalent answered clarification without runtime slot id", async () => {
+  const { storage, agentClarifications, records } = fakeStorage();
+  let calls = 0;
+  const firstClarification: ToolEventRecord = {
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      toolCallId: "call_citation_initial",
+      clarificationId: "call_citation_initial",
+      question: "Which citation format should I use?",
+      options: [
+        { id: "apa", label: "APA 7", detail: "Use APA 7th edition.", recommended: true },
+        { id: "ieee", label: "IEEE", detail: "Use IEEE numeric citations." }
+      ]
+    }
+  };
+  const repeatedClarification: ToolEventRecord = {
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      toolCallId: "call_citation_repeat",
+      clarificationId: "call_citation_repeat",
+      question: "Which citation style should the bibliography use?",
+      options: [
+        { id: "apa", label: "APA 7", detail: "Use APA 7th edition.", recommended: true },
+        { id: "ieee", label: "IEEE", detail: "Use IEEE numeric citations." }
+      ]
+    }
+  };
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        calls += 1;
+        const event = calls === 1 ? firstClarification : repeatedClarification;
+        input.onToolEvent?.(event);
+        return {
+          text: "",
+          finishReason: "clarification_required",
+          events: [event]
+        };
+      }
+    }
+  });
+
+  const first = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_intake_repeat",
+    agentCardId: "chat-agent",
+    chatInstruction: "Prepare a bibliography about autonomous workflows.",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    toolState: { web_search: true, knowledge_base: true }
+  });
+
+  assert.equal(first.finishReason, "clarification_required");
+  assert.equal(agentClarifications.length, 1);
+  assert.equal(agentClarifications[0]?.status, "pending");
+
+  const second = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_intake_repeat",
+    agentCardId: "chat-agent",
+    chatInstruction: "Prepare a bibliography about autonomous workflows.\n\nSelected clarification: APA 7",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: {
+      agentClarification: {
+        clarificationId: "call_citation_initial",
+        question: "Which citation format should I use?",
+        selectedOptionId: "apa",
+        answer: "APA 7",
+        option: { id: "apa", label: "APA 7", detail: "Use APA 7th edition." },
+        resumeContext: {
+          intakeRound: 1,
+          answeredSummary: "Citation format: APA 7"
+        }
+      }
+    },
+    toolState: { web_search: true, knowledge_base: true }
+  });
+
+  assert.equal(second.finishReason, "clarification_required");
+  assert.equal(agentClarifications.length, 1);
+  assert.equal(agentClarifications[0]?.status, "answered");
+  const secondRecord = records.at(-1) as { events?: Array<{ eventType: string; payload: Record<string, unknown> }> };
+  assert.ok(secondRecord.events?.some((event) => event.eventType === "agent_backend_duplicate_clarification_suppressed"));
+  assert.equal(secondRecord.events?.some((event) => event.eventType === "agent_backend_agent_clarification_requested"), false);
+});
+
 test("research skill intake allows evidence tools after three answered clarification rounds", async () => {
   const { storage } = fakeStorage();
   let allowedToolRefs: string[] = [];
