@@ -141,6 +141,25 @@ User-facing errors should say that the current model does not support thinking w
 - Generation failures: inspect stable `model_required`, `model_not_ready`, `runtime_unavailable`, or `runtime_auth_failed` diagnostics. Do not enable Mock fallback for acceptance testing.
 - Deliberate local Mock demonstration only: set `FACETWRITE_MOCK_FALLBACK_ENABLED=true`; unset it before real Runtime verification.
 
+### LangGraph Resume Clarifications
+
+Blocking Agent clarification can arrive twice for the same question: first as an `ask_clarification` tool call from streamed messages, then as a native LangGraph `runtime_interrupt`. Treat the interrupt as authoritative because it carries the durable resume address. The final stored `agent_backend_agent_clarification_requested` event and `agent_clarifications.resume_context_json` should preserve:
+
+- `resumeContext.runtimeResume.runtimeThreadId`
+- `resumeContext.runtimeResume.runtimeRunId`
+- `resumeContext.runtimeResume.interruptId`
+- `resumeContext.runtimeResume.checkpointId` when Runtime provides it
+
+`finishReason:"clarification_required"` means the run is waiting; it does not mean the next answer can use LangGraph resume. The frontend should set `requiresRuntimeResume:true` only when the stored clarification contains the complete `runtimeThreadId` + `runtimeRunId` + `interruptId` triple. If that metadata is absent, the answer is a fallback ordinary run and diagnostics should show that it was not a LangGraph resume.
+
+When debugging "answering a clarification starts a new run", inspect the persisted clarification before the frontend queue. A correct resume continuation posts to Runtime with `command: { resume: ... }`, `metadata.resumeOfRunId`, and the interrupt/checkpoint ids. A broken path posts a normal run with `command:null`. If the stream contains both `source:"ask_clarification"` and `source:"runtime_interrupt"` for the same question/options, adapter, generation-service, and repository dedupe must keep or merge the interrupt version rather than letting the earlier tool-call event win.
+
+Regression coverage lives in `server/runtime/agentBackendAdapter/client.test.ts`, `server/services/generation/agentBackendRunner.test.ts`, `server/services/generationService.facade.test.ts`, `server/storageFacade.test.ts`, and `tests/frontend/agentClarification.test.ts`. Run the focused set after changing clarification handling:
+
+```powershell
+node --import tsx --test server/runtime/agentBackendAdapter/client.test.ts server/services/generation/agentBackendRunner.test.ts server/services/generationService.facade.test.ts server/storageFacade.test.ts tests/frontend/agentClarification.test.ts
+```
+
 ### Skill Clarification Budget Continuation
 
 The Skill scope guard is still a strict two-phase protocol. Phase one exposes only `ask_clarification` and removes Canvas/progressive/file/evidence delivery context from the Runtime request, but the structured clarification event must carry enough `resumeContext` for phase two: original instruction, transient Skills, disabled Skills, effective `runtimeBudgetProfile`, and the original Canvas workflow. If Runtime returns only a partial `resumeContext`, the Node generation service fills missing fields from the server guard policy.

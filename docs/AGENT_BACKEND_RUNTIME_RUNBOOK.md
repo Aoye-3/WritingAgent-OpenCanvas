@@ -29,6 +29,8 @@ If no pending row exists, verify that the Runtime payload has `type:"agent_clari
 
 When a clarification answer resumes a task, confirm `requestContext.agentClarification` includes the stored clarification id and selected option, and that the next runtime request restores the original instruction, transient Skills, disabled Skills, runtime budget, and Canvas workflow from `resumeContext`. For long Skill tasks, the resumed run should re-enter progressive Canvas delivery and emit/update progress, outline, or body-draft nodes before finalization when evidence tools run.
 
+For LangGraph-backed clarification, `finishReason:"clarification_required"` is not a resume credential. The stored clarification must include a complete `resumeContext.runtimeResume` with `runtimeThreadId`, `runtimeRunId`, and `interruptId`; `checkpointId` should be preserved when present. If the stream contains both `ask_clarification` and `runtime_interrupt` events for the same question, the Runtime interrupt version must win. See the maintained details in [`AGENT_RUNTIME_RUNBOOK.md`](AGENT_RUNTIME_RUNBOOK.md#langgraph-resume-clarifications).
+
 ## Progressive CanvasWrite Diagnostics
 
 Progressive long-task runs should expose all three delivery surfaces together:
