@@ -24,7 +24,9 @@ test("storage facade records thread runs, messages, versions, events, projects, 
     userMessage: "User request",
     toolState: { knowledge_base: true },
     events: [{ eventType: "tool_call_completed", payload: { tool: "knowledge_base" } }],
-    finishReason: "mock_fallback"
+    finishReason: "mock_fallback",
+    runtimeRunId: "runtime_run_1",
+    runtimeThreadId: "runtime_thread_1"
   });
 
   assert.match(saved.runId, /^run_/);
@@ -32,6 +34,10 @@ test("storage facade records thread runs, messages, versions, events, projects, 
   assert.deepEqual(storage.listMessages(threadId).map((message) => message.role), ["user", "assistant"]);
   assert.equal(storage.listOutputVersions(threadId)[0].content, "Output text");
   assert.ok(storage.listToolEvents(threadId).some((event) => event.eventType === "tool_call_completed"));
+  assert.deepEqual(storage.findRuntimeRunMetadata(threadId, saved.runId), {
+    runtimeRunId: "runtime_run_1",
+    runtimeThreadId: "runtime_thread_1"
+  });
   assert.ok(storage.listProjects(agentCards).some((project) => project.id === agentCard.id && project.assetCount >= 1));
 
   const renamed = storage.renameThread(threadId, "Renamed project");

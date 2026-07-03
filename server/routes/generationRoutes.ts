@@ -2,6 +2,7 @@ import type { Express, Response } from "express";
 import { parseGenerateRequest, type GenerateRequest } from "../contracts/generation.js";
 import type { GenerationService } from "../services/generationService.js";
 import type { CanvasDomainService } from "../domains/canvas/index.js";
+import type { SQLiteStorageRepository } from "../storage.js";
 import { errorMessage, sendError, sendOk } from "../utils/http.js";
 import { GenerationError } from "../domains/generation/index.js";
 import { listAgentBackendRunEvents, requestAgentBackendRunIntervention } from "../runtime/agentBackendAdapter/client.js";
@@ -10,9 +11,10 @@ import { sanitizeToolEventPayload } from "../services/generation/toolEventSaniti
 type GenerationRouteDeps = {
   generationService: GenerationService;
   canvasService: CanvasDomainService;
+  storage: Pick<SQLiteStorageRepository, "findRuntimeRunMetadata">;
 };
 
-export function registerGenerationRoutes(app: Express, { generationService, canvasService }: GenerationRouteDeps) {
+export function registerGenerationRoutes(app: Express, { generationService, canvasService, storage }: GenerationRouteDeps) {
   app.post("/api/generate", async (request, response) => {
     try {
       const payload = parseGenerateRequest(request.body);
@@ -117,9 +119,10 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
         sendError(response, 400, "bad_request", "threadId is required");
         return;
       }
+      const runtimeRun = storage.findRuntimeRunMetadata(threadId, request.params.runId);
       const events = await listAgentBackendRunEvents({
-        threadId,
-        runId: request.params.runId,
+        threadId: runtimeRun?.runtimeThreadId || threadId,
+        runId: runtimeRun?.runtimeRunId || request.params.runId,
         limit
       });
       sendOk(response, { events: sanitizeRuntimeRunEvents(events) });

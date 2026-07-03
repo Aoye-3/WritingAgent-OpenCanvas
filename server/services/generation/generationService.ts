@@ -294,6 +294,8 @@ export function createGenerationService(
             toolState: context.effectiveToolState,
             events: baseEvents,
             finishReason: "clarification_required",
+            runtimeRunId: agentBackendRun.runtimeRunId,
+            runtimeThreadId: agentBackendRun.runtimeThreadId,
             usage: agentBackendRun.usage
           });
         }
@@ -345,6 +347,8 @@ export function createGenerationService(
           toolState: context.effectiveToolState,
           events,
           finishReason,
+          runtimeRunId: agentBackendRun.runtimeRunId,
+          runtimeThreadId: agentBackendRun.runtimeThreadId,
           usage: agentBackendRun.usage
         });
         return recorded;
@@ -733,6 +737,8 @@ export function createGenerationService(
                   toolState: context.effectiveToolState,
                   events,
                   finishReason: "clarification_required",
+                  runtimeRunId: repairRun.runtimeRunId ?? agentBackendRun.runtimeRunId,
+                  runtimeThreadId: repairRun.runtimeThreadId ?? agentBackendRun.runtimeThreadId,
                   usage: repairRun.usage ?? agentBackendRun.usage
                 });
               }
@@ -760,6 +766,8 @@ export function createGenerationService(
               toolState: context.effectiveToolState,
               events,
               finishReason: "clarification_required",
+              runtimeRunId: agentBackendRun.runtimeRunId,
+              runtimeThreadId: agentBackendRun.runtimeThreadId,
               usage: agentBackendRun.usage
             });
           }
@@ -811,6 +819,8 @@ export function createGenerationService(
             toolState: context.effectiveToolState,
             events,
             finishReason,
+            runtimeRunId: agentBackendRun.runtimeRunId,
+            runtimeThreadId: agentBackendRun.runtimeThreadId,
             usage: agentBackendRun.usage
           });
           return recorded;

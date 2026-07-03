@@ -48,6 +48,8 @@ export type GenerateResponse = {
   usedMock: boolean;
   threadId: string;
   runId?: string;
+  runtimeRunId?: string;
+  runtimeThreadId?: string;
   errorMessage?: string;
   events?: ToolEventRecord[];
   finishReason?: string;

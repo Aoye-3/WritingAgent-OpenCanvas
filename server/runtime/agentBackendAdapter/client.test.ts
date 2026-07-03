@@ -421,6 +421,8 @@ test("surfaces AgentBackend metadata as a raw runtime run signal", async () => {
   });
 
   assert.equal(result.text, "Done");
+  assert.equal(result.runtimeRunId, "runtime_run_1");
+  assert.equal(result.runtimeThreadId, "thread_1");
   assert.deepEqual(statuses, ["Thinking...", "Writing..."]);
   assert.equal(signals[0]?.type, "run_metadata");
   assert.deepEqual(signals[0]?.payload, {

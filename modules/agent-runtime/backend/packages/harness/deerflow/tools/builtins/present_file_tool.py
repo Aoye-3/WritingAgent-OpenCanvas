@@ -114,13 +114,30 @@ def present_file_tool(
         normalized_paths = [_normalize_presented_filepath(runtime, filepath) for filepath in filepaths]
     except ValueError as exc:
         return Command(
-            update={"messages": [ToolMessage(f"Error: {exc}", tool_call_id=tool_call_id)]},
+            update={
+                "messages": [
+                    ToolMessage(
+                        f"Error: {exc}",
+                        name="present_files",
+                        tool_call_id=tool_call_id,
+                        status="error",
+                    )
+                ]
+            },
         )
 
     # The merge_artifacts reducer will handle merging and deduplication
     return Command(
         update={
             "artifacts": normalized_paths,
-            "messages": [ToolMessage("Successfully presented files. If this satisfies the user request, respond with a concise final answer and do not call more tools.", tool_call_id=tool_call_id)],
+            "messages": [
+                ToolMessage(
+                    "Successfully presented files. If this satisfies the user request, "
+                    "respond with a concise final answer and do not call more tools.",
+                    name="present_files",
+                    tool_call_id=tool_call_id,
+                    status="success",
+                )
+            ],
         },
     )

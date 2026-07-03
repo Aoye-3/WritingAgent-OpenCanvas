@@ -27,7 +27,10 @@ def test_present_files_normalizes_host_outputs_path(tmp_path):
     )
 
     assert result.update["artifacts"] == ["/mnt/user-data/outputs/report.md"]
-    message = result.update["messages"][0].content
+    tool_message = result.update["messages"][0]
+    assert tool_message.name == "present_files"
+    assert tool_message.status == "success"
+    message = tool_message.content
     assert "Successfully presented files" in message
     assert "concise final answer" in message
     assert "do not call more tools" in message
@@ -99,4 +102,7 @@ def test_present_files_rejects_paths_outside_outputs(tmp_path):
     )
 
     assert "artifacts" not in result.update
-    assert result.update["messages"][0].content == f"Error: Only files in /mnt/user-data/outputs can be presented: {leaked_path}"
+    tool_message = result.update["messages"][0]
+    assert tool_message.name == "present_files"
+    assert tool_message.status == "error"
+    assert tool_message.content == f"Error: Only files in /mnt/user-data/outputs can be presented: {leaked_path}"

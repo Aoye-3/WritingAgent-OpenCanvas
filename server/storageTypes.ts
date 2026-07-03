@@ -21,6 +21,8 @@ export type RunRecordInput = {
   toolState?: Record<string, unknown>;
   events?: ToolEventRecord[];
   finishReason?: string;
+  runtimeRunId?: string;
+  runtimeThreadId?: string;
   usage?: unknown;
 };
 

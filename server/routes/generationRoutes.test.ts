@@ -42,7 +42,8 @@ test("runtime run events route proxies sanitized raw events", async () => {
       generateAndRecord: async () => { throw new Error("unused"); },
       generateAndRecordStream: async () => { throw new Error("unused"); }
     },
-    canvasService: {} as never
+    canvasService: {} as never,
+    storage: { findRuntimeRunMetadata: () => undefined }
   });
 
   try {
@@ -58,6 +59,77 @@ test("runtime run events route proxies sanitized raw events", async () => {
       metadata: { token: "[redacted]", tool: "web_search" },
       sequence: 2,
       createdAt: "2026-06-14T00:00:00.000Z"
+    }]);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnv("AGENT_BACKEND_ENABLED", previousEnabled);
+    restoreEnv("AGENT_BACKEND_AUTH_EMAIL", previousEmail);
+    restoreEnv("AGENT_BACKEND_AUTH_PASSWORD", previousPassword);
+    restoreEnv("AGENT_BACKEND_BASE_URL", previousBaseUrl);
+    restoreEnv("AGENT_RUNTIME_MODE", previousMode);
+    clearAgentBackendSession();
+  }
+});
+
+test("runtime run events route resolves Node run ids through persisted runtime metadata", async () => {
+  clearAgentBackendSession();
+  const previousFetch = globalThis.fetch;
+  const previousEnabled = process.env.AGENT_BACKEND_ENABLED;
+  const previousEmail = process.env.AGENT_BACKEND_AUTH_EMAIL;
+  const previousPassword = process.env.AGENT_BACKEND_AUTH_PASSWORD;
+  const previousBaseUrl = process.env.AGENT_BACKEND_BASE_URL;
+  const previousMode = process.env.AGENT_RUNTIME_MODE;
+  process.env.AGENT_BACKEND_ENABLED = "true";
+  process.env.AGENT_RUNTIME_MODE = "external";
+  process.env.AGENT_BACKEND_BASE_URL = "http://AgentBackend.local";
+  process.env.AGENT_BACKEND_AUTH_EMAIL = "admin@example.com";
+  process.env.AGENT_BACKEND_AUTH_PASSWORD = "strong-password";
+
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/api/v1/auth/setup-status")) return Response.json({ needs_setup: false });
+    if (url.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, { headers });
+    }
+    assert.equal(url, "http://AgentBackend.local/api/threads/runtime_thread_1/runs/runtime_run_1/events?limit=25");
+    return Response.json([
+      { thread_id: "runtime_thread_1", run_id: "runtime_run_1", event_type: "llm_call_start", category: "runtime", content: "start", seq: 1 }
+    ]);
+  };
+
+  const app = express();
+  app.use(express.json());
+  registerGenerationRoutes(app, {
+    generationService: {
+      generateAndRecord: async () => { throw new Error("unused"); },
+      generateAndRecordStream: async () => { throw new Error("unused"); }
+    },
+    canvasService: {} as never,
+    storage: {
+      findRuntimeRunMetadata: (threadId, runId) => {
+        assert.equal(threadId, "thread_1");
+        assert.equal(runId, "node_run_1");
+        return { runtimeRunId: "runtime_run_1", runtimeThreadId: "runtime_thread_1" };
+      }
+    }
+  });
+
+  try {
+    const response = await localJsonRequest(app, "/api/generate/runs/node_run_1/events?threadId=thread_1&limit=25", previousFetch);
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.events, [{
+      threadId: "runtime_thread_1",
+      runId: "runtime_run_1",
+      eventType: "llm_call_start",
+      category: "runtime",
+      content: "start",
+      metadata: {},
+      sequence: 1,
+      createdAt: ""
     }]);
   } finally {
     globalThis.fetch = previousFetch;

@@ -52,6 +52,8 @@ test("Canvas and artifact lifecycle events request live thread-state refresh", (
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_canvas_write_pending_approval", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_canvas_mutation_failed", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_research_committed", payload: {} }), true);
+  assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_outline_started", payload: {} }), false);
+  assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_body_started", payload: {} }), false);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_body_checkpoint_committed", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_synthesis_started", payload: {} }), false);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_body_final_committed", payload: {} }), true);
@@ -86,8 +88,9 @@ test("Canvas delivery committed events expose live node snapshots for checkpoint
 test("Canvas synced status communicates that the final response is still pending", () => {
   const source = readFileSync("src/app/hooks/useGenerationRun.ts", "utf8");
 
-  assert.match(source, /Canvas synced; waiting for final response\.\.\./);
-  assert.match(source, /Canvas 已同步，等待最终回复\.\.\./);
+  assert.match(source, /Canvas preview synced; agent is still preparing the final response\.\.\./);
+  assert.match(source, /Canvas 预览已同步，Agent 仍在生成最终回复\.\.\./);
+  assert.doesNotMatch(source, /Canvas synced; waiting for final response\.\.\./);
   assert.doesNotMatch(source, /Canvas state synced\./);
   assert.match(source, /isStreaming:\s*false,[\s\S]*statusLabel:\s*undefined/);
 });

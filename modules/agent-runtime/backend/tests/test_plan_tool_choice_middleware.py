@@ -339,6 +339,95 @@ def test_runtime_budget_file_delivery_keeps_tools_and_adds_delivery_notice():
     assert "Do not write a delivery note" in captured["request"].messages[-1].content
 
 
+def test_runtime_budget_returns_after_successful_present_files_without_notice_or_gate(monkeypatch: pytest.MonkeyPatch):
+    middleware = PlanToolChoiceMiddleware()
+    captured = {}
+    events = []
+    messages = [
+        HumanMessage(content="Write a complete report"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+        ToolMessage(content="Successfully presented files.", name="present_files", tool_call_id="call_2", status="success"),
+    ]
+
+    monkeypatch.setattr("langgraph.config.get_stream_writer", lambda: events.append)
+
+    middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            allowed_tool_refs=["web_search", "write_file", "present_files"],
+            tool_state={"web_search": True, "write_file": True, "present_files": True},
+            evidence_tool_limit=1,
+            evidence_tools=["web_search"],
+            progressive_enabled=True,
+            force_synthesis_after_evidence=True,
+            markdown_file_delivery_required=True,
+        ),
+        lambda model_request: captured.setdefault("request", model_request),
+    )
+
+    assert captured["request"].messages == messages
+    assert events == []
+
+
+def test_runtime_budget_recognizes_present_files_success_by_matching_tool_call_id(monkeypatch: pytest.MonkeyPatch):
+    middleware = PlanToolChoiceMiddleware()
+    captured = {}
+    events = []
+    messages = [
+        HumanMessage(content="Write a complete report"),
+        AIMessage(content="", tool_calls=[{"name": "present_files", "args": {"filepaths": ["/mnt/user-data/outputs/report.md"]}, "id": "call_present"}]),
+        ToolMessage(content="Successfully presented files.", tool_call_id="call_present", status="success"),
+    ]
+
+    monkeypatch.setattr("langgraph.config.get_stream_writer", lambda: events.append)
+
+    middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            allowed_tool_refs=["present_files"],
+            tool_state={"present_files": True},
+            progressive_enabled=True,
+            model_call_limit=1,
+            markdown_file_delivery_required=True,
+        ),
+        lambda model_request: captured.setdefault("request", model_request),
+    )
+
+    assert captured["request"].messages == messages
+    assert events == []
+
+
+def test_runtime_budget_does_not_skip_gate_when_error_follows_present_files(monkeypatch: pytest.MonkeyPatch):
+    middleware = PlanToolChoiceMiddleware()
+    events = []
+    messages = [
+        HumanMessage(content="Write a complete report"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+        ToolMessage(content="Successfully presented files.", name="present_files", tool_call_id="call_2", status="success"),
+        ToolMessage(content="Error: later failure", name="write_file", tool_call_id="call_3", status="error"),
+    ]
+
+    monkeypatch.setattr("langgraph.config.get_stream_writer", lambda: events.append)
+
+    middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            allowed_tool_refs=["web_search", "write_file", "present_files"],
+            tool_state={"web_search": True, "write_file": True, "present_files": True},
+            evidence_tool_limit=1,
+            evidence_tools=["web_search"],
+            progressive_enabled=True,
+            force_synthesis_after_evidence=True,
+        ),
+        lambda model_request: AIMessage(content="Final answer"),
+    )
+
+    assert events[0]["type"] == "synthesis_gate"
+
+
 def test_adds_budget_notice_near_model_call_budget_without_removing_tools():
     middleware = PlanToolChoiceMiddleware()
     captured = {}

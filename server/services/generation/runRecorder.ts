@@ -23,6 +23,8 @@ export type RecordRunInput = {
   toolState: ToolState;
   events?: ToolEventRecord[];
   finishReason?: string;
+  runtimeRunId?: string;
+  runtimeThreadId?: string;
   usage?: unknown;
   errorMessage?: string;
 };
@@ -52,6 +54,8 @@ export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
     toolState: input.toolState,
     events,
     finishReason: input.finishReason,
+    runtimeRunId: input.runtimeRunId,
+    runtimeThreadId: input.runtimeThreadId,
     usage: input.usage
   });
   const policy = input.payload.orchestrationPolicy;
@@ -67,6 +71,8 @@ export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
     usedMock: input.usedMock,
     threadId: input.threadId,
     runId: saved.runId,
+    runtimeRunId: input.runtimeRunId,
+    runtimeThreadId: input.runtimeThreadId,
     errorMessage: input.errorMessage,
     events,
     finishReason: input.finishReason,

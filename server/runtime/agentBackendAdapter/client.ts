@@ -57,6 +57,8 @@ export type AgentBackendResumeRunInput = AgentBackendRunInput & {
 export type AgentBackendRunResult = {
   text: string;
   finishReason: string;
+  runtimeRunId?: string;
+  runtimeThreadId?: string;
   usage?: unknown;
   events: ToolEventRecord[];
 };
@@ -581,6 +583,8 @@ async function readAgentBackendStream(
   let buffer = "";
   let sawWaitingForUser = false;
   let sawRuntimeEnd = false;
+  let runtimeRunId: string | undefined;
+  let runtimeThreadId: string | undefined;
   const trace = createAgentBackendStreamTrace();
   trace("start");
 
@@ -623,6 +627,8 @@ async function readAgentBackendStream(
   return {
     text: (finalValuesText || (lastMessageId ? textByMessageId.get(lastMessageId)?.join("") : unkeyedText.join("")) || "").trim(),
     finishReason: sawWaitingForUser ? "clarification_required" : "agent_backend_completed",
+    ...(runtimeRunId ? { runtimeRunId } : {}),
+    ...(runtimeThreadId ? { runtimeThreadId } : {}),
     usage,
     events
   };
@@ -644,6 +650,8 @@ async function readAgentBackendStream(
           payload: runtimeSignal.payload
         });
         if (runtimeSignal.type === "run_metadata") {
+          runtimeRunId = readSourceString(runtimeSignal.payload?.runId) || runtimeRunId;
+          runtimeThreadId = readSourceString(runtimeSignal.payload?.threadId) || runtimeThreadId;
           callbacks.onRuntimeSignal?.(runtimeSignal);
         } else if (runtimeSignal.type === "waiting_for_user") {
           sawWaitingForUser = true;

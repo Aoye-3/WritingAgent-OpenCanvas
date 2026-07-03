@@ -1568,8 +1568,15 @@ function readStringArray(value: unknown) {
 function rawRunLogEventsForMessage(message: CollaborationMessage) {
   return [...(message.timeline ?? [])]
     .filter((event) => !isProgressTimelineEvent(event))
+    .filter((event) => !isCanvasDeliveryStartedTimelineEvent(event))
     .filter((event) => event.eventType === "tool_started" || event.eventType === "tool_completed" || event.status === "failed" || event.payload?.visibility === "raw")
     .sort((left, right) => left.sequence - right.sequence);
+}
+
+function isCanvasDeliveryStartedTimelineEvent(event: RunTimelineEvent) {
+  if (event.eventType !== "tool_started") return false;
+  const payloadEventType = typeof event.payload?.eventType === "string" ? event.payload.eventType : "";
+  return /^canvas_delivery_.*_started$/.test(payloadEventType);
 }
 
 function runtimeRunTargetForMessage(message: CollaborationMessage, rawEvents: RunTimelineEvent[]) {

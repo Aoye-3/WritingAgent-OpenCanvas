@@ -603,6 +603,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         isStreaming: false,
         isReasoningStreaming: false,
         completion: result.completion,
+        ...(result.runtimeRunId ? { runtimeRun: { threadId: result.runtimeThreadId || result.threadId, runId: result.runtimeRunId } } : {}),
         status: "finalizing",
         statusLabel: undefined
       });
@@ -836,7 +837,9 @@ function canvasSyncingLabel(locale: Locale) {
 }
 
 function canvasSyncedLabel(locale: Locale) {
-  return locale === "zh" ? "Canvas 已同步，等待最终回复..." : "Canvas synced; waiting for final response...";
+  return locale === "zh"
+    ? "Canvas 预览已同步，Agent 仍在生成最终回复..."
+    : "Canvas preview synced; agent is still preparing the final response...";
 }
 
 function recoverableGenerationError(message: string, locale: Locale) {

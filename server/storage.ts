@@ -704,6 +704,10 @@ export class SQLiteStorageRepository {
     this.runs.recordToolEvent(threadId, runId, eventType, payload, createdAt);
   }
 
+  findRuntimeRunMetadata(threadId: string, runId: string) {
+    return this.runs.findRuntimeRunMetadata(threadId, runId);
+  }
+
   private syncPlanCanvasProjection(threadId: string, planId: string) {
     const plan = this.plans.get(threadId, planId);
     if (!plan || plan.status === "draft" || plan.status === "awaiting_user") return plan;

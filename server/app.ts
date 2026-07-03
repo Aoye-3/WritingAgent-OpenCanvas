@@ -60,7 +60,7 @@ export async function createApp() {
   registerCanvasRoutes(app, { canvasService, readMarkdownOutputPreview });
   registerClaimReviewRoutes(app, claimReviewService);
   registerSettingsRoutes(app, { storage });
-  registerGenerationRoutes(app, { generationService, canvasService });
+  registerGenerationRoutes(app, { generationService, canvasService, storage });
   storage.listRunnablePlanExecutions().forEach(({ threadId, planId }) => planExecutor.wake(threadId, planId));
 
   return app;

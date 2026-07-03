@@ -53,6 +53,8 @@ export class RunRepository {
         modelId: input.modelId,
         usedMock: input.usedMock,
         finishReason: input.finishReason,
+        runtimeRunId: input.runtimeRunId,
+        runtimeThreadId: input.runtimeThreadId,
         usage: input.usage
       }, now);
       this.recordToolEvent(input.threadId, runId, "prompt_built", { promptVersionId }, now);
@@ -60,6 +62,12 @@ export class RunRepository {
 
       if (input.toolState && Object.keys(input.toolState).length > 0) {
         this.recordToolEvent(input.threadId, runId, "tool_state_applied", input.toolState, now);
+      }
+      if (input.runtimeRunId || input.runtimeThreadId) {
+        this.recordToolEvent(input.threadId, runId, "agent_runtime_metadata", {
+          runtimeRunId: input.runtimeRunId,
+          runtimeThreadId: input.runtimeThreadId
+        }, now);
       }
 
       for (const event of events) {
@@ -152,6 +160,19 @@ export class RunRepository {
     this.db
       .prepare(`INSERT INTO tool_events (id, thread_id, run_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
       .run(randomId("tool"), threadId, runId, eventType, JSON.stringify(sanitizeToolEventPayload(payload)), createdAt);
+  }
+
+  findRuntimeRunMetadata(threadId: string, runId: string) {
+    const row = this.db
+      .prepare(
+        `SELECT payload_json as payloadJson
+         FROM tool_events
+         WHERE thread_id = ? AND run_id = ? AND event_type = 'agent_runtime_metadata'
+         ORDER BY created_at DESC
+         LIMIT 1`
+      )
+      .get(threadId, runId) as { payloadJson: string } | undefined;
+    return readRuntimeRunMetadata(row ? parseJson(row.payloadJson) : undefined);
   }
 
   listAgentClarifications(threadId: string) {
@@ -306,6 +327,15 @@ function readAgentClarificationOptions(value: unknown): AgentClarificationOption
 
 function readRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function readRuntimeRunMetadata(value: unknown) {
+  const record = readRecord(value);
+  const runtimeRunId = readString(record.runtimeRunId);
+  const runtimeThreadId = readString(record.runtimeThreadId);
+  return runtimeRunId || runtimeThreadId
+    ? { runtimeRunId, runtimeThreadId }
+    : undefined;
 }
 
 function readString(value: unknown) {

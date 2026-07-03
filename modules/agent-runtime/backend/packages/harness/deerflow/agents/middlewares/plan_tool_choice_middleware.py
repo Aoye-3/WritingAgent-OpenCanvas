@@ -135,6 +135,9 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         if not (evidence_exhausted or model_exhausting or recursion_exhausting):
             return request
 
+        if PlanToolChoiceMiddleware._has_successful_tool_result_without_later_error(request, "present_files"):
+            return request
+
         reason = "evidence budget reached" if evidence_exhausted else "model budget nearly exhausted" if model_exhausting else "runtime step reserve reached"
         PlanToolChoiceMiddleware._emit_synthesis_event({
             "type": "synthesis_gate",
@@ -152,7 +155,7 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             "entered_second_handler": False,
         })
         file_delivery_required = context.get("facetwrite_markdown_file_delivery_required") is True
-        file_presented = PlanToolChoiceMiddleware._has_tool_result(request, "present_files")
+        file_presented = PlanToolChoiceMiddleware._has_successful_tool_result_without_later_error(request, "present_files")
         if file_delivery_required and not file_presented:
             reminder = HumanMessage(
                 content=(
@@ -276,6 +279,41 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         return any(
             isinstance(message, ToolMessage) and getattr(message, "name", None) == name
             for message in request.messages
+        )
+
+    @staticmethod
+    def _has_successful_tool_result_without_later_error(request: ModelRequest, name: str) -> bool:
+        tool_call_ids = {
+            tool_call.get("id")
+            for message in request.messages
+            if isinstance(message, AIMessage)
+            for tool_call in (getattr(message, "tool_calls", None) or [])
+            if (
+                isinstance(tool_call, dict)
+                and tool_call.get("name") == name
+                and isinstance(tool_call.get("id"), str)
+            )
+        }
+        success_index = None
+        for index, message in enumerate(request.messages):
+            if not isinstance(message, ToolMessage):
+                continue
+            matches_name = getattr(message, "name", None) == name
+            matches_tool_call_id = getattr(message, "tool_call_id", None) in tool_call_ids
+            if (matches_name or matches_tool_call_id) and not PlanToolChoiceMiddleware._is_tool_message_error(message):
+                success_index = index
+        if success_index is None:
+            return False
+        return not any(
+            isinstance(message, ToolMessage) and PlanToolChoiceMiddleware._is_tool_message_error(message)
+            for message in request.messages[success_index + 1 :]
+        )
+
+    @staticmethod
+    def _is_tool_message_error(message: ToolMessage) -> bool:
+        content = message.content
+        return getattr(message, "status", "success") == "error" or (
+            isinstance(content, str) and content.startswith("Error:")
         )
 
     @staticmethod
