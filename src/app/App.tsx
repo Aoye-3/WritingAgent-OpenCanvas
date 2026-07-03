@@ -18,6 +18,9 @@ import type { AgentBackendRuntimeStatus, ConfiguredModelApiSummary } from "../fe
 import { ProjectsView } from "../features/projects/ProjectsView";
 import { useProjects } from "../features/projects/hooks/useProjects";
 import { WorkspaceView } from "../features/workspace/WorkspaceView";
+import type { AIComposerSubmitPayload } from "../features/workspace/components/AIComposer";
+import { isThinkingSupportedModel, thinkingOverridesFromChoice } from "../features/workspace/components/AIComposer";
+import { useSkillCatalogControls } from "../features/workspace/hooks/useSkillCatalogControls";
 import { CanvasNodeSettingsView } from "../features/canvas/CanvasNodeSettingsView";
 import { useCanvasState } from "./hooks/useCanvasState";
 import { useGenerationRun } from "./hooks/useGenerationRun";
@@ -100,6 +103,7 @@ function AppContent() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [canvasUndoDepth, setCanvasUndoDepth] = useState(20);
   const [runtimeBudgetProfile, setRuntimeBudgetProfile] = useState<GenerateRequest["runtimeBudgetProfile"]>("low");
+  const [pendingHomeComposerPayload, setPendingHomeComposerPayload] = useState<AIComposerSubmitPayload | null>(null);
 
   const applyThreadState = (state: ThreadStateResponse) => {
     activeProjectIdRef.current = state.thread.projectId;
@@ -143,6 +147,7 @@ function AppContent() {
     onRefreshProjectSurfaces: refreshProjectSurfaces,
     onNavigate: setView
   });
+  const skillControls = useSkillCatalogControls({ activeAgent, currentThreadId: threadSession.threadId });
 
   const canvasState = useCanvasState({
     ensureThreadId: () => threadSession.ensureThreadForProject(activeProjectId),
@@ -189,13 +194,11 @@ function AppContent() {
           id: node.id,
           kind: node.kind,
           title: node.title,
-          workflow: (node.metadata as { workflow?: unknown } | undefined)?.workflow,
           preview: node.content.slice(0, 600),
           content: node.kind === "reference" ? node.content : undefined
         })),
         workflow: canvasState.canvasWorkflow ? {
           mode: canvasState.canvasWorkflow.mode,
-          stage: canvasState.canvasWorkflow.stage,
           roles: workflowContext?.roles ?? []
         } : undefined,
         selectedNode: selectedCanvasNode && selectedCanvasNode.kind !== "note" ? {
@@ -340,6 +343,30 @@ function AppContent() {
   }, [generationRun.plans]);
 
   useEffect(() => {
+    if (!pendingHomeComposerPayload || view !== "workspace" || !activeProjectId || !threadSession.threadId) return;
+    const payload = pendingHomeComposerPayload;
+    let cancelled = false;
+    setPendingHomeComposerPayload(null);
+    void (async () => {
+      if (payload.selectedModelConfigId) {
+        const thread = await selectThreadModel(threadSession.threadId, payload.selectedModelConfigId);
+        if (cancelled) return;
+        setSelectedModelConfigId(thread.configuredModelApiId ?? null);
+      }
+      const model = configuredModels.find((item) => item.id === payload.selectedModelConfigId);
+      const modelOverrides = isThinkingSupportedModel(model) ? thinkingOverridesFromChoice(payload.thinkingChoice) : undefined;
+      const requestContext = {
+        ...(payload.enabledSkillRefs.length ? { transientSkillRefs: payload.enabledSkillRefs } : {}),
+        ...(payload.disabledSkillRefs.length ? { disabledSkillRefs: payload.disabledSkillRefs } : {}),
+        ...(payload.runtimeBudgetProfile ? { runtimeBudgetProfile: payload.runtimeBudgetProfile } : {})
+      };
+      await generationRun.handleChatSend(payload.text, modelOverrides, requestContext);
+      skillControls.clearSkillOverrides();
+    })().catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [activeProjectId, configuredModels, generationRun, pendingHomeComposerPayload, skillControls, threadSession.threadId, view]);
+
+  useEffect(() => {
     if (!threadSession.threadId || !activePlanPollingKey) return;
     let cancelled = false;
     const refreshActivePlans = () => {
@@ -436,7 +463,10 @@ function AppContent() {
     ].filter(Boolean).join("\n");
   }, [activeAgent, locale, projectBrief, taskBrief, toolState]);
 
-  const openWorkspace = async (agentCard: AgentCard) => {
+  const openWorkspace = async (
+    agentCard: AgentCard,
+    options: { runtimeBudgetProfile?: GenerateRequest["runtimeBudgetProfile"]; toolState?: GenerateRequest["toolState"] } = {}
+  ) => {
     if (activeProjectId) await flushBriefs();
     const projectTitle = locale === "zh" ? "新项目" : "New Project";
     threadSession.setThreadId("");
@@ -452,11 +482,23 @@ function AppContent() {
     setActiveProjectTitle(projectTitle);
     generationRun.resetGeneration();
     canvasState.resetCanvas();
-    setToolState({ web_search: true, knowledge_base: false, canvas_write: true });
+    setToolState(options.toolState ?? { web_search: true, knowledge_base: false, canvas_write: true });
+    setRuntimeBudgetProfile(options.runtimeBudgetProfile ?? "low");
     const project = await createProject(projectTitle);
     setActiveProjectId(project.id);
     setSelectedModelConfigId(null);
     await threadSession.openProject(project.id);
+  };
+
+  const openWorkspaceFromPrompt = async (payload: AIComposerSubmitPayload) => {
+    const nextAgent = agentCards.find((agent) => agent.id === payload.agentId) ?? activeAgent;
+    await openWorkspace(nextAgent, {
+      runtimeBudgetProfile: payload.runtimeBudgetProfile,
+      toolState: payload.toolState
+    });
+    if (payload.text) {
+      setPendingHomeComposerPayload(payload);
+    }
   };
 
   const openRecentThread = async (thread: StoredThread | ProjectSummary) => {
@@ -470,6 +512,14 @@ function AppContent() {
     await threadSession.openProject(thread.id);
   };
 
+  const selectedConfiguredModel = configuredModels.find((model) => model.id === selectedModelConfigId);
+  const homeModelSettings = {
+    providerId: selectedConfiguredModel?.providerId,
+    modelId: selectedConfiguredModel?.modelId,
+    modelName: selectedConfiguredModel?.modelName,
+    supportsThinking: selectedConfiguredModel?.supportsThinking
+  };
+
   const handleAgentSaved = (agentCard: AgentCard) => {
     updateAgentCard(agentCard);
     if (activeAgent.id === agentCard.id) {
@@ -481,15 +531,39 @@ function AppContent() {
     <div className="app-shell" data-view={view}>
       <StartView active={view === "start"} onStart={() => setView("home")} onOpenSettings={() => setSettingsOpen(true)} />
       <HomeView
+        activeAgent={activeAgent}
         activeView={view}
         agentCards={agentCards}
+        configuredModels={configuredModels}
+        disabledSkillRefs={skillControls.disabledSkillRefs}
+        enabledSkillRefs={skillControls.enabledSkillRefs}
+        isCreatingFromPrompt={Boolean(pendingHomeComposerPayload)}
+        modelSelectionDisabled={false}
+        modelSettings={homeModelSettings}
         projects={projects}
+        runtimeBudgetProfile={runtimeBudgetProfile}
+        selectedModelConfigId={selectedModelConfigId}
+        skillCatalog={skillControls.skillCatalog}
+        skillCatalogStatus={skillControls.skillCatalogStatus}
+        skillFolders={skillControls.skillFolders}
+        toolState={toolState}
+        onCreateBoardFromPrompt={openWorkspaceFromPrompt}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenAgent={openWorkspace}
         onOpenThread={openRecentThread}
         onNavigate={setView}
         onDeleteThread={projectTrash.handleMoveToTrash}
+        onRequestSkillCatalog={skillControls.requestSkillCatalog}
+        onSelectAgent={(agentCardId) => {
+          const nextAgent = agentCards.find((agent) => agent.id === agentCardId);
+          if (nextAgent) setActiveAgent(nextAgent);
+        }}
+        onSelectModel={(configuredModelApiId) => {
+          setSelectedModelConfigId(configuredModelApiId || null);
+        }}
         onTogglePinnedThread={handleTogglePinnedThread}
+        onToggleSkill={skillControls.toggleMessageSkill}
+        onToolStateChange={setToolState}
         pinnedThreadIds={pinnedThreadIds}
         onRenameThread={handleRenameThread}
       />
@@ -553,6 +627,11 @@ function AppContent() {
         projectThreads={threadSession.projectThreads}
         sessionBusy={threadSession.sessionBusy}
         sessionError={threadSession.sessionError}
+        disabledSkillRefs={skillControls.disabledSkillRefs}
+        enabledSkillRefs={skillControls.enabledSkillRefs}
+        skillCatalog={skillControls.skillCatalog}
+        skillFolders={skillControls.skillFolders}
+        skillCatalogStatus={skillControls.skillCatalogStatus}
         onCreateConversation={async () => { if (activeProjectId) { await flushBriefs(); await threadSession.createConversation(activeProjectId); } }}
         onResetContext={async () => { if (threadSession.threadId) await resetThreadContext(threadSession.threadId); }}
         onSelectThread={async (threadId) => { await flushBriefs(); await threadSession.restoreThread(threadId); }}
@@ -566,6 +645,13 @@ function AppContent() {
           if (!nextAgent) return;
           setActiveAgent(nextAgent);
         }}
+        onRequestSkillCatalog={skillControls.requestSkillCatalog}
+        onCreateSkillFolder={skillControls.handleCreateSkillFolder}
+        onDeleteSkillFolder={skillControls.handleDeleteSkillFolder}
+        onMoveSkillToFolder={skillControls.handleMoveSkillToFolder}
+        onRenameSkillFolder={skillControls.handleRenameSkillFolder}
+        onSkillOverridesConsumed={skillControls.clearSkillOverrides}
+        onToggleSkill={skillControls.toggleMessageSkill}
         onProjectTitleChange={handleActiveProjectTitleChange}
         onProjectBriefChange={updateProjectBrief}
         onTaskBriefChange={updateTaskBrief}
@@ -612,7 +698,6 @@ function AppContent() {
         onUpdateCanvasNodePositions={canvasState.handleUpdateCanvasNodePositions}
         onUpdateCanvasObject={canvasState.handleUpdateCanvasObject}
         onUploadCanvasAsset={canvasState.handleUploadCanvasAsset}
-        onUpdateCanvasNodeWorkflow={canvasState.handleUpdateCanvasNodeWorkflow}
         onUpdateCanvasWorkflow={canvasState.handleUpdateCanvasWorkflow}
         onUndoCanvas={canvasState.undoCanvas}
         promptPreview={promptPreview}

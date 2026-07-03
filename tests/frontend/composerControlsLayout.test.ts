@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 test("composer moves thinking control out of the bottom tool row", () => {
-  const source = readFileSync("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
+  const source = readFileSync("src/features/workspace/components/AIComposer.tsx", "utf8");
 
   assert.match(source, /ThinkingModeButton/);
   assert.doesNotMatch(source, /composer-think-controls/);
@@ -11,19 +11,21 @@ test("composer moves thinking control out of the bottom tool row", () => {
 });
 
 test("thinking mode button offers disabled, high, and max choices", () => {
-  const source = readFileSync("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
+  const source = readFileSync("src/features/workspace/components/AIComposer.tsx", "utf8");
   const styles = readFileSync("src/app/styles.css", "utf8");
 
   assert.match(source, /LightbulbIcon/);
-  assert.doesNotMatch(source, /<span aria-hidden="true">T<\/span>/);
+  assert.match(source, /className=\{choice === "disabled" \? "thinking-mode-button" : "thinking-mode-button is-active"\}/);
+  assert.match(source, /<div className="thinking-mode-control">/);
+  assert.match(source, /<div className="thinking-mode-menu" role="menu">/);
+  assert.doesNotMatch(source, /thinking-mode-trigger/);
+  assert.doesNotMatch(source, /thinking-mode-options/);
   assert.match(styles, /\.thinking-mode-button span svg/);
-  assert.match(source, /value: "disabled"/);
-  assert.match(source, /value: "high"/);
-  assert.match(source, /value: "max"/);
+  assert.match(source, /\["disabled", "high", "max"\]/);
 });
 
 test("composer keeps skill and plan controls as accessible icon buttons", () => {
-  const source = readFileSync("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
+  const source = readFileSync("src/features/workspace/components/AIComposer.tsx", "utf8");
 
   assert.match(source, /aria-label=\{skillText\(locale, "skills"\)\}/);
   assert.match(source, /aria-label=\{t\("workspace\.createTaskPlan"\)\}/);
@@ -33,7 +35,7 @@ test("composer keeps skill and plan controls as accessible icon buttons", () => 
 });
 
 test("composer keeps model selection available as a compact select", () => {
-  const source = readFileSync("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
+  const source = readFileSync("src/features/workspace/components/AIComposer.tsx", "utf8");
   const styles = readFileSync("src/app/styles.css", "utf8");
 
   assert.match(source, /className="composer-model-select"/);
@@ -42,10 +44,10 @@ test("composer keeps model selection available as a compact select", () => {
 });
 
 test("running composer switches between stop and queued send based on typed text", () => {
-  const source = readFileSync("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
+  const source = readFileSync("src/features/workspace/components/AIComposer.tsx", "utf8");
 
-  assert.match(source, /export function shouldShowStopControl\(isSending: boolean, input: string\)/);
-  assert.match(source, /const showStopControl = shouldShowStopControl\(isSending, input\);/);
+  assert.match(source, /function shouldShowStopControl\(isSending: boolean, input: string\)/);
+  assert.match(source, /const showStopControl = shouldShowStopControl\(isSending, value\);/);
   assert.match(source, /type=\{showStopControl \? "button" : "submit"\}/);
   assert.match(source, /onClick=\{showStopControl \? onStopSending : undefined\}/);
 });

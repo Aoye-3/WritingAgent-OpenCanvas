@@ -7,7 +7,7 @@ from langchain_core.messages import ToolMessage
 
 from deerflow.agents.middlewares import progress_reporting_middleware as progress_middleware
 from deerflow.agents.middlewares.progress_reporting_middleware import ProgressReportingMiddleware
-from deerflow.runtime.progress import public_progress_payload, sanitize_public_progress_payload
+from deerflow.runtime.progress import public_progress_payload, public_update_payload, sanitize_public_progress_payload
 from deerflow.runtime.runs.manager import RunManager
 from deerflow.runtime.runs.schemas import RunStatus
 
@@ -32,6 +32,39 @@ def test_public_progress_payload_filters_sensitive_fields():
         "visibility": "stage",
         "summary": "Collecting evidence.",
     }
+
+
+def test_public_update_payload_allows_public_evidence_and_filters_sensitive_fields():
+    payload = public_update_payload(
+        run_id="run_1",
+        thread_id="thread_1",
+        phase="research",
+        summary="I split the work into runtime and frontend checks.",
+        next="Next I will verify the stream path.",
+        evidence=[
+            {"kind": "subagent", "label": "frontend explorer", "ref": "agent:trace"},
+            {"kind": "tool", "label": "ignored", "arguments": {"query": "hidden"}},
+            {"kind": "unknown", "label": "ignored"},
+            "runtime checkpoint",
+        ],
+    )
+
+    assert payload["type"] == "agent_progress_reported"
+    assert payload["visibility"] == "public"
+    assert payload["source"] == "agent_public_update"
+    assert payload["summary"] == "I split the work into runtime and frontend checks."
+    assert payload["next"] == "Next I will verify the stream path."
+    assert payload["evidence"] == [
+        {"kind": "subagent", "label": "frontend explorer", "ref": "agent:trace"},
+        {"kind": "tool", "label": "ignored"},
+        {"kind": "runtime", "label": "runtime checkpoint"},
+    ]
+    assert "arguments" not in str(payload)
+
+
+def test_public_update_payload_rejects_empty_summary():
+    with pytest.raises(ValueError):
+        public_update_payload(summary="  ")
 
 
 @pytest.mark.asyncio

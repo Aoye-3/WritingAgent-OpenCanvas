@@ -44,6 +44,29 @@ export type StoredThread = {
   assetCount?: number;
 };
 
+export type ProjectCanvasPreviewNode = {
+  id: string;
+  kind: CanvasNodeKind;
+  title: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type ProjectCanvasPreviewObject = {
+  id: string;
+  kind: "arrow" | "shape" | "table" | "asset" | "text";
+  geometry: JsonValue;
+  data?: JsonValue;
+};
+
+export type ProjectCanvasPreview = {
+  nodes: ProjectCanvasPreviewNode[];
+  objects: ProjectCanvasPreviewObject[];
+  updatedAt: string;
+};
+
 export type ProjectSummary = {
   id: string;
   title: string;
@@ -54,6 +77,7 @@ export type ProjectSummary = {
   assetCount: number;
   threadCount: number;
   modelConfigIds: string[];
+  canvasPreview?: ProjectCanvasPreview;
 };
 
 export type RuntimeBudgetProfile = "low" | "medium" | "high";

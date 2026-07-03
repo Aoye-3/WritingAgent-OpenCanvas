@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { supportsModelThinking } from "../../../shared/modelCapabilities.js";
 import { getProviderReference, getStaticModels } from "../../../shared/modelReferences.js";
 import type { ModelReference } from "../../../shared/modelReferences.js";
 import { getProviderProfile } from "../../providerRuntime.js";
@@ -13,6 +14,7 @@ export type ConfiguredModelApi = {
   modelId: string;
   modelName?: string;
   modelType?: string;
+  supportsThinking?: boolean;
   apiKey?: string;
   baseURL: string;
   enabled: boolean;
@@ -27,6 +29,7 @@ export type ConfiguredModelApiSummary = {
   modelId: string;
   modelName: string;
   modelType?: string;
+  supportsThinking: boolean;
   keyConfigured: boolean;
   keyHint?: string;
   baseURL: string;
@@ -77,6 +80,7 @@ export type SaveConfiguredModelApiPayload = {
   modelId?: string;
   modelName?: string;
   modelType?: string;
+  supportsThinking?: boolean;
   apiKey?: string;
   baseURL?: string;
   enabled?: boolean;
@@ -128,6 +132,7 @@ export async function resolveConversationModelId(preferredIds: Array<string | nu
 
 export function classifyConfiguredModelCapability(input: { modelId: string; modelName?: string; modelType?: string }): ConfiguredModelCapabilityGroup {
   if (input.modelType && input.modelType !== "chat") return "other-chat";
+  if (supportsModelThinking(input)) return "reasoning";
   const name = `${input.modelId} ${input.modelName ?? ""}`.toLowerCase();
   return /reason(?:er|ing)|deepseek[-_/ ]?r1|(?:^|[-_/ ])r1(?:$|[-_/ ])|(?:^|[-_/ ])o[134](?:$|[-_/ ])|think/.test(name)
     ? "reasoning"
@@ -168,9 +173,10 @@ export async function createConfiguredModelApi(payload: SaveConfiguredModelApiPa
     id: createConfigId(providerId, modelId, store.configs),
     providerId,
     modelId,
-    modelName: readCleanString(payload.modelName) ?? findModel(providerId, modelId)?.name ?? modelId,
-    modelType: readCleanString(payload.modelType) ?? inferModelType(providerId, modelId),
-    apiKey: readCleanString(payload.apiKey) ?? findReusableProviderApiKey(store, providerId),
+	    modelName: readCleanString(payload.modelName) ?? findModel(providerId, modelId)?.name ?? modelId,
+	    modelType: readCleanString(payload.modelType) ?? inferModelType(providerId, modelId),
+    supportsThinking: typeof payload.supportsThinking === "boolean" ? payload.supportsThinking : undefined,
+	    apiKey: readCleanString(payload.apiKey) ?? findReusableProviderApiKey(store, providerId),
     baseURL: readCleanString(payload.baseURL) ?? getProviderProfile(providerId).defaultBaseURL,
     enabled: payload.enabled !== false,
     createdAt: now,
@@ -193,9 +199,10 @@ export async function saveConfiguredModelApi(configId: string, payload: SaveConf
     ...current,
     providerId,
     modelId,
-    modelName: readCleanString(payload.modelName) ?? findModel(providerId, modelId)?.name ?? current.modelName ?? modelId,
-    modelType: readCleanString(payload.modelType) ?? current.modelType ?? inferModelType(providerId, modelId),
-    baseURL: payload.baseURL === undefined ? current.baseURL : readCleanString(payload.baseURL) ?? getProviderProfile(providerId).defaultBaseURL,
+	    modelName: readCleanString(payload.modelName) ?? findModel(providerId, modelId)?.name ?? current.modelName ?? modelId,
+	    modelType: readCleanString(payload.modelType) ?? current.modelType ?? inferModelType(providerId, modelId),
+    supportsThinking: payload.supportsThinking ?? current.supportsThinking,
+	    baseURL: payload.baseURL === undefined ? current.baseURL : readCleanString(payload.baseURL) ?? getProviderProfile(providerId).defaultBaseURL,
     enabled: payload.enabled ?? current.enabled,
     updatedAt: new Date().toISOString()
   });
@@ -354,8 +361,9 @@ function normalizeStore(value: unknown): ProviderApiConfigStore {
       providerId,
       modelId,
       modelName: readCleanString(raw.modelName) ?? findModel(providerId, modelId)?.name ?? modelId,
-      modelType: readCleanString(raw.modelType) ?? inferModelType(providerId, modelId),
-      apiKey: readCleanString(raw.apiKey),
+	    modelType: readCleanString(raw.modelType) ?? inferModelType(providerId, modelId),
+      supportsThinking: typeof raw.supportsThinking === "boolean" ? raw.supportsThinking : undefined,
+	      apiKey: readCleanString(raw.apiKey),
       baseURL: readCleanString(raw.baseURL) ?? getProviderProfile(providerId).defaultBaseURL,
       enabled: raw.enabled !== false,
       createdAt: readCleanString(raw.createdAt) ?? readCleanString(raw.updatedAt) ?? new Date(0).toISOString(),
@@ -384,8 +392,9 @@ function migrateLegacyProviderStore(input: LegacyProviderApiConfigStore): Provid
       providerId,
       modelId,
       modelName: findModel(providerId, modelId)?.name ?? modelId,
-      modelType: inferModelType(providerId, modelId),
-      apiKey: readCleanString(config.apiKey),
+	      modelType: inferModelType(providerId, modelId),
+      supportsThinking: undefined,
+	      apiKey: readCleanString(config.apiKey),
       baseURL: readCleanString(config.baseURL) ?? profile.defaultBaseURL,
       enabled: config.enabled !== false,
       createdAt: readCleanString(config.updatedAt) ?? now,
@@ -404,14 +413,15 @@ function findReusableProviderApiKey(store: ProviderApiConfigStore, providerId: P
 
 function hydrateConfiguredModelApi(config: ConfiguredModelApi): ConfiguredModelApi {
   const profile = getProviderProfile(config.providerId);
-  return {
-    ...config,
-    baseURL: config.baseURL?.trim() || profile.defaultBaseURL,
-    modelName: config.modelName?.trim() || findModel(config.providerId, config.modelId)?.name || config.modelId,
-    modelType: config.modelType?.trim() || inferModelType(config.providerId, config.modelId),
-    enabled: config.enabled !== false
-  };
-}
+	  return {
+	    ...config,
+	    baseURL: config.baseURL?.trim() || profile.defaultBaseURL,
+	    modelName: config.modelName?.trim() || findModel(config.providerId, config.modelId)?.name || config.modelId,
+	    modelType: config.modelType?.trim() || inferModelType(config.providerId, config.modelId),
+    supportsThinking: config.supportsThinking ?? supportsModelThinking(config),
+	    enabled: config.enabled !== false
+	  };
+	}
 
 function toConfiguredSummary(config: ConfiguredModelApi): ConfiguredModelApiSummary {
   const hydrated = hydrateConfiguredModelApi(config);
@@ -421,8 +431,9 @@ function toConfiguredSummary(config: ConfiguredModelApi): ConfiguredModelApiSumm
     providerLabel: getProviderProfile(hydrated.providerId).label,
     modelId: hydrated.modelId,
     modelName: hydrated.modelName ?? hydrated.modelId,
-    modelType: hydrated.modelType,
-    keyConfigured: Boolean(hydrated.apiKey?.trim()),
+	    modelType: hydrated.modelType,
+    supportsThinking: hydrated.supportsThinking === true,
+	    keyConfigured: Boolean(hydrated.apiKey?.trim()),
     keyHint: hydrated.apiKey ? maskApiKey(hydrated.apiKey) : undefined,
     baseURL: hydrated.baseURL,
     enabled: hydrated.enabled,

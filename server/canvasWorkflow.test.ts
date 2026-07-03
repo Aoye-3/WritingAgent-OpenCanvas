@@ -20,12 +20,11 @@ test("canvas workflow defaults to the inspiration stage with built-in roles", ()
   assert.equal(workflow.roles[0].id, "structure");
 });
 
-test("new node metadata inherits the current workflow stage", () => {
+test("new node metadata does not inherit the current workflow stage", () => {
   const metadata = nextCanvasWorkflowNodeMetadata({ stage: "structure" }, { canvasLayout: { sizeMode: "manual" } });
 
   assert.deepEqual(metadata, {
-    canvasLayout: { sizeMode: "manual" },
-    workflow: { stage: "structure" }
+    canvasLayout: { sizeMode: "manual" }
   });
 });
 
@@ -71,7 +70,7 @@ test("workflow roles only apply through Role to content edges", () => {
   assert.deepEqual(roles.map((role) => role.prompt), ["Check sources."]);
 });
 
-test("workflow context filters by chain, stage, and connected role nodes without reading every node", () => {
+test("workflow context filters by chain and connected role nodes without stage gating", () => {
   const workflow = updateCanvasWorkflowStage(defaultCanvasWorkflow(), "research");
   const nodes = [
     { id: "role_evidence", kind: "role", title: "Evidence", content: "", metadata: { workflowRole: { roleId: "evidence", label: "Evidence", prompt: "Check sources." } } },
@@ -92,7 +91,20 @@ test("workflow context filters by chain, stage, and connected role nodes without
     stage: "research"
   });
 
-  assert.deepEqual(context.nodes.map((node) => node.id), ["source"]);
+  assert.deepEqual(context.nodes.map((node) => node.id), ["brief", "source"]);
   assert.equal(context.stage, "research");
   assert.deepEqual(context.roles.map((role) => role.roleId), ["evidence"]);
+});
+
+test("workflow context does not exclude nodes from other legacy stages", () => {
+  const workflow = updateCanvasWorkflowStage(defaultCanvasWorkflow(), "research");
+  const nodes = [
+    { id: "brief", kind: "document", title: "Brief", content: "Goal", metadata: { workflow: { stage: "inspiration" } } },
+    { id: "source", kind: "reference", title: "Source", content: "Evidence", metadata: { workflow: { stage: "research" } } },
+    { id: "draft", kind: "document", title: "Draft", content: "Draft text", metadata: { workflow: { stage: "writing" } } }
+  ];
+
+  const context = buildCanvasWorkflowContext({ workflow, nodes });
+
+  assert.deepEqual(context.nodes.map((node) => node.id), ["brief", "source", "draft"]);
 });

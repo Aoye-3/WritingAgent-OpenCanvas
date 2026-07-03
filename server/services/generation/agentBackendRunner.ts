@@ -2,7 +2,7 @@ import type { AgentRuntimeConfig } from "../agentDefinitionService.js";
 import type { ConversationModelRuntimeSettings } from "../../agentCards.js";
 import type { GenerateRequest } from "../../contracts/generation.js";
 import { getAgentBackendRuntimeConfig, type AgentBackendRuntimeConfig } from "../../runtime/agentBackendAdapter/config.js";
-import { runAgentBackendAgent } from "../../runtime/agentBackendAdapter/client.js";
+import { resumeAgentBackendRun, runAgentBackendAgent } from "../../runtime/agentBackendAdapter/client.js";
 import type { AgentBackendRuntimeSignal } from "../../runtime/agentBackendAdapter/client.js";
 import type { ChatMessage } from "../../providerRuntime.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
@@ -29,13 +29,20 @@ export type AgentBackendRunnerInput = {
 export type AgentBackendRunnerDeps = {
   getRuntimeConfig?: () => AgentBackendRuntimeConfig;
   runAgent?: typeof runAgentBackendAgent;
+  resumeRun?: typeof resumeAgentBackendRun;
 };
 
 export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, deps: AgentBackendRunnerDeps = {}) {
   const config = (deps.getRuntimeConfig ?? getAgentBackendRuntimeConfig)();
   if (!config.enabled) return undefined;
 
-  const run = await (deps.runAgent ?? runAgentBackendAgent)({
+  const agentClarification = readRecord(input.payload.contextValues?.agentClarification);
+  const runtimeResume = readRuntimeResumeMetadata(readRecord(agentClarification.resumeContext)?.runtimeResume);
+  if (agentClarification.requiresRuntimeResume === true && !runtimeResume) {
+    throw new Error("Agent clarification answer is missing runtime resume metadata; refresh the thread and answer the latest clarification.");
+  }
+
+  const baseRunInput = {
     config,
     threadId: input.threadId,
     projectId: input.projectId,
@@ -60,7 +67,18 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     onReasoningToken: input.onReasoningToken,
     onStatus: input.onStatus,
     onRuntimeSignal: input.onRuntimeSignal
-  });
+  };
+
+  const run = runtimeResume
+    ? await (deps.resumeRun ?? resumeAgentBackendRun)({
+      ...baseRunInput,
+      threadId: runtimeResume.runtimeThreadId || input.threadId,
+      resume: buildClarificationResumePayload(agentClarification),
+      resumeOfRunId: runtimeResume.runtimeRunId,
+      interruptId: runtimeResume.interruptId,
+      checkpointId: runtimeResume.checkpointId
+    })
+    : await (deps.runAgent ?? runAgentBackendAgent)(baseRunInput);
 
   if (!run.text && !run.events.some((event) => /(?:^|_)(?:plan|artifact|canvas)_/.test(event.eventType))) {
     if (!hasAgentClarificationEvent(run.events)) {
@@ -113,4 +131,38 @@ function isSkillClarificationGuarded(payload: GenerateRequest) {
 
 function hasAgentClarificationEvent(events: ToolEventRecord[]) {
   return events.some((event) => /agent_clarification_(?:requested|invalid)$/.test(event.eventType));
+}
+
+function buildClarificationResumePayload(agentClarification: Record<string, unknown>) {
+  return {
+    type: "agent_clarification_answer",
+    clarificationId: readString(agentClarification.clarificationId),
+    question: readString(agentClarification.question),
+    selectedOptionId: readString(agentClarification.selectedOptionId),
+    answer: readString(agentClarification.answer),
+    option: readRecord(agentClarification.option)
+  };
+}
+
+function readRuntimeResumeMetadata(value: unknown) {
+  const record = readRecord(value);
+  const runtimeThreadId = readString(record.runtimeThreadId);
+  const runtimeRunId = readString(record.runtimeRunId);
+  const interruptId = readString(record.interruptId);
+  const checkpointId = readString(record.checkpointId);
+  if (!runtimeThreadId || !runtimeRunId || !interruptId) return undefined;
+  return {
+    runtimeThreadId,
+    runtimeRunId,
+    interruptId,
+    ...(checkpointId ? { checkpointId } : {})
+  };
+}
+
+function readRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value.trim() : undefined;
 }

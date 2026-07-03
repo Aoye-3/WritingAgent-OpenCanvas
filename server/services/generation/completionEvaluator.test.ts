@@ -25,7 +25,14 @@ test("completion evaluator completes only when final text exists and blockers ar
 test("completion evaluator waits for pending clarification", () => {
   const events: ToolEventRecord[] = [{
     eventType: "agent_backend_agent_clarification_requested",
-    payload: { type: "agent_clarification_requested", question: "Which scope?" }
+    payload: {
+      type: "agent_clarification_requested",
+      question: "Which scope?",
+      options: [
+        { id: "focused", label: "Focused", detail: "Use a narrow scope." },
+        { id: "broad", label: "Broad", detail: "Use a broad scope." }
+      ]
+    }
   }];
 
   const verdict = evaluateRunCompletion({
@@ -37,6 +44,60 @@ test("completion evaluator waits for pending clarification", () => {
 
   assert.equal(verdict.status, "waiting");
   assert.match(verdict.missingRequirements[0] ?? "", /clarification/);
+});
+
+test("completion evaluator does not treat ordinary waiting timeline decisions as clarification", () => {
+  const events: ToolEventRecord[] = [{
+    eventType: "run_timeline_decision",
+    payload: {
+      eventType: "decision",
+      status: "waiting",
+      signal: "synthesis_gate",
+      title: "Final synthesis"
+    }
+  }];
+
+  const verdict = evaluateRunCompletion({
+    payload: basePayload,
+    text: "Synthesized final answer.",
+    events,
+    finishReason: "agent_backend_completed"
+  });
+
+  assert.equal(verdict.status, "completed");
+});
+
+test("completion evaluator clears clarification waiting after later delivery progress", () => {
+  const events: ToolEventRecord[] = [
+    {
+      eventType: "agent_backend_agent_clarification_requested",
+      payload: {
+        type: "agent_clarification_requested",
+        question: "Which scope?",
+        options: [
+          { id: "focused", label: "Focused", detail: "Use a narrow scope." },
+          { id: "broad", label: "Broad", detail: "Use a broad scope." }
+        ]
+      }
+    },
+    {
+      eventType: "agent_backend_tool_completed",
+      payload: { toolName: "web_search", toolCallId: "call_search" }
+    },
+    {
+      eventType: "canvas_delivery_body_final_committed",
+      payload: { title: "Body", status: "committed" }
+    }
+  ];
+
+  const verdict = evaluateRunCompletion({
+    payload: basePayload,
+    text: "Final answer after clarification.",
+    events,
+    finishReason: "clarification_required"
+  });
+
+  assert.equal(verdict.status, "completed");
 });
 
 test("completion evaluator continues when a tool action has no observation", () => {
@@ -71,7 +132,7 @@ test("completion evaluator marks required durable delivery as partial until comm
   assert.match(verdict.missingRequirements[0] ?? "", /Canvas node|artifact|file/);
 });
 
-test("completion evaluator treats runtime budget gates as partial, not completed", () => {
+test("completion evaluator allows runtime budget gates to complete with final text", () => {
   const verdict = evaluateRunCompletion({
     payload: basePayload,
     text: "Synthesized from available evidence.",
@@ -79,8 +140,22 @@ test("completion evaluator treats runtime budget gates as partial, not completed
     finishReason: "agent_backend_completed"
   });
 
-  assert.equal(verdict.status, "partial");
-  assert.match(verdict.reasons[0] ?? "", /budget gate/);
+  assert.equal(verdict.status, "completed");
+  assert.match(verdict.reasons.join(" "), /budget gate/);
+});
+
+test("completion evaluator completes empty assistant text when durable delivery exists", () => {
+  const verdict = evaluateRunCompletion({
+    payload: basePayload,
+    text: "",
+    events: [{
+      eventType: "canvas_delivery_file_document_committed",
+      payload: { title: "Report", status: "committed" }
+    }],
+    finishReason: "agent_backend_completed"
+  });
+
+  assert.equal(verdict.status, "completed");
 });
 
 test("completion evaluator fails leaked internal runtime protocol", () => {

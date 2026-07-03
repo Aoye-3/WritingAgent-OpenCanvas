@@ -1,4 +1,5 @@
 import type { ModelReference, ProviderReference } from "../../../../shared/modelReferences.js";
+import { supportsModelThinking } from "../../../../shared/modelCapabilities.js";
 import type { FetchContext } from "./types.js";
 
 export function defaultHeaders(context: FetchContext) {
@@ -39,11 +40,12 @@ export function modelFromId(provider: ProviderReference, id: string, extra: Part
     provider: provider.id,
     group,
     modelType: extra.modelType ?? "chat",
-    description: extra.description,
-    ownedBy: extra.ownedBy,
-    supportedEndpointTypes: extra.supportedEndpointTypes
-  };
-}
+	    description: extra.description,
+	    ownedBy: extra.ownedBy,
+	    supportedEndpointTypes: extra.supportedEndpointTypes,
+    supportsThinking: extra.supportsThinking ?? supportsModelThinking({ providerId: provider.id, modelId: id, modelName: extra.name })
+	  };
+	}
 
 export function dedup(models: ModelReference[]) {
   const seen = new Set<string>();
@@ -70,16 +72,26 @@ export function readString(record: unknown, keys: string[]) {
   return undefined;
 }
 
+export function readBoolean(record: unknown, keys: string[]) {
+  if (!record || typeof record !== "object") return undefined;
+  for (const key of keys) {
+    const value = (record as Record<string, unknown>)[key];
+    if (typeof value === "boolean") return value;
+  }
+  return undefined;
+}
+
 export function parseOpenAIModels(provider: ProviderReference, payload: unknown, modelType?: ModelReference["modelType"]) {
   return dedup(readArray(payload, "data").map((entry) => {
     const id = readString(entry, ["id", "model_id", "name"]);
     if (!id) return undefined;
     return modelFromId(provider, id, {
       name: readString(entry, ["model_name", "display_name"]) ?? id,
-      description: readString(entry, ["description", "desc"]),
-      ownedBy: readString(entry, ["owned_by", "organization"]),
-      modelType
-    });
+	      description: readString(entry, ["description", "desc"]),
+	      ownedBy: readString(entry, ["owned_by", "organization"]),
+      supportsThinking: readBoolean(entry, ["supportsThinking", "supports_thinking", "thinking"]),
+	      modelType
+	    });
   }).filter((entry): entry is ModelReference => Boolean(entry)));
 }
 

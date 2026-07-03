@@ -1,4 +1,5 @@
 import type { Locale } from "../i18n/types";
+import type { CanvasObject, CanvasObjectKind } from "../../../shared/canvasObjects";
 
 export type AgentCategory = "chat";
 export type AgentIcon = "bot" | "pen" | "lines" | "mail" | "book" | "report" | "refresh";
@@ -200,6 +201,22 @@ export type ProjectSummary = {
   agentCardId?: string;
   agentTitle?: string;
   provider?: string;
+  canvasPreview?: ProjectCanvasPreview;
+};
+
+export type ProjectCanvasPreviewNode = Pick<CanvasNode, "id" | "kind" | "title" | "x" | "y" | "width" | "height">;
+
+export type ProjectCanvasPreviewObject = {
+  id: string;
+  kind: CanvasObjectKind;
+  geometry: unknown;
+  data?: unknown;
+};
+
+export type ProjectCanvasPreview = {
+  nodes: ProjectCanvasPreviewNode[];
+  objects: ProjectCanvasPreviewObject[];
+  updatedAt: string;
 };
 
 export type StoredOutputVersion = {
@@ -360,7 +377,6 @@ export type PlanActivity = {
   status: string; summary: string; sequence: number; createdAt: string;
 };
 
-import type { CanvasObject } from "../../../shared/canvasObjects";
 export type { CanvasObject, CanvasObjectKind } from "../../../shared/canvasObjects";
 
 export type CanvasWorkflowSuggestion = {

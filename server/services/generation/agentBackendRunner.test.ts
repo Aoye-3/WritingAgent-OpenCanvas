@@ -334,3 +334,127 @@ test("rejects empty server-managed Canvas delivery", async () => {
     /no visible assistant text or structured lifecycle events/i
   );
 });
+
+test("resumes AgentBackend run when answering a runtime-backed agent clarification", async () => {
+  let resumePayload: unknown;
+  let resumedThreadId = "";
+  let runAgentCalled = false;
+  const result = await runAgentBackendGeneration({
+    payload: {
+      mode: "chat",
+      locale: "en",
+      threadId: "facet_thread_1",
+      chatInstruction: "Original task\n\nSelected clarification: Use recent sources",
+      contextValues: {
+        agentClarification: {
+          clarificationId: "clarification_1",
+          question: "Which scope should I use?",
+          selectedOptionId: "recent",
+          answer: "Use recent sources",
+          option: { id: "recent", label: "Use recent sources", detail: "Prefer last 12 months" },
+          resumeContext: {
+            runtimeResume: {
+              runtimeThreadId: "runtime_thread_1",
+              runtimeRunId: "run_original",
+              interruptId: "interrupt_1",
+              checkpointId: "checkpoint_1"
+            }
+          }
+        }
+      }
+    },
+    threadId: "facet_thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "model_1",
+    modelSettings: {
+      configuredModelApiId: "model_1",
+      providerId: "deepseek",
+      model: "deepseek-chat",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: true,
+      toolCallMode: "auto",
+      maxToolCalls: 20
+    },
+    runtimeConfig: { enabledTools: ["web_search"], agentCard: {}, settings: {} } as never,
+    messages: [],
+    prompt: "prompt"
+  }, {
+    getRuntimeConfig: () => ({ enabled: true } as never),
+    runAgent: async () => {
+      runAgentCalled = true;
+      return { text: "should not run", finishReason: "agent_backend_completed", events: [] };
+    },
+    resumeRun: async (input) => {
+      resumedThreadId = input.threadId;
+      resumePayload = input.resume;
+      assert.equal(input.resumeOfRunId, "run_original");
+      assert.equal(input.interruptId, "interrupt_1");
+      assert.equal(input.checkpointId, "checkpoint_1");
+      return {
+        text: "Resumed",
+        finishReason: "agent_backend_completed",
+        events: []
+      };
+    }
+  });
+
+  assert.equal(runAgentCalled, false);
+  assert.equal(resumedThreadId, "runtime_thread_1");
+  assert.deepEqual(resumePayload, {
+    type: "agent_clarification_answer",
+    clarificationId: "clarification_1",
+    question: "Which scope should I use?",
+    selectedOptionId: "recent",
+    answer: "Use recent sources",
+    option: { id: "recent", label: "Use recent sources", detail: "Prefer last 12 months" }
+  });
+  assert.equal(result?.text, "Resumed");
+});
+
+test("rejects explicit runtime resume clarification answers that lack metadata", async () => {
+  await assert.rejects(
+    () => runAgentBackendGeneration({
+      payload: {
+        mode: "chat",
+        locale: "en",
+        threadId: "facet_thread_1",
+        chatInstruction: "Selected clarification: Use recent sources",
+        contextValues: {
+          agentClarification: {
+            requiresRuntimeResume: true,
+            clarificationId: "clarification_1",
+            question: "Which scope should I use?",
+            answer: "Use recent sources"
+          }
+        }
+      },
+      threadId: "facet_thread_1",
+      projectId: "project_1",
+      configuredModelApiId: "model_1",
+      modelSettings: {
+        configuredModelApiId: "model_1",
+        providerId: "deepseek",
+        model: "deepseek-chat",
+        temperature: 0.7,
+        topP: 1,
+        contextCount: 5,
+        maxTokens: 2000,
+        maxTokensEnabled: false,
+        streaming: true,
+        toolCallMode: "auto",
+        maxToolCalls: 20
+      },
+      runtimeConfig: { enabledTools: ["web_search"], agentCard: {}, settings: {} } as never,
+      messages: [],
+      prompt: "prompt"
+    }, {
+      getRuntimeConfig: () => ({ enabled: true } as never),
+      runAgent: async () => ({ text: "should not run", finishReason: "agent_backend_completed", events: [] })
+    }),
+    /missing runtime resume metadata/i
+  );
+});

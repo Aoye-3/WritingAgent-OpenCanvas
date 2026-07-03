@@ -59,6 +59,91 @@ test("streaming generation client forwards progress events outside final text", 
   }
 });
 
+test("streaming generation client forwards public progress evidence", async () => {
+  const body = [
+    'event: progress_event\ndata: {"id":"progress_public","threadId":"thread_1","status":"running","visibility":"public","source":"agent_public_update","summary":"Collecting evidence.","next":"Next I will review it.","evidence":[{"kind":"subagent","label":"frontend explorer","ref":"agent:trace"}],"createdAt":"2026-06-14T00:00:00.000Z"}\n\n',
+    'event: final\ndata: {"text":"Done","prompt":"","provider":"agent-backend","usedMock":false,"threadId":"thread_1"}\n\n'
+  ].join("");
+  const progressEvents: unknown[] = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+      controller.close();
+    }
+  }), { status: 200 });
+  try {
+    await generateTextStream({ mode: "chat", locale: "en", chatInstruction: "Hi" }, {
+      onProgressEvent: (event) => progressEvents.push(event)
+    });
+
+    assert.equal(progressEvents.length, 1);
+    assert.equal((progressEvents[0] as { summary?: string }).summary, "Collecting evidence.");
+    assert.equal((progressEvents[0] as { visibility?: string }).visibility, "public");
+    assert.deepEqual((progressEvents[0] as { evidence?: unknown }).evidence, [
+      { kind: "subagent", label: "frontend explorer", ref: "agent:trace" }
+    ]);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("streaming generation client parses multiline progress event data", async () => {
+  const body = [
+    'event: progress_event\n',
+    'data: {"id":"progress_1","threadId":"thread_1",\n',
+    'data: "summary":"I checked the runtime stream.",\n',
+    'data: "createdAt":"2026-06-14T00:00:00.000Z"}\n\n',
+    'event: final\ndata: {"text":"Done","prompt":"","provider":"agent-backend","usedMock":false,"threadId":"thread_1"}\n\n'
+  ].join("");
+  const progressEvents: unknown[] = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+      controller.close();
+    }
+  }), { status: 200 });
+  try {
+    await generateTextStream({ mode: "chat", locale: "en", chatInstruction: "Hi" }, {
+      onProgressEvent: (event) => progressEvents.push(event)
+    });
+
+    assert.equal(progressEvents.length, 1);
+    assert.equal((progressEvents[0] as { summary?: string }).summary, "I checked the runtime stream.");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("streaming generation client drops invalid or sensitive progress events", async () => {
+  const body = [
+    'event: progress_event\ndata: {"id":"progress_sensitive","threadId":"thread_1","summary":"raw tool arguments include prompt","createdAt":"2026-06-14T00:00:00.000Z"}\n\n',
+    'event: progress_event\ndata: {"id":"progress_missing","threadId":"thread_1","createdAt":"2026-06-14T00:00:00.000Z"}\n\n',
+    'event: progress_event\ndata: {"id":"progress_safe","threadId":"thread_1","summary":"I verified the public update path.","evidence":[{"kind":"tool","label":"tool arguments hidden"},{"kind":"file","label":"types.ts"}],"createdAt":"2026-06-14T00:00:00.000Z"}\n\n',
+    'event: final\ndata: {"text":"Done","prompt":"","provider":"agent-backend","usedMock":false,"threadId":"thread_1"}\n\n'
+  ].join("");
+  const progressEvents: unknown[] = [];
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+      controller.close();
+    }
+  }), { status: 200 });
+  try {
+    await generateTextStream({ mode: "chat", locale: "en", chatInstruction: "Hi" }, {
+      onProgressEvent: (event) => progressEvents.push(event)
+    });
+
+    assert.equal(progressEvents.length, 1);
+    assert.equal((progressEvents[0] as { id?: string }).id, "progress_safe");
+    assert.deepEqual((progressEvents[0] as { evidence?: unknown }).evidence, [{ kind: "file", label: "types.ts" }]);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test("streaming generation client sends transient skill refs in the request payload", async () => {
   let observedBody = "";
   const previousFetch = globalThis.fetch;

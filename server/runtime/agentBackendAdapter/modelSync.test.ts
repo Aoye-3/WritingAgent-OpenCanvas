@@ -90,9 +90,10 @@ test("syncs DeepSeek models with explicit thinking enable and disable settings",
     loadModels: async () => [{
       ...configuredModels[0],
       id: "deepseek-config",
-      providerId: "deepseek",
-      modelId: "deepseek-v4-flash",
-      baseURL: "https://api.deepseek.com"
+	      providerId: "deepseek",
+	      modelId: "deepseek-v4-flash",
+      supportsThinking: true,
+	      baseURL: "https://api.deepseek.com"
     }],
     pushModels: async (models) => (pushed = models, { count: models.length })
   });
@@ -108,5 +109,31 @@ test("syncs DeepSeek models with explicit thinking enable and disable settings",
   });
   assert.deepEqual(pushed[0]?.when_thinking_disabled, {
     extra_body: { thinking: { type: "disabled" } }
+  });
+});
+
+test("syncs thinking support from the configured model record", async () => {
+  let pushed: Array<{
+    supports_thinking: boolean;
+    when_thinking_enabled?: unknown;
+    when_thinking_disabled?: unknown;
+  }> = [];
+  const service = createModelRuntimeSyncService({
+    loadModels: async () => [{
+      ...configuredModels[0],
+      id: "silicon-deepseek-v32",
+      providerId: "silicon",
+      modelId: "deepseek-ai/DeepSeek-V3.2",
+      supportsThinking: true
+    }],
+    pushModels: async (models) => (pushed = models, { count: models.length })
+  });
+
+  await service.sync();
+
+  assert.equal(service.isModelReady("silicon-deepseek-v32"), true);
+  assert.equal(pushed[0]?.supports_thinking, true);
+  assert.deepEqual(pushed[0]?.when_thinking_enabled, {
+    extra_body: { thinking: { type: "enabled" } }
   });
 });

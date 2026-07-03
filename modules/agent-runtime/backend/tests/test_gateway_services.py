@@ -81,6 +81,25 @@ def test_normalize_input_passthrough():
     assert result == {"custom_key": "value"}
 
 
+def test_normalize_command_resume():
+    from app.gateway.services import normalize_command
+
+    command = normalize_command({"resume": {"answer": "Use recent sources"}})
+    assert command is not None
+    assert command.resume == {"answer": "Use recent sources"}
+
+
+def test_normalize_command_rejects_unsupported_command():
+    from app.gateway.services import normalize_command
+
+    try:
+        normalize_command({"update": {"messages": []}})
+    except ValueError as exc:
+        assert "resume" in str(exc)
+    else:
+        raise AssertionError("normalize_command should reject unsupported commands")
+
+
 def test_build_run_config_basic():
     from app.gateway.services import build_run_config
 

@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, LightbulbIcon, ModelConfigIcon, SearchIcon, SendIcon, StopIcon } from "../../../shared/icons";
@@ -18,9 +18,13 @@ import { acceptCanvasWriteSuggestion, answerPlan, dismissCanvasWriteSuggestion, 
 import { visibleComposerTools } from "../planUiPolicy";
 import { buildPlanTimeline } from "../planTimeline";
 import type { ConfiguredModelApiSummary } from "../../settings/types";
+import { AIComposer, isThinkingSupportedModel, type AIComposerSubmitPayload, type ConversationModelControls, type RuntimeBudgetChoice } from "./AIComposer";
 import { SkillFolderPicker } from "./SkillFolderPicker";
 
+export type { ConversationModelControls } from "./AIComposer";
+
 type ToolKey = NonNullable<GenerateRequest["toolState"]> extends Partial<Record<infer Key, boolean>> ? Key : never;
+type ThinkingChoice = "disabled" | "high" | "max";
 
 type SelectionAction = {
   messageId: string;
@@ -32,15 +36,6 @@ type SelectionAction = {
 type WriteDraft = {
   messageId?: string;
   text: string;
-};
-
-type ThinkingChoice = "disabled" | "high" | "max";
-type RuntimeBudgetChoice = NonNullable<GenerateRequest["runtimeBudgetProfile"]>;
-
-export type ConversationModelControls = {
-  providerId?: string;
-  thinkingMode?: NonNullable<GenerateRequest["modelOverrides"]>["thinkingMode"];
-  reasoningEffort?: NonNullable<GenerateRequest["modelOverrides"]>["reasoningEffort"];
 };
 
 type AICollaborationDrawerProps = {
@@ -170,7 +165,7 @@ export function AICollaborationDrawer({
   const { locale, t } = useI18n();
   const reduceMotion = useReducedMotion();
   const [input, setInput] = useState("");
-  const supportsThinking = modelSettings?.providerId === "deepseek";
+  const supportsThinking = isThinkingSupportedModel(modelSettings);
   const [thinkingChoice, setThinkingChoice] = useState<ThinkingChoice>(modelSettingsToThinkingChoice(modelSettings));
   const [runtimeBudgetChoice, setRuntimeBudgetChoice] = useState<RuntimeBudgetChoice>(runtimeBudgetProfile ?? "low");
   const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
@@ -232,7 +227,7 @@ export function AICollaborationDrawer({
 
   useEffect(() => {
     setThinkingChoice(modelSettingsToThinkingChoice(modelSettings));
-  }, [modelSettings?.providerId, modelSettings?.thinkingMode, modelSettings?.reasoningEffort]);
+  }, [modelSettings?.providerId, modelSettings?.modelId, modelSettings?.modelName, modelSettings?.supportsThinking, modelSettings?.thinkingMode, modelSettings?.reasoningEffort]);
 
   useEffect(() => {
     if (!supportsThinking) setThinkingMenuOpen(false);
@@ -311,20 +306,19 @@ export function AICollaborationDrawer({
     }
   };
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const text = input.trim();
+  const submitComposerPayload = async (payload: AIComposerSubmitPayload) => {
+    const text = payload.text.trim();
     if (!text) return;
     if (pendingAgentClarification) return;
     setInput("");
-    const runtimeBudgetOverride = runtimeBudgetChoice === (runtimeBudgetProfile ?? "low")
+    const runtimeBudgetOverride = payload.runtimeBudgetProfile === (runtimeBudgetProfile ?? "low")
       ? undefined
-      : runtimeBudgetChoice;
-    const messageModelOverrides = supportsThinking ? thinkingOverridesFromChoice(thinkingChoice) : undefined;
+      : payload.runtimeBudgetProfile;
+    const messageModelOverrides = supportsThinking ? thinkingOverridesFromChoice(payload.thinkingChoice) : undefined;
     const messageRequestContext = {
       ...(mindChainContext ? { canvasMindChain: mindChainContext.text } : {}),
-      ...(enabledSkillRefs.length ? { transientSkillRefs: enabledSkillRefs } : {}),
-      ...(disabledSkillRefs.length ? { disabledSkillRefs } : {}),
+      ...(payload.enabledSkillRefs.length ? { transientSkillRefs: payload.enabledSkillRefs } : {}),
+      ...(payload.disabledSkillRefs.length ? { disabledSkillRefs: payload.disabledSkillRefs } : {}),
       ...(runtimeBudgetOverride ? { runtimeBudgetProfile: runtimeBudgetOverride } : {})
     };
     if (isSending) {
@@ -368,6 +362,20 @@ export function AICollaborationDrawer({
     } catch {
       setInput(text);
     }
+  };
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await submitComposerPayload({
+      text: input.trim(),
+      agentId: activeAgent.id,
+      enabledSkillRefs,
+      disabledSkillRefs,
+      selectedModelConfigId,
+      runtimeBudgetProfile: runtimeBudgetChoice,
+      thinkingChoice,
+      toolState
+    });
   };
 
   const captureSelection = (event: React.MouseEvent<HTMLDivElement>, message: CollaborationMessage) => {
@@ -752,6 +760,68 @@ export function AICollaborationDrawer({
         </section>
       ) : null}
 
+      <div className="drawer-chat-composer-context">
+        <AnnotationChipRow annotations={annotations} compact onRemoveAnnotation={removeAnnotation} />
+        {mindChainContext ? (
+          <div className="mind-chain-context-chip" data-testid="mind-chain-context-chip">
+            <span>{t("workspace.mindChainContext", { count: mindChainContext?.nodeCount ?? 0 })}</span>
+            <button
+              aria-label={t("workspace.removeMindChain")}
+              onClick={onRemoveMindChainContext}
+              type="button"
+            >
+              x
+            </button>
+          </div>
+        ) : null}
+        {missingAgentClarificationPayload && !pendingClarificationPlan ? (
+          <div className="budget-continuation-chip">
+            <span>{locale === "zh" ? "\u7b49\u5f85\u8865\u5145\u4fe1\u606f\uff0c\u4f46\u7f3a\u5c11\u53ef\u64cd\u4f5c\u9009\u9879\u3002" : "Clarification is waiting, but no choices were saved."}</span>
+            <button type="button" onClick={fillClarificationRecovery}>
+              {locale === "zh" ? "\u586b\u5165\u6062\u590d" : "Draft recovery"}
+            </button>
+          </div>
+        ) : null}
+        {budgetLimitFailure && !pendingClarificationPlan && !pendingAgentClarification && !missingAgentClarificationPayload ? (
+          <div className="budget-continuation-chip">
+            <span>{locale === "zh" ? "\u4e0a\u6b21\u8fd0\u884c\u8fbe\u5230\u6b65\u9aa4\u9884\u7b97\uff0c\u53ef\u7ee7\u7eed\u5b8c\u6210\u3002" : "The last run reached its step budget."}</span>
+            <button type="button" onClick={fillBudgetContinuation}>
+              {locale === "zh" ? "\u586b\u5165\u7ee7\u7eed" : "Draft continue"}
+            </button>
+          </div>
+        ) : null}
+      </div>
+      {pendingClarificationPlan || pendingAgentClarification ? null : (
+        <AIComposer
+          activeAgent={activeAgent}
+          agentCards={agentCards}
+          allowedTools={allowedTools}
+          configuredModels={configuredModels}
+          disabled={writeBusy}
+          disabledSkillRefs={disabledSkillRefs}
+          enabledSkillRefs={enabledSkillRefs}
+          isSending={isSending}
+          modelSelectionDisabled={modelSelectionDisabled}
+          modelSettings={modelSettings}
+          placeholder={t("workspace.askAiPlaceholder")}
+          runtimeBudgetProfile={runtimeBudgetProfile}
+          selectedModelConfigId={selectedModelConfigId}
+          skillCatalog={skillCatalog}
+          skillCatalogStatus={skillCatalogStatus}
+          skillFolders={skillFolders}
+          toolState={toolState}
+          value={input}
+          onRequestSkillCatalog={onRequestSkillCatalog}
+          onSelectAgent={onSelectAgent}
+          onSelectModel={onSelectModel}
+          onStopSending={onStopSending}
+          onSubmit={submitComposerPayload}
+          onToggleSkill={onToggleSkill}
+          onToolStateChange={onToolStateChange}
+          onValueChange={setInput}
+        />
+      )}
+      {false ? (
       <form className="drawer-chat-composer" onSubmit={submit}>
         <div className="composer-control-row" data-testid="composer-control-row">
           <div className="composer-agent-section">
@@ -804,7 +874,7 @@ export function AICollaborationDrawer({
         ) : null}
         {mindChainContext ? (
           <div className="mind-chain-context-chip" data-testid="mind-chain-context-chip">
-            <span>{t("workspace.mindChainContext", { count: mindChainContext.nodeCount })}</span>
+            <span>{t("workspace.mindChainContext", { count: mindChainContext?.nodeCount ?? 0 })}</span>
             <button
               aria-label={t("workspace.removeMindChain")}
               onClick={onRemoveMindChainContext}
@@ -906,6 +976,7 @@ export function AICollaborationDrawer({
           </button>
         </div>
       </form>
+      ) : null}
     </motion.aside>
   );
 }
@@ -925,7 +996,16 @@ function ProgressSegmentList({ completed, rawEvents, runTarget, segments }: {
           <div className="progress-segment" key={segment.id}>
             {segment.title ? <strong>{segment.title}</strong> : null}
             <p>{segment.summary}</p>
-            {segment.next ? <small>{segment.next}</small> : null}
+            {segment.next && segment.next !== segment.summary ? <small>{segment.next}</small> : null}
+            {segment.evidence?.length ? (
+              <div className="progress-evidence-list" aria-label={locale === "zh" ? "进展依据" : "Progress evidence"}>
+                {segment.evidence.slice(0, 3).map((item) => (
+                  <span className="progress-evidence-chip" key={`${segment.id}:${item.kind}:${item.label}:${item.ref ?? ""}`} title={item.ref ?? item.label}>
+                    {progressEvidenceLabel(item)}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             {segment.interventionHint ? <em>{segment.interventionHint}</em> : null}
           </div>
         ))}
@@ -1155,6 +1235,12 @@ type AgentClarificationResumeContext = {
   originalInstruction: string;
   transientSkillRefs: string[];
   disabledSkillRefs: string[];
+  runtimeResume?: {
+    runtimeThreadId: string;
+    runtimeRunId: string;
+    interruptId: string;
+    checkpointId?: string;
+  };
   runtimeBudgetProfile?: GenerateRequest["runtimeBudgetProfile"];
   intakeState?: string;
   intakeRound?: number;
@@ -1230,6 +1316,7 @@ export function buildAgentClarificationSubmission(input: AgentClarificationSubmi
         selectedOptionId: selectedOption.id,
         answer: answerValue,
         option: selectedOption,
+        ...(resume?.runtimeResume ? { requiresRuntimeResume: true } : {}),
         ...(resume ? { resumeContext: resume } : {}),
         ...(resume?.originalInstruction ? { originalInstruction: resume.originalInstruction } : {})
       }
@@ -1455,6 +1542,7 @@ function progressSegmentFromTimelineEvent(event: RunTimelineEvent): NonNullable<
     title: event.title,
     summary: event.summary,
     next: typeof payload.next === "string" ? payload.next : undefined,
+    evidence: readProgressEvidence(payload.evidence),
     interventionHint: typeof payload.interventionHint === "string" ? payload.interventionHint : undefined,
     source: typeof payload.source === "string" ? payload.source : undefined,
     createdAt: event.createdAt
@@ -1744,6 +1832,7 @@ function readAgentClarificationResumeContext(value: unknown): AgentClarification
   const originalInstruction = readString(record.originalInstruction);
   const transientSkillRefs = readStringList(record.transientSkillRefs);
   const disabledSkillRefs = readStringList(record.disabledSkillRefs);
+  const runtimeResume = readAgentClarificationRuntimeResume(record.runtimeResume);
   const runtimeBudgetProfile = readRuntimeBudgetProfile(record.runtimeBudgetProfile);
   const intakeState = readString(record.intakeState);
   const intakeRound = readPositiveInteger(record.intakeRound);
@@ -1751,13 +1840,14 @@ function readAgentClarificationResumeContext(value: unknown): AgentClarification
   const answeredSummary = readString(record.answeredSummary);
   const missingSlots = readStringList(record.missingSlots);
   const canvas = readRecord(record.canvas);
-  if (!originalInstruction && transientSkillRefs.length === 0 && disabledSkillRefs.length === 0 && !runtimeBudgetProfile && !intakeState && !intakeRound && !maxIntakeRounds && !answeredSummary && missingSlots.length === 0 && Object.keys(canvas).length === 0) {
+  if (!originalInstruction && transientSkillRefs.length === 0 && disabledSkillRefs.length === 0 && !runtimeResume && !runtimeBudgetProfile && !intakeState && !intakeRound && !maxIntakeRounds && !answeredSummary && missingSlots.length === 0 && Object.keys(canvas).length === 0) {
     return undefined;
   }
   return {
     originalInstruction,
     transientSkillRefs,
     disabledSkillRefs,
+    ...(runtimeResume ? { runtimeResume } : {}),
     ...(runtimeBudgetProfile ? { runtimeBudgetProfile } : {}),
     ...(intakeState ? { intakeState } : {}),
     ...(intakeRound ? { intakeRound } : {}),
@@ -1765,6 +1855,21 @@ function readAgentClarificationResumeContext(value: unknown): AgentClarification
     ...(answeredSummary ? { answeredSummary } : {}),
     ...(missingSlots.length ? { missingSlots } : {}),
     canvas
+  };
+}
+
+function readAgentClarificationRuntimeResume(value: unknown): AgentClarificationResumeContext["runtimeResume"] {
+  const record = readRecord(value);
+  const runtimeThreadId = readString(record.runtimeThreadId);
+  const runtimeRunId = readString(record.runtimeRunId);
+  const interruptId = readString(record.interruptId);
+  const checkpointId = readString(record.checkpointId);
+  if (!runtimeThreadId || !runtimeRunId || !interruptId) return undefined;
+  return {
+    runtimeThreadId,
+    runtimeRunId,
+    interruptId,
+    ...(checkpointId ? { checkpointId } : {})
   };
 }
 
@@ -1797,8 +1902,34 @@ function isWriteConfirmation(text: string) {
 }
 
 function modelSettingsToThinkingChoice(modelSettings?: ConversationModelControls): ThinkingChoice {
-  if (modelSettings?.providerId !== "deepseek" || modelSettings.thinkingMode !== "enabled") return "disabled";
+  if (!isThinkingSupportedModel(modelSettings) || modelSettings?.thinkingMode !== "enabled") return "disabled";
   return modelSettings.reasoningEffort === "max" || modelSettings.reasoningEffort === "xhigh" ? "max" : "high";
+}
+
+function readProgressEvidence(value: unknown): NonNullable<CollaborationMessage["progressSegments"]>[number]["evidence"] {
+  if (!Array.isArray(value)) return undefined;
+  const evidence = value.flatMap((item) => {
+    if (typeof item === "string" && item.trim()) {
+      return [{ kind: "runtime" as const, label: item.trim().slice(0, 120) }];
+    }
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const source = item as Record<string, unknown>;
+    const kind = readProgressEvidenceKind(source.kind);
+    const label = typeof source.label === "string" ? source.label.trim().slice(0, 120) : "";
+    const ref = typeof source.ref === "string" ? source.ref.trim().slice(0, 160) : "";
+    return kind && label ? [{ kind, label, ...(ref ? { ref } : {}) }] : [];
+  }).slice(0, 5);
+  return evidence.length ? evidence : undefined;
+}
+
+function readProgressEvidenceKind(value: unknown): NonNullable<NonNullable<CollaborationMessage["progressSegments"]>[number]["evidence"]>[number]["kind"] | undefined {
+  return value === "tool" || value === "subagent" || value === "codegraph" || value === "search" || value === "file" || value === "runtime"
+    ? value
+    : undefined;
+}
+
+function progressEvidenceLabel(item: NonNullable<NonNullable<CollaborationMessage["progressSegments"]>[number]["evidence"]>[number]) {
+  return `${item.kind}: ${item.label}`;
 }
 
 function thinkingOverridesFromChoice(choice: ThinkingChoice): GenerateRequest["modelOverrides"] {

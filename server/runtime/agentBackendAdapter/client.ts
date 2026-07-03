@@ -47,6 +47,13 @@ export type AgentBackendRunInput = {
   onRuntimeSignal?: (signal: AgentBackendRuntimeSignal) => void;
 };
 
+export type AgentBackendResumeRunInput = AgentBackendRunInput & {
+  resume: unknown;
+  resumeOfRunId?: string;
+  interruptId?: string;
+  checkpointId?: string;
+};
+
 export type AgentBackendRunResult = {
   text: string;
   finishReason: string;
@@ -137,6 +144,40 @@ export async function runAgentBackendAgent(input: AgentBackendRunInput): Promise
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(buildRunRequest(input, config))
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(await formatRuntimeHttpError(response));
+  }
+  if (!response.body) {
+    throw new Error("AgentBackend runtime returned an empty stream");
+  }
+
+  input.onStatus?.({ phase: "thinking", label: streamLabels.thinking });
+  return readAgentBackendStream(response.body, {
+    onToolEvent: input.onToolEvent,
+    onToken: input.onToken,
+    onReasoningToken: input.onReasoningToken,
+    onStatus: input.onStatus,
+    onRuntimeSignal: input.onRuntimeSignal
+  });
+}
+
+export async function resumeAgentBackendRun(input: AgentBackendResumeRunInput): Promise<AgentBackendRunResult> {
+  const config = input.config ?? getAgentBackendRuntimeConfig();
+  if (!config.enabled) {
+    throw new Error("AgentBackend runtime is disabled");
+  }
+
+  const response = await authenticatedAgentBackendFetch({
+    config,
+    path: "/api/runs/stream",
+    fetchImpl: input.fetchImpl,
+    init: {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildResumeRunRequest(input, config))
     }
   });
 
@@ -304,6 +345,22 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
     if_not_exists: "create",
     on_disconnect: "cancel",
     on_completion: "keep"
+  };
+}
+
+export function buildResumeRunRequest(input: AgentBackendResumeRunInput, config: AgentBackendRuntimeConfig) {
+  const request = buildRunRequest(input, config);
+  return {
+    ...request,
+    input: undefined,
+    command: { resume: input.resume },
+    metadata: {
+      ...request.metadata,
+      ...(input.resumeOfRunId ? { resumeOfRunId: input.resumeOfRunId } : {}),
+      ...(input.interruptId ? { interruptId: input.interruptId } : {}),
+      ...(input.checkpointId ? { checkpointId: input.checkpointId } : {})
+    },
+    ...(input.checkpointId ? { checkpoint_id: input.checkpointId } : {})
   };
 }
 
@@ -804,7 +861,7 @@ function sanitizeRuntimeSignalPayload(data: Record<string, unknown>) {
 }
 
 function sanitizeAgentProgressPayload(data: Record<string, unknown>) {
-  const allowed = ["type", "event", "runId", "threadId", "stageId", "loopId", "loopIndex", "stepKind", "actionId", "observationId", "completionStatus", "completionReasons", "missingRequirements", "phase", "status", "title", "summary", "next", "interventionHint", "visibility", "source", "createdAt"];
+  const allowed = ["type", "event", "runId", "threadId", "stageId", "loopId", "loopIndex", "stepKind", "actionId", "observationId", "completionStatus", "completionReasons", "missingRequirements", "phase", "status", "title", "summary", "next", "evidence", "interventionHint", "visibility", "source", "createdAt"];
   return Object.fromEntries(allowed.filter((key) => key in data).map((key) => [key, data[key]]));
 }
 
@@ -1013,6 +1070,9 @@ function reasoningTextFromMessageLike(value: unknown): string | undefined {
 }
 
 function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<string, Record<string, unknown>>): ToolEventRecord[] {
+  if (event === "interrupt" || event === "waiting_for_user") {
+    return agentClarificationEventsFromInterrupt(data);
+  }
   if (event === "custom" && isRecord(data)) {
     const type = typeof data.type === "string" ? data.type : typeof data.event === "string" ? data.event : undefined;
     if (type === "agent_clarification_requested") {
@@ -1026,6 +1086,40 @@ function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<strin
   if (event !== "messages" && event !== "messages-tuple") return [];
   const message = Array.isArray(data) ? data[0] : data;
   return mapMessageToolEvents(message, toolCallArgsById);
+}
+
+function agentClarificationEventsFromInterrupt(data: unknown): ToolEventRecord[] {
+  if (!isRecord(data)) return [];
+  const runtimeThreadId = readSourceString(data.thread_id) || readSourceString(data.threadId);
+  const runtimeRunId = readSourceString(data.run_id) || readSourceString(data.runId);
+  const checkpointId = readSourceString(data.checkpoint_id) || readSourceString(data.checkpointId);
+  const interrupts = Array.isArray(data.interrupts)
+    ? data.interrupts
+    : data.value !== undefined ? [data] : [];
+  return interrupts.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const interruptId = readSourceString(item.id);
+    const value = isRecord(item.value) ? item.value : item;
+    const type = readSourceString(value.type);
+    if (type !== "agent_clarification_requested") return [];
+    const resumeContext = {
+      ...(isRecord(value.resumeContext) ? value.resumeContext : {}),
+      runtimeResume: {
+        ...(runtimeThreadId ? { runtimeThreadId } : {}),
+        ...(runtimeRunId ? { runtimeRunId } : {}),
+        ...(interruptId ? { interruptId } : {}),
+        ...(checkpointId ? { checkpointId } : {})
+      }
+    };
+    return [agentClarificationEventFromSource({
+      ...value,
+      resumeContext
+    }, {
+      source: "runtime_interrupt",
+      toolCallId: interruptId || undefined,
+      toolName: "ask_clarification"
+    })];
+  });
 }
 
 function mapMessageToolEvents(message: unknown, toolCallArgsById: Map<string, Record<string, unknown>>): ToolEventRecord[] {

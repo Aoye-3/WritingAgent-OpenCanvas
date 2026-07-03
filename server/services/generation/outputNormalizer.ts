@@ -38,6 +38,7 @@ export function normalizeAgentRunOutput(input: NormalizeInput): { text: string; 
       payload: {
         source: input.source,
         reason: "internal_prompt_or_tool_payload",
+        severity: "error",
         redactedPreview: preview(input.text)
       }
     });
@@ -79,6 +80,7 @@ function stripLeakedToolJson(text: string): { text: string; events: ToolEventRec
       eventType: "internal_output_blocked",
       payload: {
         reason: "tool_payload_in_assistant_text",
+        severity: "error",
         redactedPreview: preview(match.value)
       }
     });
@@ -133,6 +135,10 @@ function looksLikeToolPayload(value: string) {
 
 function isBlockedPlaceholder(value: string, locale: Locale) {
   return value === blockedMessage(locale);
+}
+
+export function isInternalOutputBlockedText(value: string, locale: Locale) {
+  return value.trim() === blockedMessage(locale);
 }
 
 function blockedMessage(locale: Locale) {

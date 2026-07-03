@@ -15,13 +15,13 @@ import {
   type NodeChange,
   type OnSelectionChangeParams
 } from "@xyflow/react";
-import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowMode, CanvasWorkflowStage, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../agents/types";
+import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowMode, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../agents/types";
 import { fetchMarkdownOutputPreview, type CanvasEdgeDraft, type CanvasNodeDraft, type CanvasNodePatch, type CanvasNodePositionUpdate, type CanvasObjectDraft, type CanvasObjectPatch, type CanvasRangeRewriteDraft, type MarkdownOutputPreview } from "../../canvas/canvasClient";
 import { useI18n } from "../../i18n/I18nProvider";
 import { ResetIcon, ZoomInIcon, ZoomOutIcon } from "../../../shared/icons";
 import { CanvasCurveEdge } from "./canvas/CanvasCurveEdge";
 import { CanvasNodeFrame } from "./canvas/CanvasNodeFrame";
-import { CanvasContextMenu, CanvasSelectedNodeWorkflow, CanvasSelectionBar, type CanvasMenuState } from "./canvas/CanvasChrome";
+import { CanvasContextMenu, CanvasSelectionBar, type CanvasMenuState } from "./canvas/CanvasChrome";
 import { fileDocumentPreviewTarget } from "./canvas/fileDocumentPreview";
 import { MAX_ZOOM, MIN_ZOOM, canvasNodeKinds, kindLabels, workflowModeLabels } from "./canvas/constants";
 import { collectDraggedNodePositionPatches } from "./canvas/dragPersistence";
@@ -78,8 +78,7 @@ type DocumentCanvasProps = {
   onRejectWriteRequest: (requestId: string) => Promise<unknown>;
   onUpdateObject: (objectId: string, patch: CanvasObjectPatch) => Promise<unknown>;
   onUploadAsset: (input: { fileName: string; fileBase64: string }) => Promise<unknown>;
-  onUpdateNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflowStage; roles?: string[] }) => Promise<unknown>;
-  onUpdateWorkflow: (patch: { mode?: CanvasWorkflowMode; stage?: CanvasWorkflowStage; roles?: CanvasWorkflow["roles"] }) => Promise<unknown>;
+  onUpdateWorkflow: (patch: { mode?: CanvasWorkflowMode; stage?: CanvasWorkflow["stage"]; roles?: CanvasWorkflow["roles"] }) => Promise<unknown>;
   onToolChange: (tool: CanvasTool) => void;
   claimSourceFocus?: ClaimCandidate | null;
   onClaimDocumentPreviewChange?: (document: ClaimReviewDocument | null) => void;
@@ -141,7 +140,6 @@ function DocumentCanvasInner({
   onRejectWriteRequest,
   onUpdateObject,
   onUploadAsset,
-  onUpdateNodeWorkflow,
   onUpdateWorkflow,
   onToolChange,
   claimSourceFocus,
@@ -717,9 +715,6 @@ function DocumentCanvasInner({
         selectedNode={selectedNode}
         onDeleteSelectedEdge={() => void deleteSelectedEdge()}
       />
-      {selectedNode && workflow && selectedNode.kind !== "role" ? (
-        <CanvasSelectedNodeWorkflow locale={locale} node={selectedNode} workflow={workflow} onUpdateNodeWorkflow={onUpdateNodeWorkflow} />
-      ) : null}
     </section>
   );
 }

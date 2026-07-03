@@ -72,6 +72,12 @@ export type StreamStatus = {
   label: string;
 };
 
+export type AgentProgressEvidence = {
+  kind: "tool" | "subagent" | "codegraph" | "search" | "file" | "runtime";
+  label: string;
+  ref?: string;
+};
+
 export type AgentProgressEvent = {
   id: string;
   threadId?: string;
@@ -90,8 +96,9 @@ export type AgentProgressEvent = {
   title?: string;
   summary: string;
   next?: string;
+  evidence?: AgentProgressEvidence[];
   interventionHint?: string;
-  visibility?: "stage" | "raw";
+  visibility?: "stage" | "raw" | "public";
   source?: string;
   createdAt: string;
 };

@@ -9,9 +9,8 @@ from typing import override
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import ToolMessage
-from langgraph.graph import END
 from langgraph.prebuilt.tool_node import ToolCallRequest
-from langgraph.types import Command
+from langgraph.types import Command, interrupt
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +111,47 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
             payload["context"] = context
         return payload
 
+    def _interrupt(self, payload: dict) -> object:
+        return interrupt(payload)
+
+    def _structured_answer_payload(self, args: dict, resume_value: object) -> dict:
+        payload = {
+            "type": "agent_clarification_answered",
+            "question": str(args.get("question") or "").strip(),
+        }
+        if isinstance(resume_value, dict):
+            option = resume_value.get("option")
+            selected_option_id = str(resume_value.get("selectedOptionId") or resume_value.get("optionId") or "").strip()
+            answer = str(resume_value.get("answer") or resume_value.get("customAnswer") or "").strip()
+            if isinstance(option, dict):
+                label = str(option.get("label") or "").strip()
+                detail = str(option.get("detail") or option.get("description") or "").strip()
+                if not answer:
+                    answer = label
+                payload["option"] = {
+                    "id": str(option.get("id") or selected_option_id or "").strip(),
+                    "label": label,
+                    "detail": detail,
+                }
+            if selected_option_id:
+                payload["selectedOptionId"] = selected_option_id
+            if answer:
+                payload["answer"] = answer
+            return payload
+        answer = str(resume_value or "").strip()
+        if answer:
+            payload["answer"] = answer
+        return payload
+
+    def _format_answer_message(self, answer_payload: dict) -> str:
+        answer = str(answer_payload.get("answer") or "").strip()
+        option = answer_payload.get("option")
+        if not answer and isinstance(option, dict):
+            answer = str(option.get("label") or "").strip()
+        if answer:
+            return f"Clarification answered: {answer}"
+        return "Clarification answered."
+
     def _format_clarification_message(self, args: dict) -> str:
         """Format the clarification arguments into a user-friendly message.
 
@@ -187,12 +227,13 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
         logger.info("Intercepted clarification request")
         logger.debug("Clarification question: %s", question)
 
-        # Format the clarification message
-        formatted_message = self._format_clarification_message(args)
         structured_payload = self._structured_clarification_payload(args)
 
         # Get the tool call ID
         tool_call_id = request.tool_call.get("id", "")
+        resume_value = self._interrupt(structured_payload)
+        answer_payload = self._structured_answer_payload(args, resume_value)
+        formatted_message = self._format_answer_message(answer_payload)
 
         # Create a ToolMessage with the formatted question
         # This will be added to the message history
@@ -201,19 +242,11 @@ class ClarificationMiddleware(AgentMiddleware[ClarificationMiddlewareState]):
             content=formatted_message,
             tool_call_id=tool_call_id,
             name="ask_clarification",
-            artifact=structured_payload,
-            additional_kwargs={"facetwrite_clarification": structured_payload},
+            artifact=answer_payload,
+            additional_kwargs={"facetwrite_clarification_answer": answer_payload},
         )
 
-        # Return a Command that:
-        # 1. Adds the formatted tool message
-        # 2. Interrupts execution by going to __end__
-        # Note: We don't add an extra AIMessage here - the frontend will detect
-        # and display ask_clarification tool messages directly
-        return Command(
-            update={"messages": [tool_message]},
-            goto=END,
-        )
+        return tool_message
 
     @override
     def wrap_tool_call(

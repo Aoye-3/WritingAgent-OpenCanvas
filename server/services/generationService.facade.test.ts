@@ -302,6 +302,60 @@ test("generation facade records AgentBackend runs when AgentBackend is enabled",
   assert.ok((records[0] as { events: ToolEventRecord[] }).events.some((event) => event.eventType === "completion_evaluated"));
 });
 
+test("generation facade blocks internal AgentBackend output without runtime failure", async () => {
+  const { storage } = fakeStorage();
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: "LLM request failed: provider rejected reasoning_content",
+        finishReason: "agent_backend_completed",
+        events: []
+      })
+    }
+  });
+
+  const response = await service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "chat-agent", freeTextPrompt: "Hello" });
+
+  assert.equal(response.provider, "agent-backend");
+  assert.notEqual(response.finishReason, "runtime_failed");
+  assert.equal(response.errorMessage, undefined);
+  assert.equal(response.text, "");
+  const events = response.events ?? [];
+  assert.ok(response.completion);
+  assert.ok(events.some((event) => event.eventType === "internal_output_blocked"));
+  assert.equal(events.some((event) => event.eventType === "agent_backend_runtime_failed"), false);
+  assert.notEqual(response.completion.status, "failed");
+});
+
+test("generation facade completes blocked internal output when durable delivery exists", async () => {
+  const { storage } = fakeStorage();
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: "LLM request failed: provider rejected reasoning_content",
+        finishReason: "agent_backend_completed",
+        events: [{
+          eventType: "canvas_delivery_file_document_committed",
+          payload: { title: "Report", status: "committed" }
+        }]
+      })
+    }
+  });
+
+  const response = await service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "chat-agent", freeTextPrompt: "Hello" });
+
+  assert.equal(response.text, "");
+  const events = response.events ?? [];
+  assert.ok(response.completion);
+  assert.equal(response.completion.status, "completed");
+  assert.ok(events.some((event) => event.eventType === "internal_output_blocked"));
+  assert.equal(events.some((event) => event.eventType === "agent_backend_runtime_failed"), false);
+});
+
 test("complex chat automatically enters preflight Plan generation", async () => {
   const { storage, planState } = fakeStorage();
   let observedPlanPhase = "";
@@ -1576,6 +1630,74 @@ test("streaming generation suppresses Canvas active heartbeat after Agent clarif
   assert.equal(timelineEvents.some((event) => event.payload?.eventType === "agent_backend_agent_clarification_requested" && event.status === "waiting"), true);
 });
 
+test("streaming generation forwards public runtime progress evidence through progress and timeline", async () => {
+  const { storage } = fakeStorage();
+  const progressEvents: Array<{ summary: string; visibility?: string; source?: string; evidence?: unknown }> = [];
+  const timelineEvents: Array<{ summary: string; payload?: Record<string, unknown> }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onRuntimeSignal?.({
+          type: "agent_progress_reported",
+          label: "I verified the public update stream.",
+          payload: {
+            type: "agent_progress_reported",
+            runId: "runtime_run_public",
+            threadId: "thread_test",
+            phase: "verification",
+            status: "running",
+            summary: "I verified the public update stream.",
+            next: "Next I will run the focused tests.",
+            evidence: [
+              { kind: "subagent", label: "frontend explorer", ref: "agent:trace" },
+              { kind: "tool", label: "tool arguments hidden" },
+              { kind: "unknown", label: "ignored" },
+              "runtime checkpoint"
+            ],
+            visibility: "public",
+            source: "agent_public_update",
+            createdAt: "2026-07-03T00:00:00.000Z",
+            prompt: "hidden"
+          }
+        });
+        return {
+          text: "Done.",
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "Check public progress updates"
+  }, {
+    onProgressEvent: (event) => progressEvents.push(event),
+    onTimelineEvent: (event) => timelineEvents.push(event)
+  });
+
+  const publicProgress = progressEvents.find((event) => event.source === "agent_public_update");
+  const publicTimeline = timelineEvents.find((event) => event.payload?.source === "agent_public_update");
+
+  assert.equal(result.text, "Done.");
+  assert.equal(publicProgress?.visibility, "public");
+  assert.equal(publicProgress?.summary, "I verified the public update stream.");
+  assert.deepEqual(publicProgress?.evidence, [
+    { kind: "subagent", label: "frontend explorer", ref: "agent:trace" },
+    { kind: "runtime", label: "runtime checkpoint" }
+  ]);
+  assert.equal(publicTimeline?.summary, "I verified the public update stream.");
+  assert.deepEqual(publicTimeline?.payload?.evidence, publicProgress?.evidence);
+  assert.equal(JSON.stringify(publicProgress).includes("prompt"), false);
+  assert.equal(JSON.stringify(publicProgress).includes("arguments"), false);
+});
+
 test("skill scope guard fills default budget and Canvas resume context when runtime sends a partial resume", async () => {
   const { storage } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
@@ -2688,6 +2810,54 @@ test("progressive Canvas treats process clarification text as recoverable output
   assert.equal(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"), false);
 });
 
+test("progressive Canvas completes internal output block when Canvas delivery exists", async () => {
+  const { storage, records } = fakeStorage();
+  const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  const tokens: string[] = [];
+  const committedEvent: ToolEventRecord = {
+    eventType: "canvas_delivery_body_final_committed",
+    payload: { deliveryId: "delivery_internal_output", title: "Body" }
+  };
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToken?.('< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">');
+        input.onToolEvent?.(committedEvent);
+        return {
+          text: '< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">',
+          finishReason: "agent_backend_completed",
+          events: [committedEvent]
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent Agent literature and summarize the findings",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, agentClarification: answeredAgentClarification() }
+  }, {
+    onToken: (token) => tokens.push(token),
+    onToolEvent: (event) => events.push(event as typeof events[number])
+  });
+
+  assert.notEqual(result.completion?.status, "failed");
+  assert.notEqual(result.finishReason, "runtime_failed");
+  assert.equal(records.length, 1);
+  const record = records[0] as { events?: Array<{ eventType: string }> };
+  assert.ok(record.events?.some((event) => event.eventType === "internal_output_blocked"));
+  assert.ok(record.events?.some((event) => event.eventType === "canvas_delivery_body_final_committed"));
+  assert.equal(record.events?.some((event) => event.eventType === "agent_backend_runtime_failed"), false);
+  assert.equal(record.events?.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"), false);
+  assert.equal(events.some((event) => event.eventType === "agent_backend_runtime_failed"), false);
+  assert.equal(tokens.join("").includes("webfetch"), false);
+});
+
 test("progressive Canvas blocks leaked skill DSML as final body", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
@@ -2727,14 +2897,17 @@ test("progressive Canvas blocks leaked skill DSML as final body", async () => {
       onToolEvent: (event) => events.push(event as typeof events[number])
   });
 
-  assert.equal(result.completion?.status, "failed");
-  assert.match(result.errorMessage ?? "", /internal runtime output/);
+  assert.notEqual(result.completion?.status, "failed");
+  assert.equal(result.errorMessage, undefined);
   assert.equal(records.length, 1);
   assert.equal(tokens.join("").includes("webfetch"), false);
   assert.equal(canvasNodes.some((node) => /DSML|tool_calls|webfetch|invoke|parameter|maxcontentlength|2504\.19678/i.test(String(node.content))), false);
   assert.ok(canvasNodes.some((node) => node.title === "正文草稿" && String(node.content).includes("工作正文草稿")));
-  assert.ok(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"));
+  assert.equal(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"), false);
   assert.equal(events.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
+  const record = records[0] as { events?: Array<{ eventType: string }> };
+  assert.ok(record.events?.some((event) => event.eventType === "internal_output_blocked"));
+  assert.equal(record.events?.some((event) => event.eventType === "agent_backend_runtime_failed"), false);
 });
 
 test("progressive Canvas notes sanitize unsafe tool snippets", async () => {
@@ -2967,7 +3140,7 @@ test("generation records recovery when a Plan success event was not persisted", 
   assert.equal(activities.at(-1)?.status, "needs_recovery");
 });
 
-test("generation facade blocks AgentBackend internal prompt output before recording", async () => {
+test("generation facade blocks AgentBackend internal prompt output without fallback", async () => {
   const { storage, records } = fakeStorage();
     const service = createGenerationService(storage, fakeAgentRuntime(), {
       mockFallbackEnabled: true,
@@ -2995,14 +3168,16 @@ test("generation facade blocks AgentBackend internal prompt output before record
   const result = await service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "Hello" });
 
   assert.equal(result.text.includes("# AgentCard"), false);
-  assert.equal(result.provider, "mock");
-  assert.equal(result.usedMock, true);
-  assert.match(result.text, /mock fallback mode/);
+  assert.equal(result.provider, "agent-backend");
+  assert.equal(result.usedMock, false);
+  assert.equal(result.text, "");
+  assert.equal(result.errorMessage, undefined);
   assert.equal((records[0] as { output: string }).output.includes("# AgentCard"), false);
   assert.ok((records[0] as { events: Array<{ eventType: string }> }).events.some((event) => event.eventType === "internal_output_blocked"));
+  assert.equal((records[0] as { events: Array<{ eventType: string }> }).events.some((event) => event.eventType === "agent_backend_runtime_failed"), false);
 });
 
-test("generation facade falls back to mock when AgentBackend returns a provider-unavailable message", async () => {
+test("generation facade blocks provider-unavailable AgentBackend text without fallback", async () => {
   const { storage, records } = fakeStorage();
     const service = createGenerationService(storage, fakeAgentRuntime(), {
       mockFallbackEnabled: true,
@@ -3029,9 +3204,12 @@ test("generation facade falls back to mock when AgentBackend returns a provider-
 
   const result = await service.generateAndRecord({ mode: "chat", locale: "en", agentCardId: "blog-post", chatInstruction: "Hello" });
 
-  assert.equal(result.provider, "mock");
-  assert.equal(result.usedMock, true);
-  assert.match((records[0] as { errorMessage: string }).errorMessage, /internal runtime output/);
+  assert.equal(result.provider, "agent-backend");
+  assert.equal(result.usedMock, false);
+  assert.equal(result.text, "");
+  assert.equal((records[0] as { errorMessage?: string }).errorMessage, undefined);
+  assert.ok((records[0] as { events: Array<{ eventType: string }> }).events.some((event) => event.eventType === "internal_output_blocked"));
+  assert.equal((records[0] as { events: Array<{ eventType: string }> }).events.some((event) => event.eventType === "agent_backend_runtime_failed"), false);
 });
 
 test("streaming generation falls back to mock without calling provider when AgentBackend fails", async () => {

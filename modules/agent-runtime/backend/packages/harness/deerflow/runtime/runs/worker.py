@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 from deerflow.config.app_config import AppConfig
 from deerflow.runtime.progress import public_progress_payload
-from deerflow.runtime.serialization import serialize
+from deerflow.runtime.serialization import serialize, serialize_lc_object
 from deerflow.runtime.stream_bridge import StreamBridge
 
 from .manager import RunManager, RunRecord
@@ -94,7 +94,8 @@ async def _publish_progress(
     summary: str,
     status: Literal["running", "completed", "failed", "waiting"] = "running",
     next: str | None = None,
-    visibility: Literal["stage", "raw"] = "stage",
+    visibility: Literal["stage", "raw", "public"] = "stage",
+    source: str | None = "agent_runtime",
     event_type: Literal["agent_progress_reported", "agent_intervention_checkpoint"] = "agent_progress_reported",
 ) -> None:
     await bridge.publish(
@@ -109,6 +110,7 @@ async def _publish_progress(
             summary=summary,
             next=next,
             visibility=visibility,
+            source=source,
         ),
     )
 
@@ -170,7 +172,7 @@ async def run_agent(
     *,
     ctx: RunContext,
     agent_factory: Any,
-    graph_input: dict,
+    graph_input: Any,
     config: dict,
     stream_modes: list[str] | None = None,
     stream_subgraphs: bool = False,
@@ -192,6 +194,7 @@ async def run_agent(
     pre_run_checkpoint_id: str | None = None
     pre_run_snapshot: dict[str, Any] | None = None
     snapshot_capture_failed = False
+    saw_interrupt = False
 
     journal = None
 
@@ -260,6 +263,16 @@ async def run_agent(
             next="Preparing the agent runtime.",
             visibility="raw",
         )
+        await _publish_progress(
+            bridge,
+            run_id=run_id,
+            thread_id=thread_id,
+            phase="intake",
+            summary="I have accepted the run and am preparing the agent runtime.",
+            next="Next I will initialize the tools and execution context for this request.",
+            visibility="public",
+            source="agent_public_update",
+        )
 
         # 3. Build the agent
         from langchain_core.runnables import RunnableConfig
@@ -293,6 +306,16 @@ async def run_agent(
             summary="Agent runtime is ready.",
             next="Starting model and tool execution.",
             visibility="raw",
+        )
+        await _publish_progress(
+            bridge,
+            run_id=run_id,
+            thread_id=thread_id,
+            phase="context",
+            summary="I have prepared the runtime and tools for this request.",
+            next="Next I will work through the task and report useful checkpoints.",
+            visibility="public",
+            source="agent_public_update",
         )
 
         # Capture the effective (resolved) model name from the agent's metadata.
@@ -353,6 +376,16 @@ async def run_agent(
                     logger.info("Run %s abort requested — stopping", run_id)
                     break
                 sse_event = _lg_mode_to_sse_event(single_mode)
+                interrupt_payload = _interrupt_payload_from_chunk(chunk)
+                if interrupt_payload is not None:
+                    saw_interrupt = True
+                    await _publish_interrupt_event(
+                        bridge,
+                        run_id=run_id,
+                        thread_id=thread_id,
+                        checkpointer=checkpointer,
+                        interrupts=interrupt_payload,
+                    )
                 await bridge.publish(run_id, sse_event, serialize(chunk, mode=single_mode))
         else:
             # Multiple modes or subgraphs: astream yields tuples
@@ -371,6 +404,16 @@ async def run_agent(
                     continue
 
                 sse_event = _lg_mode_to_sse_event(mode)
+                interrupt_payload = _interrupt_payload_from_chunk(chunk)
+                if interrupt_payload is not None:
+                    saw_interrupt = True
+                    await _publish_interrupt_event(
+                        bridge,
+                        run_id=run_id,
+                        thread_id=thread_id,
+                        checkpointer=checkpointer,
+                        interrupts=interrupt_payload,
+                    )
                 await bridge.publish(run_id, sse_event, serialize(chunk, mode=mode))
 
         # 8. Final status
@@ -408,6 +451,16 @@ async def run_agent(
                     status="completed",
                     summary="Agent run was interrupted by the user.",
                 )
+        elif saw_interrupt:
+            await run_manager.set_status(run_id, RunStatus.interrupted)
+            await _publish_progress(
+                bridge,
+                run_id=run_id,
+                thread_id=thread_id,
+                phase="clarification",
+                status="waiting",
+                summary="Agent run is waiting for clarification.",
+            )
         else:
             await run_manager.set_status(run_id, RunStatus.success)
             await _publish_progress(
@@ -657,6 +710,58 @@ def _lg_mode_to_sse_event(mode: str) -> str:
     """
     # All LG modes map 1:1 to SSE event names — "messages" stays "messages"
     return mode
+
+
+def _interrupt_payload_from_chunk(chunk: Any) -> list[dict[str, Any]] | None:
+    if not isinstance(chunk, dict):
+        return None
+    raw = chunk.get("__interrupt__") or chunk.get("interrupt") or chunk.get("interrupts")
+    if raw is None:
+        return None
+    items = raw if isinstance(raw, (list, tuple)) else [raw]
+    payloads: list[dict[str, Any]] = []
+    for item in items:
+        serialized = serialize_lc_object(item)
+        if isinstance(serialized, dict):
+            payloads.append(serialized)
+        else:
+            payloads.append({"value": serialized})
+    return payloads
+
+
+async def _publish_interrupt_event(
+    bridge: StreamBridge,
+    *,
+    run_id: str,
+    thread_id: str,
+    checkpointer: Any,
+    interrupts: list[dict[str, Any]],
+) -> None:
+    payload: dict[str, Any] = {
+        "type": "agent_interrupt",
+        "run_id": run_id,
+        "thread_id": thread_id,
+        "interrupts": interrupts,
+    }
+    checkpoint_id = await _latest_checkpoint_id(checkpointer, thread_id)
+    if checkpoint_id:
+        payload["checkpoint_id"] = checkpoint_id
+    await bridge.publish(run_id, "interrupt", payload)
+
+
+async def _latest_checkpoint_id(checkpointer: Any, thread_id: str) -> str | None:
+    if checkpointer is None:
+        return None
+    try:
+        config_for_check = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+        ckpt_tuple = await _call_checkpointer_method(checkpointer, "aget_tuple", "get_tuple", config_for_check)
+    except Exception:
+        logger.debug("Could not read latest checkpoint id for interrupt event", exc_info=True)
+        return None
+    ckpt_config = getattr(ckpt_tuple, "config", {}) if ckpt_tuple is not None else {}
+    configurable = ckpt_config.get("configurable", {}) if isinstance(ckpt_config, dict) else {}
+    checkpoint_id = configurable.get("checkpoint_id") if isinstance(configurable, dict) else None
+    return checkpoint_id if isinstance(checkpoint_id, str) and checkpoint_id else None
 
 
 def _extract_human_message(graph_input: dict) -> HumanMessage | None:

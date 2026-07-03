@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
-import type { CanvasNode, CanvasNodeKind, CanvasWorkflow, CanvasWorkflowStage } from "../../../agents/types";
-import { kindLabels, workflowStageLabels } from "./constants";
+import type { CanvasNode, CanvasNodeKind } from "../../../agents/types";
+import { kindLabels } from "./constants";
 import type { CanvasLocale, CanvasTextSelection } from "./types";
 
 export type CanvasMenuState = { screenX: number; screenY: number; canvasX: number; canvasY: number; nodeId?: string; textSelection?: CanvasTextSelection };
@@ -81,39 +81,3 @@ export function CanvasSelectionBar({
   );
 }
 
-export function CanvasSelectedNodeWorkflow({
-  locale,
-  node,
-  workflow,
-  onUpdateNodeWorkflow
-}: {
-  locale: CanvasLocale;
-  node: CanvasNode;
-  workflow: CanvasWorkflow;
-  onUpdateNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflowStage; roles?: string[] }) => Promise<unknown>;
-}) {
-  const nodeWorkflow = readNodeWorkflow(node);
-
-  return (
-    <div className="canvas-selected-workflow" data-testid="canvas-selected-workflow">
-      <label>
-        <span>{locale === "zh" ? "批次步骤" : "Batch step"}</span>
-        <select
-          aria-label="Selected node batch step"
-          value={nodeWorkflow.stage ?? workflow.stage}
-          onChange={(event) => void onUpdateNodeWorkflow(node.id, { stage: event.target.value as CanvasWorkflowStage })}
-        >
-          {workflow.stages.map((stage) => <option key={stage} value={stage}>{workflowStageLabels[stage][locale]}</option>)}
-        </select>
-      </label>
-    </div>
-  );
-}
-
-function readNodeWorkflow(node: CanvasNode): { stage?: CanvasWorkflowStage; roles: string[] } {
-  const metadata = node.metadata as { workflow?: { stage?: CanvasWorkflowStage; roles?: unknown } } | undefined;
-  return {
-    stage: metadata?.workflow?.stage,
-    roles: Array.isArray(metadata?.workflow?.roles) ? metadata.workflow.roles.filter((role): role is string => typeof role === "string") : []
-  };
-}

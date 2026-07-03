@@ -94,27 +94,6 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         if not isinstance(allowed_refs, list):
             return request
         allowed = {value for value in allowed_refs if isinstance(value, str)}
-        research_limit = context.get("facetwrite_research_tool_limit")
-        if isinstance(research_limit, int) and research_limit > 0:
-            completed_research_tools = sum(
-                1
-                for message in request.messages
-                if isinstance(message, ToolMessage) and getattr(message, "name", None) in ("web_search", "web_fetch")
-            )
-            if completed_research_tools >= research_limit:
-                allowed.discard("web_search")
-                allowed.discard("web_fetch")
-        evidence_limit = context.get("facetwrite_evidence_tool_limit")
-        evidence_tools = context.get("facetwrite_evidence_tools")
-        if isinstance(evidence_limit, int) and evidence_limit > 0 and isinstance(evidence_tools, list):
-            evidence_tool_names = {value for value in evidence_tools if isinstance(value, str)}
-            completed_evidence_tools = sum(
-                1
-                for message in request.messages
-                if isinstance(message, ToolMessage) and getattr(message, "name", None) in evidence_tool_names
-            )
-            if completed_evidence_tools >= evidence_limit:
-                allowed.difference_update(evidence_tool_names)
         enabled = tool_state if isinstance(tool_state, dict) else {}
         phase = context.get("facetwrite_plan_phase")
         stage = context.get("facetwrite_plan_stage")
@@ -175,17 +154,14 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         file_delivery_required = context.get("facetwrite_markdown_file_delivery_required") is True
         file_presented = PlanToolChoiceMiddleware._has_tool_result(request, "present_files")
         if file_delivery_required and not file_presented:
-            delivery_tools = [
-                tool for tool in request.tools
-                if PlanToolChoiceMiddleware._tool_name(tool) in {"write_file", "present_files"}
-            ]
             reminder = HumanMessage(
                 content=(
-                    "FacetWrite runtime budget notice: stop evidence gathering now. "
-                    f"Reason: {reason}. First synthesize the complete user deliverable from the gathered evidence, "
+                    "FacetWrite runtime budget notice: the budget is reached or nearly reached. "
+                    f"Reason: {reason}. Prefer synthesizing the complete user deliverable from the gathered evidence, "
                     "including the actual report, summary tables, findings, and references when applicable. "
-                    "Then write that full Markdown deliverable to `/mnt/user-data/outputs/*.md` with write_file, "
-                    "and call present_files for that file. Do not write a delivery note, skill-loading note, "
+                    "If more tool work is still necessary for completion, keep it minimal. When ready, write that full "
+                    "Markdown deliverable to `/mnt/user-data/outputs/*.md` with write_file, and call present_files for "
+                    "that file. Do not write a delivery note, skill-loading note, "
                     "clarification question, or file-save status as the file content. Keep the chat response concise "
                     "only after the complete file is presented."
                 ),
@@ -194,43 +170,29 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             messages = list(request.messages)
             if not any(isinstance(message, HumanMessage) and message.additional_kwargs.get("facetwrite_budget_notice") for message in messages[-3:]):
                 messages.append(reminder)
-            return request.override(messages=messages, tools=delivery_tools, tool_choice=None)
+            return request.override(messages=messages)
 
         reminder = HumanMessage(
             content=(
-                "FacetWrite runtime budget notice: stop calling tools now. "
-                f"Reason: {reason}. Produce the final user-facing answer from the evidence already gathered. "
-                "Include concrete conclusions, any caveats, and source/file references that are already available."
+                "FacetWrite runtime budget notice: the budget is reached or nearly reached. "
+                f"Reason: {reason}. Prefer producing the final user-facing answer from the evidence already gathered. "
+                "If more tool work is still necessary for task completion, keep it minimal. Include concrete conclusions, "
+                "any caveats, and source/file references that are already available."
             ),
             additional_kwargs={"hide_from_ui": True, "facetwrite_budget_notice": True},
         )
         messages = list(request.messages)
         if not any(isinstance(message, HumanMessage) and message.additional_kwargs.get("facetwrite_budget_notice") for message in messages[-3:]):
             messages.append(reminder)
-        return request.override(messages=messages, tools=[], tool_choice=None)
+        return request.override(messages=messages)
 
     @staticmethod
-    def _is_budget_synthesis_request(request: ModelRequest) -> bool:
-        return (
-            not request.tools
-            and any(
-                isinstance(message, HumanMessage)
-                and message.additional_kwargs.get("facetwrite_budget_notice")
-                for message in request.messages[-4:]
-            )
+    def _has_recent_budget_notice(request: ModelRequest) -> bool:
+        return any(
+            isinstance(message, HumanMessage)
+            and message.additional_kwargs.get("facetwrite_budget_notice")
+            for message in request.messages[-4:]
         )
-
-    @staticmethod
-    def _budget_retry_request(request: ModelRequest) -> ModelRequest:
-        messages = list(request.messages)
-        messages.append(HumanMessage(
-            content=(
-                "FacetWrite hard budget guard: the previous response requested tools after the runtime budget was exhausted. "
-                "Do not call tools. Produce the final answer now from the evidence already present in the conversation."
-            ),
-            additional_kwargs={"hide_from_ui": True, "facetwrite_budget_notice": True},
-        ))
-        return request.override(messages=messages, tools=[], tool_choice=None)
 
     @staticmethod
     def _emit_synthesis_event(payload: dict[str, Any]) -> None:
@@ -371,31 +333,22 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
     ) -> ModelCallResult:
         prepared = self._prepare(request)
         result = handler(prepared)
-        if PlanToolChoiceMiddleware._is_budget_synthesis_request(prepared) and (
-            PlanToolChoiceMiddleware._contains_tool_call(result)
-            or PlanToolChoiceMiddleware._contains_internal_runtime_protocol(result)
+        contains_tool_call = PlanToolChoiceMiddleware._contains_tool_call(result)
+        contains_internal_protocol = PlanToolChoiceMiddleware._contains_internal_runtime_protocol(result)
+        if PlanToolChoiceMiddleware._has_recent_budget_notice(prepared) and (
+            contains_tool_call or contains_internal_protocol
         ):
             PlanToolChoiceMiddleware._emit_synthesis_event({
                 "type": "synthesis_gate",
                 "phase": "budget_synthesis",
-                "reason": "model returned tools after budget synthesis notice",
-                "second_handler": True,
-                "entered_second_handler": True,
+                "reason": "model continued after budget notice",
+                "second_handler": False,
+                "entered_second_handler": False,
+                "continued_after_notice": True,
+                "allowed": True,
+                "contains_tool_call": contains_tool_call,
+                "contains_internal_runtime_protocol": contains_internal_protocol,
             })
-            retry = handler(PlanToolChoiceMiddleware._budget_retry_request(prepared))
-            PlanToolChoiceMiddleware._emit_synthesis_event({
-                "type": "synthesis_gate",
-                "phase": "budget_synthesis",
-                "reason": "second handler completed",
-                "second_handler": True,
-                "entered_second_handler": True,
-            })
-            if (
-                PlanToolChoiceMiddleware._contains_tool_call(retry)
-                or PlanToolChoiceMiddleware._contains_internal_runtime_protocol(retry)
-            ):
-                raise RuntimeError("FacetWrite runtime budget exhausted but model continued requesting tools or internal runtime protocol")
-            return retry
         return result
 
     @override
@@ -406,29 +359,20 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
     ) -> ModelCallResult:
         prepared = self._prepare(request)
         result = await handler(prepared)
-        if PlanToolChoiceMiddleware._is_budget_synthesis_request(prepared) and (
-            PlanToolChoiceMiddleware._contains_tool_call(result)
-            or PlanToolChoiceMiddleware._contains_internal_runtime_protocol(result)
+        contains_tool_call = PlanToolChoiceMiddleware._contains_tool_call(result)
+        contains_internal_protocol = PlanToolChoiceMiddleware._contains_internal_runtime_protocol(result)
+        if PlanToolChoiceMiddleware._has_recent_budget_notice(prepared) and (
+            contains_tool_call or contains_internal_protocol
         ):
             PlanToolChoiceMiddleware._emit_synthesis_event({
                 "type": "synthesis_gate",
                 "phase": "budget_synthesis",
-                "reason": "model returned tools after budget synthesis notice",
-                "second_handler": True,
-                "entered_second_handler": True,
+                "reason": "model continued after budget notice",
+                "second_handler": False,
+                "entered_second_handler": False,
+                "continued_after_notice": True,
+                "allowed": True,
+                "contains_tool_call": contains_tool_call,
+                "contains_internal_runtime_protocol": contains_internal_protocol,
             })
-            retry = await handler(PlanToolChoiceMiddleware._budget_retry_request(prepared))
-            PlanToolChoiceMiddleware._emit_synthesis_event({
-                "type": "synthesis_gate",
-                "phase": "budget_synthesis",
-                "reason": "second handler completed",
-                "second_handler": True,
-                "entered_second_handler": True,
-            })
-            if (
-                PlanToolChoiceMiddleware._contains_tool_call(retry)
-                or PlanToolChoiceMiddleware._contains_internal_runtime_protocol(retry)
-            ):
-                raise RuntimeError("FacetWrite runtime budget exhausted but model continued requesting tools or internal runtime protocol")
-            return retry
         return result

@@ -178,7 +178,7 @@ class TestAskClarificationToolSchema:
 class TestClarificationCommandIdempotency:
     """Clarification tool-call retries should not duplicate messages in state."""
 
-    def test_tool_message_carries_structured_clarification_artifact(self, middleware):
+    def test_tool_message_carries_structured_clarification_answer_after_resume(self, middleware):
         request = SimpleNamespace(
             tool_call={
                 "name": "ask_clarification",
@@ -194,19 +194,28 @@ class TestClarificationCommandIdempotency:
                 },
             }
         )
+        interrupted = []
+        middleware._interrupt = lambda payload: interrupted.append(payload) or {  # type: ignore[method-assign]
+            "selectedOptionId": "recent",
+            "answer": "Recent",
+            "option": {"id": "recent", "label": "Recent", "detail": "Focus on recent papers"},
+        }
 
-        command = middleware.wrap_tool_call(request, lambda _req: pytest.fail("handler should not be called"))
-        message = command.update["messages"][0]
+        message = middleware.wrap_tool_call(request, lambda _req: pytest.fail("handler should not be called"))
 
         assert message.name == "ask_clarification"
-        assert message.artifact["type"] == "agent_clarification_requested"
-        assert message.artifact["question"] == "Which scope should I use?"
-        assert message.artifact["context"] == "The selected skill can run narrow or broad research."
-        assert message.artifact["options"] == [
+        assert interrupted[0]["type"] == "agent_clarification_requested"
+        assert interrupted[0]["question"] == "Which scope should I use?"
+        assert interrupted[0]["context"] == "The selected skill can run narrow or broad research."
+        assert interrupted[0]["options"] == [
             {"id": "recent", "label": "Recent", "detail": "Focus on recent papers", "recommended": True},
             {"id": "broad", "label": "Broad", "detail": "Scan the wider literature", "recommended": False},
         ]
-        assert message.additional_kwargs["facetwrite_clarification"] == message.artifact
+        assert message.artifact["type"] == "agent_clarification_answered"
+        assert message.artifact["question"] == "Which scope should I use?"
+        assert message.artifact["selectedOptionId"] == "recent"
+        assert message.artifact["answer"] == "Recent"
+        assert message.additional_kwargs["facetwrite_clarification_answer"] == message.artifact
 
     def test_repeated_tool_call_uses_stable_message_id(self, middleware):
         request = SimpleNamespace(
@@ -221,11 +230,12 @@ class TestClarificationCommandIdempotency:
             }
         )
 
+        middleware._interrupt = lambda _payload: "dev"  # type: ignore[method-assign]
         first = middleware.wrap_tool_call(request, lambda _req: pytest.fail("handler should not be called"))
         second = middleware.wrap_tool_call(request, lambda _req: pytest.fail("handler should not be called"))
 
-        first_message = first.update["messages"][0]
-        second_message = second.update["messages"][0]
+        first_message = first
+        second_message = second
 
         assert first_message.id == "clarification:call-clarify-1"
         assert second_message.id == first_message.id
@@ -248,11 +258,12 @@ class TestClarificationCommandIdempotency:
             }
         )
 
+        middleware._interrupt = lambda _payload: "Use production."  # type: ignore[method-assign]
         first = middleware.wrap_tool_call(request, lambda _req: pytest.fail("handler should not be called"))
         second = middleware.wrap_tool_call(request, lambda _req: pytest.fail("handler should not be called"))
 
-        first_message = first.update["messages"][0]
-        second_message = second.update["messages"][0]
+        first_message = first
+        second_message = second
 
         assert first_message.id.startswith("clarification:")
         assert second_message.id == first_message.id

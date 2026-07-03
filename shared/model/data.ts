@@ -14,7 +14,7 @@ function model(provider: string, id: string, group: string, extra: Partial<Model
 const providerModels: Record<string, ModelReference[]> = {
   cherryin: [],
   silicon: [
-    model("silicon", "deepseek-ai/DeepSeek-V3.2", "deepseek-ai"),
+    model("silicon", "deepseek-ai/DeepSeek-V3.2", "deepseek-ai", { supportsThinking: true }),
     model("silicon", "Qwen/Qwen3-8B", "Qwen"),
     model("silicon", "BAAI/bge-m3", "BAAI", { modelType: "embedding" })
   ],
@@ -24,7 +24,7 @@ const providerModels: Record<string, ModelReference[]> = {
     model("aihubmix", "gpt-5-nano", "OpenAI"),
     model("aihubmix", "gpt-4.1", "OpenAI"),
     model("aihubmix", "DeepSeek-V3", "DeepSeek"),
-    model("aihubmix", "DeepSeek-R1", "DeepSeek"),
+    model("aihubmix", "DeepSeek-R1", "DeepSeek", { supportsThinking: true }),
     model("aihubmix", "claude-sonnet-4-20250514", "Claude"),
     model("aihubmix", "gemini-2.5-pro", "Gemini")
   ],
@@ -40,13 +40,13 @@ const providerModels: Record<string, ModelReference[]> = {
     model("zai", "glm-4.5-air", "GLM")
   ],
   deepseek: [
-    model("deepseek", "deepseek-v4-flash", "DeepSeek"),
-    model("deepseek", "deepseek-v4-pro", "DeepSeek")
+    model("deepseek", "deepseek-v4-flash", "DeepSeek", { supportsThinking: true }),
+    model("deepseek", "deepseek-v4-pro", "DeepSeek", { supportsThinking: true })
   ],
   alayanew: [],
   dmxapi: [
     model("dmxapi", "deepseek-chat", "DeepSeek"),
-    model("dmxapi", "deepseek-reasoner", "DeepSeek"),
+    model("dmxapi", "deepseek-reasoner", "DeepSeek", { supportsThinking: true }),
     model("dmxapi", "gpt-4o", "OpenAI")
   ],
   aionly: [],
@@ -54,12 +54,12 @@ const providerModels: Record<string, ModelReference[]> = {
     model("burncloud", "gpt-5", "OpenAI"),
     model("burncloud", "gemini-2.5-pro", "Gemini"),
     model("burncloud", "deepseek-chat", "DeepSeek"),
-    model("burncloud", "deepseek-reasoner", "DeepSeek")
+    model("burncloud", "deepseek-reasoner", "DeepSeek", { supportsThinking: true })
   ],
   tokenflux: [],
   "302ai": [
     model("302ai", "deepseek-chat", "DeepSeek"),
-    model("302ai", "deepseek-reasoner", "DeepSeek"),
+    model("302ai", "deepseek-reasoner", "DeepSeek", { supportsThinking: true }),
     model("302ai", "gpt-4.1", "OpenAI"),
     model("302ai", "o3", "OpenAI"),
     model("302ai", "qwen3-235b-a22b", "Qwen"),
@@ -69,11 +69,11 @@ const providerModels: Record<string, ModelReference[]> = {
   lanyun: [],
   ph8: [
     model("ph8", "deepseek-v3-241226", "DeepSeek"),
-    model("ph8", "deepseek-r1-250120", "DeepSeek")
+    model("ph8", "deepseek-r1-250120", "DeepSeek", { supportsThinking: true })
   ],
   sophnet: [],
   ppio: [
-    model("ppio", "deepseek/deepseek-v3.2", "deepseek"),
+    model("ppio", "deepseek/deepseek-v3.2", "deepseek", { supportsThinking: true }),
     model("ppio", "minimax/minimax-m2", "minimaxai"),
     model("ppio", "qwen/qwen3-235b-a22b-instruct-2507", "qwen"),
     model("ppio", "qwen/qwen3-vl-235b-a22b-instruct", "qwen", { modelType: "vision" }),
@@ -87,7 +87,7 @@ const providerModels: Record<string, ModelReference[]> = {
     model("dashscope", "kimi-k2.5", "Kimi", { name: "Kimi K2.5" }),
     model("dashscope", "glm-5", "GLM", { name: "GLM-5" }),
     model("dashscope", "MiniMax/MiniMax-M2.5", "MiniMax", { name: "MiniMax M2.5" }),
-    model("dashscope", "deepseek-v3.2", "DeepSeek", { name: "DeepSeek V3.2" })
+    model("dashscope", "deepseek-v3.2", "DeepSeek", { name: "DeepSeek V3.2", supportsThinking: true })
   ],
   minimax: [model("minimax", "abab6.5s-chat", "MiniMax"), model("minimax", "MiniMax-M2", "MiniMax")],
   "minimax-global": [model("minimax-global", "MiniMax-M2", "MiniMax")],
@@ -128,9 +128,9 @@ const providerModels: Record<string, ModelReference[]> = {
     model("doubao", "doubao-1-5-pro-32k-250115", "Doubao-1.5-pro", { name: "doubao-1.5-pro-32k" }),
     model("doubao", "doubao-1-5-pro-32k-character-250228", "Doubao-1.5-pro", { name: "doubao-1.5-pro-32k-character" }),
     model("doubao", "doubao-1-5-pro-256k-250115", "Doubao-1.5-pro", { name: "Doubao-1.5-pro-256k" }),
-    model("doubao", "deepseek-r1-250120", "DeepSeek", { name: "DeepSeek-R1" }),
-    model("doubao", "deepseek-r1-distill-qwen-32b-250120", "DeepSeek", { name: "DeepSeek-R1-Distill-Qwen-32B" }),
-    model("doubao", "deepseek-r1-distill-qwen-7b-250120", "DeepSeek", { name: "DeepSeek-R1-Distill-Qwen-7B" }),
+    model("doubao", "deepseek-r1-250120", "DeepSeek", { name: "DeepSeek-R1", supportsThinking: true }),
+    model("doubao", "deepseek-r1-distill-qwen-32b-250120", "DeepSeek", { name: "DeepSeek-R1-Distill-Qwen-32B", supportsThinking: true }),
+    model("doubao", "deepseek-r1-distill-qwen-7b-250120", "DeepSeek", { name: "DeepSeek-R1-Distill-Qwen-7B", supportsThinking: true }),
     model("doubao", "deepseek-v3-250324", "DeepSeek", { name: "DeepSeek-V3" })
   ],
   baichuan: [],

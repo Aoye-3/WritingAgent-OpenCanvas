@@ -58,13 +58,11 @@ test("workspace uses independent dual-layer Briefs and moves model selection int
 });
 
 test("composer exposes a three-state DeepSeek thinking selector", async () => {
-  const collaborationSource = await readFile("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
+  const collaborationSource = await readFile("src/features/workspace/components/AIComposer.tsx", "utf8");
 
   assert.match(collaborationSource, /type ThinkingChoice = "disabled" \| "high" \| "max"/);
   assert.match(collaborationSource, /function ThinkingModeButton/);
-  assert.match(collaborationSource, /value: "disabled"/);
-  assert.match(collaborationSource, /value: "high"/);
-  assert.match(collaborationSource, /value: "max"/);
+  assert.match(collaborationSource, /\["disabled", "high", "max"\]/);
   assert.match(collaborationSource, /thinkingOverridesFromChoice/);
   assert.doesNotMatch(collaborationSource, /setThinkEnabled/);
 });

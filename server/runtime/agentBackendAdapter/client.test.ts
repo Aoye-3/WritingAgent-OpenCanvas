@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { defaultAgentSettings, getAgentCard } from "../../agentCards.js";
-import { buildRunRequest, listAgentBackendRunEvents, requestAgentBackendRunIntervention, runAgentBackendAgent } from "./client.js";
+import { buildResumeRunRequest, buildRunRequest, listAgentBackendRunEvents, requestAgentBackendRunIntervention, resumeAgentBackendRun, runAgentBackendAgent } from "./client.js";
 
 test("builds LangGraph-compatible AgentBackend run request", () => {
   const card = getAgentCard("summary");
@@ -63,6 +63,87 @@ test("builds LangGraph-compatible AgentBackend run request", () => {
   assert.equal(request.metadata.subagent.name, "facetwrite-chat-agent");
   assert.deepEqual(request.stream_mode, ["messages-tuple", "custom", "values"]);
   assert.equal(request.multitask_strategy, "interrupt");
+});
+
+test("builds AgentBackend resume run request with Command resume payload", () => {
+  const card = getAgentCard("summary");
+  const settings = defaultAgentSettings(card);
+  const request = buildResumeRunRequest({
+    threadId: "runtime_thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings,
+    messages: [{ role: "user", content: "Ignored on resume" }],
+    prompt: "Ignored on resume",
+    resume: { answer: "Use recent sources" },
+    resumeOfRunId: "runtime_run_1",
+    interruptId: "interrupt_1",
+    checkpointId: "checkpoint_1"
+  }, {
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8000",
+    assistantId: "lead_agent"
+  });
+
+  assert.equal(request.input, undefined);
+  assert.deepEqual(request.command, { resume: { answer: "Use recent sources" } });
+  assert.equal(request.metadata.resumeOfRunId, "runtime_run_1");
+  assert.equal(request.metadata.interruptId, "interrupt_1");
+  assert.equal(request.metadata.checkpointId, "checkpoint_1");
+  assert.equal(request.checkpoint_id, "checkpoint_1");
+});
+
+test("posts AgentBackend resume run through authenticated runtime API", async () => {
+  const body = [
+    'event: messages\ndata: {"content":"Resumed"}\n\n',
+    'event: end\ndata: null\n\n'
+  ].join("");
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+      controller.close();
+    }
+  });
+  let posted: Record<string, unknown> | undefined;
+  const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) return Response.json({ needs_setup: false });
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, { headers });
+    }
+    posted = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    return new Response(stream, { status: 200 }) as Response;
+  };
+
+  const result = await resumeAgentBackendRun({
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    config: {
+      enabled: true,
+      baseUrl: "http://AgentBackend.local",
+      assistantId: "lead_agent",
+      auth: {
+        email: "admin@example.com",
+        password: "strong-password",
+        autoSetup: false,
+        timeoutMs: 5000
+      }
+    },
+    threadId: "runtime_thread_1",
+    agentCard: getAgentCard("summary"),
+    messages: [{ role: "user", content: "Resume" }],
+    prompt: "Resume",
+    resume: { answer: "Use recent sources" },
+    fetchImpl
+  });
+
+  assert.equal(result.text, "Resumed");
+  assert.deepEqual(posted?.command, { resume: { answer: "Use recent sources" } });
+  assert.equal("input" in (posted ?? {}), false);
 });
 
 test("requests AgentBackend run intervention through authenticated runtime API", async () => {
@@ -181,6 +262,68 @@ test("does not expose AgentBackend reasoning kwargs as assistant stream text", a
 
   assert.equal(result.text, "Visible answer");
   assert.equal(result.text.includes("private thinking"), false);
+});
+
+test("maps native runtime interrupt to agent clarification event with resume metadata", async () => {
+  const body = [
+    'event: metadata\ndata: {"run_id":"runtime_run_1","thread_id":"thread_1"}\n\n',
+    'event: interrupt\ndata: {"type":"agent_interrupt","run_id":"runtime_run_1","thread_id":"thread_1","checkpoint_id":"checkpoint_1","interrupts":[{"id":"interrupt_1","value":{"type":"agent_clarification_requested","question":"Which scope?","options":[{"id":"recent","label":"Recent","detail":"Focus on recent papers"},{"id":"broad","label":"Broad","detail":"Scan the full field"}]}}]}\n\n',
+    'event: end\ndata: null\n\n'
+  ].join("");
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+      controller.close();
+    }
+  });
+  const events: unknown[] = [];
+  const fetchImpl = async (url: string | URL | Request) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) return Response.json({ needs_setup: false });
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, { headers });
+    }
+    return new Response(stream, { status: 200 }) as Response;
+  };
+
+  const result = await runAgentBackendAgent({
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    config: {
+      enabled: true,
+      baseUrl: "http://AgentBackend.local",
+      assistantId: "lead_agent",
+      auth: {
+        email: "admin@example.com",
+        password: "strong-password",
+        autoSetup: false,
+        timeoutMs: 5000
+      }
+    },
+    threadId: "thread_1",
+    agentCard: getAgentCard("summary"),
+    messages: [{ role: "user", content: "Clarify this" }],
+    prompt: "Clarify this",
+    onToolEvent: (event) => events.push(event),
+    fetchImpl
+  });
+
+  assert.equal(result.finishReason, "clarification_required");
+  assert.equal(result.events.length, 1);
+  assert.deepEqual(events, result.events);
+  assert.equal(result.events[0]?.eventType, "agent_backend_agent_clarification_requested");
+  assert.equal(result.events[0]?.payload.question, "Which scope?");
+  assert.deepEqual(result.events[0]?.payload.resumeContext, {
+    runtimeResume: {
+      runtimeThreadId: "thread_1",
+      runtimeRunId: "runtime_run_1",
+      interruptId: "interrupt_1",
+      checkpointId: "checkpoint_1"
+    }
+  });
 });
 
 test("reads AgentBackend stream text and task events", async () => {
@@ -431,6 +574,38 @@ test("surfaces public agent progress custom events with display fields intact", 
     interventionHint: "Add source preferences now.",
     visibility: "stage",
     source: "agent_runtime",
+    createdAt: "2026-06-14T00:00:00.000Z"
+  });
+});
+
+test("surfaces agent_public_update progress without creating tool events", async () => {
+  const signals: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+  const toolEvents: unknown[] = [];
+  const body = [
+    'event: custom\ndata: {"type":"agent_progress_reported","runId":"run_public","threadId":"thread_1","phase":"research","status":"running","summary":"I split the work into two checks.","next":"Next I will verify the frontend stream.","evidence":[{"kind":"subagent","label":"frontend explorer","ref":"agent:trace"}],"visibility":"public","source":"agent_public_update","createdAt":"2026-06-14T00:00:00.000Z","prompt":"hidden"}\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"Done"}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body, {
+    onRuntimeSignal: (signal) => signals.push(signal),
+    onToolEvent: (event) => toolEvents.push(event)
+  });
+
+  assert.equal(result.text, "Done");
+  assert.equal(toolEvents.length, 0);
+  assert.equal(result.events.length, 0);
+  assert.equal(signals.length, 1);
+  assert.deepEqual(signals[0]?.payload, {
+    type: "agent_progress_reported",
+    runId: "run_public",
+    threadId: "thread_1",
+    phase: "research",
+    status: "running",
+    summary: "I split the work into two checks.",
+    next: "Next I will verify the frontend stream.",
+    evidence: [{ kind: "subagent", label: "frontend explorer", ref: "agent:trace" }],
+    visibility: "public",
+    source: "agent_public_update",
     createdAt: "2026-06-14T00:00:00.000Z"
   });
 });

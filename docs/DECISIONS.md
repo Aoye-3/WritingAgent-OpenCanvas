@@ -1,5 +1,45 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-03: Agent Clarification Uses LangGraph Checkpoint Resume
+
+Decision: Treat Agent Runtime `ask_clarification` as a native LangGraph interrupt and resume the same graph thread with `Command(resume=...)` after the user answers. The runtime middleware calls `interrupt(structured_payload)` instead of ending the graph with `Command(update, goto=END)`. FacetWrite persists the structured clarification in `agent_clarifications`, stores only safe runtime resume metadata in `resume_context_json`, and maps the answer back through the AgentBackend resume path instead of turning it into a new ordinary chat instruction.
+
+Reason: Ending the run during clarification forced the next user answer to start a fresh run. That lost the LangGraph checkpoint, made retry behavior hard to reason about, could repeat intake/clarification work, and increased the chance that progressive Canvas delivery or node state would diverge from the original task. Native checkpoint resume keeps the model/tool/Canvas flow on the same runtime thread while preserving the existing FacetWrite UI semantics.
+
+Impact: Gateway run creation must honor `body.command.resume`; ordinary input uses `input`, resume uses `Command(resume=...)`. The Node adapter maps native runtime interrupts into the existing `agent_backend_agent_clarification_requested` event and persists the clarification as before. Answering an Agent clarification must call `resumeAgentBackendRun` when runtime resume metadata exists; missing resume metadata is a recoverable error, not a silent fallback to asking again. Plan clarification, Plan approval, and Canvas write approval remain product-owned FacetWrite flows and do not enter Runtime checkpoint resume. Blocking clarification must not commit final Canvas delivery, and any side effects around an interrupt must be after resume or explicitly idempotent.
+
+## 2026-07-03: Agent Public Updates Are Sanitized Progress Events
+
+Decision: Use the existing Runtime custom `agent_progress_reported` and frontend `progress_event` path for public Agent progress narration. Public updates are identified by `visibility:"public"` and `source:"agent_public_update"`, not a new SSE event type. They may include `summary`, optional `next`, and bounded `evidence` records. Runtime keeps raw lifecycle telemetry as `visibility:"raw"` and may additionally emit public narration at real execution boundaries.
+
+Reason: Users need natural "I have done X; next I will do Y" work updates without exposing hidden chain-of-thought, prompts, raw tool arguments, raw outputs, or replayed messages. Reusing the existing progress path preserves compatibility with `status`, `tool_event`, `timeline_event`, and raw run logs while making the public-vs-raw boundary explicit.
+
+Impact: Any public progress source must pass the Runtime, server, and frontend sanitizers. Frontend `generationClient` normalizes `progress_event` payloads before appending progress segments, and `AICollaborationDrawer` renders evidence as short chips. Tests must cover Python public payload sanitization, adapter signal mapping, frontend SSE multiline parsing, invalid or sensitive progress dropping, and raw/run-trace separation. Do not promote `run.end`, tool outputs, `reasoning_content`, `messages`, or `tool_calls.arguments` into public progress.
+
+## 2026-07-02: Runtime Budget And Internal Output Are Completion Signals, Not Hard Stops
+
+Decision: Treat runtime budget gates as advisory synthesis signals and internal-output blocks as redaction diagnostics. `synthesis_gate`, model-call waiting, retry, and other ordinary `run_timeline_decision` events with `status:"waiting"` must not imply pending user clarification. A valid Agent Runtime clarification requires a structured `agent_backend_agent_clarification_requested` payload with a question and at least two options, and later substantive progress clears the waiting interpretation. `internal_output_blocked` removes unsafe visible text but does not automatically create `agent_backend_runtime_failed`; completion still depends on final text, durable Canvas/file/Artifact delivery, valid clarification, or a real runtime error.
+
+Reason: The previous hard-stop behavior made budget notices and internal-output redaction look like broken task chains. Budget gates were intended to nudge synthesis, but downstream completion logic treated generic waiting timeline entries as user clarification and treated redacted internal text as runtime failure. That caused runs to stall with "Answer the pending clarification before completion" even when the Agent was only synthesizing, waiting for a model response, or had already produced Canvas/file delivery evidence.
+
+Impact: `completionEvaluator` owns this distinction. Tests should cover ordinary waiting timeline entries, stale clarification followed by tool/Canvas progress, budget synthesis with final text, empty assistant text with durable delivery, and internal-output blocking without runtime failure. Frontend code should render choice cards from persisted valid clarifications first and use timeline inference only as fallback. Runtime middleware may continue emitting budget notices and telemetry, but it must not clear tools, force a second model pass, or throw solely because the model continues after a notice.
+
+## 2026-07-02: Composer Thinking UI Uses Shared Model Capability Detection
+
+Decision: Home and Workspace chat inputs share `AIComposer` as the only maintained composer surface for per-message thinking controls. The composer must decide whether to render the thinking button through the shared model capability helper, not by provider id alone and not by the model list group label. The visible trigger uses the `thinking-mode-button` CSS contract; `thinking-mode-menu` is reserved for the popover menu.
+
+Reason: A frontend cleanup moved Home and Workspace onto the shared composer, but old tests still inspected dead drawer markup and missed a class-name regression. The trigger was rendered with a menu class, while the CSS positioned that class as an absolute popover. Separately, some configured DeepSeek-compatible reasoning models can be grouped as `reasoning` without an explicit persisted `supportsThinking:true` flag, so strict flag-only checks hide the thinking UI even when the model id is recognizable.
+
+Impact: `shared/modelCapabilities.ts` is the cross-layer fallback for known model thinking support. `AIComposer` is the regression-test target for thinking UI markup, model selection, Skill controls, and Plan controls. Tests must not use obsolete `AICollaborationDrawer` form remnants as evidence that the current composer UI works. Future thinking UI changes need both capability tests and rendered-component coverage.
+
+## 2026-07-02: Canvas Stage Is Compatibility Data, Canvas Mode Drives Delivery Strategy
+
+Decision: Retire Canvas batch Stage from the main user and runtime workflow. The top-toolbar Canvas Mode remains the user-facing strategy selector for batch delivery and diagram-oriented modes. The frontend must not render the bottom batch-step control or ordinary node stage badges. New Canvas nodes and suggestion-converted nodes must not write `metadata.workflow.stage`. Generation context may include Canvas Mode and connected Role perspectives, but must not include workflow or node stage and must not filter nodes by stage.
+
+Reason: Stage began as a coarse delivery/context categorization, but it became weak signal once Canvas Mode and Role nodes provided more explicit strategy and targeted perspective controls. Keeping Stage visible attached stale terms such as inspiration/research/writing to nodes, encouraged users and agents to treat those labels as meaningful context, and could hide useful nodes from runtime context when historical stage metadata no longer matched the current task.
+
+Impact: `canvas_workflows.stage/stages`, `CanvasWorkflowStage`, and compatibility routes remain so older local data and callers do not break. Existing stored `metadata.workflow.stage` values are not migrated away in this pass, but they are inert: hidden from node UI, stripped from new writes, omitted from generation context, and ignored by `buildCanvasWorkflowContext`. Role influence continues through `role` nodes plus directed `Role -> content` edges. Future delivery strategies should extend `CanvasWorkflowMode` or introduce explicit nodes/edges, not revive node-level Stage badges.
+
 ## 2026-06-30: Run Trace Is Safe Execution Narration, Not Chain-Of-Thought
 
 Decision: Treat visible Thinking/Run Trace UI as a public execution narration layer, not as model chain-of-thought. Low-level `tool_event` records remain audit data. User-facing trace entries should be safe `timeline_event` summaries that aggregate repetitive tool lifecycle events into readable milestones, decisions, and next-step narration.
@@ -157,6 +197,8 @@ Reason: FigJam-style visual annotations must not silently affect Agent context, 
 Impact: The floating toolbar can create saved visual objects, but Agent selection actions remain proposal-oriented and Agent-originated content writes continue through the existing approval boundary.
 
 ## 2026-06-15: Canvas Mode Is The User-Facing Workflow Layer
+Status: Superseded for Stage behavior by "2026-07-02: Canvas Stage Is Compatibility Data, Canvas Mode Drives Delivery Strategy".
+
 Decision: Add `CanvasWorkflowMode` and expose `batch_delivery` as the first Canvas Mode. The existing writing stage remains as mode-specific batch-step state instead of the primary workspace concept.
 
 Reason: The product centers on text nodes, batch delivery, and the canvas. Presenting inspiration/research/writing as the top-level control made the workspace look like a linear writing-stage product, while the stage data is still valuable for context filtering and node inheritance.
@@ -171,6 +213,8 @@ Reason: A FacetWrite request reached AgentBackend `/api/runs/stream` successfull
 Impact: `modules/agent-runtime/config.yaml` and `config.example.yaml` must stay aligned with `facetwrite_bridge.py`, `server/tools/catalog.ts`, and frontend tool types. `server/agentRuntimeConfig.test.ts` loads both YAML files and verifies every configured `tools[*].use` target resolves to a real exported LangChain tool. Runtime/model failures remain visible failures and must not be converted into fake Canvas delivery nodes or Mock assistant output.
 
 ## 2026-05-30: Canvas Role Controls Are Function Nodes
+Status: Superseded for Stage filtering and node-stage preservation by "2026-07-02: Canvas Stage Is Compatibility Data, Canvas Mode Drives Delivery Strategy".
+
 Decision: Model Canvas Workflow Roles as first-class `role` Canvas nodes that apply only through directed `Role -> content` edges. Stage remains a single project/thread state and does not become a normal duplicable node.
 
 Reason: Role is an influence relationship, not another property to pile onto every document, note, and reference node. Keeping Role as a function node preserves Canvas spatial reuse, drag/resize/delete/undo behavior, and prevents ordinary content nodes from becoming large containers for workflow controls.
@@ -178,6 +222,8 @@ Reason: Role is an influence relationship, not another property to pile onto eve
 Impact: Role data lives in `canvas_nodes.metadata.workflowRole`; Role effect is computed from `canvas_edges`; suggestions are anchored to the Role node while retaining `targetNodeId`; Agent context filtering reads connected Role prompts only after chain and stage filtering. New Workflow control capabilities should follow the same nodeized/relationship-driven bias when they need targeted influence, rather than adding more controls to content-node UI. Legacy `metadata.workflow.roles` is migrated into Role nodes and edges, then removed from content node metadata while preserving node stage.
 
 ## 2026-05-28: Canvas Workflow Is A Separate Layer Over Canvas V2
+Status: Superseded for Stage filtering and node-stage metadata by "2026-07-02: Canvas Stage Is Compatibility Data, Canvas Mode Drives Delivery Strategy".
+
 Decision: Add Canvas Workflow as a project-level writing-stage, node-stage, Role, and suggestion layer over the existing Canvas V2 spatial model, without adding new node kinds in v1.
 
 Reason: The Canvas needs writing-process awareness so Agents can work on the relevant chain, stage, and Role perspective without reading the entire board. Keeping Workflow separate from React Flow spatial behavior prevents the Canvas UI, Agent orchestration, and suggestion lifecycle from becoming one tangled module.

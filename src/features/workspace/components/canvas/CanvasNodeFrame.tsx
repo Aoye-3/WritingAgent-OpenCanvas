@@ -1,8 +1,8 @@
 import { Handle, Position, useReactFlow, useViewport, type NodeProps } from "@xyflow/react";
 import { flushSync } from "react-dom";
-import type { CanvasNode, CanvasWorkflowRole, CanvasWorkflowStage } from "../../../agents/types";
+import type { CanvasNode, CanvasWorkflowRole } from "../../../agents/types";
 import { TrashIcon } from "../../../../shared/icons";
-import { MIN_NODE_SIZE, kindLabels, workflowStageLabels } from "./constants";
+import { MIN_NODE_SIZE, kindLabels } from "./constants";
 import { computeResize, isKnownCanvasKind, readDiagramMetadata, readDimension, withManualCanvasSize } from "./nodeLayout";
 import { CanvasNodeRenderer } from "./renderers/CanvasNodeRenderer";
 import type { CanvasFlowNode, CanvasLocale, ResizeHandle } from "./types";
@@ -84,7 +84,6 @@ export function CanvasNodeFrame({ data, selected }: NodeProps<CanvasFlowNode>) {
       <NodeLinkPort />
       {selected ? <ResizeFrame onResizeStart={startResize} /> : null}
       <CanvasNodeHeader locale={locale} node={node} />
-      <CanvasNodeWorkflowBadges locale={locale} node={node} />
       <CanvasNodeRenderer
         agentCardId={data.agentCardId}
         isSelected={Boolean(selected)}
@@ -163,18 +162,6 @@ function CanvasNodeHeader({
   );
 }
 
-function CanvasNodeWorkflowBadges({ locale, node }: { locale: CanvasLocale; node: CanvasNode }) {
-  if (node.kind === "role") return null;
-  const workflow = readNodeWorkflow(node);
-  const stageLabel = workflow.stage ? workflowStageLabels[workflow.stage][locale] : undefined;
-  if (!stageLabel) return null;
-  return (
-    <div className="canvas-node-workflow-badges nodrag">
-      {stageLabel ? <span className="canvas-node-stage-badge">{stageLabel}</span> : null}
-    </div>
-  );
-}
-
 function CanvasNodeSuggestions({
   locale,
   roles,
@@ -209,10 +196,3 @@ function CanvasNodeSuggestions({
   );
 }
 
-function readNodeWorkflow(node: CanvasNode): { stage?: CanvasWorkflowStage; roles: string[] } {
-  const metadata = node.metadata as { workflow?: { stage?: CanvasWorkflowStage; roles?: unknown } } | undefined;
-  return {
-    stage: metadata?.workflow?.stage,
-    roles: Array.isArray(metadata?.workflow?.roles) ? metadata.workflow.roles.filter((role): role is string => typeof role === "string") : []
-  };
-}

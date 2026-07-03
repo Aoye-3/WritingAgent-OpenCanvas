@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
 import { Topbar } from "../../shared/Topbar";
@@ -15,8 +15,6 @@ import type { CanvasTool } from "./components/canvas/toolState";
 import type { CanvasClipboardPayload } from "../../../shared/canvasClipboard";
 import type { CanvasMindChainContext } from "../../../shared/canvasMindChain";
 import type { AgentBackendRuntimeStatus, ConfiguredModelApiSummary } from "../settings/types";
-import { createSkillFolder, deleteSkillFolder, fetchSkillCatalogState, moveSkillToFolder, renameSkillFolder } from "../agents/agentClient";
-import { isSkillRefSelected } from "./components/SkillFolderPicker";
 import { ClaimReviewPanel } from "./claims/ClaimReviewPanel";
 import { useClaimReview } from "./claims/useClaimReview";
 
@@ -52,6 +50,11 @@ type WorkspaceViewProps = {
   projectThreads: StoredThread[];
   sessionBusy: boolean;
   sessionError: string;
+  disabledSkillRefs: string[];
+  enabledSkillRefs: string[];
+  skillCatalog: SkillCatalogItem[];
+  skillFolders: SkillFolderItem[];
+  skillCatalogStatus: "idle" | "loading" | "ready" | "error";
   onSelectModel: (configuredModelApiId: string) => Promise<void>;
   onCreateConversation: () => Promise<void>;
   onResetContext: () => Promise<void>;
@@ -77,6 +80,13 @@ type WorkspaceViewProps = {
   onGoHome: () => void;
   onOpenSettings: () => void;
   onSelectAgent: (agentCardId: string) => void;
+  onRequestSkillCatalog: () => void;
+  onCreateSkillFolder: (folderId: string) => Promise<void>;
+  onDeleteSkillFolder: (folderId: string) => Promise<void>;
+  onMoveSkillToFolder: (skill: SkillCatalogItem, folderId: string) => Promise<void>;
+  onRenameSkillFolder: (folderId: string, nextFolderId: string) => Promise<void>;
+  onSkillOverridesConsumed: () => void;
+  onToggleSkill: (skill: SkillCatalogItem, enabled: boolean) => void;
   onProjectTitleChange: (title: string) => Promise<void>;
   onApplyCanvasWriteFromMessage: (text: string) => Promise<void>;
   onRejectCanvasWriteRequest: (requestId: string) => Promise<void>;
@@ -88,7 +98,6 @@ type WorkspaceViewProps = {
   onUpdateCanvasNodePositions: (updates: CanvasNodePositionUpdate[]) => Promise<unknown>;
   onUpdateCanvasObject: (objectId: string, patch: CanvasObjectPatch) => Promise<unknown>;
   onUploadCanvasAsset: (input: { fileName: string; fileBase64: string }) => Promise<unknown>;
-  onUpdateCanvasNodeWorkflow: (nodeId: string, patch: { stage?: CanvasWorkflow["stage"]; roles?: string[] }) => Promise<unknown>;
   onUpdateCanvasWorkflow: (patch: { mode?: CanvasWorkflow["mode"]; stage?: CanvasWorkflow["stage"]; roles?: CanvasWorkflow["roles"] }) => Promise<unknown>;
   onUndoCanvas: () => Promise<void>;
   onPlansChanged: () => Promise<void>;
@@ -132,6 +141,11 @@ export function WorkspaceView({
   projectThreads,
   sessionBusy,
   sessionError,
+  disabledSkillRefs,
+  enabledSkillRefs,
+  skillCatalog,
+  skillFolders,
+  skillCatalogStatus,
   onSelectModel,
     onCreateConversation,
     onResetContext,
@@ -155,6 +169,13 @@ export function WorkspaceView({
   onGoHome,
   onOpenSettings,
   onSelectAgent,
+  onRequestSkillCatalog,
+  onCreateSkillFolder,
+  onDeleteSkillFolder,
+  onMoveSkillToFolder,
+  onRenameSkillFolder,
+  onSkillOverridesConsumed,
+  onToggleSkill,
   onProjectTitleChange,
   onApplyCanvasWriteFromMessage,
   onRejectCanvasWriteRequest,
@@ -170,7 +191,6 @@ export function WorkspaceView({
   onUpdateCanvasNodePositions,
   onUpdateCanvasObject,
   onUploadCanvasAsset,
-  onUpdateCanvasNodeWorkflow,
   onUpdateCanvasWorkflow,
   onUndoCanvas,
   promptPreview,
@@ -188,11 +208,6 @@ export function WorkspaceView({
   const [composerDraft, setComposerDraft] = useState("");
   const [mindChainContext, setMindChainContext] = useState<CanvasMindChainContext | null>(null);
   const [activeCanvasTool, setActiveCanvasTool] = useState<CanvasTool>("select");
-  const [skillCatalog, setSkillCatalog] = useState<SkillCatalogItem[]>([]);
-  const [skillFolders, setSkillFolders] = useState<SkillFolderItem[]>([]);
-  const [skillCatalogStatus, setSkillCatalogStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [enabledSkillRefs, setEnabledSkillRefs] = useState<string[]>([]);
-  const [disabledSkillRefs, setDisabledSkillRefs] = useState<string[]>([]);
   const focusedPlanProjectionRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
@@ -223,66 +238,6 @@ export function WorkspaceView({
   const workspaceChromeStyle = {
     "--ai-drawer-width": `${rightDrawerWidth}px`
   } as CSSProperties;
-
-  const requestSkillCatalog = useCallback(() => {
-    if (skillCatalogStatus === "loading" || skillCatalogStatus === "ready") return;
-    setSkillCatalogStatus("loading");
-    fetchSkillCatalogState()
-      .then((catalog) => {
-        setSkillCatalog(catalog.skills);
-        setSkillFolders(catalog.folders);
-        setSkillCatalogStatus("ready");
-      })
-      .catch(() => {
-        setSkillCatalog([]);
-        setSkillFolders([]);
-        setSkillCatalogStatus("error");
-      });
-  }, [skillCatalogStatus]);
-
-  const applySkillCatalogState = useCallback((catalog: { skills: SkillCatalogItem[]; folders: SkillFolderItem[] }) => {
-    setSkillCatalog(catalog.skills);
-    setSkillFolders(catalog.folders);
-    setSkillCatalogStatus("ready");
-  }, []);
-
-  const handleCreateSkillFolder = useCallback(async (folderId: string) => {
-    applySkillCatalogState(await createSkillFolder(folderId));
-  }, [applySkillCatalogState]);
-
-  const handleRenameSkillFolder = useCallback(async (folderId: string, nextFolderId: string) => {
-    applySkillCatalogState(await renameSkillFolder(folderId, nextFolderId));
-  }, [applySkillCatalogState]);
-
-  const handleDeleteSkillFolder = useCallback(async (folderId: string) => {
-    applySkillCatalogState(await deleteSkillFolder(folderId));
-  }, [applySkillCatalogState]);
-
-  const handleMoveSkillToFolder = useCallback(async (skill: SkillCatalogItem, folderId: string) => {
-    applySkillCatalogState(await moveSkillToFolder(skill.name, folderId));
-  }, [applySkillCatalogState]);
-
-  const clearSkillOverrides = useCallback(() => {
-    setEnabledSkillRefs([]);
-    setDisabledSkillRefs([]);
-  }, []);
-
-  useEffect(() => {
-    clearSkillOverrides();
-  }, [activeAgent.id, clearSkillOverrides, currentThreadId]);
-
-  const toggleMessageSkill = useCallback((skill: SkillCatalogItem, enabled: boolean) => {
-    const skillRef = skill.id;
-    const defaultSkill = isSkillRefSelected(skill, activeAgent.skillRefs);
-    if (defaultSkill) {
-      setDisabledSkillRefs((current) => enabled ? removeRef(current, skillRef) : addRef(current, skillRef));
-      setEnabledSkillRefs((current) => removeRef(current, skillRef));
-    } else {
-      setEnabledSkillRefs((current) => enabled ? addRef(current, skillRef) : removeRef(current, skillRef));
-      setDisabledSkillRefs((current) => removeRef(current, skillRef));
-    }
-    setRightCollapsed(false);
-  }, [activeAgent.skillRefs]);
 
   const claimReview = useClaimReview({
     threadId: currentThreadId,
@@ -407,7 +362,6 @@ export function WorkspaceView({
           onRejectWriteRequest={onRejectCanvasWriteRequest}
           onUpdateObject={onUpdateCanvasObject}
           onUploadAsset={onUploadCanvasAsset}
-          onUpdateNodeWorkflow={onUpdateCanvasNodeWorkflow}
           onUpdateWorkflow={onUpdateCanvasWorkflow}
           onToolChange={setActiveCanvasTool}
           claimSourceFocus={claimReview.sourceFocusClaim}
@@ -463,7 +417,9 @@ export function WorkspaceView({
           selectedModelConfigId={selectedModelConfigId}
           modelSettings={{
             providerId: selectedConfiguredModel?.providerId,
-            thinkingMode: selectedConfiguredModel?.providerId === "deepseek" && selectedConfiguredModel.modelId === "deepseek-reasoner" ? "enabled" : undefined
+            modelId: selectedConfiguredModel?.modelId,
+            modelName: selectedConfiguredModel?.modelName,
+            supportsThinking: selectedConfiguredModel?.supportsThinking
           }}
           onApproveWriteRequest={async (requestId) => { await onApproveCanvasWriteRequest(requestId); }}
             onCreateConversation={onCreateConversation}
@@ -478,13 +434,16 @@ export function WorkspaceView({
           onSelectAgent={onSelectAgent}
           onSelectModel={onSelectModel}
           onSelectThread={onSelectThread}
-          onRequestSkillCatalog={requestSkillCatalog}
-          onCreateSkillFolder={handleCreateSkillFolder}
-          onDeleteSkillFolder={handleDeleteSkillFolder}
-          onMoveSkillToFolder={handleMoveSkillToFolder}
-          onRenameSkillFolder={handleRenameSkillFolder}
-          onSkillOverridesConsumed={clearSkillOverrides}
-          onToggleSkill={toggleMessageSkill}
+          onRequestSkillCatalog={onRequestSkillCatalog}
+          onCreateSkillFolder={onCreateSkillFolder}
+          onDeleteSkillFolder={onDeleteSkillFolder}
+          onMoveSkillToFolder={onMoveSkillToFolder}
+          onRenameSkillFolder={onRenameSkillFolder}
+          onSkillOverridesConsumed={onSkillOverridesConsumed}
+          onToggleSkill={(skill, enabled) => {
+            onToggleSkill(skill, enabled);
+            setRightCollapsed(false);
+          }}
           onInputDraftConsumed={() => setComposerDraft("")}
           onMindChainContextConsumed={() => setMindChainContext(null)}
           onRemoveMindChainContext={() => setMindChainContext(null)}
@@ -507,22 +466,14 @@ export function WorkspaceView({
         skillCatalog={skillCatalog}
         skillFolders={skillFolders}
         skillCatalogStatus={skillCatalogStatus}
-        onCreateSkillFolder={handleCreateSkillFolder}
-        onDeleteSkillFolder={handleDeleteSkillFolder}
-        onMoveSkillToFolder={handleMoveSkillToFolder}
-        onRequestSkillCatalog={requestSkillCatalog}
-        onRenameSkillFolder={handleRenameSkillFolder}
-        onToggleSkill={toggleMessageSkill}
+        onCreateSkillFolder={onCreateSkillFolder}
+        onDeleteSkillFolder={onDeleteSkillFolder}
+        onMoveSkillToFolder={onMoveSkillToFolder}
+        onRequestSkillCatalog={onRequestSkillCatalog}
+        onRenameSkillFolder={onRenameSkillFolder}
+        onToggleSkill={onToggleSkill}
         onToolChange={setActiveCanvasTool}
       />
     </section>
   );
-}
-
-function addRef(refs: string[], ref: string) {
-  return refs.includes(ref) ? refs : [...refs, ref];
-}
-
-function removeRef(refs: string[], ref: string) {
-  return refs.filter((item) => item !== ref);
 }

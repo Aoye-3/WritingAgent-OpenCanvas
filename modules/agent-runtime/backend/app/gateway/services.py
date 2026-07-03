@@ -16,6 +16,7 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 from langchain_core.messages import HumanMessage
+from langgraph.types import Command
 
 from app.gateway.deps import get_run_context, get_run_manager, get_stream_bridge
 from app.gateway.utils import sanitize_log_param
@@ -94,6 +95,14 @@ def normalize_input(raw_input: dict[str, Any] | None) -> dict[str, Any]:
                 converted.append(msg)
         return {**raw_input, "messages": converted}
     return raw_input
+
+
+def normalize_command(raw_command: dict[str, Any] | None) -> Command | None:
+    if raw_command is None:
+        return None
+    if "resume" in raw_command:
+        return Command(resume=raw_command["resume"])
+    raise ValueError("Unsupported run command: expected a resume field.")
 
 
 _DEFAULT_ASSISTANT_ID = "lead_agent"
@@ -340,7 +349,7 @@ async def start_run(
             body.assistant_id,
             on_disconnect=disconnect,
             metadata=body.metadata or {},
-            kwargs={"input": body.input, "config": body.config},
+            kwargs={"input": body.input, "command": body.command, "config": body.config},
             multitask_strategy=body.multitask_strategy,
             model_name=model_name,
         )
@@ -366,7 +375,10 @@ async def start_run(
         logger.warning("Failed to upsert thread_meta for %s (non-fatal)", sanitize_log_param(thread_id))
 
     agent_factory = resolve_agent_factory(body.assistant_id)
-    graph_input = normalize_input(body.input)
+    try:
+        graph_input = normalize_command(body.command) if body.command is not None else normalize_input(body.input)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     config = build_run_config(thread_id, body.config, body.metadata, assistant_id=body.assistant_id)
 
     # Merge DeerFlow-specific context overrides into both ``configurable`` and ``context``.

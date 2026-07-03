@@ -80,7 +80,15 @@ async function reopenCurrentCanvas(page: Page, expectedThreadId: string) {
   if (await startButton.waitFor({ state: "visible", timeout: 3000 }).then(() => true).catch(() => false)) {
     await startButton.click();
   }
-  await page.getByRole("button", { name: /New conversation/ }).first().click();
+  const canvas = page.getByTestId("document-canvas");
+  if (!(await canvas.isVisible().catch(() => false))) {
+    const recentProject = page.locator(".home-project-open").first();
+    if (await recentProject.isVisible().catch(() => false)) {
+      await recentProject.click();
+    } else {
+      await page.getByRole("button", { name: /New conversation/ }).first().click();
+    }
+  }
   await expect(page.getByTestId("document-canvas")).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("facetwrite:lastThreadId"))).toBe(expectedThreadId);
 }
@@ -539,19 +547,23 @@ test("canvas persists blur edits and preserves node data across kind conversion"
   });
 });
 
-test("canvas mode, batch stage inheritance, role nodes, and suggestions are visible in the UI", async ({ page }) => {
+test("canvas mode, retired batch stage UI, role nodes, and suggestions are visible in the UI", async ({ page }) => {
   await openNewCanvas(page);
 
   await expect(page.getByLabel("Canvas mode")).toHaveValue("batch_delivery");
   await expect(page.getByTestId("canvas-status-node")).toHaveCount(0);
   const threadId = await getCurrentThreadId(page);
   const workflowResponse = await page.request.put(`/api/threads/${threadId}/canvas/workflow`, {
-    data: { mode: "batch_delivery", stage: "research" }
+    data: { mode: "mind_map", stage: "research" }
   });
   expect(workflowResponse.ok()).toBeTruthy();
+  await reopenCurrentCanvas(page, threadId);
+  await expect(page.getByLabel("Canvas mode")).toHaveValue("mind_map");
   const viewport = page.getByTestId("canvas-viewport");
   await viewport.click({ button: "right", position: { x: 180, y: 180 } });
   await page.getByTestId("canvas-menu-create-document").click();
+  await expect(page.getByTestId("canvas-selected-workflow")).toHaveCount(0);
+  await expect(page.locator(".canvas-node-stage-badge")).toHaveCount(0);
   await page.getByTestId("canvas-node-title").first().dblclick();
   await page.getByTestId("canvas-node-title").first().fill("Workflow draft");
   await page.getByTestId("canvas-node-content").first().dblclick();
@@ -560,8 +572,8 @@ test("canvas mode, batch stage inheritance, role nodes, and suggestions are visi
 
   await expect.poll(async () => {
     const state = await fetchCanvasState(page);
-    return state.canvasNodes[0]?.metadata?.workflow?.stage;
-  }).toBe("research");
+    return state.canvasNodes[0]?.metadata?.workflow?.stage ?? null;
+  }).toBeNull();
 
   const stateWithDocument = await fetchCanvasState(page);
   const nodeId = stateWithDocument.canvasNodes.find((node) => node.kind === "document")!.id;
@@ -587,11 +599,14 @@ test("canvas mode, batch stage inheritance, role nodes, and suggestions are visi
   expect(suggestionResponse.ok()).toBeTruthy();
   const suggestionId = ((await suggestionResponse.json()) as { suggestion: { id: string } }).suggestion.id;
 
-  const publishResponse = await page.request.put(`/api/threads/${threadId}/canvas/workflow`, {
-    data: { stage: "publish" }
+  const batchResponse = await page.request.put(`/api/threads/${threadId}/canvas/workflow`, {
+    data: { mode: "batch_delivery" }
   });
-  expect(publishResponse.ok()).toBeTruthy();
+  expect(batchResponse.ok()).toBeTruthy();
   await reopenCurrentCanvas(page, threadId);
+  await expect(page.getByLabel("Canvas mode")).toHaveValue("batch_delivery");
+  await expect(page.getByTestId("canvas-selected-workflow")).toHaveCount(0);
+  await expect(page.locator(".canvas-node-stage-badge")).toHaveCount(0);
   await expect(page.getByText("Add one concrete source.")).toBeVisible();
   const acceptResponse = await page.request.post(`/api/threads/${threadId}/canvas/suggestions/${suggestionId}/accept`);
   expect(acceptResponse.ok()).toBeTruthy();

@@ -50,7 +50,24 @@ test("conversation models include enabled vision configs", async () => {
 
 test("model capability classification uses stable reasoning names", () => {
   assert.equal(classifyConfiguredModelCapability({ modelId: "deepseek-r1", modelName: "DeepSeek R1" }), "reasoning");
+  assert.equal(classifyConfiguredModelCapability({ modelId: "deepseek-ai/DeepSeek-V3.2", modelName: "DeepSeek V3.2" }), "reasoning");
   assert.equal(classifyConfiguredModelCapability({ modelId: "gpt-4o", modelName: "GPT-4o" }), "chat");
+});
+
+test("configured model summaries expose stored thinking support", async () => {
+  await withTempWorkspace(async () => {
+    await writeProviderApiConfigStore({
+      version: 2,
+      activeConfigId: "silicon-v32",
+      configs: {
+        "silicon-v32": configured("silicon-v32", "silicon", "deepseek-ai/DeepSeek-V3.2", "chat", true, "sk-silicon")
+      }
+    });
+
+    const result = await listConversationModelSummaries();
+
+    assert.equal(result.configs[0]?.supportsThinking, true);
+  });
 });
 
 test("provider API config store saves multiple providers and returns redacted summaries", async () => {
