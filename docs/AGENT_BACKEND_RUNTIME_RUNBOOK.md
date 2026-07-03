@@ -41,6 +41,8 @@ Do not debug missing final documents by removing `canvas_write`; that also remov
 
 Skill scope guard is the exception: its first pass must expose only `ask_clarification`, with no progressive delivery, file tools, evidence tools, or CanvasWrite scope. After the user answers, the resumed run restores progressive delivery and the short-node CanvasWrite scope.
 
+When diagnosing perceived stalls after Canvas updates, separate progress commits from terminal commits. `canvas_delivery_research_committed` and `canvas_delivery_body_checkpoint_committed` are lightweight progress events: the frontend applies their node snapshot immediately and debounces the expensive Thread-state refresh. Their payload should include `evidenceCount`, `bodyDraftWriteCount`, delivery limits, and `nextPhaseHint` so the drawer can show a phase-specific message. `canvas_delivery_body_final_committed`, `canvas_delivery_file_document_committed`, `canvas_delivery_sources_committed`, and `canvas_delivery_failed_summary_committed` are terminal/strong-sync events and should refresh immediately. If the UI still feels idle after a progress commit, inspect the next Runtime event or model call before treating the debounce as a Runtime stall.
+
 This historical path is kept for compatibility. The maintained runbook is now [`AGENT_RUNTIME_RUNBOOK.md`](AGENT_RUNTIME_RUNBOOK.md).
 # FacetWrite Model Config Synchronization (2026-06-11)
 

@@ -576,7 +576,7 @@ async function readAgentBackendStream(
   const textByMessageId = new Map<string, string[]>();
   const unkeyedText: string[] = [];
   const toolCallArgsById = new Map<string, Record<string, unknown>>();
-  const emittedToolEventKeys = new Set<string>();
+  const emittedToolEventKeys = new Map<string, number>();
   let lastMessageId: string | undefined;
   let finalValuesText: string | undefined;
   let usage: unknown;
@@ -704,8 +704,16 @@ async function readAgentBackendStream(
 
       for (const event of toolEvents) {
         const key = toolEventDedupeKey(event);
-        if (key && emittedToolEventKeys.has(key)) continue;
-        if (key) emittedToolEventKeys.add(key);
+        if (key && emittedToolEventKeys.has(key)) {
+          const existingIndex = emittedToolEventKeys.get(key)!;
+          const merged = mergePreferredToolEvent(events[existingIndex]!, event);
+          if (merged !== events[existingIndex]) {
+            events[existingIndex] = merged;
+            callbacks.onToolEvent?.(merged);
+          }
+          continue;
+        }
+        if (key) emittedToolEventKeys.set(key, events.length);
         events.push(event);
         trace("tool_event", {
           eventType: event.eventType,
@@ -1034,8 +1042,71 @@ function extractFinalValuesText(data: unknown): string | undefined {
 function toolEventDedupeKey(event: ToolEventRecord) {
   const toolName = typeof event.payload?.toolName === "string" ? event.payload.toolName : "";
   const toolCallId = typeof event.payload?.toolCallId === "string" ? event.payload.toolCallId : "";
+  if (isAgentClarificationToolEvent(event)) {
+    const clarificationId = readSourceString(event.payload?.clarificationId);
+    const question = readSourceString(event.payload?.question);
+    const options = Array.isArray(event.payload?.options)
+      ? JSON.stringify(event.payload.options.map((option) => isRecord(option) ? {
+        id: readSourceString(option.id),
+        label: readSourceString(option.label) || readSourceString(option.title)
+      } : readSourceString(option)))
+      : "";
+    return `${event.eventType}:agent_clarification:${clarificationId || question}:${options}`;
+  }
   if (!toolName || !toolCallId) return undefined;
   return `${event.eventType}:${toolName}:${toolCallId}`;
+}
+
+function mergePreferredToolEvent(existing: ToolEventRecord, incoming: ToolEventRecord) {
+  if (!isAgentClarificationToolEvent(existing) || !isAgentClarificationToolEvent(incoming)) return existing;
+  const existingHasResume = hasCompleteRuntimeResume(existing);
+  const incomingHasResume = hasCompleteRuntimeResume(incoming);
+  if (!incomingHasResume && existingHasResume) return existing;
+  if (!incomingHasResume && !existingHasResume) return existing;
+  return mergeAgentClarificationToolEvent(existing, incoming);
+}
+
+function mergeAgentClarificationToolEvent(existing: ToolEventRecord, incoming: ToolEventRecord): ToolEventRecord {
+  const existingPayload = existing.payload ?? {};
+  const incomingPayload = incoming.payload ?? {};
+  const existingResumeContext = isRecord(existingPayload.resumeContext) ? existingPayload.resumeContext : {};
+  const incomingResumeContext = isRecord(incomingPayload.resumeContext) ? incomingPayload.resumeContext : {};
+  const runtimeResume = hasCompleteRuntimeResume(incoming)
+    ? readRuntimeResume(incomingPayload.resumeContext)
+    : readRuntimeResume(existingPayload.resumeContext);
+  return {
+    ...existing,
+    ...incoming,
+    payload: {
+      ...existingPayload,
+      ...incomingPayload,
+      resumeContext: {
+        ...existingResumeContext,
+        ...incomingResumeContext,
+        ...(runtimeResume ? { runtimeResume } : {})
+      }
+    }
+  };
+}
+
+function hasCompleteRuntimeResume(event: ToolEventRecord) {
+  return Boolean(readRuntimeResume(event.payload?.resumeContext));
+}
+
+function readRuntimeResume(resumeContext: unknown) {
+  const context = isRecord(resumeContext) ? resumeContext : {};
+  const resume = isRecord(context.runtimeResume) ? context.runtimeResume : {};
+  const runtimeThreadId = readSourceString(resume.runtimeThreadId);
+  const runtimeRunId = readSourceString(resume.runtimeRunId);
+  const interruptId = readSourceString(resume.interruptId);
+  if (!runtimeThreadId || !runtimeRunId || !interruptId) return undefined;
+  const checkpointId = readSourceString(resume.checkpointId);
+  return {
+    runtimeThreadId,
+    runtimeRunId,
+    interruptId,
+    ...(checkpointId ? { checkpointId } : {})
+  };
 }
 
 function textFromMessageTuple(data: unknown): string | undefined {

@@ -5,7 +5,8 @@ import {
   createLiveToolEventState,
   readLiveCanvasNodeSnapshot,
   reduceLiveToolEvent,
-  shouldRefreshThreadStateForToolEvent
+  shouldRefreshThreadStateForToolEvent,
+  threadStateRefreshModeForToolEvent
 } from "../../src/app/hooks/toolEventPresentation";
 import { looksUnsafeForReasoningStream } from "../../src/app/hooks/useGenerationRun";
 
@@ -60,6 +61,38 @@ test("Canvas and artifact lifecycle events request live thread-state refresh", (
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_failed_summary_committed", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_plan_waiting_for_user", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_tool_completed", payload: { toolName: "web_search" } }), false);
+});
+
+test("Canvas delivery committed events classify strong and deferred refreshes", () => {
+  assert.equal(threadStateRefreshModeForToolEvent({ eventType: "canvas_delivery_research_committed", payload: {} }), "deferred");
+  assert.equal(threadStateRefreshModeForToolEvent({ eventType: "canvas_delivery_body_checkpoint_committed", payload: {} }), "deferred");
+  assert.equal(threadStateRefreshModeForToolEvent({ eventType: "canvas_delivery_body_final_committed", payload: {} }), "immediate");
+  assert.equal(threadStateRefreshModeForToolEvent({ eventType: "canvas_delivery_file_document_committed", payload: {} }), "immediate");
+  assert.equal(threadStateRefreshModeForToolEvent({ eventType: "canvas_delivery_sources_committed", payload: {} }), "immediate");
+  assert.equal(threadStateRefreshModeForToolEvent({ eventType: "canvas_delivery_failed_summary_committed", payload: {} }), "immediate");
+  assert.equal(threadStateRefreshModeForToolEvent({ eventType: "canvas_delivery_outline_started", payload: {} }), "none");
+});
+
+test("Canvas delivery progress labels include evidence and draft progress", () => {
+  assert.equal(reduceLiveToolEvent(createLiveToolEventState(), {
+    eventType: "canvas_delivery_research_committed",
+    payload: { evidenceCount: 4, nextPhaseHint: "synthesis_ready" }
+  }, "zh").statusLabel, "已收集 4 条参考资料，Agent 正在整理交付...");
+
+  assert.equal(reduceLiveToolEvent(createLiveToolEventState(), {
+    eventType: "canvas_delivery_body_checkpoint_committed",
+    payload: { draftIndex: 2, evidenceCount: 2 }
+  }, "zh").statusLabel, "已生成第 2 版正文草稿，继续筛选资料...");
+
+  assert.equal(reduceLiveToolEvent(createLiveToolEventState(), {
+    eventType: "agent_backend_tool_started",
+    payload: { toolName: "write_file" }
+  }, "zh").statusLabel, "正在写入 Markdown 文档...");
+
+  assert.equal(reduceLiveToolEvent(createLiveToolEventState(), {
+    eventType: "agent_backend_tool_completed",
+    payload: { toolName: "present_files" }
+  }, "zh").statusLabel, "文档已展示，正在生成最终回复...");
 });
 
 test("Canvas delivery committed events expose live node snapshots for checkpoint and final nodes", () => {

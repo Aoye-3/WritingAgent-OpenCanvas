@@ -326,6 +326,43 @@ test("maps native runtime interrupt to agent clarification event with resume met
   });
 });
 
+test("prefers native runtime interrupt clarification over ask_clarification tool call", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_clarify","name":"ask_clarification","args":{"question":"Which scope?","options":[{"id":"recent","label":"Recent","detail":"Focus on recent papers"},{"id":"broad","label":"Broad","detail":"Scan the full field"}]}}]}]\n\n',
+    'event: interrupt\ndata: {"type":"agent_interrupt","run_id":"runtime_run_1","thread_id":"thread_1","checkpoint_id":"checkpoint_1","interrupts":[{"id":"interrupt_1","value":{"type":"agent_clarification_requested","question":"Which scope?","options":[{"id":"recent","label":"Recent","detail":"Focus on recent papers"},{"id":"broad","label":"Broad","detail":"Scan the full field"}]}}]}\n\n',
+    'event: end\ndata: null\n\n'
+  ].join("");
+
+  const result = await runWithBody(body);
+  const clarifications = result.events.filter((event) => event.eventType === "agent_backend_agent_clarification_requested");
+
+  assert.equal(clarifications.length, 1);
+  assert.equal(clarifications[0]?.payload.source, "runtime_interrupt");
+  assert.equal(clarifications[0]?.payload.toolCallId, "interrupt_1");
+  assert.deepEqual(clarifications[0]?.payload.resumeContext, {
+    runtimeResume: {
+      runtimeThreadId: "thread_1",
+      runtimeRunId: "runtime_run_1",
+      interruptId: "interrupt_1",
+      checkpointId: "checkpoint_1"
+    }
+  });
+});
+
+test("does not synthesize runtime resume metadata for ordinary ask_clarification", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_clarify","name":"ask_clarification","args":{"question":"Which scope?","options":[{"id":"recent","label":"Recent"},{"id":"broad","label":"Broad"}]}}]}]\n\n',
+    'event: end\ndata: null\n\n'
+  ].join("");
+
+  const result = await runWithBody(body);
+  const clarification = result.events.find((event) => event.eventType === "agent_backend_agent_clarification_requested");
+
+  assert.ok(clarification);
+  assert.equal(clarification.payload.source, "ask_clarification");
+  assert.equal(clarification.payload.resumeContext, undefined);
+});
+
 test("reads AgentBackend stream text and task events", async () => {
   const body = [
     'event: custom\ndata: {"type":"task_started","name":"facetwrite-summary"}\n\n',

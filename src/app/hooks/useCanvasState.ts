@@ -46,7 +46,7 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces, undoD
     setCanvasWriteRequests(writeRequests);
     setCanvasWorkflow(workflow ?? createDefaultCanvasWorkflow());
     setCanvasWorkflowSuggestions(suggestions);
-    setSelectedCanvasNodeId(nodes[0]?.id);
+    setSelectedCanvasNodeId((current) => resolveCanvasSelectedNodeId(current, nodes));
   };
 
   const refreshCanvas = async (threadId: string) => {
@@ -110,7 +110,29 @@ export function useCanvasState({ ensureThreadId, onRefreshProjectSurfaces, undoD
 export function upsertCanvasNodeSnapshot(nodes: CanvasNode[], node: CanvasNode) {
   const existingIndex = nodes.findIndex((candidate) => candidate.id === node.id);
   if (existingIndex < 0) return [...nodes, node];
+  if (isSameCanvasNodeSnapshot(nodes[existingIndex], node)) return nodes;
   return nodes.map((candidate, index) => index === existingIndex ? node : candidate);
+}
+
+export function resolveCanvasSelectedNodeId(current: string | undefined, nodes: CanvasNode[]) {
+  return current && nodes.some((node) => node.id === current) ? current : nodes[0]?.id;
+}
+
+function isSameCanvasNodeSnapshot(current: CanvasNode | undefined, next: CanvasNode) {
+  if (!current) return false;
+  return current.id === next.id
+    && current.projectId === next.projectId
+    && current.kind === next.kind
+    && current.title === next.title
+    && current.content === next.content
+    && current.x === next.x
+    && current.y === next.y
+    && current.width === next.width
+    && current.height === next.height
+    && current.includeInProjectContext === next.includeInProjectContext
+    && current.createdAt === next.createdAt
+    && current.updatedAt === next.updatedAt
+    && JSON.stringify(current.metadata ?? null) === JSON.stringify(next.metadata ?? null);
 }
 
 function createDefaultCanvasWorkflow(): CanvasWorkflow {

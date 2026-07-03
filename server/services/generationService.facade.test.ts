@@ -565,7 +565,7 @@ test("direct Canvas delivery is committed by the server planner without copying 
 });
 
 test("non-stream Plan execution commits progressive Canvas delivery before completing the step", async () => {
-  const { storage, planState, canvasNodes } = fakeStorage();
+  const { storage, planState, canvasNodes, records } = fakeStorage();
   Object.assign(planState, {
     projectId: "project_test",
     threadId: "thread_test",
@@ -580,24 +580,27 @@ test("non-stream Plan execution commits progressive Canvas delivery before compl
     modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
-      runAgent: async () => ({
-        text: [
-          "# Result",
-          "",
-          "The requested research has been completed and written into Canvas.",
-          "",
-          "## Sources",
-          "- [News A](https://news.example/a)"
-        ].join("\n"),
-        finishReason: "stop",
-        events: [{
+      runAgent: async (input) => {
+        input.onToolEvent?.({
           eventType: "agent_backend_tool_completed",
           payload: {
             toolName: "web_search",
             sources: [{ title: "News A", url: "https://news.example/a" }]
           }
-        }]
-      })
+        });
+        return {
+          text: [
+            "# Result",
+            "",
+            "The requested research has been completed and written into Canvas.",
+            "",
+            "## Sources",
+            "- [News A](https://news.example/a)"
+          ].join("\n"),
+          finishReason: "stop",
+          events: []
+        };
+      }
     }
   });
 
@@ -623,6 +626,14 @@ test("non-stream Plan execution commits progressive Canvas delivery before compl
   assert.equal(planState.status, "completed");
   assert.equal((planState.artifacts as Array<{ status: string; canvasTargetId?: string }>)[0]?.status, "committed");
   assert.ok((planState.artifacts as Array<{ status: string; canvasTargetId?: string }>)[0]?.canvasTargetId);
+  const recordedEvents = ((records[0] as { events?: Array<{ eventType: string; payload: Record<string, unknown> }> })?.events ?? []);
+  const researchEvent = recordedEvents.find((event) => event.eventType === "canvas_delivery_research_committed");
+  assert.ok(researchEvent);
+  assert.equal(researchEvent.payload.researchIndex, 1);
+  assert.equal(researchEvent.payload.evidenceCount, 1);
+  assert.equal(researchEvent.payload.bodyDraftWriteLimit, 2);
+  assert.equal(researchEvent.payload.evidenceToolLimit, 8);
+  assert.equal(researchEvent.payload.nextPhaseHint, "body_checkpoint");
 });
 
 test("direct Canvas delivery treats process clarification text as recoverable output", async () => {
@@ -778,8 +789,21 @@ test("streaming direct Canvas delivery commits a link-only research reference af
   assert.ok(bodyNode);
   assert.ok(String(bodyNode.content).includes("\u5de5\u4f5c\u6b63\u6587\u8349\u7a3f"));
   assert.equal(String(bodyNode.content).includes("\u6b63\u5728\u751f\u6210\u5185\u5bb9"), false);
-  assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_checkpoint_committed"));
-  assert.ok(events.some((event) => event.eventType === "canvas_delivery_research_committed"));
+  const researchEvent = events.find((event) => event.eventType === "canvas_delivery_research_committed");
+  assert.ok(researchEvent);
+  assert.equal(researchEvent.payload.researchIndex, 1);
+  assert.equal(researchEvent.payload.evidenceCount, 1);
+  assert.equal(researchEvent.payload.bodyDraftWriteCount, 0);
+  assert.equal(researchEvent.payload.bodyDraftWriteLimit, 2);
+  assert.equal(researchEvent.payload.evidenceToolLimit, 8);
+  assert.equal(researchEvent.payload.nextPhaseHint, "body_checkpoint");
+  const bodyCheckpointEvent = events.find((event) => event.eventType === "canvas_delivery_body_checkpoint_committed");
+  assert.ok(bodyCheckpointEvent);
+  assert.equal(bodyCheckpointEvent.payload.evidenceCount, 1);
+  assert.equal(bodyCheckpointEvent.payload.bodyDraftWriteCount, 1);
+  assert.equal(bodyCheckpointEvent.payload.bodyDraftWriteLimit, 2);
+  assert.equal(bodyCheckpointEvent.payload.evidenceToolLimit, 8);
+  assert.equal(bodyCheckpointEvent.payload.nextPhaseHint, "continue_research");
 });
 
 test("streaming direct Canvas delivery skips research references when search has no linked sources", async () => {
@@ -1083,6 +1107,88 @@ test("clarification-required AgentBackend run is waiting and deduplicates repeat
   assert.equal(timelineEvents.some((event) => event.eventType === "run_completed"), false);
   assert.equal(timelineEvents.find((event) => event.payload?.eventType === "agent_backend_agent_clarification_requested")?.status, "waiting");
   assert.equal(events.filter((event) => event.eventType === "agent_backend_agent_clarification_requested").length, 1);
+});
+
+test("clarification dedupe preserves runtime resume metadata for storage", async () => {
+  const { storage, records, agentClarifications } = fakeStorage();
+  const question = "Which time range should the review cover?";
+  const options = [
+    { id: "recent_5", label: "Recent 5 years", detail: "2021-2026", recommended: true },
+    { id: "recent_10", label: "Recent 10 years", detail: "2016-2026" }
+  ];
+  const toolCallEvent: ToolEventRecord = {
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      source: "ask_clarification",
+      toolName: "ask_clarification",
+      toolCallId: "call_reused",
+      question,
+      options
+    }
+  };
+  const runtimeInterruptEvent: ToolEventRecord = {
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      source: "runtime_interrupt",
+      toolName: "ask_clarification",
+      toolCallId: "interrupt_1",
+      question,
+      options,
+      resumeContext: {
+        runtimeResume: {
+          runtimeThreadId: "runtime_thread_1",
+          runtimeRunId: "runtime_run_1",
+          interruptId: "interrupt_1",
+          checkpointId: "checkpoint_1"
+        }
+      }
+    }
+  };
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.(toolCallEvent);
+        input.onToolEvent?.(runtimeInterruptEvent);
+        return {
+          text: "",
+          finishReason: "clarification_required",
+          events: [toolCallEvent, runtimeInterruptEvent]
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review recent agent literature",
+    transientSkillRefs: ["literature-review"],
+    toolState: { web_search: true }
+  });
+
+  assert.equal(result.finishReason, "clarification_required");
+  const record = records[0] as { events?: Array<{ eventType: string; payload: Record<string, unknown> }> };
+  const clarifications = record.events?.filter((event) => event.eventType === "agent_backend_agent_clarification_requested") ?? [];
+  assert.equal(clarifications.length, 1);
+  assert.equal(clarifications[0]?.payload.source, "runtime_interrupt");
+  assert.deepEqual((clarifications[0]?.payload.resumeContext as Record<string, unknown> | undefined)?.runtimeResume, {
+    runtimeThreadId: "runtime_thread_1",
+    runtimeRunId: "runtime_run_1",
+    interruptId: "interrupt_1",
+    checkpointId: "checkpoint_1"
+  });
+  assert.equal(agentClarifications.length, 1);
+  assert.deepEqual((agentClarifications[0]?.resumeContext as Record<string, unknown> | undefined)?.runtimeResume, {
+    runtimeThreadId: "runtime_thread_1",
+    runtimeRunId: "runtime_run_1",
+    interruptId: "interrupt_1",
+    checkpointId: "checkpoint_1"
+  });
 });
 
 test("invalid Agent clarification options are repaired by retrying ask_clarification", async () => {

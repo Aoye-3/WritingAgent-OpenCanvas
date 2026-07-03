@@ -54,6 +54,71 @@ test("storage facade records thread runs, messages, versions, events, projects, 
   assert.equal(await storage.hardDeleteThread(threadId), true);
 });
 
+test("storage facade stores runtime resume context when clarification events duplicate", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_runtime_resume_${Date.now()}`;
+  const agentCard = agentCards[0];
+  const question = "Which time range should the review cover?";
+  const options = [
+    { id: "recent_5", label: "Recent 5 years", detail: "2021-2026", recommended: true },
+    { id: "recent_10", label: "Recent 10 years", detail: "2016-2026" }
+  ];
+
+  await storage.ensureThread(threadId, agentCard.id);
+  storage.recordRun({
+    threadId,
+    agentCardId: agentCard.id,
+    mode: "chat",
+    prompt: "Prompt text",
+    output: "",
+    provider: "agent-backend",
+    usedMock: false,
+    events: [{
+      eventType: "agent_backend_agent_clarification_requested",
+      payload: {
+        type: "agent_clarification_requested",
+        source: "ask_clarification",
+        toolName: "ask_clarification",
+        toolCallId: "call_reused",
+        question,
+        options
+      }
+    }, {
+      eventType: "agent_backend_agent_clarification_requested",
+      payload: {
+        type: "agent_clarification_requested",
+        source: "runtime_interrupt",
+        toolName: "ask_clarification",
+        toolCallId: "interrupt_1",
+        question,
+        options,
+        resumeContext: {
+          runtimeResume: {
+            runtimeThreadId: "runtime_thread_1",
+            runtimeRunId: "runtime_run_1",
+            interruptId: "interrupt_1",
+            checkpointId: "checkpoint_1"
+          }
+        }
+      }
+    }],
+    finishReason: "clarification_required"
+  });
+
+  const clarifications = storage.listAgentClarifications(threadId);
+  const resumeContext = clarifications[0]?.resumeContext as Record<string, unknown> | undefined;
+  assert.equal(clarifications.length, 1);
+  assert.deepEqual(resumeContext?.runtimeResume, {
+    runtimeThreadId: "runtime_thread_1",
+    runtimeRunId: "runtime_run_1",
+    interruptId: "interrupt_1",
+    checkpointId: "checkpoint_1"
+  });
+
+  assert.equal(storage.moveThreadToTrash(threadId), true);
+  assert.equal(await storage.hardDeleteThread(threadId), true);
+});
+
 test("project summaries include lightweight Canvas previews without node content", async () => {
   const storage = await createStorage();
   const projectId = `project_preview_${Date.now()}`;

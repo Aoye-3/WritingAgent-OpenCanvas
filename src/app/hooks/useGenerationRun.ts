@@ -16,7 +16,7 @@ import {
   createLiveToolEventState,
   readLiveCanvasNodeSnapshot,
   reduceLiveToolEvent,
-  shouldRefreshThreadStateForToolEvent
+  threadStateRefreshModeForToolEvent
 } from "./toolEventPresentation";
 import { containsInternalRuntimeProtocol } from "../../../shared/internalRuntimeProtocol";
 
@@ -68,6 +68,8 @@ type LiveThreadStateRefreshRequest = {
 export function createLiveThreadStateRefreshScheduler() {
   let inFlight: Promise<void> | null = null;
   let pending: LiveThreadStateRefreshRequest | null = null;
+  let deferredTimer: ReturnType<typeof setTimeout> | null = null;
+  let deferred: LiveThreadStateRefreshRequest | null = null;
   let generation = 0;
   let sequence = 0;
 
@@ -115,16 +117,39 @@ export function createLiveThreadStateRefreshScheduler() {
     inFlight = refresh;
   };
 
+  const clearDeferred = () => {
+    if (deferredTimer) globalThis.clearTimeout(deferredTimer);
+    deferredTimer = null;
+    deferred = null;
+  };
+
+  const requestNow = (request: LiveThreadStateRefreshRequest) => {
+    if (inFlight) {
+      traceLiveRefresh("queued", `live_refresh_pending_${sequence + 1}`, request);
+      pending = request;
+      return;
+    }
+    run(request);
+  };
+
   return {
-    request(request: LiveThreadStateRefreshRequest) {
-      if (inFlight) {
-        traceLiveRefresh("queued", `live_refresh_pending_${sequence + 1}`, request);
-        pending = request;
-        return;
-      }
-      run(request);
+    request: requestNow,
+    requestDeferred(request: LiveThreadStateRefreshRequest, delayMs = 800) {
+      clearDeferred();
+      deferred = request;
+      traceLiveRefresh("deferred", `live_refresh_deferred_${sequence + 1}`, request, { delayMs });
+      deferredTimer = globalThis.setTimeout(() => {
+        const next = deferred;
+        deferredTimer = null;
+        deferred = null;
+        if (next) requestNow(next);
+      }, delayMs);
+    },
+    cancelDeferred() {
+      clearDeferred();
     },
     reset() {
+      clearDeferred();
       generation += 1;
       inFlight = null;
       pending = null;
@@ -174,6 +199,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
   }, [options.currentProjectId, options.currentThreadId]);
 
   useEffect(() => () => {
+    liveStateRefreshRef.current.reset();
     for (const state of Object.values(typewriterRef.current)) {
       if (state?.timer) window.clearTimeout(state.timer);
     }
@@ -263,21 +289,34 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       }]);
     }
 
-    if (shouldRefreshThreadStateForToolEvent(liveEvent)) {
+    const refreshMode = threadStateRefreshModeForToolEvent(liveEvent);
+    if (refreshMode !== "none") {
       const liveNode = readLiveCanvasNodeSnapshot(liveEvent);
       if (liveNode) options.onApplyLiveCanvasNode(liveNode);
-      if (activeMessageId) {
+      if (activeMessageId && refreshMode === "immediate") {
         updateStreamingMessage(activeMessageId, {
           status: "writing",
           statusLabel: canvasSyncingLabel(options.locale)
         });
       }
-      refreshLiveThreadState(threadId, operationId, activeMessageId ? () => {
+      const refreshSettled = activeMessageId && refreshMode === "immediate" ? () => {
         if (operationId !== operationIdRef.current) return;
         updateStreamingMessage(activeMessageId, {
           statusLabel: canvasSyncedLabel(options.locale)
         });
-      } : undefined);
+      } : undefined;
+      if (refreshMode === "deferred") {
+        liveStateRefreshRef.current.requestDeferred({
+          threadId,
+          operationId,
+          currentOperationId: () => operationIdRef.current,
+          fetchAndApply: options.onFetchAndApplyThreadState,
+          apply: options.onApplyLiveThreadState
+        });
+      } else {
+        liveStateRefreshRef.current.cancelDeferred();
+        refreshLiveThreadState(threadId, operationId, refreshSettled);
+      }
     }
   };
 

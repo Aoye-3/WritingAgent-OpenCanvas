@@ -35,6 +35,7 @@ from deerflow.runtime import (
 )
 
 logger = logging.getLogger(__name__)
+DEFAULT_RECURSION_LIMIT = 160
 
 
 # ---------------------------------------------------------------------------
@@ -183,13 +184,13 @@ def sync_recursion_limit_from_context(config: dict[str, Any], context: Mapping[s
 
     Middleware reads ``facetwrite_recursion_limit`` from runtime context, but
     LangGraph enforces the top-level ``recursion_limit``.  When callers omit
-    the top-level value and the default remains 100, mirror the validated
+    the top-level value and the Gateway default remains in place, mirror the validated
     context value so both layers share the same budget.
     """
     if not context:
         return
     recursion_limit = context.get("facetwrite_recursion_limit")
-    if type(recursion_limit) is int and recursion_limit > 0 and config.get("recursion_limit", 100) == 100:
+    if type(recursion_limit) is int and recursion_limit > 0 and config.get("recursion_limit", DEFAULT_RECURSION_LIMIT) == DEFAULT_RECURSION_LIMIT:
         config["recursion_limit"] = recursion_limit
 
 
@@ -246,7 +247,7 @@ def build_run_config(
     the LangGraph Platform-compatible HTTP API and the IM channel path behave
     identically.
     """
-    config: dict[str, Any] = {"recursion_limit": 100}
+    config: dict[str, Any] = {"recursion_limit": DEFAULT_RECURSION_LIMIT}
     if request_config:
         # LangGraph >= 0.6.0 introduced ``context`` as the preferred way to
         # pass thread-level data and rejects requests that include both
