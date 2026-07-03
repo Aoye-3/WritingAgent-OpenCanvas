@@ -206,12 +206,23 @@ export function createGenerationService(
           return researchDeliverySequence;
         }
       });
-      for (const researchEvent of researchEvents) {
+      const budget = researchEvents.length ? readProgressiveDeliveryBudget(payload) : undefined;
+      const evidenceCount = progressiveEvidenceEntries.length;
+      const enrichedResearchEvents = budget ? researchEvents.map((researchEvent) => withCanvasDeliveryProgressMetadata(researchEvent, {
+        researchIndex: readCanvasDeliveryResearchIndex(researchEvent),
+        evidenceCount,
+        bodyDraftWriteCount,
+        bodyDraftWriteLimit: budget.bodyDraftWriteLimit,
+        evidenceToolLimit: budget.evidenceToolLimit,
+        nextPhaseHint: progressiveEvidenceEntries.length >= budget.evidenceToolLimit || progressiveSynthesisStarted
+          ? "synthesis_ready"
+          : bodyDraftWriteCount < budget.bodyDraftWriteLimit ? "body_checkpoint" : "continue_research"
+      })) : researchEvents;
+      for (const researchEvent of enrichedResearchEvents) {
         runtimeEvents.push(researchEvent);
         emitRuntimeToolEvent(researchEvent);
       }
-      if (researchEvents.length && !progressiveSynthesisStarted) {
-        const budget = readProgressiveDeliveryBudget(payload);
+      if (budget && researchEvents.length && !progressiveSynthesisStarted) {
         if (bodyDraftWriteCount < budget.bodyDraftWriteLimit) {
           const bodyEvents = commitProgressiveBodyCheckpointDelivery({
             payload,
@@ -222,8 +233,15 @@ export function createGenerationService(
             draftIndex: bodyDraftWriteCount + 1,
             draftLimit: budget.bodyDraftWriteLimit
           });
-          if (bodyEvents.length) bodyDraftWriteCount += 1;
-          for (const bodyEvent of bodyEvents) {
+          const nextBodyDraftWriteCount = bodyDraftWriteCount + (bodyEvents.length ? 1 : 0);
+          if (bodyEvents.length) bodyDraftWriteCount = nextBodyDraftWriteCount;
+          const enrichedBodyEvents = bodyEvents.map((bodyEvent) => withCanvasDeliveryProgressMetadata(bodyEvent, {
+            bodyDraftWriteCount: nextBodyDraftWriteCount,
+            bodyDraftWriteLimit: budget.bodyDraftWriteLimit,
+            evidenceToolLimit: budget.evidenceToolLimit,
+            nextPhaseHint: progressiveEvidenceEntries.length >= budget.evidenceToolLimit ? "synthesis_ready" : "continue_research"
+          }));
+          for (const bodyEvent of enrichedBodyEvents) {
             runtimeEvents.push(bodyEvent);
             emitRuntimeToolEvent(bodyEvent);
           }
@@ -588,12 +606,23 @@ export function createGenerationService(
           return researchDeliverySequence;
         }
       });
-      for (const researchEvent of researchEvents) {
+      const budget = researchEvents.length ? readProgressiveDeliveryBudget(payload) : undefined;
+      const evidenceCount = progressiveEvidenceEntries.length;
+      const enrichedResearchEvents = budget ? researchEvents.map((researchEvent) => withCanvasDeliveryProgressMetadata(researchEvent, {
+        researchIndex: readCanvasDeliveryResearchIndex(researchEvent),
+        evidenceCount,
+        bodyDraftWriteCount,
+        bodyDraftWriteLimit: budget.bodyDraftWriteLimit,
+        evidenceToolLimit: budget.evidenceToolLimit,
+        nextPhaseHint: progressiveEvidenceEntries.length >= budget.evidenceToolLimit || progressiveSynthesisStarted
+          ? "synthesis_ready"
+          : bodyDraftWriteCount < budget.bodyDraftWriteLimit ? "body_checkpoint" : "continue_research"
+      })) : researchEvents;
+      for (const researchEvent of enrichedResearchEvents) {
         runtimeEvents.push(researchEvent);
         emitRuntimeToolEvent(researchEvent);
       }
-      if (researchEvents.length && !progressiveSynthesisStarted) {
-        const budget = readProgressiveDeliveryBudget(payload);
+      if (budget && researchEvents.length && !progressiveSynthesisStarted) {
         if (bodyDraftWriteCount < budget.bodyDraftWriteLimit) {
           const bodyEvents = commitProgressiveBodyCheckpointDelivery({
             payload,
@@ -604,8 +633,15 @@ export function createGenerationService(
             draftIndex: bodyDraftWriteCount + 1,
             draftLimit: budget.bodyDraftWriteLimit
           });
-          if (bodyEvents.length) bodyDraftWriteCount += 1;
-          for (const bodyEvent of bodyEvents) {
+          const nextBodyDraftWriteCount = bodyDraftWriteCount + (bodyEvents.length ? 1 : 0);
+          if (bodyEvents.length) bodyDraftWriteCount = nextBodyDraftWriteCount;
+          const enrichedBodyEvents = bodyEvents.map((bodyEvent) => withCanvasDeliveryProgressMetadata(bodyEvent, {
+            bodyDraftWriteCount: nextBodyDraftWriteCount,
+            bodyDraftWriteLimit: budget.bodyDraftWriteLimit,
+            evidenceToolLimit: budget.evidenceToolLimit,
+            nextPhaseHint: progressiveEvidenceEntries.length >= budget.evidenceToolLimit ? "synthesis_ready" : "continue_research"
+          }));
+          for (const bodyEvent of enrichedBodyEvents) {
             runtimeEvents.push(bodyEvent);
             emitRuntimeToolEvent(bodyEvent);
           }
@@ -1640,13 +1676,19 @@ function stripSelectedClarificationInstruction(value: unknown) {
 }
 
 function dedupeToolEvents(events: ToolEventRecord[]) {
-  const seen = new Set<string>();
-  return events.filter((event) => {
+  const byKey = new Map<string, ToolEventRecord>();
+  const order: string[] = [];
+  for (const event of events) {
     const key = toolEventDedupeKey(event);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+    const existing = byKey.get(key);
+    if (existing) {
+      byKey.set(key, mergePreferredToolEvent(existing, event));
+      continue;
+    }
+    byKey.set(key, event);
+    order.push(key);
+  }
+  return order.map((key) => byKey.get(key)!);
 }
 
 function toolEventDedupeKey(event: ToolEventRecord) {
@@ -1655,9 +1697,69 @@ function toolEventDedupeKey(event: ToolEventRecord) {
   const toolCallId = readString(payload.toolCallId);
   const clarificationId = readString(payload.clarificationId);
   if (/agent_clarification/.test(event.eventType) || question) {
-    return [event.eventType, toolCallId, clarificationId, question].join("|");
+    return [event.eventType, clarificationId || question || toolCallId, agentClarificationOptionsKey(payload.options)].join("|");
   }
   return `${event.eventType}|${JSON.stringify(event.payload)}`;
+}
+
+function mergePreferredToolEvent(existing: ToolEventRecord, incoming: ToolEventRecord) {
+  if (!isAgentClarificationEvent(existing) || !isAgentClarificationEvent(incoming)) return existing;
+  const existingHasResume = hasCompleteRuntimeResume(existing);
+  const incomingHasResume = hasCompleteRuntimeResume(incoming);
+  if (!incomingHasResume && existingHasResume) return existing;
+  if (!incomingHasResume && !existingHasResume) return existing;
+  const existingPayload = record(existing.payload);
+  const incomingPayload = record(incoming.payload);
+  const existingResumeContext = record(existingPayload.resumeContext);
+  const incomingResumeContext = record(incomingPayload.resumeContext);
+  const runtimeResume = readRuntimeResume(incomingResumeContext.runtimeResume)
+    ?? readRuntimeResume(existingResumeContext.runtimeResume);
+  return {
+    ...existing,
+    ...incoming,
+    payload: {
+      ...existingPayload,
+      ...incomingPayload,
+      resumeContext: {
+        ...existingResumeContext,
+        ...incomingResumeContext,
+        ...(runtimeResume ? { runtimeResume } : {})
+      }
+    }
+  };
+}
+
+function hasCompleteRuntimeResume(event: ToolEventRecord) {
+  const payload = record(event.payload);
+  const resumeContext = record(payload.resumeContext);
+  return Boolean(readRuntimeResume(resumeContext.runtimeResume));
+}
+
+function readRuntimeResume(value: unknown) {
+  const resume = record(value);
+  const runtimeThreadId = readString(resume.runtimeThreadId);
+  const runtimeRunId = readString(resume.runtimeRunId);
+  const interruptId = readString(resume.interruptId);
+  if (!runtimeThreadId || !runtimeRunId || !interruptId) return undefined;
+  const checkpointId = readString(resume.checkpointId);
+  return {
+    runtimeThreadId,
+    runtimeRunId,
+    interruptId,
+    ...(checkpointId ? { checkpointId } : {})
+  };
+}
+
+function agentClarificationOptionsKey(value: unknown) {
+  if (!Array.isArray(value)) return "";
+  return JSON.stringify(value.map((option) => {
+    if (typeof option === "string") return option.trim();
+    const item = record(option);
+    return {
+      id: readString(item.id),
+      label: readString(item.label) || readString(item.title)
+    };
+  }));
 }
 
 export function withAgentClarificationResumeContext(event: ToolEventRecord, payload: GenerateRequest, deliveryId?: string): ToolEventRecord {
@@ -2903,6 +3005,22 @@ function isCanvasCommitEvent(event: ToolEventRecord) {
   return /^canvas_delivery_.*_committed$/.test(event.eventType)
     || /(?:^|_)canvas_mutation_committed$/.test(event.eventType)
     || /(?:^|_)canvas_node_committed$/.test(event.eventType);
+}
+
+function withCanvasDeliveryProgressMetadata(event: ToolEventRecord, metadata: Record<string, unknown>): ToolEventRecord {
+  const payload = record(event.payload);
+  const compactMetadata = Object.fromEntries(Object.entries(metadata).filter(([, value]) => value !== undefined));
+  return { ...event, payload: { ...payload, ...compactMetadata } };
+}
+
+function readCanvasDeliveryResearchIndex(event: ToolEventRecord) {
+  const payload = record(event.payload);
+  if (typeof payload.researchIndex === "number" && Number.isFinite(payload.researchIndex)) return payload.researchIndex;
+  const node = record(payload.node);
+  const metadata = record(node.metadata);
+  return typeof metadata.researchIndex === "number" && Number.isFinite(metadata.researchIndex)
+    ? metadata.researchIndex
+    : undefined;
 }
 
 function isProgressiveEvidenceTool(toolName: string) {

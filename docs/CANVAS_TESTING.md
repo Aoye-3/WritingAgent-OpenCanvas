@@ -36,5 +36,14 @@ The architecture and encoding guards must pass on both LF and CRLF worktrees.
 - Direct Agent Canvas delivery splits body nodes only on H1 headings, keeps H2-H6 headings inside their parent body node, and does not paginate overlong sections.
 - Progressive research/progress reference nodes are created only from sanitized HTTP(S) `sources[]`; `web_search` or `web_fetch` events with only query, summary, snippet, path, command, or bare `url` do not create reference nodes.
 - Progressive reference node content contains Markdown links from `formatSourceLinks()` and does not include tool, query, `URL:`, or snippet fields; final `Sources` / `References` nodes still render clickable Markdown links.
+- Progressive `research_committed` and `body_checkpoint_committed` events apply live node snapshots immediately but coalesce full Thread-state refresh through the deferred live-refresh path; final Body, file document, sources, and failed-summary committed events bypass the debounce.
+- Progressive Canvas status labels use delivery metadata when available: evidence count for research cards, draft index for body checkpoints, Markdown-writing text for `write_file`, and final-response-preparation text after `present_files`.
 - Multi-selected node drag persists selected node positions through one batch update, remains undoable, and does not blank the Canvas.
+- React Flow `dimensions` changes remain accepted into controlled Canvas nodes so `measured.width/height` survive mapping and node drag does not emit `error#015` / `node not initialized`.
 - Shape library search, recent selections, close behavior, and localized labels remain accessible.
+
+Focused frontend coverage for Canvas drag and progressive refresh behavior can be run with:
+
+```powershell
+node --import tsx --test tests/frontend/canvasFlowMapping.test.ts tests/frontend/documentCanvasNodeChanges.test.ts tests/frontend/liveThreadStateRefresh.test.ts tests/frontend/canvasDragPersistence.test.ts tests/frontend/canvasKeyboardShortcuts.test.ts
+```

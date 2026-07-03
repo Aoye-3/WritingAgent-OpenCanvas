@@ -101,11 +101,11 @@ def test_normalize_command_rejects_unsupported_command():
 
 
 def test_build_run_config_basic():
-    from app.gateway.services import build_run_config
+    from app.gateway.services import DEFAULT_RECURSION_LIMIT, build_run_config
 
     config = build_run_config("thread-1", None, None)
     assert config["configurable"]["thread_id"] == "thread-1"
-    assert config["recursion_limit"] == 100
+    assert config["recursion_limit"] == DEFAULT_RECURSION_LIMIT
 
 
 def test_build_run_config_with_overrides():
@@ -435,7 +435,7 @@ def test_inject_authenticated_user_context_overrides_client_user_id():
 
 def test_build_run_config_with_context():
     """When caller sends 'context', prefer it over 'configurable'."""
-    from app.gateway.services import build_run_config
+    from app.gateway.services import DEFAULT_RECURSION_LIMIT, build_run_config
 
     config = build_run_config(
         "thread-1",
@@ -445,7 +445,7 @@ def test_build_run_config_with_context():
     assert "context" in config
     assert config["context"]["user_id"] == "u-42"
     assert "configurable" not in config
-    assert config["recursion_limit"] == 100
+    assert config["recursion_limit"] == DEFAULT_RECURSION_LIMIT
 
 
 def test_build_run_config_null_context_becomes_empty_context():

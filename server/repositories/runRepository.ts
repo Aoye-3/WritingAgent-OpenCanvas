@@ -279,13 +279,19 @@ export class RunRepository {
 }
 
 function dedupeToolEvents(events: Array<{ eventType: string; payload: unknown }>) {
-  const seen = new Set<string>();
-  return events.filter((event) => {
+  const byKey = new Map<string, { eventType: string; payload: unknown }>();
+  const order: string[] = [];
+  for (const event of events) {
     const key = toolEventDedupeKey(event);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+    const existing = byKey.get(key);
+    if (existing) {
+      byKey.set(key, mergePreferredToolEvent(existing, event));
+      continue;
+    }
+    byKey.set(key, event);
+    order.push(key);
+  }
+  return order.map((key) => byKey.get(key)!);
 }
 
 function toolEventDedupeKey(event: { eventType: string; payload: unknown }) {
@@ -294,9 +300,78 @@ function toolEventDedupeKey(event: { eventType: string; payload: unknown }) {
   const toolCallId = readString(payload.toolCallId);
   const clarificationId = readString(payload.clarificationId);
   if (/agent_clarification/.test(event.eventType) || question) {
-    return [event.eventType, toolCallId, clarificationId, question].join("|");
+    return [event.eventType, clarificationId || question || toolCallId, agentClarificationOptionsKey(payload.options)].join("|");
   }
   return `${event.eventType}|${JSON.stringify(sanitizeToolEventPayload(event.payload as JsonValue))}`;
+}
+
+function mergePreferredToolEvent(
+  existing: { eventType: string; payload: unknown },
+  incoming: { eventType: string; payload: unknown }
+) {
+  if (!isAgentClarificationEvent(existing) || !isAgentClarificationEvent(incoming)) return existing;
+  const existingHasResume = hasCompleteRuntimeResume(existing);
+  const incomingHasResume = hasCompleteRuntimeResume(incoming);
+  if (!incomingHasResume && existingHasResume) return existing;
+  if (!incomingHasResume && !existingHasResume) return existing;
+  const existingPayload = readRecord(existing.payload);
+  const incomingPayload = readRecord(incoming.payload);
+  const existingResumeContext = readRecord(existingPayload.resumeContext);
+  const incomingResumeContext = readRecord(incomingPayload.resumeContext);
+  const runtimeResume = readRuntimeResume(incomingResumeContext.runtimeResume)
+    ?? readRuntimeResume(existingResumeContext.runtimeResume);
+  return {
+    ...existing,
+    ...incoming,
+    payload: {
+      ...existingPayload,
+      ...incomingPayload,
+      resumeContext: {
+        ...existingResumeContext,
+        ...incomingResumeContext,
+        ...(runtimeResume ? { runtimeResume } : {})
+      }
+    }
+  };
+}
+
+function isAgentClarificationEvent(event: { eventType: string; payload: unknown }) {
+  const payload = readRecord(event.payload);
+  const type = readString(payload.type) || readString(payload.eventType);
+  return /agent_clarification_requested$/.test(event.eventType) || type === "agent_clarification_requested";
+}
+
+function hasCompleteRuntimeResume(event: { eventType: string; payload: unknown }) {
+  const payload = readRecord(event.payload);
+  const resumeContext = readRecord(payload.resumeContext);
+  return Boolean(readRuntimeResume(resumeContext.runtimeResume));
+}
+
+function readRuntimeResume(value: unknown) {
+  const resume = readRecord(value);
+  const runtimeThreadId = readString(resume.runtimeThreadId);
+  const runtimeRunId = readString(resume.runtimeRunId);
+  const interruptId = readString(resume.interruptId);
+  if (!runtimeThreadId || !runtimeRunId || !interruptId) return undefined;
+  const checkpointId = readString(resume.checkpointId);
+  return {
+    runtimeThreadId,
+    runtimeRunId,
+    interruptId,
+    ...(checkpointId ? { checkpointId } : {})
+  };
+}
+
+function agentClarificationOptionsKey(value: unknown) {
+  if (!Array.isArray(value)) return "";
+  return JSON.stringify(value.map((option) => {
+    if (typeof option === "string") return option.trim();
+    const item = readRecord(option);
+    return {
+      id: readString(item.id),
+      label: readString(item.label) || readString(item.title)
+    };
+  }));
 }
 
 function stableAgentClarificationId(threadId: string, payload: Record<string, unknown>, question: string) {

@@ -101,6 +101,61 @@ test("Canvas flow mapping preserves multi-selected node state", () => {
   assert.deepEqual(flowNodes.map((node) => node.selected), [true, true, false]);
 });
 
+test("Canvas flow mapping reuses unchanged flow node references", () => {
+  const source = canvasNode("node_1", 10);
+  const currentNodes = buildCanvasFlowNodes({
+    nodes: [source],
+    currentNodes: [],
+    selectedNodeId: "node_1",
+    resizingNodeId: null,
+    locale: "en",
+    suggestions: [],
+    callbacks
+  });
+
+  const nextNodes = buildCanvasFlowNodes({
+    nodes: [source],
+    currentNodes,
+    selectedNodeId: "node_1",
+    resizingNodeId: null,
+    locale: "en",
+    suggestions: [],
+    callbacks
+  });
+
+  assert.equal(nextNodes[0], currentNodes[0]);
+});
+
+test("Canvas flow mapping preserves React Flow measured dimensions", () => {
+  const source = canvasNode("node_1", 10);
+  const currentNodes = buildCanvasFlowNodes({
+    nodes: [source],
+    currentNodes: [],
+    selectedNodeId: "node_1",
+    resizingNodeId: null,
+    locale: "en",
+    suggestions: [],
+    callbacks
+  });
+  const measuredNode = {
+    ...currentNodes[0],
+    measured: { width: 300, height: 180 }
+  };
+
+  const nextNodes = buildCanvasFlowNodes({
+    nodes: [source],
+    currentNodes: [measuredNode],
+    selectedNodeId: "node_1",
+    resizingNodeId: null,
+    locale: "en",
+    suggestions: [],
+    callbacks
+  });
+
+  assert.equal(nextNodes[0], measuredNode);
+  assert.deepEqual(nextNodes[0].measured, { width: 300, height: 180 });
+});
+
 function canvasNode(id: string, x: number) {
   return {
     id,

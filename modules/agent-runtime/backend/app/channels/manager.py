@@ -28,7 +28,7 @@ DEFAULT_GATEWAY_URL = "http://localhost:8001"
 DEFAULT_ASSISTANT_ID = "lead_agent"
 CUSTOM_AGENT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9-]+$")
 
-DEFAULT_RUN_CONFIG: dict[str, Any] = {"recursion_limit": 100}
+DEFAULT_RUN_CONFIG: dict[str, Any] = {"recursion_limit": 160}
 DEFAULT_RUN_CONTEXT: dict[str, Any] = {
     "thinking_enabled": True,
     "is_plan_mode": False,

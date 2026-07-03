@@ -36,6 +36,8 @@ type BuildCanvasFlowNodesInput = {
 
 const emptySuggestions: CanvasWorkflowSuggestion[] = [];
 const emptyWriteRequests: CanvasWriteRequest[] = [];
+const emptySuggestionMap = new Map<string, CanvasWorkflowSuggestion[]>();
+const emptyWriteRequestMap = new Map<string, CanvasWriteRequest[]>();
 
 export function buildCanvasFlowNodes({
   nodes,
@@ -53,16 +55,16 @@ export function buildCanvasFlowNodes({
 }: BuildCanvasFlowNodesInput): CanvasFlowNode[] {
   const currentById = new Map(currentNodes.map((node) => [node.id, node]));
   const selectedNodeSet = new Set(selectedNodeIds);
-  const suggestionsByNodeId = groupByNodeId(suggestions, (suggestion) => suggestion.nodeId);
-  const pendingWriteRequestsByNodeId = groupByNodeId(
-    writeRequests.filter((request) => request.status === "pending" && request.targetNodeId),
-    (request) => request.targetNodeId ?? ""
-  );
+  const suggestionsByNodeId = suggestions.length ? groupByNodeId(suggestions, (suggestion) => suggestion.nodeId) : emptySuggestionMap;
+  const pendingWriteRequests = writeRequests.length ? writeRequests.filter((request) => request.status === "pending" && request.targetNodeId) : emptyWriteRequests;
+  const pendingWriteRequestsByNodeId = pendingWriteRequests.length ? groupByNodeId(pendingWriteRequests, (request) => request.targetNodeId ?? "") : emptyWriteRequestMap;
   return nodes.map((node) => {
     const current = currentById.get(node.id);
     const preserveLiveGeometry = current?.dragging || node.id === resizingNodeId;
     const liveWidth = readDimension(current?.style?.width, node.width);
     const liveHeight = readDimension(current?.style?.height, node.height);
+    const measured = current?.measured;
+    const hasMeasured = typeof measured?.width === "number" && typeof measured?.height === "number";
     const selected = selectedNodeSet.has(node.id) || node.id === selectedNodeId;
     const nextNode: CanvasFlowNode = {
       id: node.id,
@@ -73,6 +75,7 @@ export function buildCanvasFlowNodes({
       style: { width: preserveLiveGeometry ? liveWidth : node.width, height: preserveLiveGeometry ? liveHeight : node.height },
       width: preserveLiveGeometry ? liveWidth : node.width,
       height: preserveLiveGeometry ? liveHeight : node.height,
+      ...(hasMeasured ? { measured } : {}),
       data: {
         isResizing: node.id === resizingNodeId,
         locale,
@@ -98,6 +101,7 @@ function isSameFlowNode(current: CanvasFlowNode, next: CanvasFlowNode) {
     && current.position.y === next.position.y
     && current.width === next.width
     && current.height === next.height
+    && sameMeasuredSize(current, next)
     && current.style?.width === next.style?.width
     && current.style?.height === next.style?.height
     && current.data.locale === next.data.locale
@@ -122,7 +126,13 @@ function isSameFlowNode(current: CanvasFlowNode, next: CanvasFlowNode) {
     && current.data.onUpdateNode === next.data.onUpdateNode;
 }
 
+function sameMeasuredSize(current: CanvasFlowNode, next: CanvasFlowNode) {
+  return current.measured?.width === next.measured?.width
+    && current.measured?.height === next.measured?.height;
+}
+
 function isSameCanvasNodeValue(current: CanvasNode, next: CanvasNode) {
+  if (current === next) return true;
   return current.id === next.id
     && current.projectId === next.projectId
     && current.kind === next.kind
@@ -135,10 +145,11 @@ function isSameCanvasNodeValue(current: CanvasNode, next: CanvasNode) {
     && current.includeInProjectContext === next.includeInProjectContext
     && current.createdAt === next.createdAt
     && current.updatedAt === next.updatedAt
-    && JSON.stringify(current.metadata ?? null) === JSON.stringify(next.metadata ?? null);
+    && (current.metadata === next.metadata || JSON.stringify(current.metadata ?? null) === JSON.stringify(next.metadata ?? null));
 }
 
 function isSameWorkflowValue(current: CanvasWorkflow | undefined, next: CanvasWorkflow | undefined) {
+  if (current === next) return true;
   if (!current || !next) return current === next;
   return current.mode === next.mode
     && current.stage === next.stage

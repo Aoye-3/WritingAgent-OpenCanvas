@@ -1,4 +1,5 @@
-import { Handle, Position, useReactFlow, useViewport, type NodeProps } from "@xyflow/react";
+import { memo } from "react";
+import { Handle, Position, useReactFlow, type NodeProps } from "@xyflow/react";
 import { flushSync } from "react-dom";
 import type { CanvasNode, CanvasWorkflowRole } from "../../../agents/types";
 import { TrashIcon } from "../../../../shared/icons";
@@ -9,10 +10,9 @@ import type { CanvasFlowNode, CanvasLocale, ResizeHandle } from "./types";
 
 export const resizeHandles: ResizeHandle[] = ["n", "e", "s", "w"];
 
-export function CanvasNodeFrame({ data, selected }: NodeProps<CanvasFlowNode>) {
+export const CanvasNodeFrame = memo(function CanvasNodeFrame({ data, selected }: NodeProps<CanvasFlowNode>) {
   const { isResizing, locale, node, onDeleteNode, onResizeStateChange, onUpdateNode } = data;
   const reactFlow = useReactFlow<CanvasFlowNode>();
-  const viewport = useViewport();
   const diagram = readDiagramMetadata(node.metadata);
   const kindClass = isKnownCanvasKind(node.kind) ? `canvas-node-${node.kind}` : "canvas-node-unknown";
   const diagramClass = diagram ? `canvas-node-diagram is-${diagram.shape} tone-${diagram.tone}` : "";
@@ -38,7 +38,7 @@ export function CanvasNodeFrame({ data, selected }: NodeProps<CanvasFlowNode>) {
       y: liveNode?.position.y ?? node.y,
       width: liveWidth,
       height: liveHeight,
-      zoom: viewport.zoom || 1
+      zoom: reactFlow.getZoom() || 1
     };
 
     const updateVisualNode = (next: { x: number; y: number; width: number; height: number }) => {
@@ -112,7 +112,7 @@ export function CanvasNodeFrame({ data, selected }: NodeProps<CanvasFlowNode>) {
       </button>
     </article>
   );
-}
+});
 
 function NodeLinkPort() {
   return (

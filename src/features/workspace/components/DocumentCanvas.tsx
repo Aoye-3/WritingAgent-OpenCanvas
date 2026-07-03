@@ -26,6 +26,7 @@ import { fileDocumentPreviewTarget } from "./canvas/fileDocumentPreview";
 import { MAX_ZOOM, MIN_ZOOM, canvasNodeKinds, kindLabels, workflowModeLabels } from "./canvas/constants";
 import { collectDraggedNodePositionPatches } from "./canvas/dragPersistence";
 import { buildCanvasFlowNodes } from "./canvas/flowMapping";
+import { filterCanvasNodeChanges, sameFlowNodeViewArray } from "./canvas/nodeChanges";
 import { formatMindChainContext, type CanvasMindChainContext } from "../../../../shared/canvasMindChain";
 import type { CanvasFlowNode } from "./canvas/types";
 import { completeCanvasToolAction, type CanvasTool } from "./canvas/toolState";
@@ -317,11 +318,7 @@ function DocumentCanvasInner({
   };
 
   const onNodesChange = useCallback((changes: NodeChange<CanvasFlowNode>[]) => {
-    const activeResizeNodeId = resizingNodeIdRef.current;
-    const allowedChanges = changes.filter((change) => {
-      if (change.type !== "position" && change.type !== "select") return false;
-      return !(activeResizeNodeId && change.id === activeResizeNodeId);
-    });
+    const allowedChanges = filterCanvasNodeChanges(changes, resizingNodeIdRef.current);
     if (allowedChanges.length === 0) return;
     setFlowNodes((current) => {
       const next = applyNodeChanges(allowedChanges, current);
@@ -868,21 +865,6 @@ function sameStringArray(left: string[], right: string[]) {
 
 function sameFlowNodeArray(left: CanvasFlowNode[], right: CanvasFlowNode[]) {
   return left.length === right.length && left.every((node, index) => node === right[index]);
-}
-
-function sameFlowNodeViewArray(left: CanvasFlowNode[], right: CanvasFlowNode[]) {
-  return left.length === right.length && left.every((node, index) => {
-    const next = right[index];
-    return node.id === next.id
-      && node.selected === next.selected
-      && node.dragging === next.dragging
-      && node.position.x === next.position.x
-      && node.position.y === next.position.y
-      && node.width === next.width
-      && node.height === next.height
-      && node.style?.width === next.style?.width
-      && node.style?.height === next.style?.height;
-  });
 }
 
 function isPointOverCanvasContent(point: { x: number; y: number }, nodes: CanvasNode[], objects: CanvasObject[]) {

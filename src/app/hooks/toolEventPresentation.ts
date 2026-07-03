@@ -16,6 +16,8 @@ export type LiveToolEventReduction = {
   chatActivityText?: string;
 };
 
+export type LiveThreadStateRefreshMode = "none" | "deferred" | "immediate";
+
 export function createLiveToolEventState(): LiveToolEventState {
   return { callsByTool: {} };
 }
@@ -43,7 +45,7 @@ export function reduceLiveToolEvent(
     };
   }
 
-  const activityText = lifecycleActivityText(event.eventType, locale);
+  const activityText = canvasDeliveryProgressText(event, locale) ?? lifecycleActivityText(event.eventType, locale);
   return {
     state,
     statusLabel: activityText,
@@ -52,10 +54,19 @@ export function reduceLiveToolEvent(
 }
 
 export function shouldRefreshThreadStateForToolEvent(event: LiveToolEvent) {
+  return threadStateRefreshModeForToolEvent(event) !== "none";
+}
+
+export function threadStateRefreshModeForToolEvent(event: LiveToolEvent): LiveThreadStateRefreshMode {
+  if (event.eventType === "canvas_delivery_research_committed" || event.eventType === "canvas_delivery_body_checkpoint_committed") {
+    return "deferred";
+  }
   return /(?:^|_)(?:canvas_mutation_committed|canvas_write_pending_approval|canvas_mutation_failed|artifact_committed|artifact_staged)$/.test(event.eventType)
     || /^canvas_delivery_.*_committed$/.test(event.eventType)
     || /(?:^|_)plan_waiting_for_user$/.test(event.eventType)
-    || /(?:^|_)agent_clarification_requested$/.test(event.eventType);
+    || /(?:^|_)agent_clarification_requested$/.test(event.eventType)
+    ? "immediate"
+    : "none";
 }
 
 export function readLiveCanvasNodeSnapshot(event: LiveToolEvent): CanvasNode | undefined {
@@ -124,6 +135,12 @@ function readCanvasNodeKind(value: unknown): CanvasNodeKind | undefined {
 }
 
 function buildToolStatusLabel(toolName: string, eventType: string, count: number, locale: Locale) {
+  if (toolName === "write_file" && /(?:^|_)tool_started$/.test(eventType)) {
+    return locale === "zh" ? "正在写入 Markdown 文档..." : "Writing the Markdown document...";
+  }
+  if (toolName === "present_files" && /(?:^|_)tool_completed$/.test(eventType)) {
+    return locale === "zh" ? "文档已展示，正在生成最终回复..." : "Document presented; preparing the final response...";
+  }
   const label = toolLabel(toolName, locale);
   const suffix = count > 1 ? locale === "zh" ? ` (${count} 次)` : ` (${count} calls)` : "";
   if (/(?:^|_)tool_failed$/.test(eventType)) return locale === "zh" ? `${label}失败${suffix}` : `${label} failed${suffix}`;
@@ -170,4 +187,31 @@ function lifecycleActivityText(eventType: string, locale: Locale) {
     return locale === "zh" ? "Canvas 写入失败" : "Canvas write failed";
   }
   return undefined;
+}
+
+function canvasDeliveryProgressText(event: LiveToolEvent, locale: Locale) {
+  const payload = event.payload ?? {};
+  const evidenceCount = readPositiveInteger(payload.evidenceCount);
+  const draftIndex = readPositiveInteger(payload.draftIndex);
+  const nextPhaseHint = typeof payload.nextPhaseHint === "string" ? payload.nextPhaseHint : "";
+  if (event.eventType === "canvas_delivery_research_committed" && evidenceCount) {
+    if (nextPhaseHint === "synthesis_ready") {
+      return locale === "zh"
+        ? `已收集 ${evidenceCount} 条参考资料，Agent 正在整理交付...`
+        : `${evidenceCount} references collected; agent is organizing the delivery...`;
+    }
+    return locale === "zh"
+      ? `已收集 ${evidenceCount} 条参考资料，继续检索/整理中...`
+      : `${evidenceCount} references collected; continuing research and organization...`;
+  }
+  if (event.eventType === "canvas_delivery_body_checkpoint_committed" && draftIndex) {
+    return locale === "zh"
+      ? `已生成第 ${draftIndex} 版正文草稿，继续筛选资料...`
+      : `Body draft ${draftIndex} generated; continuing to filter sources...`;
+  }
+  return undefined;
+}
+
+function readPositiveInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }
