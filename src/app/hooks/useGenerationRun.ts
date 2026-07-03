@@ -52,6 +52,10 @@ type QueuedChatInput = {
   requestContext?: Record<string, unknown>;
 };
 
+export type ChatSendResult =
+  | { ok: true; state: ThreadStateResponse }
+  | { ok: false; error: string; threadId?: string; aborted?: boolean };
+
 type LiveThreadStateRefreshRequest = {
   threadId: string;
   operationId: number;
@@ -504,7 +508,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     }
   };
 
-  const handleChatSend = async (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>) => {
+  const handleChatSend = async (text: string, modelOverrides?: GenerateRequest["modelOverrides"], requestContext?: Record<string, unknown>): Promise<ChatSendResult> => {
     await options.beforeGenerate();
     const operationId = ++operationIdRef.current;
     liveToolEventStateRef.current = createLiveToolEventState();
@@ -591,7 +595,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         onTimelineEvent: appendTimelineEvent,
         onProgressEvent: (event) => appendProgressEvent(event, assistantMessageId)
       }, { signal: abortController.signal });
-      if (operationId !== operationIdRef.current) return;
+      if (operationId !== operationIdRef.current) return { ok: false, error: "stale_operation", threadId: activeThreadId };
 
       await drainStreamingText(`message:${assistantMessageId}`);
       await syncFinalTypewriterText(`message:${assistantMessageId}`, streamedText, result.text);
@@ -607,11 +611,11 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       options.onPersistThreadId(result.threadId);
 
       const state = await options.onFetchAndApplyThreadState(result.threadId);
-      if (operationId !== operationIdRef.current) return;
+      if (operationId !== operationIdRef.current) return { ok: false, error: "stale_operation", threadId: result.threadId };
       applyCollaborationMessagesFromThreadState(state);
       await options.onRefreshThreadState(result.threadId);
       await options.onRefreshProjectSurfaces();
-      return state;
+      return { ok: true, state };
     } catch (error) {
       if (isAbortError(error)) {
         flushStreamingText(`message:${assistantMessageId}`);
@@ -623,7 +627,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
           status: "stopped",
           statusLabel: undefined
         });
-        return;
+        return { ok: false, error: "aborted", threadId, aborted: true };
       }
       const message = recoverableGenerationError(error instanceof Error ? error.message : "Generation failed", options.locale);
       flushStreamingText(`message:${assistantMessageId}`);
@@ -643,6 +647,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
           // Keep the visible stream failure when persisted recovery state cannot be refreshed.
         }
       }
+      return { ok: false, error: message, threadId };
     } finally {
       if (chatAbortControllerRef.current === abortController) chatAbortControllerRef.current = null;
       if (activeChatMessageIdRef.current === assistantMessageId) activeChatMessageIdRef.current = null;

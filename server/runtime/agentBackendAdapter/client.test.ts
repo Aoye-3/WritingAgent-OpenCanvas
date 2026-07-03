@@ -56,6 +56,8 @@ test("builds LangGraph-compatible AgentBackend run request", () => {
   assert.equal(request.context.facetwrite_memory_scope_id, "thread_1");
   assert.equal(request.context.facetwrite_project_id, "project_1");
   assert.equal(request.context.facetwrite_plan_phase, "chat");
+  assert.equal(request.context.facetwrite_intake_phase, "execution");
+  assert.equal(request.config.configurable.facetwrite_intake_phase, "execution");
   assert.equal(request.config.configurable.facetwrite_memory_enabled, false);
   assert.equal(request.metadata.agentCardId, "chat-agent");
   assert.equal(request.metadata.subagent.name, "facetwrite-chat-agent");
@@ -1057,6 +1059,8 @@ test("skill clarification guard exposes only ask_clarification even with progres
   assert.equal(request.context.reasoning_effort, undefined);
   assert.equal(request.config.configurable.facetwrite_clarification_phase, "clarification_guard");
   assert.equal(request.context.facetwrite_clarification_phase, "clarification_guard");
+  assert.equal(request.config.configurable.facetwrite_intake_phase, "intake");
+  assert.equal(request.context.facetwrite_intake_phase, "intake");
   assert.deepEqual(request.config.configurable.facetwrite_clarification_policy, {
     mode: "skill_scope_guard",
     instruction: "Call ask_clarification."
@@ -1099,6 +1103,21 @@ test("does not keep clarification_required after runtime continues with tools", 
   assert.equal(result.finishReason, "agent_backend_completed");
   assert.ok(result.events.some((event) => event.eventType === "agent_backend_agent_clarification_requested"));
   assert.ok(result.events.some((event) => event.eventType === "agent_backend_tool_completed" && event.payload.toolName === "web_search"));
+});
+
+test("keeps clarification_required when runtime only sends ordinary text after clarification", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_clarify","name":"ask_clarification","args":{"question":"Which citation format?","options":[{"id":"apa","label":"APA","detail":"APA 7th","recommended":true},{"id":"ieee","label":"IEEE","detail":"IEEE style"}]}}]}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"I can continue once you choose."}]\n\n',
+    'event: end\ndata: null\n\n'
+  ].join("");
+
+  const result = await runWithBody(body);
+
+  assert.equal(result.finishReason, "clarification_required");
+  assert.equal(result.text, "I can continue once you choose.");
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_agent_clarification_requested"));
+  assert.equal(result.events.some((event) => event.eventType === "agent_backend_tool_started"), false);
 });
 
 test("maps ask_clarification tool calls with JSON string args", async () => {

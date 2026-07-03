@@ -7,7 +7,9 @@ import {
   buildAgentClarificationSubmission,
   hasUnresolvedAgentClarificationTrace,
   latestPendingAgentClarification,
-  mergeAgentClarificationDisplayRecords
+  mergeAgentClarificationDisplayRecords,
+  removeOptimisticAgentClarification,
+  removeSubmittedAgentClarificationKeys
 } from "../../src/features/workspace/components/AICollaborationDrawer";
 import type { AgentClarification } from "../../src/features/agents/types";
 import type { CollaborationMessage } from "../../src/features/generation/types";
@@ -125,6 +127,35 @@ test("optimistic answered Agent clarification remains visible until persisted an
     mergeAgentClarificationDisplayRecords([persisted], [optimistic]).filter((item) => item.status === "answered").map((item) => item.runId),
     ["run_1"]
   );
+});
+
+test("failed Agent clarification send removes submitted keys and optimistic record", () => {
+  const optimistic: AgentClarification = {
+    id: "agent_clarification_scope",
+    threadId: "thread_1",
+    runId: "pending",
+    status: "answered",
+    question: "Which Agent scope?",
+    options: [
+      { id: "multi_agent", label: "Multi-agent systems", detail: "Coordination", recommended: true },
+      { id: "agent_frameworks", label: "Agent frameworks", detail: "Runtime tooling", recommended: false }
+    ],
+    selectedOptionId: "multi_agent",
+    selectedOptionLabel: "Multi-agent systems",
+    answer: "Multi-agent systems",
+    createdAt: "2026-06-24T00:00:00.000Z",
+    updatedAt: "2026-06-24T00:00:01.000Z"
+  };
+  const other: AgentClarification = {
+    ...optimistic,
+    id: "agent_clarification_time",
+    question: "Which time range?",
+    answer: "Recent 3 years"
+  };
+  const keys = new Set(["id:agent_clarification_scope", "question:which agent scope?", "keep"]);
+
+  assert.deepEqual([...removeSubmittedAgentClarificationKeys(keys, ["id:agent_clarification_scope", "question:which agent scope?"])].sort(), ["keep"]);
+  assert.deepEqual(removeOptimisticAgentClarification([optimistic, other], optimistic), [other]);
 });
 
 test("answering one Agent clarification does not suppress a later different clarification", () => {
