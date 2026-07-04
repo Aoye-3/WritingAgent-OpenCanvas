@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-04: Runtime Recursion Budget Is Advisory, LangGraph Limit Is A Hard Guard
+
+Decision: Keep `facetwrite_recursion_limit` as the FacetWrite advisory budget threshold and send a larger top-level LangGraph `config.recursion_limit` hard guard. The hard guard is `max(160, advisory recursion * 2)`. The low profile remains `80` for budget pressure, but LangGraph receives at least `160` so final Writing, `write_file`, and `present_files` delivery can finish after the advisory notice fires.
+
+Reason: LangGraph treats `recursion_limit` as a maximum graph-step safety clamp, not as a resumable business budget. Using the low profile's `80` directly as the top-level limit caused long batch-delivery runs to fail during final file writing before hitting a normal stop condition.
+
+Impact: The TypeScript AgentBackend adapter and Runtime Gateway must preserve `facetwrite_recursion_limit` in context/configurable fields for middleware `synthesis_gate` decisions, while expanding the top-level LangGraph limit to the hard guard. Budget middleware may emit telemetry and hidden final-synthesis reminders, but it must not clear tools, force failure, or treat the advisory threshold as completion. `GraphRecursionError` remains a failed but recoverable run state.
+
 ## 2026-07-03: Agent Clarification Uses LangGraph Checkpoint Resume
 
 Decision: Treat Agent Runtime `ask_clarification` as a native LangGraph interrupt and resume the same graph thread with `Command(resume=...)` after the user answers. The runtime middleware calls `interrupt(structured_payload)` instead of ending the graph with `Command(update, goto=END)`. FacetWrite persists the structured clarification in `agent_clarifications`, stores only safe runtime resume metadata in `resume_context_json`, and maps the answer back through the AgentBackend resume path instead of turning it into a new ordinary chat instruction.
@@ -108,9 +116,9 @@ Impact: `server/services/generation/canvasWriteScopePolicy.ts` is the shared pol
 
 Decision: Skill scope clarification continuation must carry an effective runtime budget and Canvas workflow across the two-phase guard. The guard `resumeContext` records the resolved `runtimeBudgetProfile` from either the request override or Project runtime settings, plus the original Canvas workflow. If Runtime returns a partial `resumeContext`, the Node generation service fills missing original instruction, Skill refs, disabled Skill refs, runtime budget, and Canvas workflow instead of trusting the partial payload as complete.
 
-Reason: The composer may display the default medium budget without sending an explicit `runtimeBudgetProfile`, and Runtime may emit a structured clarification event with only partial resume metadata. If the selected clarification answer resumes without `batch_delivery` Canvas workflow or effective budget, progressive delivery can fail to set LangGraph's top-level `recursion_limit` and the run falls back to the default 100-step clamp.
+Reason: The composer may display the default medium budget without sending an explicit `runtimeBudgetProfile`, and Runtime may emit a structured clarification event with only partial resume metadata. If the selected clarification answer resumes without `batch_delivery` Canvas workflow or effective budget, progressive delivery can fail to set FacetWrite's advisory budget context and the run falls back to the Gateway hard guard without the intended synthesis pressure signals.
 
-Impact: The adapter and Gateway must keep FacetWrite budget context and LangGraph's enforced `config.recursion_limit` aligned. `facetwrite_recursion_limit` from progressive delivery context is mirrored to the top-level run config when the top-level value is still the default. A recursion-limit failure remains a real failed run with recoverable Canvas progress; the composer may offer a "continue" draft action, but that recovery path must preserve the same clarification answer, Skills, Canvas workflow, and budget semantics.
+Impact: The adapter and Gateway must keep FacetWrite budget context and LangGraph's enforced `config.recursion_limit` related but distinct. `facetwrite_recursion_limit` from progressive delivery context stays available to middleware, and the top-level run config is expanded to the larger hard guard when the top-level value is still the default. A recursion-limit failure remains a real failed run with recoverable Canvas progress; the composer may offer a "continue" draft action, but that recovery path must preserve the same clarification answer, Skills, Canvas workflow, and budget semantics.
 
 ## 2026-06-24: Skill Scope Guard Uses Two-Phase Clarification And Structured Runtime Artifacts
 
@@ -174,11 +182,11 @@ Impact: `simple_chat` and `plan_intake` are conversation-only. `long_task` and `
 
 ## 2026-06-21: Long Agent Runs Use Explicit Runtime Budgets And Body Checkpoints
 
-Decision: Add a per-request `runtimeBudgetProfile` (`low`, `medium`, `high`, now default `low`) and keep long-task Canvas progress server-owned. The profile maps to LangGraph recursion limit, model-call budget, evidence-tool budget, body-draft checkpoint budget, and synthesis reserve steps. During batch-delivery runs the server updates a stable `正文草稿` / `Body draft` node with working checkpoints as evidence arrives, then writes final content to the separate `正文` / `Body` node only when the runtime succeeds.
+Decision: Add a per-request `runtimeBudgetProfile` (`low`, `medium`, `high`, now default `low`) and keep long-task Canvas progress server-owned. The profile maps to an advisory recursion budget, model-call budget, evidence-tool budget, body-draft checkpoint budget, and synthesis reserve steps. During batch-delivery runs the server updates a stable `正文草稿` / `Body draft` node with working checkpoints as evidence arrives, then writes final content to the separate `正文` / `Body` node only when the runtime succeeds.
 
 Reason: Increasing LangGraph `recursion_limit` alone hides the symptom but does not force the Agent to stop searching and write. The observed failure mode was a long tool loop that produced many reference nodes, then hit `GRAPH_RECURSION_LIMIT` before final synthesis, leaving `正文` empty. Users need visible control over run depth and recoverable body progress even when the final Agent run fails.
 
-Impact: The composer exposes `低 / 中 / 高` as a compact run-budget control independent of thinking mode. The AgentBackend adapter forwards both `config.recursion_limit` and `facetwrite_*` budget context. Python middleware removes evidence tools and injects a final-synthesis instruction near the budget boundary. `canvas_delivery_body_checkpoint_committed` is a live Canvas-refresh event with a committed draft-node snapshot, not a success condition; runs with only progress/checkpoint events still fail if no final assistant text or final structured lifecycle outcome exists.
+Impact: The composer exposes `低 / 中 / 高` as a compact run-budget control independent of thinking mode. The AgentBackend adapter forwards `facetwrite_*` budget context as advisory pressure signals and sends a larger top-level `config.recursion_limit` hard guard. Python middleware emits `synthesis_gate` and injects a final-synthesis instruction near the budget boundary without turning the budget into a tool kill switch. `canvas_delivery_body_checkpoint_committed` is a live Canvas-refresh event with a committed draft-node snapshot, not a success condition; runs with only progress/checkpoint events still fail if no final assistant text or final structured lifecycle outcome exists.
 
 ## 2026-06-21: Project Skill Folders Are Managed Through The Catalog API
 

@@ -335,14 +335,14 @@ def test_merge_run_context_overrides_preserves_facetwrite_runtime_contract():
     assert "untrusted_extra" not in config["configurable"]
 
 
-def test_merge_run_context_overrides_syncs_facetwrite_recursion_limit_to_top_level():
+def test_merge_run_context_overrides_expands_facetwrite_recursion_limit_to_hard_guard():
     from app.gateway.services import build_run_config, merge_run_context_overrides
 
     config = build_run_config("thread-1", None, None)
 
     merge_run_context_overrides(config, {"facetwrite_recursion_limit": 140})
 
-    assert config["recursion_limit"] == 140
+    assert config["recursion_limit"] == 280
     assert config["context"]["facetwrite_recursion_limit"] == 140
     assert config["configurable"]["facetwrite_recursion_limit"] == 140
 
@@ -357,13 +357,22 @@ def test_merge_run_context_overrides_preserves_explicit_top_level_recursion_limi
     assert config["recursion_limit"] == 220
 
 
-def test_build_run_config_context_syncs_facetwrite_recursion_limit():
+def test_build_run_config_context_expands_facetwrite_recursion_limit_to_hard_guard():
     from app.gateway.services import build_run_config
 
     config = build_run_config("thread-1", {"context": {"facetwrite_recursion_limit": 140}}, None)
 
-    assert config["recursion_limit"] == 140
+    assert config["recursion_limit"] == 280
     assert config["context"]["facetwrite_recursion_limit"] == 140
+
+
+def test_build_run_config_context_keeps_low_budget_hard_guard_at_gateway_default():
+    from app.gateway.services import DEFAULT_RECURSION_LIMIT, build_run_config
+
+    config = build_run_config("thread-1", {"context": {"facetwrite_recursion_limit": 80}}, None)
+
+    assert config["recursion_limit"] == DEFAULT_RECURSION_LIMIT
+    assert config["context"]["facetwrite_recursion_limit"] == 80
 
 
 def test_merge_run_context_overrides_noop_for_empty_context():

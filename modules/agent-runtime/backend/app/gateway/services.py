@@ -36,6 +36,7 @@ from deerflow.runtime import (
 
 logger = logging.getLogger(__name__)
 DEFAULT_RECURSION_LIMIT = 160
+LANGGRAPH_RECURSION_LIMIT_MULTIPLIER = 2
 
 
 # ---------------------------------------------------------------------------
@@ -180,18 +181,19 @@ def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, An
 
 
 def sync_recursion_limit_from_context(config: dict[str, Any], context: Mapping[str, Any] | None) -> None:
-    """Let FacetWrite's progressive budget drive LangGraph's top-level limit.
+    """Let FacetWrite's progressive budget set an advisory limit and a hard guard.
 
     Middleware reads ``facetwrite_recursion_limit`` from runtime context, but
-    LangGraph enforces the top-level ``recursion_limit``.  When callers omit
-    the top-level value and the Gateway default remains in place, mirror the validated
-    context value so both layers share the same budget.
+    LangGraph enforces the top-level ``recursion_limit``.  When callers omit the
+    top-level value and the Gateway default remains in place, use a larger hard
+    guard so final write/present-file delivery can finish after the advisory
+    budget notice fires.
     """
     if not context:
         return
     recursion_limit = context.get("facetwrite_recursion_limit")
     if type(recursion_limit) is int and recursion_limit > 0 and config.get("recursion_limit", DEFAULT_RECURSION_LIMIT) == DEFAULT_RECURSION_LIMIT:
-        config["recursion_limit"] = recursion_limit
+        config["recursion_limit"] = max(DEFAULT_RECURSION_LIMIT, recursion_limit * LANGGRAPH_RECURSION_LIMIT_MULTIPLIER)
 
 
 def inject_authenticated_user_context(config: dict[str, Any], request: Request) -> None:

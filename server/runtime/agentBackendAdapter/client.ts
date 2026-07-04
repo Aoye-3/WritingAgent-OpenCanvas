@@ -87,6 +87,9 @@ const streamLabels = {
   finalizing: "Finalizing..."
 } as const;
 
+const MIN_LANGGRAPH_RECURSION_LIMIT = 160;
+const LANGGRAPH_RECURSION_LIMIT_MULTIPLIER = 2;
+
 type AgentBackendRunContext = {
   model_name: string;
   thinking_enabled?: boolean;
@@ -324,7 +327,7 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
     },
     metadata: buildAgentBackendRuntimeMetadata(input.agentCard, input.settings),
     config: {
-      ...(effectiveRuntimeContext.facetwrite_recursion_limit ? { recursion_limit: effectiveRuntimeContext.facetwrite_recursion_limit } : {}),
+      ...(effectiveRuntimeContext.facetwrite_recursion_limit ? { recursion_limit: langGraphRecursionLimit(effectiveRuntimeContext.facetwrite_recursion_limit) } : {}),
       configurable: {
         thread_id: input.threadId,
         ...effectiveRuntimeContext
@@ -348,6 +351,10 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
     on_disconnect: "cancel",
     on_completion: "keep"
   };
+}
+
+function langGraphRecursionLimit(advisoryLimit: number) {
+  return Math.max(MIN_LANGGRAPH_RECURSION_LIMIT, advisoryLimit * LANGGRAPH_RECURSION_LIMIT_MULTIPLIER);
 }
 
 export function buildResumeRunRequest(input: AgentBackendResumeRunInput, config: AgentBackendRuntimeConfig) {

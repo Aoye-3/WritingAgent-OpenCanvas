@@ -65,6 +65,41 @@ test("builds LangGraph-compatible AgentBackend run request", () => {
   assert.equal(request.multitask_strategy, "interrupt");
 });
 
+test("keeps progressive recursion budget advisory while raising LangGraph hard guard", () => {
+  const card = getAgentCard("summary");
+  const settings = defaultAgentSettings(card);
+  const request = buildRunRequest({
+    threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings,
+    messages: [{ role: "user", content: "Write the report" }],
+    prompt: "Write the report",
+    contextValues: {
+      taskHandlingPolicy: { kind: "long_task" },
+      canvas: { workflow: { mode: "batch_delivery" } },
+      progressiveCanvasDelivery: {
+        enabled: true,
+        runtimeBudgetProfile: "low",
+        recursionLimit: 80,
+        modelCallLimit: 18,
+        evidenceToolLimit: 8,
+        bodyDraftWriteLimit: 2,
+        synthesisReserveSteps: 16
+      }
+    }
+  }, {
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8000",
+    assistantId: "lead_agent"
+  });
+
+  assert.equal(request.config.configurable.facetwrite_recursion_limit, 80);
+  assert.equal(request.context.facetwrite_recursion_limit, 80);
+  assert.equal(request.config.recursion_limit, 160);
+});
+
 test("builds AgentBackend resume run request with Command resume payload", () => {
   const card = getAgentCard("summary");
   const settings = defaultAgentSettings(card);
@@ -1112,7 +1147,7 @@ test("sends progressive Canvas evidence controls for skill long tasks", () => {
 
   assert.equal(request.context.facetwrite_progressive_canvas_delivery_enabled, true);
   assert.equal(request.config.configurable.facetwrite_progressive_canvas_delivery_enabled, true);
-  assert.equal(request.config.recursion_limit, 110);
+  assert.equal(request.config.recursion_limit, 220);
   assert.equal(request.context.facetwrite_runtime_budget_profile, "medium");
   assert.equal(request.context.facetwrite_recursion_limit, 110);
   assert.equal(request.context.facetwrite_model_call_limit, 24);
@@ -1171,7 +1206,7 @@ test("preserves progressive Canvas budget after an answered skill clarification"
     toolState: { web_search: true }
   }, { enabled: true, baseUrl: "http://127.0.0.1:8000", assistantId: "lead_agent" });
 
-  assert.equal(request.config.recursion_limit, 110);
+  assert.equal(request.config.recursion_limit, 220);
   assert.equal(request.context.facetwrite_progressive_canvas_delivery_enabled, true);
   assert.equal(request.context.facetwrite_runtime_budget_profile, "medium");
   assert.equal(request.context.facetwrite_allowed_tool_refs.includes("web_search"), true);
