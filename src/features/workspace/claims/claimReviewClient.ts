@@ -8,8 +8,12 @@ import type {
 import type { CanvasNode } from "../../agents/types";
 import { apiDelete, apiGet, apiPatch, apiPost } from "../../../shared/apiClient";
 
-export async function fetchClaims(threadId: string, sourceNodeId?: string): Promise<ClaimCandidate[]> {
-  const suffix = sourceNodeId ? `?sourceNodeId=${encodeURIComponent(sourceNodeId)}` : "";
+export async function fetchClaims(threadId: string, sourceNodeId?: string, sourceDocumentPath?: string): Promise<ClaimCandidate[]> {
+  const params = new URLSearchParams();
+  if (sourceNodeId) params.set("sourceNodeId", sourceNodeId);
+  if (sourceDocumentPath) params.set("sourceDocumentPath", sourceDocumentPath);
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
   const payload = await apiGet<{ claims: ClaimCandidate[] }>(`/api/threads/${encodeURIComponent(threadId)}/claims${suffix}`);
   return payload.claims;
 }

@@ -86,6 +86,30 @@ test("deletes Claim candidates persistently", async () => {
   assert.equal(service.delete(threadId, claim.id), false);
 });
 
+test("lists Claims by source document path within the same source node", async () => {
+  const { service, storage, threadId, sourceNode } = await claimFixture();
+  storage.createClaim(sourceNode.projectId, threadId, {
+    sourceNodeId: sourceNode.id,
+    sourceDocumentPath: "/mnt/user-data/outputs/research.md",
+    sourceFileName: "research.md",
+    claimText: "Research claim.",
+    evidenceText: "Research evidence.",
+    createdBy: "user_selection"
+  });
+  storage.createClaim(sourceNode.projectId, threadId, {
+    sourceNodeId: sourceNode.id,
+    sourceDocumentPath: "/mnt/user-data/outputs/other.md",
+    sourceFileName: "other.md",
+    claimText: "Other claim.",
+    evidenceText: "Other evidence.",
+    createdBy: "user_selection"
+  });
+
+  const claims = service.listClaims(threadId, sourceNode.id, "/mnt/user-data/outputs/research.md");
+
+  assert.deepEqual(claims.map((claim) => claim.claimText), ["Research claim."]);
+});
+
 test("rejects Claim creation when the source path does not match the file_document node", async () => {
   const { service, threadId, sourceNode } = await claimFixture();
 

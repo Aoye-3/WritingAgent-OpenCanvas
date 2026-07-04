@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-04: Markdown Preview Uses Real File Documents Before Fallback
+
+Decision: Treat Runtime-reported `/mnt/user-data/outputs/*.md` paths from `write_file` and `present_files` as the primary Markdown delivery source. If runtime artifact archiving fails but the current Thread outputs directory already contains a readable Markdown file for the reported virtual path, FacetWrite still creates the `file_document` node for that real path. Server fallback Markdown is allowed only when no real Markdown path exists or all reported Markdown files are unreadable.
+
+Reason: Long-form runs can produce the correct Markdown file while the artifact archive step reports failure or while a fallback summary is also generated. Letting `facetwrite-delivery-*.md` win in that state opens the wrong document, hides the actual report, and makes Claim extraction bind to the wrong source.
+
+Impact: Progressive finalization must not let fallback files shadow readable Runtime-authored Markdown. The Markdown preview panel lists existing Canvas `file_document` nodes rather than scanning disk. Claim Review queries, extraction, and selected-text creation are scoped by Thread, `sourceNodeId`, and `sourceDocumentPath`, and switching preview documents clears local selection before loading candidates for the selected path.
+
 ## 2026-07-04: Runtime Recursion Budget Is Advisory, LangGraph Limit Is A Hard Guard
 
 Decision: Keep `facetwrite_recursion_limit` as the FacetWrite advisory budget threshold and send a larger top-level LangGraph `config.recursion_limit` hard guard. The hard guard is `max(160, advisory recursion * 2)`. The low profile remains `80` for budget pressure, but LangGraph receives at least `160` so final Writing, `write_file`, and `present_files` delivery can finish after the advisory notice fires.

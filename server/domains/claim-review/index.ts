@@ -54,8 +54,8 @@ export function createClaimReviewDomainService(
   };
 
   return {
-    listClaims(threadId: string, sourceNodeId?: string) {
-      return storage.listClaims(threadId, sourceNodeId);
+    listClaims(threadId: string, sourceNodeId?: string, sourceDocumentPath?: string) {
+      return storage.listClaims(threadId, sourceNodeId, sourceDocumentPath);
     },
 
     async createFromSelection(threadId: string, input: CreateClaimFromSelectionInput) {

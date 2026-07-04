@@ -45,9 +45,20 @@ export class ClaimReviewRepository {
     }
   ) {}
 
-  listClaims(threadId: string, sourceNodeId?: string) {
+  listClaims(threadId: string, sourceNodeId?: string, sourceDocumentPath?: string) {
     validateId(threadId, "threadId");
     if (sourceNodeId) validateId(sourceNodeId, "sourceNodeId");
+    const documentPath = cleanText(sourceDocumentPath ?? "");
+    const filters = ["thread_id = ?"];
+    const params: string[] = [threadId];
+    if (sourceNodeId) {
+      filters.push("source_node_id = ?");
+      params.push(sourceNodeId);
+    }
+    if (documentPath) {
+      filters.push("source_document_path = ?");
+      params.push(documentPath);
+    }
     const rows = this.db.prepare(
       `SELECT id,
               project_id as projectId,
@@ -67,9 +78,9 @@ export class ClaimReviewRepository {
               created_at as createdAt,
               updated_at as updatedAt
        FROM claim_candidates
-       WHERE thread_id = ?${sourceNodeId ? " AND source_node_id = ?" : ""}
+       WHERE ${filters.join(" AND ")}
        ORDER BY created_at DESC`
-    ).all(...(sourceNodeId ? [threadId, sourceNodeId] : [threadId])) as ClaimRow[];
+    ).all(...params) as ClaimRow[];
     return rows.map(toClaimCandidate);
   }
 

@@ -121,6 +121,7 @@ Free arrows, shapes, tables, and asset cards are explicit saved user artifacts a
 
 - AI extraction and manual selection create candidate rows only; they never create Canvas nodes automatically.
 - The current UI treats candidates as selectable work items: users can create nodes from selected candidates or delete selected candidates.
+- Candidate listing for a Markdown preview is scoped by Thread, `source_node_id`, and `source_document_path`. The same source node can have candidates for multiple Markdown paths, but preview switching must not show candidates from another path.
 - `DELETE /api/threads/:threadId/claims/:claimId` removes only the candidate row. It intentionally does not delete a previously created Canvas node because that node may have been edited or connected after creation.
 - `source_anchor_json` and `evidence_text` remain stored so `Show source` can highlight the original document region or fall back to matching evidence text, even though the queue card and created Canvas node no longer render persistent evidence/source/status blocks.
 - `canvas_node_id` is a provenance link from a candidate to the node created through the legacy accepted-Claim route; created Claim nodes use compact `摘要 N` titles and visible content from `claim_text`, while Canvas node lifecycle remains owned by `canvas_nodes`.

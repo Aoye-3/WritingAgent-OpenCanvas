@@ -6,7 +6,8 @@ export function registerClaimReviewRoutes(app: Express, claimService: ClaimRevie
   app.get("/api/threads/:threadId/claims", (request, response) => {
     try {
       const sourceNodeId = typeof request.query.sourceNodeId === "string" ? request.query.sourceNodeId : undefined;
-      sendOk(response, { claims: claimService.listClaims(request.params.threadId, sourceNodeId) });
+      const sourceDocumentPath = typeof request.query.sourceDocumentPath === "string" ? request.query.sourceDocumentPath : undefined;
+      sendOk(response, { claims: claimService.listClaims(request.params.threadId, sourceNodeId, sourceDocumentPath) });
     } catch (error) {
       sendError(response, 400, "bad_request", errorMessage(error, "Unable to list Claims"));
     }

@@ -166,7 +166,7 @@ export class SQLiteStorageRepository {
   acceptCanvasWriteSuggestion(threadId: string, suggestionId: string) { return this.canvas.acceptWriteSuggestion(threadId, suggestionId); }
   dismissCanvasWriteSuggestion(threadId: string, suggestionId: string) { return this.canvas.dismissWriteSuggestion(threadId, suggestionId); }
 
-  listClaims(threadId: string, sourceNodeId?: string) { return this.claims.listClaims(threadId, sourceNodeId); }
+  listClaims(threadId: string, sourceNodeId?: string, sourceDocumentPath?: string) { return this.claims.listClaims(threadId, sourceNodeId, sourceDocumentPath); }
   createClaim(projectId: string, threadId: string, input: Omit<CreateClaimFromSelectionInput, "selectedText" | "surroundingContext"> & { claimText: string; evidenceText: string; createdBy: "ai" | "user_selection"; extractionRunId?: string }) {
     return this.claims.createClaim(projectId, threadId, input);
   }

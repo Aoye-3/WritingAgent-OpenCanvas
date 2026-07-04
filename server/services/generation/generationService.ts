@@ -2356,15 +2356,22 @@ async function archiveProgressiveMarkdownOutputs(input: {
   const archivedPaths: string[] = [];
   const events: ToolEventRecord[] = [];
   for (const filePath of uniqueStrings(input.paths)) {
+    let archiveError: unknown;
     try {
       await input.archiveMarkdownOutput(input.threadId, filePath);
-      archivedPaths.push(filePath);
     } catch (error) {
+      archiveError = error;
+    }
+    if (readThreadOutputMarkdown(input.threadId, filePath)) {
+      archivedPaths.push(filePath);
+      continue;
+    }
+    if (archiveError) {
       events.push(canvasDeliveryEvent("canvas_delivery_file_document_archive_failed", input.deliveryId, input.locale, undefined, {
         status: "failed",
         path: filePath,
         summary: input.locale === "zh" ? "Markdown 文档归档失败，未创建不可预览的文档节点。" : "Markdown document archive failed, so no unreadable document node was created.",
-        error: error instanceof Error ? error.message : "Unable to archive Markdown output"
+        error: archiveError instanceof Error ? archiveError.message : "Unable to archive Markdown output"
       }));
     }
   }

@@ -88,6 +88,15 @@ type DocumentCanvasProps = {
   claimPanel?: ReactNode;
 };
 
+type FileDocumentListItem = {
+  nodeId: string;
+  title: string;
+  path: string;
+  fileName: string;
+  threadId: string;
+  status?: string;
+};
+
 const canvasNodeTypes = {
   canvasNode: CanvasNodeFrame
 };
@@ -166,7 +175,7 @@ function DocumentCanvasInner({
   const [recentShapeIds, setRecentShapeIds] = useState<string[]>(["rectangle", "circle", "diamond"]);
   const [creationPreviewPoint, setCreationPreviewPoint] = useState<{ x: number; y: number } | null>(null);
   const [editNewTextId, setEditNewTextId] = useState<string | null>(null);
-  const [documentPreview, setDocumentPreview] = useState<{ path: string; nodeTitle: string; status: "loading" | "ready" | "failed"; document?: MarkdownOutputPreview; error?: string } | null>(null);
+  const [documentPreview, setDocumentPreview] = useState<{ path: string; threadId: string; nodeTitle: string; status: "loading" | "ready" | "failed"; document?: MarkdownOutputPreview; error?: string } | null>(null);
   const [, setArrowStart] = useState<{ x: number; y: number } | null>(null);
   const resizingNodeIdRef = useRef<string | null>(null);
   const lastCanvasPointRef = useRef<{ x: number; y: number } | null>(null);
@@ -216,6 +225,20 @@ function DocumentCanvasInner({
   };
   const floatingTransition = reduceMotion ? { duration: 0 } : { type: "spring" as const, stiffness: 300, damping: 30 };
   const selectedNode = useMemo(() => nodes.find((node) => node.id === selectedNodeId), [nodes, selectedNodeId]);
+  const fileDocumentItems = useMemo(() => nodes.flatMap((node): FileDocumentListItem[] => {
+    if (node.kind !== "file_document") return [];
+    const target = fileDocumentPreviewTarget(node, threadId);
+    if (!target) return [];
+    const fileDocument = readFileDocumentMetadataRecord(node);
+    return [{
+      nodeId: node.id,
+      title: node.title,
+      path: target.path,
+      fileName: readMetadataString(fileDocument.fileName) || fileNameFromPath(target.path) || node.title,
+      threadId: target.threadId,
+      status: readMetadataString(fileDocument.status) || undefined
+    }];
+  }), [nodes, threadId]);
   const flowEdges = useMemo<Edge[]>(() => edges.map((edge) => ({
     id: edge.id,
     source: edge.sourceNodeId,
@@ -245,6 +268,28 @@ function DocumentCanvasInner({
     actionRef.current.onSelectNode(nodeId);
   }, []);
 
+  const openDocumentPreview = useCallback((node: CanvasNode) => {
+    const target = fileDocumentPreviewTarget(node, threadId);
+    if (!target) return;
+    const { path } = target;
+    setDocumentPreview({ path, threadId: target.threadId, nodeTitle: node.title, status: "loading" });
+    void fetchMarkdownOutputPreview(target.threadId, path)
+      .then((document) => {
+        setDocumentPreview({ path, threadId: target.threadId, nodeTitle: node.title, status: "ready", document });
+        onClaimDocumentPreviewChange?.({
+          sourceNodeId: node.id,
+          threadId: target.threadId,
+          path: document.path,
+          fileName: document.fileName,
+          content: document.content
+        });
+      })
+      .catch((error) => {
+        setDocumentPreview({ path, threadId: target.threadId, nodeTitle: node.title, status: "failed", error: error instanceof Error ? error.message : "Unable to load Markdown preview" });
+        onClaimDocumentPreviewChange?.(null);
+      });
+  }, [onClaimDocumentPreviewChange, threadId]);
+
   const flowCallbacks = useMemo(() => ({
     onAcceptSuggestion: (suggestionId: string) => actionRef.current.onAcceptSuggestion(suggestionId),
     onApproveWriteRequest: (requestId: string) => actionRef.current.onApproveWriteRequest(requestId),
@@ -252,33 +297,14 @@ function DocumentCanvasInner({
     onCreationPreviewBlocked: clearCreationPreview,
     onDeleteNode: (nodeId: string) => actionRef.current.onDeleteNode(nodeId),
     onIgnoreSuggestion: (suggestionId: string) => actionRef.current.onIgnoreSuggestion(suggestionId),
-    onOpenDocumentPreview: (node: CanvasNode) => {
-      const target = fileDocumentPreviewTarget(node, threadId);
-      if (!target) return;
-      const { path } = target;
-      setDocumentPreview({ path, nodeTitle: node.title, status: "loading" });
-      void fetchMarkdownOutputPreview(target.threadId, path)
-        .then((document) => {
-          setDocumentPreview({ path, nodeTitle: node.title, status: "ready", document });
-          onClaimDocumentPreviewChange?.({
-            sourceNodeId: node.id,
-            path: document.path,
-            fileName: document.fileName,
-            content: document.content
-          });
-        })
-        .catch((error) => {
-          setDocumentPreview({ path, nodeTitle: node.title, status: "failed", error: error instanceof Error ? error.message : "Unable to load Markdown preview" });
-          onClaimDocumentPreviewChange?.(null);
-        });
-    },
+    onOpenDocumentPreview: openDocumentPreview,
     onRejectWriteRequest: (requestId: string) => actionRef.current.onRejectWriteRequest(requestId),
     onRequestNodeMenu: requestNodeMenu,
     onRequestRangeRewrite: (draft: CanvasRangeRewriteDraft) => actionRef.current.onRequestRangeRewrite(draft),
     onTextSelectionChange: handleTextSelectionChange,
     onResizeStateChange: handleResizeStateChange,
     onUpdateNode: (nodeId: string, patch: CanvasNodePatch) => actionRef.current.onUpdateNode(nodeId, patch)
-  }), [clearCreationPreview, handleResizeStateChange, handleTextSelectionChange, onClaimDocumentPreviewChange, requestNodeMenu, threadId]);
+  }), [clearCreationPreview, handleResizeStateChange, handleTextSelectionChange, openDocumentPreview, requestNodeMenu]);
 
   useEffect(() => {
     setFlowNodes((current) => {
@@ -684,6 +710,7 @@ function DocumentCanvasInner({
           <MarkdownDocumentPreviewPanel
             claimSourceFocus={claimSourceFocus}
             claimPanel={claimPanel}
+            documents={fileDocumentItems}
             locale={locale}
             preview={documentPreview}
             onClose={() => {
@@ -699,6 +726,10 @@ function DocumentCanvasInner({
               height: 180
             })}
             onExtractClaims={onExtractClaims}
+            onSelectDocument={(nodeId) => {
+              const node = nodes.find((candidate) => candidate.id === nodeId);
+              if (node) openDocumentPreview(node);
+            }}
             onSendSelectionToChat={onSendMindChainToChat}
           />
         ) : null}
@@ -720,28 +751,51 @@ function isBlankCanvasPoint(clientX: number, clientY: number) {
   return Boolean(document.elementFromPoint(clientX, clientY)?.closest(".react-flow__pane"));
 }
 
+function readFileDocumentMetadataRecord(node: CanvasNode) {
+  const metadata = node.metadata && typeof node.metadata === "object" && !Array.isArray(node.metadata)
+    ? node.metadata as Record<string, unknown>
+    : {};
+  const fileDocument = metadata.fileDocument;
+  return fileDocument && typeof fileDocument === "object" && !Array.isArray(fileDocument)
+    ? fileDocument as Record<string, unknown>
+    : {};
+}
+
+function readMetadataString(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function fileNameFromPath(path: string) {
+  return path.split("/").filter(Boolean).at(-1) ?? "";
+}
+
 function MarkdownDocumentPreviewPanel({
   claimSourceFocus,
   claimPanel,
+  documents,
   locale,
   preview,
   onClose,
   onCreateClaimFromSelection,
   onCreateExcerptNode,
   onExtractClaims,
+  onSelectDocument,
   onSendSelectionToChat
 }: {
   claimSourceFocus?: ClaimCandidate | null;
   claimPanel?: ReactNode;
+  documents: FileDocumentListItem[];
   locale: "en" | "zh";
-  preview: { path: string; nodeTitle: string; status: "loading" | "ready" | "failed"; document?: MarkdownOutputPreview; error?: string };
+  preview: { path: string; threadId: string; nodeTitle: string; status: "loading" | "ready" | "failed"; document?: MarkdownOutputPreview; error?: string };
   onClose: () => void;
   onCreateClaimFromSelection?: (input: Omit<CreateClaimFromSelectionInput, "sourceNodeId" | "sourceDocumentPath" | "sourceFileName">) => Promise<unknown>;
   onCreateExcerptNode: (text: string) => Promise<unknown>;
   onExtractClaims?: () => Promise<unknown>;
+  onSelectDocument: (nodeId: string) => void;
   onSendSelectionToChat: (text: string) => void;
 }) {
   const title = preview.document?.fileName ?? preview.nodeTitle;
+  const activeDocumentNodeId = documents.find((document) => document.path === preview.path && document.threadId === preview.threadId)?.nodeId ?? "";
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const [selectionAction, setSelectionAction] = useState<(SourceTextSelection & { x: number; y: number }) | null>(null);
 
@@ -798,6 +852,22 @@ function MarkdownDocumentPreviewPanel({
             <strong>{title}</strong>
             <span>{preview.document?.path ?? preview.path}</span>
           </div>
+          {documents.length > 1 ? (
+            <select
+              className="markdown-document-picker"
+              value={activeDocumentNodeId}
+              aria-label={locale === "zh" ? "切换 Markdown 文档" : "Switch Markdown document"}
+              onChange={(event) => {
+                if (event.target.value) onSelectDocument(event.target.value);
+              }}
+            >
+              {documents.map((document) => (
+                <option key={document.nodeId} value={document.nodeId}>
+                  {document.fileName}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <button className="button button-secondary button-small" type="button" disabled={preview.status !== "ready"} onClick={() => void onExtractClaims?.()}>
             {locale === "zh" ? "抽取 Claims" : "Extract Claims"}
           </button>

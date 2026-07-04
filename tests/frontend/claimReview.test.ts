@@ -81,6 +81,18 @@ test("Claim Review client exposes persistent delete API", () => {
   assert.match(clientSource, /apiDelete\(`\/api\/threads\/\$\{encodeURIComponent\(threadId\)\}\/claims\/\$\{encodeURIComponent\(claimId\)\}`\)/);
 });
 
+test("Claim Review document switching binds Claims to the selected Markdown path", () => {
+  const canvasSource = readFileSync("src/features/workspace/components/DocumentCanvas.tsx", "utf8");
+  const hookSource = readFileSync("src/features/workspace/claims/useClaimReview.ts", "utf8");
+  const clientSource = readFileSync("src/features/workspace/claims/claimReviewClient.ts", "utf8");
+
+  assert.match(canvasSource, /className="markdown-document-picker"/);
+  assert.match(canvasSource, /threadId: target\.threadId/);
+  assert.match(hookSource, /fetchClaims\(documentThreadId, sourceNodeId, sourceDocumentPath\)/);
+  assert.match(hookSource, /loadClaims\(document\.sourceNodeId, document\.path, document\.threadId\)/);
+  assert.match(clientSource, /params\.set\("sourceDocumentPath", sourceDocumentPath\)/);
+});
+
 function claimFixture(id: string, status: ClaimStatus): ClaimCandidate {
   return {
     id,

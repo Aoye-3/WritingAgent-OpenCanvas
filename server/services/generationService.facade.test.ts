@@ -2190,6 +2190,65 @@ test("progressive Canvas creates a file document node for Markdown output files"
   }
 });
 
+test("progressive Canvas prefers a readable Markdown output over fallback when runtime archive fails", async () => {
+  const appRoot = `.facetwrite-test/md-runtime-local-output-${Date.now()}`;
+  const previousRoot = process.env.FACETWRITE_APP_ROOT;
+  process.env.FACETWRITE_APP_ROOT = appRoot;
+  try {
+    const { storage, canvasNodes } = fakeStorage();
+    const reportPath = "/mnt/user-data/outputs/real-report.md";
+    const reportMarkdown = `# Real report\n\n${"Verified local output. ".repeat(180)}`;
+    const fallbackCandidate = `# Fallback candidate\n\n${"This text should not become the document path. ".repeat(220)}`;
+    const service = createGenerationService(storage, fakeAgentRuntime(), {
+      modelRuntime: fakeModelRuntime,
+      archiveMarkdownOutput: async (threadId, virtualPath) => {
+        await archiveMarkdownForTest(threadId, virtualPath, reportMarkdown);
+        throw new Error("runtime artifact missing");
+      },
+      agentBackend: {
+        getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+        runAgent: async (input) => {
+          input.onToolEvent?.({
+            eventType: "agent_backend_tool_completed",
+            payload: { toolName: "write_file", path: reportPath }
+          });
+          input.onToolEvent?.({
+            eventType: "agent_backend_tool_completed",
+            payload: { toolName: "present_files", filepaths: [reportPath] }
+          });
+          return {
+            text: fallbackCandidate,
+            finishReason: "agent_backend_completed",
+            events: []
+          };
+        }
+      }
+    });
+
+    await service.generateAndRecordStream({
+      mode: "chat",
+      locale: "en",
+      threadId: "thread_runtime_local_output",
+      agentCardId: "chat-agent",
+      chatInstruction: "Research and write a detailed report",
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
+    });
+
+    const fileNodes = canvasNodes.filter((node) => node.kind === "file_document");
+    assert.equal(fileNodes.length, 1);
+    const fileDocument = (fileNodes[0]?.metadata as { fileDocument?: { path?: string } }).fileDocument;
+    assert.equal(fileDocument?.path, reportPath);
+    assert.equal(fileDocument?.path?.includes("facetwrite-delivery-"), false);
+  } finally {
+    if (previousRoot === undefined) {
+      delete process.env.FACETWRITE_APP_ROOT;
+    } else {
+      process.env.FACETWRITE_APP_ROOT = previousRoot;
+    }
+    await rm(path.resolve(process.cwd(), appRoot), { recursive: true, force: true });
+  }
+});
+
 test("progressive Canvas finalizes files after clarification when runtime keeps working", async () => {
   const appRoot = `.facetwrite-test/md-after-clarification-${Date.now()}`;
   const previousRoot = process.env.FACETWRITE_APP_ROOT;

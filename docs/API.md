@@ -21,14 +21,14 @@ The backend derives Plan phase independently of frontend flags. `/plan` forces p
 ## Claim Review
 
 - `GET /api/threads/:threadId/claims`
-  - Optional query: `sourceNodeId`.
-  - Returns `{ claims }` ordered newest first. Claims are review candidates for the current Markdown preview, not Canvas nodes.
+  - Optional query: `sourceNodeId`, `sourceDocumentPath`.
+  - Returns `{ claims }` ordered newest first. When both source filters are supplied, the response is scoped to that exact Markdown preview document. Claims are review candidates for the current Markdown preview, not Canvas nodes.
 - `POST /api/threads/:threadId/claims/from-selection`
   - Body: `{ sourceNodeId, sourceDocumentPath, sourceFileName?, selectedText, sourceAnchor?, surroundingContext?, citationUrls? }`.
-  - Creates a persisted candidate Claim from selected Markdown preview text and returns `{ claim }`.
+  - Creates a persisted candidate Claim from selected Markdown preview text and returns `{ claim }`. The source path must match the referenced `file_document` node.
 - `POST /api/threads/:threadId/claims/extract`
   - Body: `{ sourceNodeId, sourceDocumentPath, sourceFileName?, configuredModelApiId?, maxCandidates? }`.
-  - Extracts a bounded set of candidate Claims from the current Markdown preview. Extraction does not create Canvas nodes.
+  - Extracts a bounded set of candidate Claims from the current Markdown preview. Extraction does not create Canvas nodes. The source path must match the referenced `file_document` node.
 - `PATCH /api/threads/:threadId/claims/:claimId`
   - Body accepts `{ claimText?, evidenceText?, status? }`.
   - Updates the candidate and returns `{ claim }`. Editing text preserves `originalClaimText` and marks the candidate `edited` unless an explicit status is supplied.
@@ -44,6 +44,7 @@ The backend derives Plan phase independently of frontend flags. `/plan` forces p
 
 The current Markdown preview UI uses direct user actions for `Create selected` and `Delete selected`: selected candidates are converted through the normal Canvas node creation callback, while deletion calls the persistent `DELETE` route above.
 The direct UI path also creates compact document nodes: visible content is the candidate `claimText`; `evidenceText` is retained only for source fallback/highlight behavior.
+When the preview panel switches between Markdown documents, the frontend reloads candidates with `sourceNodeId` and `sourceDocumentPath`, using the same source Thread as the Markdown preview. Candidate selection state is local to the active document and must not carry across documents.
 
 ## Canvas Objects And Assets
 

@@ -82,6 +82,14 @@ Renderer windows use context isolation, disabled Node integration, and sandboxin
 - Agent Settings renders Agent profile controls only: Prompt, Knowledge, Tools, MCP selection, and Memory. It has no Model tab. Users can enable Knowledge, search all bases or selected base ids, tune retrieval count/threshold, and choose from already configured Agent Runtime MCP servers without adding new MCP installation/editing APIs.
 - `src/shared/apiClient.ts` provides shared frontend API helpers used by feature clients.
 
+## Markdown Preview And Claim Review Boundary
+
+`DocumentCanvas` owns the Markdown preview shell. It derives the preview document switcher from current Canvas `file_document` nodes and loads each preview through the selected node's source Thread metadata plus virtual Markdown path. It does not scan output folders for orphan files. Switching preview documents clears local Claim selection and reloads candidates for the selected source Thread, source node, and source document path.
+
+`server/domains/claim-review/` owns Markdown Claim extraction, source validation, candidate listing, candidate updates, persistent deletion, and legacy accepted-Claim node creation. Candidate listing is path-scoped when callers supply `sourceDocumentPath`, and creation/extraction verify that the supplied path matches the referenced `file_document` node before reading preview content. Preview-side Claim Review uses the same Thread and virtual path for candidate loading, extraction, and selected-text candidate creation.
+
+Claim Review candidates live in `claim_candidates` behind `ClaimReviewRepository`. Preview queries should include both `sourceNodeId` and `sourceDocumentPath` so candidates from two Markdown files attached to the same Canvas node do not mix. `evidence_text` remains source fallback data for locating/highlighting the original document, not default Canvas body content.
+
 ## Backend
 - `server/index.ts` starts the HTTP server.
 - `server/app.ts` wires Express middleware, storage, Agent runtime, generation service, and route modules.

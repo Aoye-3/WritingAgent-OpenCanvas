@@ -685,3 +685,22 @@ Completed:
 
 Validation:
 - Documentation-only update.
+
+## 2026-07-04 - Markdown Preview And Claim Binding Fix
+
+Scope: Fixed wrong Markdown preview selection when fallback delivery files existed alongside real Runtime Markdown outputs, added preview document switching, and scoped Claim Review to the selected Markdown path.
+
+Completed:
+- Changed progressive Markdown finalization so readable Runtime-authored `/mnt/user-data/outputs/*.md` files win over `facetwrite-delivery-*.md` fallback files, even when artifact archiving reports failure.
+- Kept fallback Markdown only for runs with no readable real Markdown delivery.
+- Added a Markdown preview document picker based on current Canvas `file_document` nodes, without scanning output directories for orphan files.
+- Scoped Claim listing, creation, and extraction to the active preview Thread, source node, and source document path.
+- Updated Canvas, API, database, architecture, and decision docs.
+
+Validation:
+- `node --import tsx --test server/claimReview.test.ts`
+- `node --import tsx --test server/services/generationService.facade.test.ts`
+- `node --import tsx --test tests/frontend/claimReview.test.ts`
+- `npm.cmd run typecheck`
+- `npm.cmd test`
+- `npm.cmd run agent:check` was requested but the repository has no `agent:check` script.

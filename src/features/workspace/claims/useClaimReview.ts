@@ -6,6 +6,7 @@ import { createClaimFromSelection, deleteClaim, extractClaims, fetchClaims, upda
 
 export type ClaimReviewDocument = {
   sourceNodeId: string;
+  threadId: string;
   path: string;
   fileName: string;
   content: string;
@@ -33,11 +34,11 @@ export function useClaimReview({
 
   const acceptedClaims = useMemo(() => getAcceptedClaims(claims), [claims]);
 
-  const loadClaims = useCallback(async (sourceNodeId?: string) => {
+  const loadClaims = useCallback(async (sourceNodeId?: string, sourceDocumentPath?: string, documentThreadId = threadId) => {
     setLoading(true);
     setError("");
     try {
-      const nextClaims = await fetchClaims(threadId, sourceNodeId);
+      const nextClaims = await fetchClaims(documentThreadId, sourceNodeId, sourceDocumentPath);
       setClaims(nextClaims);
       return nextClaims;
     } catch (err) {
@@ -51,14 +52,15 @@ export function useClaimReview({
   const activateDocument = useCallback((document: ClaimReviewDocument | null) => {
     setActiveDocument(document);
     setSourceFocusClaim(null);
-    if (document) void loadClaims(document.sourceNodeId);
+    setClaims([]);
+    if (document) void loadClaims(document.sourceNodeId, document.path, document.threadId);
   }, [loadClaims]);
 
   const createFromSelection = useCallback(async (input: Omit<CreateClaimFromSelectionInput, "sourceNodeId" | "sourceDocumentPath" | "sourceFileName">) => {
     if (!activeDocument) return undefined;
     setError("");
     try {
-      const claim = await createClaimFromSelection(threadId, {
+      const claim = await createClaimFromSelection(activeDocument.threadId, {
         ...input,
         sourceNodeId: activeDocument.sourceNodeId,
         sourceDocumentPath: activeDocument.path,
@@ -70,14 +72,14 @@ export function useClaimReview({
       setError(errorMessage(err, "Unable to create Claim"));
       return undefined;
     }
-  }, [activeDocument, threadId]);
+  }, [activeDocument]);
 
   const extractActiveDocumentClaims = useCallback(async () => {
     if (!activeDocument) return [];
     setExtracting(true);
     setError("");
     try {
-      const nextClaims = await extractClaims(threadId, {
+      const nextClaims = await extractClaims(activeDocument.threadId, {
         sourceNodeId: activeDocument.sourceNodeId,
         sourceDocumentPath: activeDocument.path,
         sourceFileName: activeDocument.fileName,
@@ -92,19 +94,19 @@ export function useClaimReview({
     } finally {
       setExtracting(false);
     }
-  }, [activeDocument, selectedModelConfigId, threadId]);
+  }, [activeDocument, selectedModelConfigId]);
 
   const setClaimStatus = useCallback(async (claim: ClaimCandidate, status: ClaimStatus) => {
-    const updated = await updateClaim(threadId, claim.id, { status });
+    const updated = await updateClaim(claim.threadId, claim.id, { status });
     setClaims((current) => current.map((item) => item.id === updated.id ? updated : item));
     return updated;
-  }, [threadId]);
+  }, []);
 
   const editClaim = useCallback(async (claim: ClaimCandidate, claimText: string) => {
-    const updated = await updateClaim(threadId, claim.id, { claimText });
+    const updated = await updateClaim(claim.threadId, claim.id, { claimText });
     setClaims((current) => current.map((item) => item.id === updated.id ? updated : item));
     return updated;
-  }, [threadId]);
+  }, []);
 
   const createNodeFromClaim = useCallback(async (claim: ClaimCandidate) => {
     await onCreateCanvasNode(claimNodeDraft(claim, titleForClaim(claim, claims)));
@@ -123,17 +125,17 @@ export function useClaimReview({
   }, [acceptedClaims, claims, onCreateCanvasNode]);
 
   const deleteClaimCandidate = useCallback(async (claim: ClaimCandidate) => {
-    await deleteClaim(threadId, claim.id);
+    await deleteClaim(claim.threadId, claim.id);
     setClaims((current) => current.filter((item) => item.id !== claim.id));
-  }, [threadId]);
+  }, []);
 
   const deleteClaimCandidates = useCallback(async (selectedClaims: ClaimCandidate[]) => {
     for (const claim of selectedClaims) {
-      await deleteClaim(threadId, claim.id);
+      await deleteClaim(claim.threadId, claim.id);
     }
     const deletedIds = new Set(selectedClaims.map((claim) => claim.id));
     setClaims((current) => current.filter((claim) => !deletedIds.has(claim.id)));
-  }, [threadId]);
+  }, []);
 
   const sendClaimsToChat = useCallback((selected: ClaimCandidate[]) => {
     if (!selected.length) return;
