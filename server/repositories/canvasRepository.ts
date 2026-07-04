@@ -34,6 +34,7 @@ import { createStoredCanvasAsset, normalizeStoredCanvasObject, validateCanvasObj
 import { sanitizeVisibleText } from "../services/generation/outputNormalizer.js";
 import { isSingleParagraphRange, replaceTextRange } from "../../shared/canvasRangeEdit.js";
 import { splitCanvasText, stableDeliveryId } from "../services/canvasDelivery.js";
+import { findAvailableCanvasNodePosition } from "../services/canvasNodePlacement.js";
 import {
   cleanText,
   defaultCanvasTitle,
@@ -350,13 +351,17 @@ export class CanvasRepository {
     let resolvedStatus: CanvasWriteRequestStatus = "approved";
     this.deps.withTransaction(() => {
       if (request.operation === "create") {
-        const nextIndex = this.listCanvasNodes(projectId).length;
+        const existingNodes = this.listCanvasNodes(projectId);
+        const position = findAvailableCanvasNodePosition({
+          existingNodes,
+          anchorNodeId: request.targetNodeId
+        });
         node = this.createCanvasNode(projectId, {
           kind: request.nodeKind,
           title: request.title,
           content: request.content,
-          x: 120 + (nextIndex % 4) * 36,
-          y: 120 + (nextIndex % 4) * 36
+          x: position.x,
+          y: position.y
         });
       } else {
         const existing = request.targetNodeId ? this.getCanvasNode(projectId, request.targetNodeId) : undefined;

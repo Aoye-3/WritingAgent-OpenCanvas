@@ -20,7 +20,7 @@ The architecture and encoding guards must pass on both LF and CRLF worktrees.
 | Nodes | create, update, delete cleanup, kind conversion, history | create kinds, edit persistence, delete, undo |
 | Semantic edges | storage cleanup, mind-chain helpers | create, select, delete, mind-chain draft |
 | Workflow | stage, Role edges, suggestions, migration | stage inheritance, Role suggestions |
-| Agent delivery | H1 section-to-node planning, nested-heading preservation, long-section preservation, stable source placement, progressive reference filtering | generated nodes remain draggable/resizable after delivery |
+| Agent delivery | H1 section-to-node planning, nested-heading preservation, long-section preservation, stable source placement, automatic create placement, progressive reference filtering | generated nodes remain draggable/resizable after delivery |
 | Visual objects | strict writes, compatible reads, CRUD, history | shape search/recents, arrows, table edit, asset upload, undo, refresh |
 | Tools | creation/persistent mode rules, default drafts | toolbar activation, overlays, pane hit testing |
 | Boundaries | route/domain/repository guard, encoding guard | overlays do not block pan, zoom, selection, or context menu |
@@ -38,6 +38,8 @@ The architecture and encoding guards must pass on both LF and CRLF worktrees.
 - Progressive reference node content contains Markdown links from `formatSourceLinks()` and does not include tool, query, `URL:`, or snippet fields; final `Sources` / `References` nodes still render clickable Markdown links.
 - Progressive `research_committed` and `body_checkpoint_committed` events apply live node snapshots immediately but coalesce full Thread-state refresh through the deferred live-refresh path; final Body, file document, sources, and failed-summary committed events bypass the debounce.
 - Progressive Canvas status labels use delivery metadata when available: evidence count for research cards, draft index for body checkpoints, Markdown-writing text for `write_file`, and final-response-preparation text after `present_files`.
+- Agent low-risk `canvas_write create` commits and approved create write requests place new nodes near the selected/target node or current node group center without overlapping existing persisted node rectangles.
+- Stable short-progress Canvas node ids update the existing node in place and must not create another placed card.
 - Multi-selected node drag persists selected node positions through one batch update, remains undoable, and does not blank the Canvas.
 - React Flow `dimensions` changes remain accepted into controlled Canvas nodes so `measured.width/height` survive mapping and node drag does not emit `error#015` / `node not initialized`.
 - Shape library search, recent selections, close behavior, and localized labels remain accessible.
@@ -46,4 +48,10 @@ Focused frontend coverage for Canvas drag and progressive refresh behavior can b
 
 ```powershell
 node --import tsx --test tests/frontend/canvasFlowMapping.test.ts tests/frontend/documentCanvasNodeChanges.test.ts tests/frontend/liveThreadStateRefresh.test.ts tests/frontend/canvasDragPersistence.test.ts tests/frontend/canvasKeyboardShortcuts.test.ts
+```
+
+Focused server coverage for automatic Canvas create placement can be run with:
+
+```powershell
+node --import tsx --test server/services/canvasNodePlacement.test.ts server/services/canvasWriteCommit.test.ts server/canvasStorage.test.ts server/routes/internalAgentBackendRoutes.test.ts
 ```

@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createStorage } from "./storage.js";
+import { canvasRectsOverlap } from "./services/canvasNodePlacement.js";
+import type { CanvasNode } from "./storageTypes.js";
 
 test("stores canvas nodes and applies approved write requests", async () => {
   const storage = await createStorage();
@@ -47,6 +49,31 @@ test("stores canvas nodes and applies approved write requests", async () => {
   const createResult = storage.approveCanvasWriteRequest(threadId, create.id);
   assert.equal(createResult?.node?.kind, "reference");
   assert.equal(storage.listCanvasNodes(threadId).length, 2);
+});
+
+test("approved create write requests avoid overlapping existing canvas nodes", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_${randomUUID().replace(/-/g, "_")}`;
+  await storage.ensureThread(threadId, "blog-post");
+  const createdNodes: CanvasNode[] = [];
+
+  for (let index = 0; index < 6; index += 1) {
+    const request = storage.createCanvasWriteRequest(threadId, {
+      operation: "create",
+      nodeKind: "document",
+      title: `Draft ${index + 1}`,
+      content: `Content ${index + 1}`
+    });
+    const approved = storage.approveCanvasWriteRequest(threadId, request.id);
+    assert.ok(approved?.node);
+    createdNodes.push(approved.node);
+  }
+
+  for (let index = 0; index < createdNodes.length; index += 1) {
+    for (let nextIndex = index + 1; nextIndex < createdNodes.length; nextIndex += 1) {
+      assert.equal(canvasRectsOverlap(createdNodes[index], createdNodes[nextIndex]), false);
+    }
+  }
 });
 
 test("rejecting a canvas write request leaves nodes unchanged", async () => {
