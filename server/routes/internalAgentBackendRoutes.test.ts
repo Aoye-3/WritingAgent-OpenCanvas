@@ -156,7 +156,7 @@ test("canvas_write bridge resolves the Thread project and commits low-risk creat
   assert.equal((result.body.payload as { status: string }).status, "committed");
   assert.equal((result.body.payload as { projectId: string }).projectId, "project_bridge");
   assert.equal((result.body.payload as { nodeId: string }).nodeId, "node_bridge");
-  assert.deepEqual(storage.createdNodes, [{ projectId: "project_bridge", id: undefined, kind: "document", title: "Draft", content: "Pending via AgentBackend" }]);
+  assert.deepEqual(storage.createdNodes, [{ projectId: "project_bridge", id: undefined, kind: "document", title: "Draft", content: "Pending via AgentBackend", x: 472, y: 120 }]);
   assert.deepEqual(storage.createdRequests, []);
 });
 
@@ -203,7 +203,9 @@ test("canvas_write bridge commits append without a target as a new node", async 
     id: undefined,
     kind: "document",
     title: "Appendix: Search Methodology",
-    content: "## Appendix\nSearch criteria."
+    content: "## Appendix\nSearch criteria.",
+    x: 472,
+    y: 120
   }]);
   assert.deepEqual(storage.createdRequests, []);
 });
@@ -230,7 +232,7 @@ test("canvas_write bridge rejects a Runtime project that does not own the Thread
 function fakeStorage() {
   const createdRequests: unknown[] = [];
   const createdNodes: unknown[] = [];
-  const existing = { id: "node_existing", projectId: "project_bridge", kind: "document", title: "Existing", content: "Before" };
+  const existing = { id: "node_existing", projectId: "project_bridge", kind: "document", title: "Existing", content: "Before", x: 120, y: 120, width: 320, height: 220 };
   return {
     createdRequests,
     createdNodes,

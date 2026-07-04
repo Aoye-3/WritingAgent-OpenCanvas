@@ -6,6 +6,7 @@ import { executeToolCall } from "../toolRuntime.js";
 import type { ToolState } from "../tools/catalog.js";
 import { errorMessage, sendError, sendOk } from "../utils/http.js";
 import { commitPlanArtifact, commitPlanArtifactLinks } from "../services/planArtifactService.js";
+import { commitLowRiskCanvasWrite } from "../services/canvasWriteCommit.js";
 
 type InternalAgentRuntimeRouteDeps = {
   storage: SQLiteStorageRepository;
@@ -43,7 +44,11 @@ export function registerInternalToolBridgeRoute(
           if (!storage.resetThreadContext(body.threadId)) throw new Error("Thread not found");
         },
         createCanvasWriteRequest: (input) => storage.createCanvasWriteRequest(projectIdForBridge(storage, body), input),
-        commitCanvasWrite: (input, options) => commitLowRiskCanvasWrite(storage, projectIdForBridge(storage, body), input, body.canvasAction, options?.shortProgressStableNodeId),
+        commitCanvasWrite: (input, options) => commitLowRiskCanvasWrite(storage, projectIdForBridge(storage, body), input, {
+          actionId: typeof body.canvasAction?.id === "string" ? body.canvasAction.id : undefined,
+          selectedCanvasNodeId: body.selectedCanvasNodeId,
+          shortProgressStableNodeId: options?.shortProgressStableNodeId
+        }),
         createPlanRun: (input) => storage.createPlanRun(body.threadId, input),
         submitPlanClarification: (planId, clarification) => storage.submitPlanClarification(body.threadId, planId, clarification),
         revisePlanRun: (planId, input) => storage.revisePlanRun(body.threadId, planId, input),
@@ -112,38 +117,6 @@ function projectIdForBridge(storage: SQLiteStorageRepository, body: BridgeReques
   if (!projectId) throw new Error("Thread not found");
   if (body.projectId && body.projectId !== projectId) throw new Error("Runtime project does not match the Thread project");
   return projectId;
-}
-
-function commitLowRiskCanvasWrite(storage: SQLiteStorageRepository, projectId: string, input: import("../storage.js").CanvasWriteRequestInput, action?: Record<string, unknown>, shortProgressStableNodeId?: string) {
-  if (input.operation === "create") {
-    const stableId = shortProgressStableNodeId || (typeof action?.id === "string" ? `node_${action.id.replace(/[^A-Za-z0-9_-]/g, "_")}` : undefined);
-    const existing = stableId ? storage.listCanvasNodes(projectId).find((node) => node.id === stableId) : undefined;
-    if (existing && shortProgressStableNodeId) {
-      const updated = storage.updateCanvasNode(projectId, existing.id, {
-        kind: input.nodeKind ?? existing.kind,
-        title: input.title,
-        content: input.content
-      });
-      if (updated) return updated;
-    }
-    if (existing) return existing;
-    return storage.createCanvasNode(projectId, {
-      id: stableId,
-      kind: input.nodeKind ?? "document",
-      title: input.title,
-      content: input.content,
-      ...(shortProgressStableNodeId ? { metadata: { canvasWriteScope: "short_progress_nodes" }, includeInProjectContext: true } : {})
-    });
-  }
-  if (input.operation === "append" && input.targetNodeId) {
-    const existing = storage.listCanvasNodes(projectId).find((node) => node.id === input.targetNodeId);
-    if (!existing) throw new Error("Target node was not found");
-    const updated = storage.updateCanvasNode(projectId, existing.id, {
-      content: existing.content ? `${existing.content}\n\n${input.content}` : input.content
-    });
-    if (updated) return updated;
-  }
-  throw new Error("Only create and append Canvas operations can be committed without approval");
 }
 
 function toToolCall(input: BridgeRequest): ChatToolCall {

@@ -136,6 +136,8 @@ Current default content-node sizes are deliberately wider than the minimum size 
 - Manual Canvas creation defaults in `canvasCreation.ts`: `document` 640x260, `reference` 420x190, `note` 380x190, `role` 340x190, `file_document` 360x220, and `clarification` 420x260.
 - Direct multi-node Canvas delivery defaults in `server/services/canvasDeliveryPlanner.ts`: `outline` 520x260, `body` 640x520, and `sources` 520x320.
 
+Server-owned automatic node creation uses a placement helper instead of relying on the generic repository fallback. Agent `canvas_write` low-risk creates and approved `canvas_write` create requests call `server/services/canvasNodePlacement.ts` before persisting the node. The helper keeps the first automatic node at `(120, 120)`, then places later automatic nodes near the selected/target node when one is available, or near the existing node group's geometric center otherwise. It searches nearby grid positions and rejects candidates whose persisted `x/y/width/height` rectangle overlaps an existing node. Manual Canvas creation, drag, paste, text conversion, Plan delivery, and Claim Review paths keep their explicit coordinates and do not use this automatic placement rule.
+
 The backend direct-delivery planner persists those dimensions in the created node draft. Retrying the same stable delivery id updates existing delivery nodes with the current title, content, position, size, kind, and metadata, so old narrow nodes do not keep stale geometry after a layout contract change.
 
 Generic long-task progressive delivery writes stable Overview, Body draft, and final Body nodes in batch-delivery mode. Completed evidence events create separate research/progress `reference` nodes only when the sanitized tool result includes at least one HTTP(S) `sources[]` entry. A top-level `url`, query, summary, snippet, path, or command is not enough to create a reference node, so tool activity never becomes source material merely because it has a bare URL. Research/progress reference content is link-only Markdown generated through `formatSourceLinks()`: it may show `## Sources` / `## 来源` and `- [title](url)` items, but must not include tool name, query, `URL:`, path, command, snippet, raw tool JSON, prompts, provider reasoning, request headers, environment variables, credentials, or hidden chain-of-thought. The nodes are keyed by source URL so repeated source-backed evidence does not keep creating duplicate nodes. Body checkpoints update the stable `Body draft` node as recoverable working state; `bodyDraftWriteLimit` is a hard limit for checkpoint writes, while research/progress notes can continue until the evidence budget triggers final synthesis. The final `Body` node is reserved for the final deliverable and must not be overwritten by progress text. `canvas_delivery_body_checkpoint_committed` live payloads expose only node hints (`nodeId`, `title`, `displayTitle`, `contentPreview`, `contentHash`), and the frontend reconciles full content through Thread-state refresh. When the Agent returns final assistant text, generic progressive delivery commits the final `Body` node and emits `canvas_delivery_body_final_committed`. Explicit direct Canvas delivery still uses the structured delivery planner and keeps its heading-based body nodes; the generic final-body replacement is skipped for those runs.
@@ -251,13 +253,15 @@ The only safe write path is:
 ```text
 explicit Canvas action recognized by the server
  -> canvas_write forced once
- -> create/append: validated direct commit with real projectId and nodeId
+ -> create/append: validated direct commit with real projectId, nodeId, and non-overlapping automatic placement for new nodes
  -> replace/replace_range/delete: pending approval
  -> structured committed/pending/failed event
  -> Canvas refresh and accurate conversation feedback
 ```
 
 Frontend Canvas features such as drag, resize, title edit, and content edit are direct user edits and may call Canvas node CRUD endpoints directly. AI-originated content changes must stay behind the operation-level Canvas tool policy.
+
+Low-risk Agent create commits are implemented through `server/services/canvasWriteCommit.ts` so Provider-runner and Agent Runtime bridge behavior stay aligned. Stable short-progress node ids still update the existing node instead of creating another placed card. Approved create write requests use the same placement helper from the repository approval branch, replacing the historical four-position diagonal loop.
 
 ## Directed Edges And Mind Chains
 Canvas supports directed node edges stored separately from nodes. A connection from A to B means `A -> B` for mind-chain ordering. Edges are user-authored Canvas structure, not Agent-owned state.
@@ -344,6 +348,7 @@ Before claiming Canvas work is complete, verify:
 - Lightweight frontend tests cover API client errors, Canvas action state transitions, and React Flow mapping without starting a dev server.
 - Canvas renders in the workspace.
 - Background right-click menu creates manual `document`, `note`, `reference`, `role`, and `clarification` nodes.
+- Agent-originated and approved automatic Canvas creates avoid overlapping existing nodes while staying near the selected/target node or current node group center.
 - Node drag persists `x/y`; multi-selected node drag uses the batch position endpoint and remains undoable as one operation.
 - Node resize uses draggable edges, not point handles, and persists `x/y/width/height`.
 - Title/content edit persists after blur.
