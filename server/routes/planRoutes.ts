@@ -32,7 +32,7 @@ export function registerPlanRoutes(app: Express, storage: SQLiteStorageRepositor
       customAnswer: typeof request.body?.customAnswer === "string" ? request.body.customAnswer.trim() : undefined
     };
     if (!answer.answer && !answer.optionId && !answer.customAnswer) return sendError(response, 400, "bad_request", "Answer is required");
-    return mutate(response, () => storage.resumePlanWithAnswer(request.params.threadId, request.params.planId, answer));
+    return mutateAndWake(request, response, () => storage.resumePlanWithAnswer(request.params.threadId, request.params.planId, answer));
   });
 
   function mutateAndWake(request: { params: { threadId: string; planId: string } }, response: Parameters<typeof sendOk>[0], work: () => unknown, key = "plan") {

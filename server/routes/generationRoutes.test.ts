@@ -5,6 +5,49 @@ import express from "express";
 import { clearAgentBackendSession } from "../runtime/agentBackendAdapter/auth.js";
 import { registerGenerationRoutes } from "./generationRoutes.js";
 
+test("generation route wakes executor after an execution request completes", async () => {
+  const wakes: string[] = [];
+  const app = express();
+  app.use(express.json());
+  registerGenerationRoutes(app, {
+    generationService: {
+      generateAndRecord: async (payload) => {
+        assert.equal(payload.planPhase, "execution");
+        assert.equal(payload.planId, "plan_1");
+        return {
+          text: "Done",
+          prompt: "Execute",
+          provider: "agent-backend",
+          usedMock: false,
+          threadId: payload.threadId!,
+          finishReason: "agent_backend_completed"
+        };
+      },
+      generateAndRecordStream: async () => { throw new Error("unused"); }
+    },
+    canvasService: {} as never,
+    storage: { findRuntimeRunMetadata: () => undefined },
+    planExecutor: { wake: (threadId, planId) => wakes.push(`${threadId}:${planId}`) }
+  });
+
+  const response = await localJsonRequest(app, "/api/generate", fetch, {
+    method: "POST",
+    body: {
+      mode: "chat",
+      locale: "en",
+      threadId: "thread_1",
+      projectId: "project_1",
+      chatInstruction: "Continue",
+      planPhase: "execution",
+      planId: "plan_1",
+      stepId: "step_1"
+    }
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(wakes, ["thread_1:plan_1"]);
+});
+
 test("runtime run events route proxies sanitized raw events", async () => {
   clearAgentBackendSession();
   const previousFetch = globalThis.fetch;
@@ -142,12 +185,16 @@ test("runtime run events route resolves Node run ids through persisted runtime m
   }
 });
 
-async function localJsonRequest(app: express.Express, path: string, fetchImpl: typeof fetch) {
+async function localJsonRequest(app: express.Express, path: string, fetchImpl: typeof fetch, options: { method?: string; body?: unknown } = {}) {
   const server = app.listen(0, "127.0.0.1");
   try {
     await new Promise<void>((resolve) => server.once("listening", resolve));
     const address = server.address() as AddressInfo;
-    const response = await fetchImpl(`http://127.0.0.1:${address.port}${path}`);
+    const response = await fetchImpl(`http://127.0.0.1:${address.port}${path}`, {
+      method: options.method,
+      headers: options.body === undefined ? undefined : { "Content-Type": "application/json" },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body)
+    });
     return { status: response.status, body: await response.json() as Record<string, unknown> };
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

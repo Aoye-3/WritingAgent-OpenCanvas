@@ -593,6 +593,8 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       const disabledSkillRefs = readSkillRefs(requestContext?.disabledSkillRefs);
       const runtimeBudgetProfile = readRuntimeBudgetProfile(requestContext?.runtimeBudgetProfile);
       const requestContextValues = omitSkillOverrideRefs(requestContext);
+      const planExecution = readPlanExecutionContext(requestContext?.planExecution);
+      const isExecutionRequest = Boolean(requestContext?.approvedPlan || planExecution);
       const payload: GenerateRequest = {
         mode: "chat",
         clientRequestId: assistantMessageId,
@@ -602,17 +604,15 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         locale: options.locale,
         contextValues: { ...options.getContextValues(), ...requestContextValues },
         chatInstruction: text,
-        planPhase: requestContext?.approvedPlan ? "execution" : requestContext?.awaitingPlan ? "revise" : isPlanInstruction(text) ? "intake" : undefined,
-        planId: typeof (requestContext?.planExecution as { planId?: unknown } | undefined)?.planId === "string"
-          ? (requestContext?.planExecution as { planId: string }).planId
+        planPhase: isExecutionRequest ? "execution" : requestContext?.awaitingPlan ? "revise" : isPlanInstruction(text) ? "intake" : undefined,
+        planId: planExecution?.planId
+          ? planExecution.planId
           : typeof (requestContext?.awaitingPlan as { id?: unknown } | undefined)?.id === "string"
             ? (requestContext?.awaitingPlan as { id: string }).id
             : undefined,
-        stepId: typeof (requestContext?.planExecution as { stepId?: unknown } | undefined)?.stepId === "string"
-          ? (requestContext?.planExecution as { stepId: string }).stepId
-          : undefined,
+        stepId: planExecution?.stepId,
         toolState: buildRequestToolState(options.toolState, {
-          kind: requestContext?.approvedPlan ? "execution" : isPlanInstruction(text) || Boolean(requestContext?.awaitingPlan) ? "planning" : "chat"
+          kind: isExecutionRequest ? "execution" : isPlanInstruction(text) || Boolean(requestContext?.awaitingPlan) ? "planning" : "chat"
         }),
         runtimeBudgetProfile,
         modelOverrides,
@@ -849,6 +849,14 @@ function omitSkillOverrideRefs(requestContext?: Record<string, unknown>) {
   if (!requestContext) return undefined;
   const { transientSkillRefs: _transientSkillRefs, disabledSkillRefs: _disabledSkillRefs, runtimeBudgetProfile: _runtimeBudgetProfile, ...rest } = requestContext;
   return rest;
+}
+
+function readPlanExecutionContext(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  return typeof record.planId === "string" && typeof record.stepId === "string"
+    ? { planId: record.planId, stepId: record.stepId }
+    : undefined;
 }
 
 function readRuntimeBudgetProfile(value: unknown): GenerateRequest["runtimeBudgetProfile"] | undefined {

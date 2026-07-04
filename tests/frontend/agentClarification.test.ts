@@ -235,6 +235,40 @@ test("custom Agent clarification answer builds an optimistic record and resume r
   });
 });
 
+test("plan-backed Agent clarification answer carries plan execution context", () => {
+  const clarification = agentClarificationFromRecord({
+    id: "agent_clarification_plan_step",
+    threadId: "thread_1",
+    runId: "run_1",
+    status: "pending",
+    question: "Which source should I use?",
+    options: [
+      { id: "primary", label: "Primary sources", detail: "Official docs", recommended: true },
+      { id: "secondary", label: "Secondary sources", detail: "Analyst summaries", recommended: false }
+    ],
+    resumeContext: {
+      originalInstruction: "Continue approved plan plan_1.",
+      planExecution: { planId: "plan_1", stepId: "step_1" },
+      canvas: {}
+    },
+    createdAt: "2026-06-24T00:00:00.000Z",
+    updatedAt: "2026-06-24T00:00:01.000Z"
+  });
+  assert.ok(clarification);
+
+  const submission = buildAgentClarificationSubmission({
+    clarification,
+    currentThreadId: "thread_1",
+    optionId: "primary",
+    enabledSkillRefs: [],
+    disabledSkillRefs: [],
+    runtimeBudgetProfile: "medium"
+  });
+
+  assert.deepEqual(submission.requestContext.planExecution, { planId: "plan_1", stepId: "step_1" });
+  assert.deepEqual(submission.requestContext.agentClarification.resumeContext, clarification.resumeContext);
+});
+
 test("waiting Agent clarification trace without options is detected as recoverable", () => {
   const messages = [assistantWithTimeline([{
     id: "timeline_waiting",

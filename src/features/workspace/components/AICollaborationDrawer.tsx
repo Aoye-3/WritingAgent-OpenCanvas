@@ -1242,6 +1242,7 @@ type AgentClarificationResumeContext = {
     checkpointId?: string;
   };
   runtimeBudgetProfile?: GenerateRequest["runtimeBudgetProfile"];
+  planExecution?: { planId: string; stepId: string };
   intakeState?: string;
   intakeRound?: number;
   maxIntakeRounds?: number;
@@ -1310,6 +1311,7 @@ export function buildAgentClarificationSubmission(input: AgentClarificationSubmi
       ...(transientSkillRefs.length ? { transientSkillRefs } : {}),
       ...(resumeDisabledSkillRefs.length ? { disabledSkillRefs: resumeDisabledSkillRefs } : {}),
       ...resumeRuntimeContext,
+      ...(resume?.planExecution ? { planExecution: resume.planExecution } : {}),
       agentClarification: {
         clarificationId: input.clarification.clarificationId,
         question: input.clarification.question,
@@ -1841,13 +1843,14 @@ function readAgentClarificationResumeContext(value: unknown): AgentClarification
   const disabledSkillRefs = readStringList(record.disabledSkillRefs);
   const runtimeResume = readAgentClarificationRuntimeResume(record.runtimeResume);
   const runtimeBudgetProfile = readRuntimeBudgetProfile(record.runtimeBudgetProfile);
+  const planExecution = readAgentClarificationPlanExecution(record.planExecution);
   const intakeState = readString(record.intakeState);
   const intakeRound = readPositiveInteger(record.intakeRound);
   const maxIntakeRounds = readPositiveInteger(record.maxIntakeRounds);
   const answeredSummary = readString(record.answeredSummary);
   const missingSlots = readStringList(record.missingSlots);
   const canvas = readRecord(record.canvas);
-  if (!originalInstruction && transientSkillRefs.length === 0 && disabledSkillRefs.length === 0 && !runtimeResume && !runtimeBudgetProfile && !intakeState && !intakeRound && !maxIntakeRounds && !answeredSummary && missingSlots.length === 0 && Object.keys(canvas).length === 0) {
+  if (!originalInstruction && transientSkillRefs.length === 0 && disabledSkillRefs.length === 0 && !runtimeResume && !runtimeBudgetProfile && !planExecution && !intakeState && !intakeRound && !maxIntakeRounds && !answeredSummary && missingSlots.length === 0 && Object.keys(canvas).length === 0) {
     return undefined;
   }
   return {
@@ -1856,6 +1859,7 @@ function readAgentClarificationResumeContext(value: unknown): AgentClarification
     disabledSkillRefs,
     ...(runtimeResume ? { runtimeResume } : {}),
     ...(runtimeBudgetProfile ? { runtimeBudgetProfile } : {}),
+    ...(planExecution ? { planExecution } : {}),
     ...(intakeState ? { intakeState } : {}),
     ...(intakeRound ? { intakeRound } : {}),
     ...(maxIntakeRounds ? { maxIntakeRounds } : {}),
@@ -1863,6 +1867,13 @@ function readAgentClarificationResumeContext(value: unknown): AgentClarification
     ...(missingSlots.length ? { missingSlots } : {}),
     canvas
   };
+}
+
+function readAgentClarificationPlanExecution(value: unknown): AgentClarificationResumeContext["planExecution"] {
+  const record = readRecord(value);
+  const planId = readString(record.planId);
+  const stepId = readString(record.stepId);
+  return planId && stepId ? { planId, stepId } : undefined;
 }
 
 function readAgentClarificationRuntimeResume(value: unknown): AgentClarificationResumeContext["runtimeResume"] {

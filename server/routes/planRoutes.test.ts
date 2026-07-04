@@ -32,7 +32,7 @@ test("plan routes list, approve, pause, resume, cancel, answer, activities, and 
   assert.equal((await request(app, "/api/threads/thread_1/plans/plan_1/answer", "POST", { optionId: "value" })).status, 200);
   assert.equal((await request(app, "/api/threads/thread_1/plans/plan_1/cancel", "POST")).status, 200);
   assert.deepEqual(calls, ["approve", "pause", "resume", "retry", "UK market", "value", "cancel"]);
-  assert.deepEqual(wakes, ["thread_1:plan_1", "thread_1:plan_1", "thread_1:plan_1"]);
+  assert.deepEqual(wakes, ["thread_1:plan_1", "thread_1:plan_1", "thread_1:plan_1", "thread_1:plan_1", "thread_1:plan_1"]);
 });
 
 async function request(app: express.Express, path: string, method = "GET", body?: unknown) {

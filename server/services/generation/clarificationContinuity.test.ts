@@ -61,3 +61,32 @@ test("progressive clarification events carry the active delivery id in resume co
 
   assert.equal((event.payload as { resumeContext: { canvas: { deliveryId: string } } }).resumeContext.canvas.deliveryId, "delivery_thread_1_3_direct");
 });
+
+test("execution clarification events carry plan execution context in resume context", () => {
+  const event = withAgentClarificationResumeContext({
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      question: "Which source should I use?",
+      options: [{ id: "a", label: "A" }, { id: "b", label: "B" }],
+      resumeContext: {
+        originalInstruction: "Continue approved plan."
+      }
+    }
+  }, {
+    mode: "chat",
+    locale: "en",
+    chatInstruction: "Continue approved plan plan_1. Execute only step step_1.",
+    planPhase: "execution",
+    planId: "plan_1",
+    stepId: "step_1",
+    contextValues: {
+      planExecution: { planId: "plan_1", stepId: "step_1" }
+    }
+  });
+
+  assert.deepEqual(
+    (event.payload as { resumeContext: { planExecution: { planId: string; stepId: string } } }).resumeContext.planExecution,
+    { planId: "plan_1", stepId: "step_1" }
+  );
+});

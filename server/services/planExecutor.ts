@@ -1,4 +1,4 @@
-import type { GenerateRequest } from "../contracts/generation.js";
+import type { GenerateRequest, GenerateResponse } from "../contracts/generation.js";
 import type { SQLiteStorageRepository } from "../storage.js";
 
 type PlanExecutionStorage = Pick<SQLiteStorageRepository,
@@ -9,7 +9,7 @@ export class PlanExecutor {
 
   constructor(
     private readonly storage: PlanExecutionStorage,
-    private readonly generate: (payload: GenerateRequest) => Promise<unknown>,
+    private readonly generate: (payload: GenerateRequest) => Promise<Partial<Pick<GenerateResponse, "finishReason">> | unknown>,
     private readonly options: { heartbeatMs?: number } = {}
   ) {}
 
@@ -36,7 +36,7 @@ export class PlanExecutor {
         if (!plan || !execution || plan.status !== "running" || plan.approval !== "approved") return;
         const stepId = plan.currentStepId ?? execution.currentStepId;
         if (!stepId) return;
-        await this.generate({
+        const result = await this.generate({
           mode: "chat",
           locale: "en",
           threadId,
@@ -54,6 +54,7 @@ export class PlanExecutor {
           },
           contextValues: { planExecution: { planId: plan.id, stepId } }
         });
+        if (isClarificationRequiredResult(result)) return;
       }
     } catch (error) {
       this.storage.pausePlanRun(threadId, planId, error instanceof Error ? error.message : "Plan execution paused");
@@ -62,4 +63,8 @@ export class PlanExecutor {
       this.storage.releasePlanExecutionLease(threadId, planId, owner);
     }
   }
+}
+
+function isClarificationRequiredResult(value: unknown) {
+  return Boolean(value && typeof value === "object" && "finishReason" in value && (value as { finishReason?: unknown }).finishReason === "clarification_required");
 }

@@ -12,13 +12,16 @@ type GenerationRouteDeps = {
   generationService: GenerationService;
   canvasService: CanvasDomainService;
   storage: Pick<SQLiteStorageRepository, "findRuntimeRunMetadata">;
+  planExecutor?: { wake: (threadId: string, planId: string) => void };
 };
 
-export function registerGenerationRoutes(app: Express, { generationService, canvasService, storage }: GenerationRouteDeps) {
+export function registerGenerationRoutes(app: Express, { generationService, canvasService, storage, planExecutor }: GenerationRouteDeps) {
   app.post("/api/generate", async (request, response) => {
     try {
       const payload = parseGenerateRequest(request.body);
-      sendOk(response, await generationService.generateAndRecord(payload));
+      const result = await generationService.generateAndRecord(payload);
+      wakePlanExecutionIfReady(planExecutor, payload, result);
+      sendOk(response, result);
     } catch (error) {
       const status = error instanceof GenerationError ? generationErrorStatus(error.code) : error instanceof Error && error.message.startsWith("Request body") || error instanceof Error && error.message.startsWith("mode ") || error instanceof Error && error.message.startsWith("locale ")
         ? 400
@@ -29,10 +32,28 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
 
   app.post("/api/generate/stream", async (request, response) => {
     const trace = createServerStreamTrace();
+    const sendSse = (event: string, payload: unknown) => writeSse(response, event, payload, trace);
     response.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive"
+    });
+    request.on("close", () => {
+      trace("request_close", {
+        aborted: request.aborted,
+        readableEnded: request.readableEnded,
+        responseWritableEnded: response.writableEnded
+      });
+    });
+    response.on("close", () => {
+      trace("response_close", {
+        writableEnded: response.writableEnded,
+        writableFinished: response.writableFinished,
+        writableLength: response.writableLength
+      });
+    });
+    response.on("error", (error) => {
+      trace("response_error", { message: error.message });
     });
 
     try {
@@ -41,23 +62,23 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
       const result = await generationService.generateAndRecordStream(payload, {
         onStatus: (status) => {
           trace("status", { label: status.label, statusPhase: status.phase });
-          writeSse(response, "status", status);
+          sendSse("status", status);
         },
         onToken: (token) => {
           trace("token", { length: token.length });
-          writeSse(response, "token", { text: token });
+          sendSse("token", { text: token });
         },
         onReasoningToken: (token) => {
           trace("reasoning_token", { length: token.length });
-          writeSse(response, "reasoning_token", { text: token });
+          sendSse("reasoning_token", { text: token });
         },
         onTimelineEvent: (event) => {
           trace("timeline_event", { eventType: event.eventType, status: event.status, sequence: event.sequence });
-          writeSse(response, "timeline_event", event);
+          sendSse("timeline_event", event);
         },
         onProgressEvent: (event) => {
           trace("progress_event", { status: event.status, phase: event.phase });
-          writeSse(response, "progress_event", event);
+          sendSse("progress_event", event);
         },
         onToolEvent: (event) => {
           const safePayload = sanitizeToolEventPayload(event.payload);
@@ -68,19 +89,20 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
             tool: typeof event.payload?.tool === "string" ? event.payload.tool : typeof event.payload?.toolName === "string" ? event.payload.toolName : "",
             deliveryId: typeof event.payload?.deliveryId === "string" ? event.payload.deliveryId : ""
           });
-          writeSse(response, "tool_event", safeEvent);
+          sendSse("tool_event", safeEvent);
           const structuredEvent = typeof event.payload?.eventType === "string" ? event.payload.eventType : "";
-          if (/^(?:plan_|artifact_)/.test(structuredEvent)) writeSse(response, structuredEvent, safePayload);
+          if (/^(?:plan_|artifact_)/.test(structuredEvent)) sendSse(structuredEvent, safePayload);
           if (/^(?:plan_|artifact_|canvas_)/.test(structuredEvent) || /(?:tool_started|tool_completed)$/.test(event.eventType)) {
-            writeSse(response, "activity", safePayload);
+            sendSse("activity", safePayload);
           }
         }
       });
       trace("final", { threadId: result.threadId, runId: result.runId, provider: result.provider, finishReason: result.finishReason });
-      writeSse(response, "final", result);
+      sendSse("final", result);
+      wakePlanExecutionIfReady(planExecutor, payload, result);
     } catch (error) {
       trace("error", { message: errorMessage(error, "Generation failed") });
-      writeSse(response, "error", {
+      sendSse("error", {
         code: error instanceof GenerationError ? error.code : error instanceof Error && (error.message.startsWith("Request body") || error.message.startsWith("mode ") || error.message.startsWith("locale ")) ? "bad_request" : "internal_error",
         message: errorMessage(error, "Generation failed")
       });
@@ -184,6 +206,16 @@ export function registerGenerationRoutes(app: Express, { generationService, canv
   });
 }
 
+function wakePlanExecutionIfReady(
+  planExecutor: GenerationRouteDeps["planExecutor"],
+  payload: GenerateRequest,
+  result: { finishReason?: string }
+) {
+  if (result.finishReason === "clarification_required") return;
+  if (payload.planPhase !== "execution" || !payload.threadId || !payload.planId) return;
+  planExecutor?.wake(payload.threadId, payload.planId);
+}
+
 function generationErrorStatus(code: GenerationError["code"]) {
   if (code === "model_required" || code === "model_not_ready") return 409;
   if (code === "runtime_auth_failed") return 401;
@@ -199,9 +231,23 @@ function readModelOverrides(value: unknown): GenerateRequest["modelOverrides"] {
   return thinkingMode || reasoningEffort ? { thinkingMode, reasoningEffort } : undefined;
 }
 
-function writeSse(response: Response, event: string, payload: unknown) {
-  response.write(`event: ${event}\n`);
-  response.write(`data: ${JSON.stringify(payload)}\n\n`);
+function writeSse(
+  response: Response,
+  event: string,
+  payload: unknown,
+  trace?: ReturnType<typeof createServerStreamTrace>
+) {
+  const eventWriteAccepted = response.write(`event: ${event}\n`);
+  const dataWriteAccepted = response.write(`data: ${JSON.stringify(payload)}\n\n`);
+  if (!eventWriteAccepted || !dataWriteAccepted) {
+    trace?.("sse_backpressure", {
+      event,
+      eventWriteAccepted,
+      dataWriteAccepted,
+      writableEnded: response.writableEnded,
+      writableLength: response.writableLength
+    });
+  }
 }
 
 function sanitizeRuntimeRunEvents(events: unknown[]) {

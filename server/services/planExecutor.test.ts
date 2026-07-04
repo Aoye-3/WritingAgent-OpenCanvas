@@ -37,6 +37,37 @@ test("executor runs persisted plan steps sequentially without a frontend trigger
   assert.deepEqual(calls, ["step_1", "step_2"]);
 });
 
+test("executor stops when a plan step requires clarification", async () => {
+  const plan = {
+    id: "plan_1",
+    threadId: "thread_1",
+    projectId: "project_1",
+    status: "running",
+    approval: "approved",
+    currentStepId: "step_1",
+    executionVersion: 1,
+    steps: [{ id: "step_1", status: "running" }]
+  };
+  const calls: string[] = [];
+  const storage = {
+    getPlanRun: () => plan,
+    getPlanExecution: () => ({ status: "running", currentStepId: plan.currentStepId, attempt: 0 }),
+    claimPlanExecution: () => true,
+    releasePlanExecutionLease: () => undefined,
+    pausePlanRun: () => undefined
+  };
+  const executor = new PlanExecutor(storage as never, async (payload) => {
+    calls.push(payload.stepId!);
+    if (calls.length > 1) plan.status = "completed";
+    return { finishReason: "clarification_required" };
+  });
+
+  executor.wake("thread_1", "plan_1");
+  await executor.whenIdle("plan_1");
+
+  assert.deepEqual(calls, ["step_1"], "executor retried a plan step after clarification_required");
+});
+
 test("orchestrator attributes tool activity to the only running plan when the adapter omits planId", () => {
   const activities: unknown[] = [];
   const plan = { id: "plan_1", status: "running" };

@@ -295,6 +295,7 @@ export function createGenerationService(
         const visibleText = blockedInternalOutput ? visibleTextAfterInternalOutputBlock(normalized.text, payload.locale) : normalized.text;
         const baseEvents = dedupeToolEvents([...runtimeEvents, ...normalizedEvents]);
         if (isBlockingAgentClarificationRun(baseEvents, visibleText, agentBackendRun.finishReason)) {
+          markPlanWaitingForAgentClarification(storage, threadId, payload, baseEvents);
           agentPlanOrchestrator.complete(threadId, payload, baseEvents);
           return recordGenerationRun({
             storage,
@@ -785,6 +786,7 @@ export function createGenerationService(
             textGate.flush();
             callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
             const events = [...baseEvents, ...timelineEvents.map(timelineEventToToolEvent)];
+            markPlanWaitingForAgentClarification(storage, threadId, payload, events);
             agentPlanOrchestrator.complete(threadId, payload, events);
             return recordGenerationRun({
               storage,
@@ -1345,6 +1347,23 @@ function readString(value: unknown) {
   return isSentinelText(text) ? "" : text;
 }
 
+function readPlanExecutionContext(value: unknown) {
+  const source = record(value);
+  const planId = readString(source.planId);
+  const stepId = readString(source.stepId);
+  return planId && stepId ? { planId, stepId } : undefined;
+}
+
+function planExecutionContextForPayload(payload: GenerateRequest) {
+  if (payload.planGeneration?.phase === "execution" && payload.planGeneration.stepId) {
+    return { planId: payload.planGeneration.planId, stepId: payload.planGeneration.stepId };
+  }
+  if (payload.planPhase === "execution" && payload.planId && payload.stepId) {
+    return { planId: payload.planId, stepId: payload.stepId };
+  }
+  return readPlanExecutionContext(payload.contextValues?.planExecution);
+}
+
 function isSentinelText(value: string) {
   return /^(?:undefined|null|none|nan)$/i.test(value.trim());
 }
@@ -1642,11 +1661,47 @@ function markAnsweredAgentClarification(storage: SQLiteStorageRepository, thread
     selectedOptionLabel: readString(option.label) || readString(clarification.answer),
     answer: readString(clarification.answer) || readString(option.label)
   };
-  if (storage.answerAgentClarification(threadId, clarificationId, answer)) return;
+  if (storage.answerAgentClarification(threadId, clarificationId, answer)) {
+    resumePlanExecutionForAgentClarificationAnswer(storage, threadId, payload, answer);
+    return;
+  }
   const question = readString(clarification.question);
   if (!question) return;
   const matchingPending = storage.listAgentClarifications(threadId).find((item) => item.status === "pending" && item.question === question);
-  if (matchingPending) storage.answerAgentClarification(threadId, matchingPending.id, answer);
+  if (matchingPending && storage.answerAgentClarification(threadId, matchingPending.id, answer)) {
+    resumePlanExecutionForAgentClarificationAnswer(storage, threadId, payload, answer);
+  }
+}
+
+function markPlanWaitingForAgentClarification(storage: SQLiteStorageRepository, threadId: string, payload: GenerateRequest, events: ToolEventRecord[]) {
+  const planExecution = planExecutionContextForPayload(payload);
+  if (!planExecution || !events.some(isAgentClarificationEvent)) return;
+  const question = latestAgentClarificationQuestion(events);
+  storage.recordPlanActivity(threadId, planExecution.planId, {
+    stepId: planExecution.stepId,
+    type: "clarification_ready",
+    status: "waiting",
+    summary: question || "Waiting for user clarification",
+    detail: { source: "agent_clarification" }
+  });
+  storage.setPlanWaitingForUser(threadId, planExecution.planId, question || "Waiting for user clarification");
+}
+
+function resumePlanExecutionForAgentClarificationAnswer(
+  storage: SQLiteStorageRepository,
+  threadId: string,
+  payload: GenerateRequest,
+  answer: { selectedOptionId?: string; selectedOptionLabel?: string; answer?: string }
+) {
+  const planExecution = readPlanExecutionContext(record(payload.contextValues?.planExecution))
+    ?? readPlanExecutionContext(record(record(payload.contextValues?.agentClarification).resumeContext).planExecution);
+  if (!planExecution) return;
+  const plan = storage.getPlanRun(threadId, planExecution.planId);
+  if (plan?.status !== "awaiting_user") return;
+  storage.resumePlanWithAnswer(threadId, planExecution.planId, {
+    optionId: answer.selectedOptionId,
+    answer: answer.answer || answer.selectedOptionLabel
+  });
 }
 
 function isBlockingAgentClarificationRun(events: ToolEventRecord[], text: string, finishReason?: string) {
@@ -1657,6 +1712,16 @@ function isBlockingAgentClarificationRun(events: ToolEventRecord[], text: string
     || !visible
     || isProcessClarificationText(visible)
     || /(?:need(?:s|ed)?\s+(?:to\s+)?(?:confirm|clarif|supplement)|clarif(?:y|ication)|supplement(?:al)?\s+information|范围|确认|补充|澄清)/i.test(visible) && visible.length < 500;
+}
+
+function latestAgentClarificationQuestion(events: ToolEventRecord[]) {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (!isAgentClarificationEvent(event)) continue;
+    const question = readString(record(event.payload).question);
+    if (question) return question;
+  }
+  return "";
 }
 
 function finalFinishReason(finishReason: string | undefined, events: ToolEventRecord[]) {
@@ -1811,6 +1876,8 @@ export function withAgentClarificationResumeContext(event: ToolEventRecord, payl
     || stripSelectedClarificationInstruction(payload.chatInstruction)
     || stripSelectedClarificationInstruction(payload.freeTextPrompt)
     || "";
+  const planExecution = readPlanExecutionContext(existingResumeContext.planExecution)
+    ?? planExecutionContextForPayload(payload);
   return {
     ...event,
     payload: {
@@ -1826,6 +1893,7 @@ export function withAgentClarificationResumeContext(event: ToolEventRecord, payl
         ...(maxIntakeRounds ? { maxIntakeRounds } : {}),
         ...(answeredSummary ? { answeredSummary } : {}),
         ...(missingSlots.length ? { missingSlots } : {}),
+        ...(planExecution ? { planExecution } : {}),
         canvas: mergedCanvas
       }
     }
