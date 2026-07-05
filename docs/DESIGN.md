@@ -163,6 +163,7 @@ OpenCanvas homepage update:
 - Submitting a non-empty Home composer prompt creates a new board, opens the workspace, and sends that prompt into the new board thread. Submitting with no prompt still creates a blank board.
 - The Home project browser may borrow the structure of Figma Recents: light tabs, filter controls, sort control, and grid/list switching.
 - Borrow the Figma Recents information architecture only. Do not copy Figma's black-and-white brand system, extreme pill geometry, negative letter spacing, or marketing typography.
+- Home should use one page scrollbar. The left sidebar stays fixed, the recents filter controls can become sticky as the page scrolls, and the project grid should not introduce a nested scrollbar.
 - Remove or hide ineffective actions. If a button appears on Home, it must either create a board, open a project, filter/sort/switch view, open project actions, or navigate to a working section.
 - Project/recents thumbnails should prefer real cached Canvas screenshots when available, with the geometric Canvas preview as a graceful fallback. Cached screenshots are intentionally refreshed on Project leave/switch rather than in real time.
 

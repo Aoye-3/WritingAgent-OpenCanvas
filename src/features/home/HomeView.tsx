@@ -254,93 +254,97 @@ export function HomeView({
           </section>
 
           <section className="home-recents-section" aria-label={copy.recent}>
-            <SegmentedControl.Root className="home-recents-tabs" radius="full" value={activeTab} onValueChange={(value) => setActiveTab(value as HomeTab)}>
-              {(["recent", "pinned", "all"] as HomeTab[]).map((tab) => (
-                <SegmentedControl.Item key={tab} value={tab}>
-                  {tab === "recent" ? copy.recent : tab === "pinned" ? copy.pinned : copy.all}
-                </SegmentedControl.Item>
-              ))}
-            </SegmentedControl.Root>
-
-            <div className="home-recents-toolbar">
-              <RadixTextField.Root
-                aria-label={copy.search}
-                className="home-search-control"
-                placeholder={copy.search}
-                radius="large"
-                size="3"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              >
-                <RadixTextField.Slot>
-                  <SearchIcon aria-hidden="true" size={16} />
-                </RadixTextField.Slot>
-              </RadixTextField.Root>
-              <Select.Root value={agentFilter} onValueChange={setAgentFilter}>
-                <Select.Trigger aria-label={copy.allAgents} className="home-toolbar-select" radius="large" variant="surface" />
-                <Select.Content>
-                  <Select.Item value="all">{copy.allAgents}</Select.Item>
-                  {agentCards.map((agent) => <Select.Item key={agent.id} value={agent.id}>{agent.title[locale]}</Select.Item>)}
-                </Select.Content>
-              </Select.Root>
-              <Select.Root value={typeFilter} onValueChange={(value) => setTypeFilter(value as HomeTypeFilter)}>
-                <Select.Trigger aria-label={copy.allFiles} className="home-toolbar-select" radius="large" variant="surface" />
-                <Select.Content>
-                  <Select.Item value="all">{copy.allFiles}</Select.Item>
-                  <Select.Item value="with-assets">{copy.withAssets}</Select.Item>
-                  <Select.Item value="empty">{copy.withoutAssets}</Select.Item>
-                </Select.Content>
-              </Select.Root>
-              <Select.Root value={sortMode} onValueChange={(value) => setSortMode(value as HomeSortMode)}>
-                <Select.Trigger aria-label={copy.sortLastViewed} className="home-toolbar-select" radius="large" variant="surface" />
-                <Select.Content>
-                  <Select.Item value="last-viewed">{copy.sortLastViewed}</Select.Item>
-                  <Select.Item value="name">{copy.sortName}</Select.Item>
-                </Select.Content>
-              </Select.Root>
-              <SegmentedControl.Root className="home-view-toggle" radius="large" value={viewMode} onValueChange={(value) => setViewMode(value as HomeViewMode)}>
-                <SegmentedControl.Item value="grid">{copy.grid}</SegmentedControl.Item>
-                <SegmentedControl.Item value="list">{copy.list}</SegmentedControl.Item>
+            <div className="home-recents-controls">
+              <SegmentedControl.Root className="home-recents-tabs" radius="full" value={activeTab} onValueChange={(value) => setActiveTab(value as HomeTab)}>
+                {(["recent", "pinned", "all"] as HomeTab[]).map((tab) => (
+                  <SegmentedControl.Item key={tab} value={tab}>
+                    {tab === "recent" ? copy.recent : tab === "pinned" ? copy.pinned : copy.all}
+                  </SegmentedControl.Item>
+                ))}
               </SegmentedControl.Root>
-              <RadixButton className="home-view-all" radius="full" type="button" variant="ghost" onClick={() => onNavigate("projects")}>{copy.viewAll}</RadixButton>
+
+              <div className="home-recents-toolbar">
+                <RadixTextField.Root
+                  aria-label={copy.search}
+                  className="home-search-control"
+                  placeholder={copy.search}
+                  radius="large"
+                  size="3"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                >
+                  <RadixTextField.Slot>
+                    <SearchIcon aria-hidden="true" size={16} />
+                  </RadixTextField.Slot>
+                </RadixTextField.Root>
+                <Select.Root value={agentFilter} onValueChange={setAgentFilter}>
+                  <Select.Trigger aria-label={copy.allAgents} className="home-toolbar-select" radius="large" variant="surface" />
+                  <Select.Content>
+                    <Select.Item value="all">{copy.allAgents}</Select.Item>
+                    {agentCards.map((agent) => <Select.Item key={agent.id} value={agent.id}>{agent.title[locale]}</Select.Item>)}
+                  </Select.Content>
+                </Select.Root>
+                <Select.Root value={typeFilter} onValueChange={(value) => setTypeFilter(value as HomeTypeFilter)}>
+                  <Select.Trigger aria-label={copy.allFiles} className="home-toolbar-select" radius="large" variant="surface" />
+                  <Select.Content>
+                    <Select.Item value="all">{copy.allFiles}</Select.Item>
+                    <Select.Item value="with-assets">{copy.withAssets}</Select.Item>
+                    <Select.Item value="empty">{copy.withoutAssets}</Select.Item>
+                  </Select.Content>
+                </Select.Root>
+                <Select.Root value={sortMode} onValueChange={(value) => setSortMode(value as HomeSortMode)}>
+                  <Select.Trigger aria-label={copy.sortLastViewed} className="home-toolbar-select" radius="large" variant="surface" />
+                  <Select.Content>
+                    <Select.Item value="last-viewed">{copy.sortLastViewed}</Select.Item>
+                    <Select.Item value="name">{copy.sortName}</Select.Item>
+                  </Select.Content>
+                </Select.Root>
+                <SegmentedControl.Root className="home-view-toggle" radius="large" value={viewMode} onValueChange={(value) => setViewMode(value as HomeViewMode)}>
+                  <SegmentedControl.Item value="grid">{copy.grid}</SegmentedControl.Item>
+                  <SegmentedControl.Item value="list">{copy.list}</SegmentedControl.Item>
+                </SegmentedControl.Root>
+                <RadixButton className="home-view-all" radius="full" type="button" variant="ghost" onClick={() => onNavigate("projects")}>{copy.viewAll}</RadixButton>
+              </div>
             </div>
 
-            {filteredProjects.length ? (
-              <div className={viewMode === "grid" ? "home-project-grid" : "home-project-table"} data-view-mode={viewMode}>
-                {viewMode === "list" ? (
-                  <div className="home-project-table-head">
-                    <span>{copy.name}</span>
-                    <span>Agent</span>
-                    <span>{copy.allFiles}</span>
-                    <span>{copy.sortLastViewed}</span>
-                    <span>{copy.projectActions}</span>
-                  </div>
-                ) : null}
-                {filteredProjects.map((project) => (
-                  <HomeProjectItem
-                    agentTitle={agentTitle(project, agentCards, locale)}
-                    copy={copy}
-                    key={project.id}
-                    locale={locale}
-                    openMenuThreadId={openMenuThreadId}
-                    pinned={pinnedThreadIds.includes(project.id)}
-                    project={project}
-                    thumbnailRetryToken={thumbnailRetryToken}
-                    viewMode={viewMode}
-                    onDeleteThread={onDeleteThread}
-                    onOpenMenu={openProjectMenu}
-                    onOpenThread={onOpenThread}
-                    onRename={setRenameProject}
-                    onTogglePinnedThread={onTogglePinnedThread}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="home-project-empty" role="status">
-                <strong>{copy.empty}</strong>
-                <p>{copy.emptyHint}</p>
-              </div>
-            )}
+            <div className="home-project-scroll">
+              {filteredProjects.length ? (
+                <div className={viewMode === "grid" ? "home-project-grid" : "home-project-table"} data-view-mode={viewMode}>
+                  {viewMode === "list" ? (
+                    <div className="home-project-table-head">
+                      <span>{copy.name}</span>
+                      <span>Agent</span>
+                      <span>{copy.allFiles}</span>
+                      <span>{copy.sortLastViewed}</span>
+                      <span>{copy.projectActions}</span>
+                    </div>
+                  ) : null}
+                  {filteredProjects.map((project) => (
+                    <HomeProjectItem
+                      agentTitle={agentTitle(project, agentCards, locale)}
+                      copy={copy}
+                      key={project.id}
+                      locale={locale}
+                      openMenuThreadId={openMenuThreadId}
+                      pinned={pinnedThreadIds.includes(project.id)}
+                      project={project}
+                      thumbnailRetryToken={thumbnailRetryToken}
+                      viewMode={viewMode}
+                      onDeleteThread={onDeleteThread}
+                      onOpenMenu={openProjectMenu}
+                      onOpenThread={onOpenThread}
+                      onRename={setRenameProject}
+                      onTogglePinnedThread={onTogglePinnedThread}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="home-project-empty" role="status">
+                  <strong>{copy.empty}</strong>
+                  <p>{copy.emptyHint}</p>
+                </div>
+              )}
+            </div>
           </section>
         </div>
       </section>
