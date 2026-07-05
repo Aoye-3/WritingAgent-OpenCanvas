@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import { Button as RadixButton, SegmentedControl, Select, TextField as RadixTextField, Theme } from "@radix-ui/themes";
 import type { AppView } from "../../app/App";
 import { AppSidebar } from "../../shared/AppSidebar";
-import { AddIcon, DocumentIcon, MoreIcon, SearchIcon, StarIcon } from "../../shared/icons";
+import { AddIcon, DocumentIcon, HomeSparkleIcon, MoreIcon, SearchIcon, StarIcon } from "../../shared/icons";
 import { Button as LocalButton, IconButton, ModalDialog, TextField } from "../../shared/ui";
 import type { AgentCard, ProjectSummary, SkillCatalogItem, SkillFolderItem } from "../agents/types";
 import type { GenerateRequest } from "../generation/types";
@@ -200,7 +200,10 @@ export function HomeView({
         <div className="home-recents-shell">
           <section className="home-ai-region" aria-labelledby="home-title">
             <div className="home-ai-heading">
-              <h1 id="home-title">{copy.title}</h1>
+              <div className="home-title-row">
+                <HomeSparkleIcon className="home-title-sparkle" size={34} />
+                <h1 id="home-title">{copy.title}</h1>
+              </div>
               <RadixButton
                 className="home-create-board-button"
                 data-testid="home-create-board"

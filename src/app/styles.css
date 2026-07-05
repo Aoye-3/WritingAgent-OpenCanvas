@@ -1114,6 +1114,21 @@ textarea:focus-visible,
   gap: 16px;
 }
 
+.home-title-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+
+.home-title-sparkle {
+  flex: 0 0 auto;
+  width: clamp(24px, 2.2vw, 34px);
+  height: clamp(24px, 2.2vw, 34px);
+  color: #5d8ff5;
+  filter: drop-shadow(0 6px 10px rgba(71, 128, 245, 0.22));
+}
+
 .home-ai-heading h1 {
   margin: 0;
   color: var(--color-text);

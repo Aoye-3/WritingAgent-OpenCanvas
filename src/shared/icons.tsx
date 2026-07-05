@@ -91,6 +91,31 @@ export const ArchiveIcon = createIcon(Archive);
 export const ZoomInIcon = createIcon(ZoomIn);
 export const ZoomOutIcon = createIcon(ZoomOut);
 
+export function HomeSparkleIcon({ className, size = 32, ...props }: IconComponentProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      fill="none"
+      height={size}
+      viewBox="0 0 40 40"
+      width={size}
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path
+        d="M20 2.75C21.82 11.9 23.6 16.12 31.25 20C23.6 23.88 21.82 28.1 20 37.25C18.18 28.1 16.4 23.88 8.75 20C16.4 16.12 18.18 11.9 20 2.75Z"
+        fill="currentColor"
+      />
+      <path
+        d="M20 8.6C21.36 14.8 23.15 17.54 28.45 20C23.15 22.46 21.36 25.2 20 31.4C18.64 25.2 16.85 22.46 11.55 20C16.85 17.54 18.64 14.8 20 8.6Z"
+        fill="#78A9FF"
+        opacity="0.56"
+      />
+    </svg>
+  );
+}
+
 const taskIcons = {
   bot: Bot,
   pen: PenLine,
