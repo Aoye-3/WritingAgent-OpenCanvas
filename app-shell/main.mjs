@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:net";
@@ -25,6 +25,7 @@ const viteCli = path.join(root, "node_modules", "vite", "bin", "vite.js");
 const logsRoot = path.join(root, "logs");
 const shellLogPath = path.join(logsRoot, "app-shell.log");
 mkdirSync(logsRoot, { recursive: true });
+registerShellIpc();
 
 let splashWindow;
 let mainWindow;
@@ -157,6 +158,7 @@ function createMainWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: path.join(shellDir, "preload.cjs"),
     },
   });
   window.on("close", (event) => {
@@ -317,6 +319,47 @@ async function findAvailablePort() {
 function updateStage(stage) {
   writeShellLog(`stage=${stage}`);
   sendWindowStage(splashWindow, stage);
+}
+
+function registerShellIpc() {
+  ipcMain.handle("shell:capture-project-thumbnail", async (event, input) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed()) return undefined;
+    const rect = readCaptureRect(input);
+    const image = await window.webContents.capturePage(rect);
+    const resized = image.resize({ width: 800, height: 450, quality: "best" });
+    return {
+      imageBase64: resized.toPNG().toString("base64"),
+      mimeType: "image/png",
+    };
+  });
+}
+
+function readCaptureRect(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Project thumbnail capture bounds are required.");
+  }
+  const input = value;
+  const x = readFiniteNumber(input.x, "x");
+  const y = readFiniteNumber(input.y, "y");
+  const width = readFiniteNumber(input.width, "width");
+  const height = readFiniteNumber(input.height, "height");
+  const outputWidth = readFiniteNumber(input.outputWidth, "outputWidth");
+  const outputHeight = readFiniteNumber(input.outputHeight, "outputHeight");
+  if (width < 80 || height < 80 || width > 2400 || height > 1800) {
+    throw new Error("Project thumbnail capture bounds are outside the allowed size.");
+  }
+  if (outputWidth !== 800 || outputHeight !== 450) {
+    throw new Error("Project thumbnail output size is not supported.");
+  }
+  return { x, y, width, height };
+}
+
+function readFiniteNumber(value, label) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Project thumbnail capture ${label} must be a finite number.`);
+  }
+  return Math.round(value);
 }
 
 function showStartupError(error) {

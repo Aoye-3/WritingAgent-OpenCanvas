@@ -287,11 +287,19 @@ Compatibility: `/api/agent-backend/status`, `/api/agent-backend/config`, and `/a
   - `ProjectSummary.canvasPreview` is present only when the Project has previewable Canvas nodes or objects. It contains at most 8 `nodes` and at most 8 `objects`.
   - Preview nodes expose only `id`, `kind`, `title`, `x`, `y`, `width`, and `height`; they must not include node `content`.
   - Preview objects expose only `id`, `kind`, `geometry`, and minimal safe `data`. They must not include uploaded file bytes, full table contents, large text payloads, or Thread state.
-  - Home uses this summary preview for project cards. It must not issue one full `GET /api/threads/:threadId/canvas` request per card.
+  - Home first tries the local cached Project thumbnail URL for projects with visible assets or preview data, then falls back to this lightweight summary preview. It must not issue one full `GET /api/threads/:threadId/canvas` request per card.
 - `GET /api/projects/trash`
   - Returns trashed project/thread summaries.
 - `GET /api/projects/:projectId/threads`
   - Returns `{ threads }` containing only active conversations for that Project, ordered by `updatedAt` descending.
+- `GET /api/projects/:projectId/thumbnail`
+  - Returns the locally cached Project thumbnail image as `image/png` or `image/webp`.
+  - Missing thumbnails return `404 not_found`; invalid project ids return `400 bad_request`.
+  - Responses set `Cache-Control: no-store`; clients should still include a version query parameter such as Project `updatedAt` or a local retry token to avoid stale failed image state.
+- `POST /api/projects/:projectId/thumbnail`
+  - Body: `{ imageBase64: string, mimeType: "image/png" | "image/webp" }`.
+  - Saves a fixed-size local desktop thumbnail under `.facetwrite/project-thumbnails/`, updates the sidecar metadata, and touches the Project `updatedAt` so summary consumers can retry.
+  - The backend validates project id, project existence, MIME type, base64 shape, payload size, and storage path containment. It does not accept arbitrary file paths or non-image types.
 - `GET /api/projects/:projectId/runtime-settings`
   - Returns `{ settings }` for this Project's Agent run budget. Defaults are medium when the Project has no saved row.
 - `PUT /api/projects/:projectId/runtime-settings`

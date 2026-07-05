@@ -140,7 +140,8 @@ test("Home renders recents filters, grid/list controls, and shared composer cont
   assert.match(html, /Grid/);
   assert.match(html, /List/);
   assert.match(html, /Skills/);
-  assert.match(html, /project-canvas-preview/);
+  assert.match(html, /is-cached-thumbnail/);
+  assert.match(html, /\/api\/projects\/project_alpha\/thumbnail/);
   assert.match(html, /home-project-preview-grid/);
   assert.match(html, /Alpha project/);
   assert.match(html, /Empty project/);

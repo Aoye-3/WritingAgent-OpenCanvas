@@ -79,6 +79,10 @@ export async function renameProject(projectId: string, title: string): Promise<P
   return payload.project;
 }
 
+export async function saveProjectThumbnail(projectId: string, thumbnail: { imageBase64: string; mimeType: string }): Promise<void> {
+  await apiPost<{ thumbnail: { mimeType: string; updatedAt: string } }>(`/api/projects/${encodeURIComponent(projectId)}/thumbnail`, thumbnail);
+}
+
 export async function bindProjectModels(projectId: string, configuredModelApiIds: string[]): Promise<string[]> {
   const payload = await apiPut<{ configuredModelApiIds: string[] }>(`/api/projects/${encodeURIComponent(projectId)}/models`, { configuredModelApiIds });
   return payload.configuredModelApiIds;

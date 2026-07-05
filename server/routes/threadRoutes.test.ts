@@ -80,6 +80,33 @@ async function get(app: express.Express, path: string) {
   return localJsonRequest(app, path);
 }
 
+async function getBinary(app: express.Express, path: string) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const server = app.listen(0, "127.0.0.1");
+    try {
+      await new Promise<void>((resolve) => server.once("listening", resolve));
+      const address = server.address();
+      assert.equal(typeof address, "object");
+      assert.ok(address);
+      const response = await fetch(`http://127.0.0.1:${(address as AddressInfo).port}${path}`);
+      return {
+        status: response.status,
+        contentType: response.headers.get("content-type") ?? "",
+        body: Buffer.from(await response.arrayBuffer())
+      };
+    } catch (error) {
+      lastError = error;
+      if (!isBadPortFetchError(error)) {
+        throw error;
+      }
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  }
+  throw lastError;
+}
+
 test("renames an active thread title", async () => {
   const { app, storage } = await withThreadRoutes();
   const threadId = `thread_rename_route_${Date.now()}`;
@@ -132,6 +159,33 @@ test("project runtime settings are isolated per project", async () => {
   assert.equal((third.body.settings as { modelCallLimit: number }).modelCallLimit, 32);
   assert.equal((third.body.settings as { recursionLimit: number }).recursionLimit, 140);
   assert.equal((third.body.settings as { synthesisReserveSteps: number }).synthesisReserveSteps, 28);
+});
+
+test("project thumbnail routes store cached images and reject unsafe inputs", async () => {
+  const { app, storage } = await withThreadRoutes();
+  const projectId = `project_thumbnail_route_${Date.now()}`;
+  storage.createProject(projectId, "Thumbnail route project");
+  const imageBase64 = Buffer.from("fake-png-image").toString("base64");
+
+  const missing = await get(app, `/api/projects/${projectId}/thumbnail`);
+  const saved = await post(app, `/api/projects/${projectId}/thumbnail`, { imageBase64, mimeType: "image/png" });
+  const fetched = await getBinary(app, `/api/projects/${projectId}/thumbnail`);
+  const invalidType = await post(app, `/api/projects/${projectId}/thumbnail`, { imageBase64, mimeType: "text/plain" });
+  const invalidBase64 = await post(app, `/api/projects/${projectId}/thumbnail`, { imageBase64: "not-valid-base64", mimeType: "image/png" });
+  const invalidId = await post(app, "/api/projects/bad.id/thumbnail", { imageBase64, mimeType: "image/png" });
+
+  assert.equal(missing.status, 404);
+  assert.equal(saved.status, 200);
+  assert.equal((saved.body.thumbnail as { mimeType: string }).mimeType, "image/png");
+  assert.equal(fetched.status, 200);
+  assert.match(fetched.contentType, /image\/png/);
+  assert.equal(fetched.body.toString(), "fake-png-image");
+  assert.equal(invalidType.status, 400);
+  assert.equal(invalidBase64.status, 400);
+  assert.equal(invalidId.status, 400);
+
+  storage.moveProjectToTrash(projectId);
+  await storage.hardDeleteProject(projectId);
 });
 
 test("rejects blank thread titles", async () => {

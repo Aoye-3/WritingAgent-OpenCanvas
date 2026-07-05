@@ -86,6 +86,11 @@ const appRoot = storagePaths.appRoot;
 const dbDir = storagePaths.dbDir;
 const dbPath = storagePaths.dbPath;
 const threadDirectoryManager = createThreadDirectoryManager(appRoot);
+const projectThumbnailRoot = path.join(appRoot, "project-thumbnails");
+const projectThumbnailTypes = new Map<string, ".webp" | ".png">([
+  ["image/webp", ".webp"],
+  ["image/png", ".png"]
+]);
 const maxThreadTitleLength = 120;
 const maxProjectTitleLength = 120;
 
@@ -266,6 +271,40 @@ export class SQLiteStorageRepository {
     return this.projects.list(includeDeleted);
   }
 
+  async saveProjectThumbnail(projectId: string, input: { imageBase64: unknown; mimeType: unknown }) {
+    validateId(projectId, "projectId");
+    if (!this.getProject(projectId)) return undefined;
+    const mimeType = typeof input.mimeType === "string" ? input.mimeType.toLowerCase() : "";
+    const extension = projectThumbnailTypes.get(mimeType);
+    if (!extension) throw new Error("Unsupported project thumbnail image type");
+    const buffer = readThumbnailBase64(input.imageBase64);
+    if (buffer.byteLength === 0 || buffer.byteLength > 2 * 1024 * 1024) throw new Error("Project thumbnail must be between 1 byte and 2MB");
+    await mkdir(projectThumbnailRoot, { recursive: true });
+    await Promise.all([...projectThumbnailTypes.values()]
+      .filter((candidate) => candidate !== extension)
+      .map((candidate) => rm(resolveProjectThumbnailPath(projectId, candidate), { force: true })));
+    const updatedAt = nowIso();
+    await writeFile(resolveProjectThumbnailPath(projectId, extension), buffer);
+    await writeFile(resolveProjectThumbnailMetadataPath(projectId), `${JSON.stringify({ mimeType, updatedAt })}\n`, "utf8");
+    this.projects.touch(projectId, updatedAt);
+    return { mimeType, updatedAt };
+  }
+
+  async readProjectThumbnail(projectId: string) {
+    validateId(projectId, "projectId");
+    if (!this.getProject(projectId)) return undefined;
+    for (const [mimeType, extension] of projectThumbnailTypes) {
+      try {
+        const content = await readFile(resolveProjectThumbnailPath(projectId, extension));
+        const metadata = await readProjectThumbnailMetadata(projectId);
+        return { content, mimeType, updatedAt: metadata?.updatedAt };
+      } catch {
+        // Try the next supported thumbnail format.
+      }
+    }
+    return undefined;
+  }
+
   getProjectModelBindings(projectId: string) {
     validateId(projectId, "projectId");
     return (this.db
@@ -431,7 +470,12 @@ export class SQLiteStorageRepository {
       this.db.prepare(`DELETE FROM threads WHERE project_id = ?`).run(projectId);
       this.db.prepare(`DELETE FROM projects WHERE id = ?`).run(projectId);
     });
-    await Promise.all([...threadIds, projectId].map((id) => rm(threadDataRoot(id), { recursive: true, force: true })));
+    await Promise.all([
+      ...[...threadIds, projectId].map((id) => rm(threadDataRoot(id), { recursive: true, force: true })),
+      rm(resolveProjectThumbnailPath(projectId, ".webp"), { force: true }),
+      rm(resolveProjectThumbnailPath(projectId, ".png"), { force: true }),
+      rm(resolveProjectThumbnailMetadataPath(projectId), { force: true })
+    ]);
     return true;
   }
 
@@ -818,6 +862,42 @@ function resolveThreadRelativePath(threadId: string, relativePath: string) {
   const resolved = path.resolve(root, relativePath);
   if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error("Canvas asset path must stay inside the thread workspace");
   return resolved;
+}
+
+function resolveProjectThumbnailPath(projectId: string, extension: ".webp" | ".png") {
+  validateId(projectId, "projectId");
+  const root = path.resolve(projectThumbnailRoot);
+  const resolved = path.resolve(root, `${projectId}${extension}`);
+  if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error("Project thumbnail path must stay inside the local app workspace");
+  return resolved;
+}
+
+function resolveProjectThumbnailMetadataPath(projectId: string) {
+  validateId(projectId, "projectId");
+  const root = path.resolve(projectThumbnailRoot);
+  const resolved = path.resolve(root, `${projectId}.json`);
+  if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error("Project thumbnail metadata path must stay inside the local app workspace");
+  return resolved;
+}
+
+async function readProjectThumbnailMetadata(projectId: string) {
+  try {
+    const parsed = parseJson(await readFile(resolveProjectThumbnailMetadataPath(projectId), "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    const updatedAt = (parsed as { updatedAt?: unknown }).updatedAt;
+    return typeof updatedAt === "string" ? { updatedAt } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readThumbnailBase64(value: unknown) {
+  if (typeof value !== "string") throw new Error("Project thumbnail image data must be base64");
+  const imageBase64 = value.trim();
+  if (!imageBase64 || imageBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(imageBase64)) {
+    throw new Error("Project thumbnail image data must be base64");
+  }
+  return Buffer.from(imageBase64, "base64");
 }
 
 function cleanProjectBrief(value: unknown): ProjectBrief {

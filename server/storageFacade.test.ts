@@ -155,6 +155,31 @@ test("project summaries include lightweight Canvas previews without node content
   assert.equal(emptyProject?.canvasPreview, undefined);
 });
 
+test("storage facade stores local project thumbnail cache", async () => {
+  const storage = await createStorage();
+  const projectId = `project_thumbnail_${Date.now()}`;
+  storage.createProject(projectId, "Thumbnail project");
+  const imageBase64 = Buffer.from("fake-webp-image").toString("base64");
+
+  const saved = await storage.saveProjectThumbnail(projectId, { imageBase64, mimeType: "image/webp" });
+  const thumbnail = await storage.readProjectThumbnail(projectId);
+
+  assert.equal(saved?.mimeType, "image/webp");
+  assert.ok(saved?.updatedAt);
+  assert.equal(thumbnail?.mimeType, "image/webp");
+  assert.equal(thumbnail?.content.toString(), "fake-webp-image");
+  assert.equal(thumbnail?.updatedAt, saved?.updatedAt);
+  await assert.rejects(
+    () => storage.saveProjectThumbnail(projectId, { imageBase64, mimeType: "text/plain" }),
+    /thumbnail image type/i
+  );
+  assert.equal(await storage.saveProjectThumbnail("project_missing_thumbnail", { imageBase64, mimeType: "image/webp" }), undefined);
+
+  assert.equal(storage.moveProjectToTrash(projectId), true);
+  assert.equal(await storage.hardDeleteProject(projectId), true);
+  assert.equal(await storage.readProjectThumbnail(projectId), undefined);
+});
+
 test("storage facade preserves Canvas write approval semantics", async () => {
   const storage = await createStorage();
   const threadId = `thread_canvas_facade_${Date.now()}`;

@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import type { AppView } from "../../app/App";
 import { AppSidebar } from "../../shared/AppSidebar";
@@ -156,6 +156,13 @@ export function HomeView({
   const [viewMode, setViewMode] = useState<HomeViewMode>("grid");
   const [openMenuThreadId, setOpenMenuThreadId] = useState("");
   const [renameProject, setRenameProject] = useState<ProjectSummary | null>(null);
+  const [thumbnailRetryToken, setThumbnailRetryToken] = useState(0);
+
+  useEffect(() => {
+    if (activeView === "home") {
+      setThumbnailRetryToken((token) => token + 1);
+    }
+  }, [activeView]);
 
   const filteredProjects = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -283,6 +290,7 @@ export function HomeView({
                     openMenuThreadId={openMenuThreadId}
                     pinned={pinnedThreadIds.includes(project.id)}
                     project={project}
+                    thumbnailRetryToken={thumbnailRetryToken}
                     viewMode={viewMode}
                     onDeleteThread={onDeleteThread}
                     onOpenMenu={openProjectMenu}
@@ -324,6 +332,7 @@ function HomeProjectItem({
   openMenuThreadId,
   pinned,
   project,
+  thumbnailRetryToken,
   viewMode,
   onDeleteThread,
   onOpenMenu,
@@ -337,6 +346,7 @@ function HomeProjectItem({
   openMenuThreadId: string;
   pinned: boolean;
   project: ProjectSummary;
+  thumbnailRetryToken: number;
   viewMode: HomeViewMode;
   onDeleteThread: (projectId: string) => void;
   onOpenMenu: (projectId: string) => void;
@@ -348,7 +358,7 @@ function HomeProjectItem({
   return (
     <article className={viewMode === "grid" ? "home-project-card" : "home-project-row"} data-pinned={pinned}>
       <button className="home-project-open" type="button" onClick={() => onOpenThread(project)}>
-        <ProjectCanvasPreviewThumb pinned={pinned} project={project} />
+        <ProjectCanvasPreviewThumb pinned={pinned} project={project} retryToken={thumbnailRetryToken} />
         <span className="home-project-title-block">
           <strong>{title}</strong>
           <small>{agentTitle}</small>
@@ -382,7 +392,28 @@ type PreviewItem = {
   height: number;
 };
 
-function ProjectCanvasPreviewThumb({ pinned, project }: { pinned: boolean; project: ProjectSummary }) {
+function ProjectCanvasPreviewThumb({ pinned, project, retryToken }: { pinned: boolean; project: ProjectSummary; retryToken: number }) {
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const thumbnailUrl = projectThumbnailUrl(project, retryToken);
+  useEffect(() => {
+    setThumbnailFailed(false);
+  }, [thumbnailUrl]);
+  const shouldTryThumbnail = !thumbnailFailed && (project.assetCount > 0 || Boolean(project.canvasPreview));
+  if (shouldTryThumbnail) {
+    return (
+      <span className="home-project-thumb is-cached-thumbnail">
+        <img
+          alt=""
+          loading="lazy"
+          src={thumbnailUrl}
+          onError={() => setThumbnailFailed(true)}
+        />
+        <DocumentIcon aria-hidden="true" size={18} />
+        {pinned ? <StarIcon aria-hidden="true" size={14} /> : null}
+      </span>
+    );
+  }
+
   const items = getPreviewItems(project);
   if (!items.length) {
     return (
@@ -420,6 +451,10 @@ function ProjectCanvasPreviewThumb({ pinned, project }: { pinned: boolean; proje
       {pinned ? <StarIcon aria-hidden="true" size={14} /> : null}
     </span>
   );
+}
+
+function projectThumbnailUrl(project: ProjectSummary, retryToken: number) {
+  return `/api/projects/${encodeURIComponent(project.id)}/thumbnail?v=${encodeURIComponent(project.updatedAt)}&r=${retryToken}`;
 }
 
 function projectTitle(project: ProjectSummary, locale: "en" | "zh") {

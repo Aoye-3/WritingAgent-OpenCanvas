@@ -59,6 +59,28 @@ export function registerProjectRoutes(app: Express, { storage, agentRuntime }: P
     sendOk(response, { settings: storage.getProjectRuntimeSettings(request.params.projectId) });
   });
 
+  app.get("/api/projects/:projectId/thumbnail", async (request, response) => {
+    try {
+      const thumbnail = await storage.readProjectThumbnail(request.params.projectId);
+      if (!thumbnail) return sendError(response, 404, "not_found", "Project thumbnail not found");
+      response.setHeader("Cache-Control", "no-store");
+      if (thumbnail.updatedAt) response.setHeader("Last-Modified", new Date(thumbnail.updatedAt).toUTCString());
+      response.type(thumbnail.mimeType).send(thumbnail.content);
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to read project thumbnail"));
+    }
+  });
+
+  app.post("/api/projects/:projectId/thumbnail", async (request, response) => {
+    try {
+      const thumbnail = await storage.saveProjectThumbnail(request.params.projectId, request.body ?? {});
+      if (!thumbnail) return sendError(response, 404, "not_found", "Project not found");
+      sendOk(response, { thumbnail });
+    } catch (error) {
+      sendError(response, 400, "bad_request", errorMessage(error, "Unable to save project thumbnail"));
+    }
+  });
+
   app.put("/api/projects/:projectId/runtime-settings", (request, response) => {
     try {
       const settings = storage.saveProjectRuntimeSettings(request.params.projectId, request.body);

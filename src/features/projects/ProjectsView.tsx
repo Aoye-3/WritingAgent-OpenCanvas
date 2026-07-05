@@ -23,6 +23,13 @@ type ProjectsViewProps = {
   sessionError?: string;
 };
 
+type ProjectSortKey = "assetCount" | "updatedAt";
+type ProjectSortDirection = "asc" | "desc";
+type ProjectSortState = {
+  key: ProjectSortKey;
+  direction: ProjectSortDirection;
+};
+
 const projectCopy = {
   en: {
     actions: "Actions",
@@ -115,16 +122,18 @@ export function ProjectsView({
   const [renameProject, setRenameProject] = useState<ProjectSummary | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [batchBusy, setBatchBusy] = useState(false);
+  const [sortState, setSortState] = useState<ProjectSortState>({ key: "updatedAt", direction: "desc" });
   const source = showTrash ? trashProjects : projects;
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return source.filter((project) => {
+    const rows = source.filter((project) => {
       const matchesAgent = agentFilter === "all" || project.agentCardId === agentFilter;
       const matchesText = !term || `${project.title} ${project.agentTitle} ${project.agentCardId}`.toLowerCase().includes(term);
       return matchesAgent && matchesText;
     });
-  }, [agentFilter, query, source]);
+    return rows.sort((left, right) => compareProjects(left, right, sortState));
+  }, [agentFilter, query, sortState, source]);
 
   const visibleIds = useMemo(() => filtered.map((project) => project.id), [filtered]);
   const selectedVisibleIds = selectedIds.filter((id) => visibleIds.includes(id));
@@ -142,6 +151,15 @@ export function ProjectsView({
 
   const toggleSelected = (threadId: string) => {
     setSelectedIds((current) => current.includes(threadId) ? current.filter((id) => id !== threadId) : [...current, threadId]);
+  };
+
+  const toggleSort = (key: ProjectSortKey) => {
+    setSortState((current) => {
+      if (current.key === key) {
+        return { key, direction: current.direction === "asc" ? "desc" : "asc" };
+      }
+      return { key, direction: key === "assetCount" ? "asc" : "desc" };
+    });
   };
 
   const runBatchAction = async () => {
@@ -195,8 +213,20 @@ export function ProjectsView({
             </label>
             <span>{copy.name}</span>
             <span>{copy.agent}</span>
-            <span>{copy.assets}</span>
-            <span>{copy.updated}</span>
+            <SortHeader
+              active={sortState.key === "assetCount"}
+              direction={sortState.direction}
+              label={copy.assets}
+              locale={locale}
+              onClick={() => toggleSort("assetCount")}
+            />
+            <SortHeader
+              active={sortState.key === "updatedAt"}
+              direction={sortState.direction}
+              label={copy.updated}
+              locale={locale}
+              onClick={() => toggleSort("updatedAt")}
+            />
             <span>{copy.actions}</span>
           </div>
           {filtered.map((project) => (
@@ -253,6 +283,41 @@ export function ProjectsView({
       ) : null}
     </main>
   );
+}
+
+function SortHeader({
+  active,
+  direction,
+  label,
+  locale,
+  onClick
+}: {
+  active: boolean;
+  direction: ProjectSortDirection;
+  label: string;
+  locale: "en" | "zh";
+  onClick: () => void;
+}) {
+  const nextDirection = active && direction === "asc" ? "desc" : "asc";
+  const ariaLabel = locale === "zh"
+    ? `按${label}${nextDirection === "asc" ? "升序" : "降序"}排序`
+    : `Sort by ${label} ${nextDirection === "asc" ? "ascending" : "descending"}`;
+  return (
+    <button className="project-sort-header" type="button" aria-label={ariaLabel} aria-sort={active ? direction === "asc" ? "ascending" : "descending" : "none"} onClick={onClick}>
+      <span>{label}</span>
+      <span className="project-sort-badge" data-active={active} aria-hidden="true">
+        {active ? direction === "asc" ? "▲" : "▼" : "↕"}
+      </span>
+    </button>
+  );
+}
+
+function compareProjects(left: ProjectSummary, right: ProjectSummary, sortState: ProjectSortState) {
+  const multiplier = sortState.direction === "asc" ? 1 : -1;
+  const leftValue = sortState.key === "assetCount" ? left.assetCount ?? 0 : new Date(left.updatedAt).getTime();
+  const rightValue = sortState.key === "assetCount" ? right.assetCount ?? 0 : new Date(right.updatedAt).getTime();
+  if (leftValue !== rightValue) return (leftValue - rightValue) * multiplier;
+  return (left.title || left.id).localeCompare(right.title || right.id);
 }
 
 export function ManagementSidebar({ activeView, onNavigate }: { activeView: AppView; onNavigate: (view: AppView) => void }) {

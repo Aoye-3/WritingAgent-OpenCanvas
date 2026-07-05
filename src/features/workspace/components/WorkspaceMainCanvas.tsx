@@ -55,7 +55,7 @@ type WorkspaceMainCanvasProps = {
 
 export function WorkspaceMainCanvas(props: WorkspaceMainCanvasProps) {
   return (
-    <main className="output-area canvas-output-area" aria-label="Document canvas">
+    <main className="output-area canvas-output-area" data-project-thumbnail-target="true" aria-label="Document canvas">
       <DocumentCanvas
         activeTool={props.activeTool}
         canUndo={props.canUndo}

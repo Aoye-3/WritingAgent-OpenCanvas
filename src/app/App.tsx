@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createProject, fetchProjectFirstHealth, fetchThreadState, renameProject, resetThreadContext, saveProjectBrief, saveTaskBrief, selectThreadModel } from "../features/agents/agentClient";
+import { createProject, fetchProjectFirstHealth, fetchThreadState, renameProject, resetThreadContext, saveProjectBrief, saveProjectThumbnail, saveTaskBrief, selectThreadModel } from "../features/agents/agentClient";
 import { AgentSettingsView } from "../features/agents/AgentSettingsView";
 import { useAgentCards } from "../features/agents/hooks/useAgentCards";
 import type { AgentCard, BriefSaveStatus, ProjectBrief, ProjectSummary, StoredThread, TaskBrief, ThreadStateResponse } from "../features/agents/types";
@@ -28,6 +28,7 @@ import { useProjectTrash } from "./hooks/useProjectTrash";
 import { useThreadSession } from "./hooks/useThreadSession";
 import { buildCanvasWorkflowContext } from "../../shared/canvasWorkflow";
 import { assertProjectFirstContract } from "./projectWorkspace";
+import { captureProjectThumbnail } from "./projectThumbnailCapture";
 
 export type AppView = "start" | "home" | "workspace" | "projects" | "agentSettings" | "modelConfig" | "aiDashboard" | "knowledgeSettings" | "canvasNodeSettings";
 
@@ -317,6 +318,27 @@ function AppContent() {
     await Promise.all([saveProjectBriefNow(), saveTaskBriefNow()]);
   }, [saveProjectBriefNow, saveTaskBriefNow]);
 
+  const saveActiveProjectThumbnail = useCallback(async () => {
+    const projectId = activeProjectIdRef.current;
+    if (!projectId || view !== "workspace") return;
+    const thumbnail = await captureProjectThumbnail();
+    if (!thumbnail) return;
+    await saveProjectThumbnail(projectId, thumbnail);
+    await refreshProjects();
+  }, [refreshProjects, view]);
+
+  const leaveWorkspace = useCallback(async () => {
+    const thumbnailSave = saveActiveProjectThumbnail().catch(() => undefined);
+    if (activeProjectIdRef.current) await flushBriefs();
+    await thumbnailSave;
+  }, [flushBriefs, saveActiveProjectThumbnail]);
+
+  const beginWorkspaceLeave = useCallback(() => {
+    const thumbnailSave = saveActiveProjectThumbnail().catch(() => undefined);
+    const briefSave = activeProjectIdRef.current ? flushBriefs().catch(() => undefined) : Promise.resolve();
+    return Promise.allSettled([thumbnailSave, briefSave]);
+  }, [flushBriefs, saveActiveProjectThumbnail]);
+
   const generationRun = useGenerationRun({
     activeAgent,
     locale,
@@ -467,7 +489,7 @@ function AppContent() {
     agentCard: AgentCard,
     options: { runtimeBudgetProfile?: GenerateRequest["runtimeBudgetProfile"]; toolState?: GenerateRequest["toolState"] } = {}
   ) => {
-    if (activeProjectId) await flushBriefs();
+    await leaveWorkspace();
     const projectTitle = locale === "zh" ? "新项目" : "New Project";
     threadSession.setThreadId("");
     setActiveAgent(agentCard);
@@ -502,7 +524,7 @@ function AppContent() {
   };
 
   const openRecentThread = async (thread: StoredThread | ProjectSummary) => {
-    if (activeProjectId) await flushBriefs();
+    await leaveWorkspace();
     if ("projectId" in thread) {
       await threadSession.restoreThread(thread.id);
       return;
@@ -526,6 +548,24 @@ function AppContent() {
       setActiveAgent(agentCard);
     }
   };
+
+  const navigateFromWorkspace = (nextView: AppView) => {
+    if (view !== "workspace") {
+      setView(nextView);
+      return;
+    }
+    void beginWorkspaceLeave();
+    setView(nextView);
+  };
+
+  useEffect(() => {
+    if (view !== "workspace") return;
+    const handleBeforeUnload = () => {
+      void saveActiveProjectThumbnail().catch(() => undefined);
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [saveActiveProjectThumbnail, view]);
 
   return (
     <div className="app-shell" data-view={view}>
@@ -551,7 +591,7 @@ function AppContent() {
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenAgent={openWorkspace}
         onOpenThread={openRecentThread}
-        onNavigate={setView}
+        onNavigate={navigateFromWorkspace}
         onDeleteThread={projectTrash.handleMoveToTrash}
         onRequestSkillCatalog={skillControls.requestSkillCatalog}
         onSelectAgent={(agentCardId) => {
@@ -576,7 +616,7 @@ function AppContent() {
         trashProjects={trashProjects}
         onHardDelete={projectTrash.handleHardDeleteThread}
         onMoveToTrash={projectTrash.handleMoveToTrash}
-        onNavigate={setView}
+        onNavigate={navigateFromWorkspace}
         onOpenThread={openRecentThread}
         onRenameThread={handleRenameThread}
         onRestore={projectTrash.handleRestoreThread}
@@ -587,13 +627,13 @@ function AppContent() {
         activeView={view}
         agentCards={agentCards}
         onAgentSaved={handleAgentSaved}
-        onNavigate={setView}
+        onNavigate={navigateFromWorkspace}
         onOpenAgent={openWorkspace}
       />
-      <AiDashboardView activeView={view} onNavigate={setView} />
-      <ModelConfigView activeView={view} onNavigate={setView} />
-      <KnowledgeSettingsView activeView={view} onNavigate={setView} />
-      <CanvasNodeSettingsView activeView={view} onNavigate={setView} />
+      <AiDashboardView activeView={view} onNavigate={navigateFromWorkspace} />
+      <ModelConfigView activeView={view} onNavigate={navigateFromWorkspace} />
+      <KnowledgeSettingsView activeView={view} onNavigate={navigateFromWorkspace} />
+      <CanvasNodeSettingsView activeView={view} onNavigate={navigateFromWorkspace} />
       <WorkspaceView
         activeAgent={activeAgent}
         agentCards={agentCards}
@@ -676,7 +716,7 @@ function AppContent() {
         onConvertCanvasText={canvasState.handleConvertCanvasText}
         onEditableOutputChange={generationRun.setEditableOutput}
         onGenerate={generationRun.handleGenerate}
-        onGoHome={() => setView("home")}
+        onGoHome={() => navigateFromWorkspace("home")}
         onOpenSettings={() => setSettingsOpen(true)}
         onRejectCanvasWriteRequest={canvasState.handleRejectCanvasWriteRequest}
         onRequestCanvasRangeRewrite={canvasState.handleRequestCanvasRangeRewrite}

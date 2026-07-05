@@ -43,6 +43,7 @@ Current frontend responsibilities:
 - Persist multi-selected node positions after drag stop through `PATCH /api/threads/:threadId/canvas/node-positions` so a group move performs one backend write and one project-surface refresh.
 - Persist node size after resize stop through the same PATCH endpoint.
 - Persist title/content only on blur, not on every keystroke.
+- Mark the main workspace Canvas container as the Project thumbnail capture target. In the Electron shell, leaving or switching the active Project captures this bounded Canvas region once and saves it through the Project thumbnail API. Browser-only sessions skip capture and continue to rely on the lightweight Project summary preview.
 
 React Flow is only a view/interaction layer. It must not become the source of truth for node persistence.
 
@@ -308,8 +309,12 @@ Canvas V2 uses the existing API shape:
 - `PUT /api/settings/canvas`
 - `GET /api/projects/:projectId/runtime-settings`
 - `PUT /api/projects/:projectId/runtime-settings`
+- `GET /api/projects/:projectId/thumbnail`
+- `POST /api/projects/:projectId/thumbnail`
 
 Canvas nodes remain in `canvas_nodes`. Directed edges live in `canvas_edges`. Workflow state lives in `canvas_workflows`, and node suggestions live in `canvas_workflow_suggestions`. Canvas settings use the generic `settings` table with key `canvas`. Canvas routes call `server/domains/canvas/`; the domain service calls the storage facade; the SQL implementation lives in `server/repositories/canvasRepository.ts`. `server/storage.ts` keeps compatibility methods for existing route/service callers.
+
+Project thumbnails are a read-optimized Home/Project-browser cache, not Canvas state. They should be regenerated only on Project leave/switch/window-close paths, not on every node edit or pan/zoom frame. Capture failures must not block navigation and must leave the previous cached thumbnail intact.
 
 ## Styling And Hit Testing
 Canvas styles live in `src/app/styles.css`.
