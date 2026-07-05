@@ -1,9 +1,10 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
+import { Button as RadixButton, SegmentedControl, Select, TextField as RadixTextField, Theme } from "@radix-ui/themes";
 import type { AppView } from "../../app/App";
 import { AppSidebar } from "../../shared/AppSidebar";
-import { DocumentIcon, MoreIcon, SearchIcon, StarIcon } from "../../shared/icons";
-import { Button, IconButton, ModalDialog, TextField } from "../../shared/ui";
+import { AddIcon, DocumentIcon, MoreIcon, SearchIcon, StarIcon } from "../../shared/icons";
+import { Button as LocalButton, IconButton, ModalDialog, TextField } from "../../shared/ui";
 import type { AgentCard, ProjectSummary, SkillCatalogItem, SkillFolderItem } from "../agents/types";
 import type { GenerateRequest } from "../generation/types";
 import { useI18n } from "../i18n/I18nProvider";
@@ -192,6 +193,7 @@ export function HomeView({
   };
 
   return (
+    <Theme asChild accentColor="blue" grayColor="slate" radius="large" scaling="100%">
     <main className="view view-home home-app" id="home-view" data-active={activeView === "home"}>
       <AppSidebar activeView={activeView} onNavigate={onNavigate} onOpenSettings={onOpenSettings} />
       <section className="home-main-panel">
@@ -199,7 +201,18 @@ export function HomeView({
           <section className="home-ai-region" aria-labelledby="home-title">
             <div className="home-ai-heading">
               <h1 id="home-title">{copy.title}</h1>
-              <Button data-testid="home-create-board" size="sm" type="button" onClick={() => onOpenAgent(activeAgent)}>{copy.create}</Button>
+              <RadixButton
+                className="home-create-board-button"
+                data-testid="home-create-board"
+                radius="full"
+                size="3"
+                type="button"
+                variant="surface"
+                onClick={() => onOpenAgent(activeAgent)}
+              >
+                <AddIcon aria-hidden="true" size={16} />
+                <span>{copy.create}</span>
+              </RadixButton>
             </div>
             <AIComposer
               activeAgent={activeAgent}
@@ -234,40 +247,59 @@ export function HomeView({
               onToolStateChange={onToolStateChange}
               onValueChange={setHomePrompt}
             />
+            <span className="home-plant-layer" aria-hidden="true" />
           </section>
 
           <section className="home-recents-section" aria-label={copy.recent}>
-            <div className="home-recents-tabs">
+            <SegmentedControl.Root className="home-recents-tabs" radius="full" value={activeTab} onValueChange={(value) => setActiveTab(value as HomeTab)}>
               {(["recent", "pinned", "all"] as HomeTab[]).map((tab) => (
-                <button className={activeTab === tab ? "is-active" : ""} key={tab} onClick={() => setActiveTab(tab)} type="button">
+                <SegmentedControl.Item key={tab} value={tab}>
                   {tab === "recent" ? copy.recent : tab === "pinned" ? copy.pinned : copy.all}
-                </button>
+                </SegmentedControl.Item>
               ))}
-            </div>
+            </SegmentedControl.Root>
 
             <div className="home-recents-toolbar">
-              <label className="home-search-control">
-                <SearchIcon aria-hidden="true" size={16} />
-                <input aria-label={copy.search} placeholder={copy.search} value={query} onChange={(event) => setQuery(event.target.value)} />
-              </label>
-              <select aria-label={copy.allAgents} value={agentFilter} onChange={(event) => setAgentFilter(event.target.value)}>
-                <option value="all">{copy.allAgents}</option>
-                {agentCards.map((agent) => <option key={agent.id} value={agent.id}>{agent.title[locale]}</option>)}
-              </select>
-              <select aria-label={copy.allFiles} value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as HomeTypeFilter)}>
-                <option value="all">{copy.allFiles}</option>
-                <option value="with-assets">{copy.withAssets}</option>
-                <option value="empty">{copy.withoutAssets}</option>
-              </select>
-              <select aria-label={copy.sortLastViewed} value={sortMode} onChange={(event) => setSortMode(event.target.value as HomeSortMode)}>
-                <option value="last-viewed">{copy.sortLastViewed}</option>
-                <option value="name">{copy.sortName}</option>
-              </select>
-              <div className="home-view-toggle" aria-label={`${copy.grid} / ${copy.list}`}>
-                <button className={viewMode === "grid" ? "is-active" : ""} type="button" onClick={() => setViewMode("grid")}>{copy.grid}</button>
-                <button className={viewMode === "list" ? "is-active" : ""} type="button" onClick={() => setViewMode("list")}>{copy.list}</button>
-              </div>
-              <button className="home-view-all" type="button" onClick={() => onNavigate("projects")}>{copy.viewAll}</button>
+              <RadixTextField.Root
+                aria-label={copy.search}
+                className="home-search-control"
+                placeholder={copy.search}
+                radius="large"
+                size="3"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              >
+                <RadixTextField.Slot>
+                  <SearchIcon aria-hidden="true" size={16} />
+                </RadixTextField.Slot>
+              </RadixTextField.Root>
+              <Select.Root value={agentFilter} onValueChange={setAgentFilter}>
+                <Select.Trigger aria-label={copy.allAgents} className="home-toolbar-select" radius="large" variant="surface" />
+                <Select.Content>
+                  <Select.Item value="all">{copy.allAgents}</Select.Item>
+                  {agentCards.map((agent) => <Select.Item key={agent.id} value={agent.id}>{agent.title[locale]}</Select.Item>)}
+                </Select.Content>
+              </Select.Root>
+              <Select.Root value={typeFilter} onValueChange={(value) => setTypeFilter(value as HomeTypeFilter)}>
+                <Select.Trigger aria-label={copy.allFiles} className="home-toolbar-select" radius="large" variant="surface" />
+                <Select.Content>
+                  <Select.Item value="all">{copy.allFiles}</Select.Item>
+                  <Select.Item value="with-assets">{copy.withAssets}</Select.Item>
+                  <Select.Item value="empty">{copy.withoutAssets}</Select.Item>
+                </Select.Content>
+              </Select.Root>
+              <Select.Root value={sortMode} onValueChange={(value) => setSortMode(value as HomeSortMode)}>
+                <Select.Trigger aria-label={copy.sortLastViewed} className="home-toolbar-select" radius="large" variant="surface" />
+                <Select.Content>
+                  <Select.Item value="last-viewed">{copy.sortLastViewed}</Select.Item>
+                  <Select.Item value="name">{copy.sortName}</Select.Item>
+                </Select.Content>
+              </Select.Root>
+              <SegmentedControl.Root className="home-view-toggle" radius="large" value={viewMode} onValueChange={(value) => setViewMode(value as HomeViewMode)}>
+                <SegmentedControl.Item value="grid">{copy.grid}</SegmentedControl.Item>
+                <SegmentedControl.Item value="list">{copy.list}</SegmentedControl.Item>
+              </SegmentedControl.Root>
+              <RadixButton className="home-view-all" radius="full" type="button" variant="ghost" onClick={() => onNavigate("projects")}>{copy.viewAll}</RadixButton>
             </div>
 
             {filteredProjects.length ? (
@@ -322,6 +354,7 @@ export function HomeView({
         />
       ) : null}
     </main>
+    </Theme>
   );
 }
 
@@ -569,8 +602,8 @@ function RenameThreadDialog({ initialTitle, locale, onClose, onRename }: { initi
         <h2 id="rename-thread-title">{copy.renameProject}</h2>
         <TextField autoFocus maxLength={120} label={copy.projectTitle} value={title} onChange={(event) => setTitle(event.target.value)} />
         <div className="rename-dialog-actions">
-          <Button type="button" onClick={onClose} disabled={isSaving}>{copy.cancel}</Button>
-          <Button variant="primary" type="submit" disabled={!cleanTitle} loading={isSaving}>{isSaving ? copy.saving : copy.save}</Button>
+          <LocalButton type="button" onClick={onClose} disabled={isSaving}>{copy.cancel}</LocalButton>
+          <LocalButton variant="primary" type="submit" disabled={!cleanTitle} loading={isSaving}>{isSaving ? copy.saving : copy.save}</LocalButton>
         </div>
       </form>
     </ModalDialog>

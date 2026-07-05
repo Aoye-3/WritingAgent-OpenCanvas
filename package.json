@@ -43,6 +43,7 @@
     "@cherrystudio/embedjs-loader-web": "^0.1.34",
     "@cherrystudio/embedjs-ollama": "^0.1.35",
     "@cherrystudio/embedjs-openai": "^0.1.34",
+    "@radix-ui/themes": "^3.3.0",
     "@vitejs/plugin-react": "^5.0.4",
     "@xyflow/react": "^12.10.2",
     "cors": "^2.8.5",
