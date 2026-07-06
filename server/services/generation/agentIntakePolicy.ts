@@ -1,0 +1,86 @@
+import type { GenerateRequest } from "../../contracts/generation.js";
+import { sanitizeCanvasForAgentIntake } from "../../../shared/agentIntakeCanvas.js";
+
+export const AGENT_INTAKE_TOOL_REFS = ["ask_clarification", "agent_intake_complete"] as const;
+export const SKILL_SCOPE_GUARD_TOOL_REFS = ["ask_clarification"] as const;
+
+export function isAgentIntakePhase(payload: GenerateRequest) {
+  if (isAgentIntakeExecution(payload.contextValues)) return false;
+  if (isPlanGenerationPhase(payload)) return false;
+  if (isSkillClarificationGuarded(payload)) return true;
+  if (isRecord(payload.contextValues?.agentClarification)) return true;
+  if ((payload.transientSkillRefs ?? []).length > 0) return true;
+  if (isProgressiveCanvasDelivery(payload)) return true;
+  return Boolean(payload.contextValues?.facetwrite_clarification_policy);
+}
+
+export function withAgentIntakeExecutionPhase(payload: GenerateRequest): GenerateRequest {
+  return {
+    ...payload,
+    contextValues: {
+      ...payload.contextValues,
+      agentIntake: {
+        ...readRecord(payload.contextValues?.agentIntake),
+        phase: "execution",
+        completed: true
+      }
+    }
+  };
+}
+
+export function withSanitizedAgentIntakeCanvas(payload: GenerateRequest): GenerateRequest {
+  if (!isAgentIntakePhase(payload)) return payload;
+  const contextValues = payload.contextValues ?? {};
+  const policy = readRecord(contextValues.facetwrite_clarification_policy);
+  const sanitizedPolicyCanvas = sanitizeCanvasForAgentIntake(policy.canvas);
+  const sanitizedPolicy = Object.keys(policy).length
+    ? {
+      ...policy,
+      ...("canvas" in policy && Object.keys(sanitizedPolicyCanvas).length ? { canvas: sanitizedPolicyCanvas } : {})
+    }
+    : policy;
+  const sanitizedCanvas = sanitizeCanvasForAgentIntake(contextValues.canvas);
+  return {
+    ...payload,
+    contextValues: {
+      ...contextValues,
+      ...(Object.keys(sanitizedCanvas).length ? { canvas: sanitizedCanvas } : {}),
+      ...(Object.keys(sanitizedPolicy).length ? { facetwrite_clarification_policy: sanitizedPolicy } : {})
+    }
+  };
+}
+
+export function isSkillClarificationGuarded(payload: GenerateRequest) {
+  const policy = readRecord(payload.contextValues?.facetwrite_clarification_policy);
+  return policy.mode === "skill_scope_guard";
+}
+
+export function agentIntakeToolRefsForPayload(payload: GenerateRequest) {
+  return isSkillClarificationGuarded(payload)
+    ? [...SKILL_SCOPE_GUARD_TOOL_REFS]
+    : [...AGENT_INTAKE_TOOL_REFS];
+}
+
+export function isProgressiveCanvasDelivery(payload: GenerateRequest) {
+  const delivery = readRecord(payload.contextValues?.progressiveCanvasDelivery);
+  return delivery.enabled === true;
+}
+
+function isAgentIntakeExecution(contextValues: GenerateRequest["contextValues"]) {
+  const intake = readRecord(contextValues?.agentIntake);
+  return intake.phase === "execution" || intake.completed === true;
+}
+
+function isPlanGenerationPhase(payload: GenerateRequest) {
+  if (payload.planPhase) return true;
+  if (isRecord(payload.planGeneration)) return true;
+  return isRecord(payload.contextValues?.planGeneration);
+}
+
+function readRecord(value: unknown) {
+  return isRecord(value) ? value : {};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}

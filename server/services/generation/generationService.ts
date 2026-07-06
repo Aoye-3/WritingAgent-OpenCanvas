@@ -34,7 +34,9 @@ import {
   resolveTaskHandlingPolicy
 } from "./taskHandlingPolicy.js";
 import { isCanvasWorkflowMode, type CanvasWorkflowMode } from "../../../shared/canvasWorkflow.js";
+import { sanitizeCanvasForAgentIntake } from "../../../shared/agentIntakeCanvas.js";
 import { containsInternalRuntimeProtocol } from "../../../shared/internalRuntimeProtocol.js";
+import { withSanitizedAgentIntakeCanvas } from "./agentIntakePolicy.js";
 import {
   archiveMarkdownOutputFromRuntime,
   readArchivedMarkdownOutputSync,
@@ -151,6 +153,7 @@ export function createGenerationService(
     payload = withAutoPreflightPlan(payload, threadId, projectRuntimeSettings, agentPlanOrchestrator);
     payload = withPlanGeneration(payload, threadId, storage);
     payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
+    payload = withSanitizedAgentIntakeCanvas(payload);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     payload = withTaskHandlingPolicy(payload, context);
     payload = withRuntimeContext(payload, context.canvasDeliveryContract);
@@ -432,6 +435,7 @@ export function createGenerationService(
     payload = withAutoPreflightPlan(payload, threadId, projectRuntimeSettings, agentPlanOrchestrator);
     payload = withPlanGeneration(payload, threadId, storage);
     payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
+    payload = withSanitizedAgentIntakeCanvas(payload);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     payload = withTaskHandlingPolicy(payload, context);
     payload = withRuntimeContext(payload, context.canvasDeliveryContract);
@@ -490,6 +494,7 @@ export function createGenerationService(
     };
     const observeRuntimeSignal = (signal: AgentBackendRuntimeSignal) => {
       if (signal.type === "run_metadata" || signal.type === "agent_progress_reported" || signal.type === "agent_intervention_checkpoint") {
+        if (signal.type === "agent_progress_reported" && signal.payload?.status !== "waiting") runtimeWaitingForUser = false;
         stageProgress.fromRuntimeSignal(signal);
         return;
       }
@@ -527,6 +532,11 @@ export function createGenerationService(
       }
       if (signal.type === "llm_call_error") {
         lastModelErrorSignal = signal;
+      }
+      runtimeWaitingForUser = false;
+      if (lastCanvasCommitAt) {
+        lastCanvasCommitAt = undefined;
+        runtimeHeartbeatTimelineEmitted = false;
       }
       const signalReason = typeof signal.payload?.reason === "string" ? signal.payload.reason : "";
       const activeTitle = signal.type === "llm_call_start"
@@ -577,12 +587,14 @@ export function createGenerationService(
         runtimeWaitingForUser = true;
         lastCanvasCommitAt = undefined;
         runtimeHeartbeatTimelineEmitted = false;
+      } else {
+        runtimeWaitingForUser = false;
       }
       if (isCanvasCommitEvent(observed)) {
         lastCanvasCommitAt = Date.now();
         runtimeHeartbeatTimelineEmitted = false;
       }
-      if (lastCanvasCommitAt && /(?:^|_)tool_started$/.test(observed.eventType)) {
+      if (lastCanvasCommitAt && (/(?:^|_)tool_started$/.test(observed.eventType) || observed.eventType === "agent_backend_agent_intake_complete")) {
         emitTimeline(timeline.event(
           "decision",
           "completed",
@@ -1848,9 +1860,9 @@ export function withAgentClarificationResumeContext(event: ToolEventRecord, payl
   }
   const existingSkillRefs = readStringList(existingResumeContext.transientSkillRefs);
   const existingDisabledSkillRefs = readStringList(existingResumeContext.disabledSkillRefs);
-  const existingCanvas = record(existingResumeContext.canvas);
-  const payloadCanvas = record(payload.contextValues?.canvas);
-  const policyCanvas = isSkillClarificationGuarded(payload) ? record(policy.canvas) : {};
+  const existingCanvas = sanitizeCanvasForAgentIntake(existingResumeContext.canvas);
+  const payloadCanvas = sanitizeCanvasForAgentIntake(payload.contextValues?.canvas);
+  const policyCanvas = isSkillClarificationGuarded(payload) ? sanitizeCanvasForAgentIntake(policy.canvas) : {};
   const canvas = mergeSkillClarificationResumeCanvas(policyCanvas, existingCanvas);
   const mergedCanvas = {
     ...(Object.keys(canvas).length ? canvas : payloadCanvas),

@@ -2,6 +2,7 @@ import { useI18n } from "../i18n/I18nProvider";
 import { CloseIcon } from "../../shared/icons";
 import { AgentBackendRuntimePanel } from "./components/AgentBackendRuntimePanel";
 import { ProviderSettingsForm } from "./components/ProviderSettingsForm";
+import { SourceUpdatePanel } from "./components/SourceUpdatePanel";
 import { useProjectSettings } from "./hooks/useProjectSettings";
 import { Button, IconButton, Panel } from "../../shared/ui";
 
@@ -82,6 +83,7 @@ export function ProjectSettingsPanel({ open, projectId, onClose }: ProjectSettin
         </dl>
 
         <AgentBackendRuntimePanel config={settings.agentBackendConfig} status={settings.agentBackendStatus} />
+        <SourceUpdatePanel />
 
         <Panel className="settings-canvas-panel" aria-labelledby="settings-runtime-budget-title">
           <form onSubmit={settings.handleRuntimeSettingsSubmit}>

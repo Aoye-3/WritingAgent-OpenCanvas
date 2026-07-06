@@ -8,6 +8,7 @@ import { createLifecycle } from "./runtime.mjs";
 import { isLocalRuntimeStale, parseLocalRuntimeMetadata } from "./local-runtime-metadata.mjs";
 import { resolveRuntimeMode } from "./runtime-config.mjs";
 import { parseRunningServices, run, runDetachedCommand, startProcess, waitForHttp } from "./platform.mjs";
+import { createSourceUpdateController } from "./source-update.mjs";
 import { sendWindowStage } from "./window-status.mjs";
 
 const shellDir = path.dirname(fileURLToPath(import.meta.url));
@@ -25,6 +26,18 @@ const viteCli = path.join(root, "node_modules", "vite", "bin", "vite.js");
 const logsRoot = path.join(root, "logs");
 const shellLogPath = path.join(logsRoot, "app-shell.log");
 mkdirSync(logsRoot, { recursive: true });
+const sourceUpdateController = createSourceUpdateController({
+  root,
+  run,
+  stopServices: async () => {
+    await lifecycle?.stop();
+  },
+  relaunch: () => {
+    app.relaunch();
+    app.exit(0);
+  },
+  onProgress: sendSourceUpdateProgress,
+});
 registerShellIpc();
 
 let splashWindow;
@@ -322,6 +335,18 @@ function updateStage(stage) {
 }
 
 function registerShellIpc() {
+  ipcMain.handle("shell:source-update-preview", async (_event, input = {}) => {
+    return sourceUpdateController.preview({
+      refresh: Boolean(input && typeof input === "object" && input.refresh),
+    });
+  });
+  ipcMain.handle("shell:source-update-apply", async (_event, input = {}) => {
+    const request = input && typeof input === "object" ? input : {};
+    return sourceUpdateController.apply({
+      expectedHead: typeof request.expectedHead === "string" ? request.expectedHead : undefined,
+      installDependencies: request.installDependencies !== false,
+    });
+  });
   ipcMain.handle("shell:capture-project-thumbnail", async (event, input) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window || window.isDestroyed()) return undefined;
@@ -333,6 +358,13 @@ function registerShellIpc() {
       mimeType: "image/png",
     };
   });
+}
+
+function sendSourceUpdateProgress(event) {
+  writeShellLog(`source-update=${event.stage}`);
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send("shell:source-update-progress", event);
+  }
 }
 
 function readCaptureRect(value) {

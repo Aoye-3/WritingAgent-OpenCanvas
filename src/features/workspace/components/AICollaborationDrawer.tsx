@@ -17,6 +17,7 @@ import { PlanClarificationCard } from "./PlanClarificationCard";
 import { acceptCanvasWriteSuggestion, answerPlan, dismissCanvasWriteSuggestion, pausePlan } from "../../agents/agentClient";
 import { visibleComposerTools } from "../planUiPolicy";
 import { buildPlanTimeline } from "../planTimeline";
+import { sanitizeCanvasForAgentIntake } from "../../../../shared/agentIntakeCanvas";
 import type { ConfiguredModelApiSummary } from "../../settings/types";
 import { AIComposer, isThinkingSupportedModel, type AIComposerSubmitPayload, type ConversationModelControls, type RuntimeBudgetChoice } from "./AIComposer";
 import { SkillFolderPicker } from "./SkillFolderPicker";
@@ -1278,7 +1279,7 @@ export function buildAgentClarificationSubmission(input: AgentClarificationSubmi
   const resumeRuntimeContext = resume
     ? {
       runtimeBudgetProfile: resume.runtimeBudgetProfile ?? input.runtimeBudgetChoice ?? input.runtimeBudgetProfile ?? "low",
-      ...(Object.keys(resume.canvas).length ? { canvas: resume.canvas } : {})
+      ...(Object.keys(sanitizeCanvasForAgentIntake(resume.canvas)).length ? { canvas: sanitizeCanvasForAgentIntake(resume.canvas) } : {})
     }
     : { runtimeBudgetProfile: input.runtimeBudgetChoice ?? input.runtimeBudgetProfile ?? "low" };
   const selectedText = option
@@ -1319,7 +1320,7 @@ export function buildAgentClarificationSubmission(input: AgentClarificationSubmi
         answer: answerValue,
         option: selectedOption,
         ...(resume?.runtimeResume ? { requiresRuntimeResume: true } : {}),
-        ...(resume ? { resumeContext: resume } : {}),
+        ...(resume ? { resumeContext: { ...resume, canvas: sanitizeCanvasForAgentIntake(resume.canvas) } } : {}),
         ...(resume?.originalInstruction ? { originalInstruction: resume.originalInstruction } : {})
       }
     }

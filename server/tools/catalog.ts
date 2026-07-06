@@ -1,7 +1,8 @@
 import type { ChatCompletionTool } from "../providerRuntime.js";
 
 export type ToolRef = "web_search" | "knowledge_base" | "clear_context" | "canvas_write" | "plan_clarification_submit" | "plan_revision_submit" | "artifact_stage";
-export type ToolState = Partial<Record<ToolRef, boolean>>;
+export type AgentBackendInternalToolRef = "ask_clarification" | "agent_intake_complete";
+export type ToolState = Partial<Record<ToolRef | AgentBackendInternalToolRef, boolean>>;
 export type ToolRiskLevel = "low" | "medium" | "high";
 export type ToolGroup = "web" | "context" | "chat";
 

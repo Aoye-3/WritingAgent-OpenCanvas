@@ -18,6 +18,12 @@ import {
   applyCanvasWriteToolState,
   canvasWriteScopeForRun
 } from "../../services/generation/canvasWriteScopePolicy.js";
+import {
+  AGENT_INTAKE_TOOL_REFS,
+  SKILL_SCOPE_GUARD_TOOL_REFS,
+  isAgentIntakePhase,
+  withSanitizedAgentIntakeCanvas
+} from "../../services/generation/agentIntakePolicy.js";
 
 export type AgentBackendRunInput = {
   threadId: string;
@@ -131,7 +137,7 @@ type AgentBackendRunContext = {
   facetwrite_canvas_write_policy?: typeof SHORT_PROGRESS_CANVAS_WRITE_POLICY;
   facetwrite_task_completion_policy?: string;
   facetwrite_clarification_policy?: string | Record<string, unknown>;
-  facetwrite_clarification_phase?: "clarification_guard";
+  facetwrite_clarification_phase?: "agent_intake" | "clarification_guard";
   facetwrite_intake_phase?: "intake" | "execution";
 };
 
@@ -273,14 +279,29 @@ async function formatRuntimeHttpError(response: Response) {
 }
 
 export function buildRunRequest(input: AgentBackendRunInput, config: AgentBackendRuntimeConfig) {
+  const sanitizedContextValues = withSanitizedAgentIntakeCanvas({
+    mode: "chat",
+    locale: "en",
+    contextValues: input.contextValues,
+    chatInstruction: input.chatInstruction,
+    toolState: input.toolState,
+    transientSkillRefs: [],
+    disabledSkillRefs: [],
+    planPhase: input.planPhase,
+    planId: input.planId,
+    stepId: input.stepId,
+    planGeneration: input.planGeneration
+  }).contextValues;
+  input = { ...input, contextValues: sanitizedContextValues };
   const baseRuntimeContext = buildAgentBackendRunContext(input);
   const skillScopeGuardPolicy = skillScopeGuardPolicyFromContext(input.contextValues);
   const skillScopeGuard = Boolean(skillScopeGuardPolicy);
-  const runtimeContext = skillScopeGuardPolicy
-    ? withClarificationGuardContext(baseRuntimeContext, skillScopeGuardPolicy)
+  const agentIntake = isAgentIntakeRunInput(input);
+  const runtimeContext = agentIntake
+    ? withAgentIntakeContext(baseRuntimeContext, skillScopeGuardPolicy, skillScopeGuard ? "clarification_guard" : "agent_intake")
     : baseRuntimeContext;
   const providedCanvasAction = input.contextValues?.canvasAction as CanvasAction | undefined;
-  const canvasAction = skillScopeGuard
+  const canvasAction = agentIntake
     ? undefined
     : providedCanvasAction ?? resolveCanvasAction({
       threadId: input.threadId,
@@ -291,7 +312,9 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
     ? { ...runtimeContext, facetwrite_canvas_write_scope: undefined, facetwrite_canvas_write_policy: undefined }
     : runtimeContext;
   const baseAllowedToolRefs = skillScopeGuard
-    ? ["ask_clarification"]
+    ? [...SKILL_SCOPE_GUARD_TOOL_REFS]
+    : agentIntake
+    ? [...AGENT_INTAKE_TOOL_REFS]
     : canvasAction?.requiresTool
     ? [...new Set([...(input.allowedToolRefs ?? input.agentCard.toolRefs), "canvas_write"])]
     : input.allowedToolRefs ?? input.agentCard.toolRefs;
@@ -300,11 +323,13 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
     progressiveCanvasDeliveryEnabled: effectiveRuntimeContext.facetwrite_progressive_canvas_delivery_enabled === true,
     canvasActionRequiresTool: canvasAction?.requiresTool === true
   });
-  const allowedToolRefs = !skillScopeGuard && effectiveRuntimeContext.facetwrite_markdown_file_delivery_required
+  const allowedToolRefs = !agentIntake && effectiveRuntimeContext.facetwrite_markdown_file_delivery_required
     ? [...new Set([...chatAllowedToolRefs, "write_file", "present_files"])]
     : chatAllowedToolRefs;
   const baseToolState = skillScopeGuard
     ? { ask_clarification: true }
+    : agentIntake
+    ? { ask_clarification: true, agent_intake_complete: true }
     : canvasAction?.requiresTool
     ? { ...(input.toolState ?? {}), canvas_write: true }
     : input.toolState ?? {};
@@ -399,15 +424,35 @@ function withoutProgressiveDeliveryContext(context: AgentBackendRunContext): Age
   };
 }
 
-function withClarificationGuardContext(context: AgentBackendRunContext, policy: Record<string, unknown>): AgentBackendRunContext {
+function withAgentIntakeContext(
+  context: AgentBackendRunContext,
+  policy: Record<string, unknown> | undefined,
+  phase: AgentBackendRunContext["facetwrite_clarification_phase"] = "agent_intake"
+): AgentBackendRunContext {
   return {
     ...withoutProgressiveDeliveryContext(context),
     thinking_enabled: false,
     reasoning_effort: undefined,
-    facetwrite_clarification_policy: policy,
-    facetwrite_clarification_phase: "clarification_guard",
+    ...(policy ? { facetwrite_clarification_policy: policy } : {}),
+    facetwrite_clarification_phase: phase,
     facetwrite_intake_phase: "intake"
   };
+}
+
+function isAgentIntakeRunInput(input: AgentBackendRunInput) {
+  return isAgentIntakePhase({
+    mode: "chat",
+    locale: "en",
+    contextValues: input.contextValues,
+    chatInstruction: input.chatInstruction,
+    toolState: input.toolState,
+    transientSkillRefs: [],
+    disabledSkillRefs: [],
+    planPhase: input.planPhase,
+    planId: input.planId,
+    stepId: input.stepId,
+    planGeneration: input.planGeneration
+  });
 }
 
 function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId" | "projectId" | "configuredModelApiId" | "modelSettings" | "settings" | "facetwriteMemoryContent" | "chatInstruction" | "contextValues" | "toolState" | "planPhase" | "planId" | "stepId" | "planGeneration">): AgentBackendRunContext {
@@ -937,6 +982,7 @@ function createAgentBackendStreamTrace() {
 function isPostClarificationProgressEvent(event: ToolEventRecord) {
   const toolName = readSourceString(event.payload?.toolName) || readSourceString(event.payload?.tool);
   return /(?:^|_)tool_(?:started|completed)$/.test(event.eventType)
+    || event.eventType === "agent_backend_agent_intake_complete"
     || /^(?:write_file|present_files|web_search|web_fetch|knowledge_base)$/.test(toolName)
     || /^canvas_delivery_/.test(readSourceString(event.payload?.eventType));
 }
@@ -1164,7 +1210,7 @@ function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<strin
     if (type === "agent_clarification_requested") {
       return [agentClarificationEventFromSource(data, { source: "runtime_custom_event" })];
     }
-    return type && /^(?:task_|plan_|artifact_|canvas_|agent_clarification_)/.test(type) ? [{ eventType: `agent_backend_${type}`, payload: data }] : [];
+    return type && /^(?:task_|plan_|artifact_|canvas_|agent_clarification_|agent_intake_)/.test(type) ? [{ eventType: `agent_backend_${type}`, payload: data }] : [];
   }
   if (event === "values" && isRecord(data) && Array.isArray(data.messages)) {
     return data.messages.flatMap((message) => mapMessageToolEvents(message, toolCallArgsById));
@@ -1578,7 +1624,7 @@ function structuredToolEvents(content: unknown): ToolEventRecord[] {
     const eventType = envelope.event.eventType === "tool_failed" && envelope.event.tool === "canvas_write"
       ? "canvas_mutation_failed"
       : envelope.event.eventType;
-    if (!/^(?:plan_|artifact_|canvas_)/.test(eventType)) return [];
+    if (!/^(?:plan_|artifact_|canvas_|agent_intake_)/.test(eventType)) return [];
     const payload = { ...envelope.event, eventType };
     const events: ToolEventRecord[] = [{ eventType: `agent_backend_${eventType}`, payload }];
     if (eventType === "artifact_staged" && Array.isArray(envelope.event.artifacts) && envelope.event.artifacts.some((artifact) => isRecord(artifact) && artifact.status === "committed")) {

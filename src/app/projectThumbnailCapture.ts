@@ -1,34 +1,11 @@
-type ShellProjectThumbnailRequest = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  outputWidth: number;
-  outputHeight: number;
-};
-
-type ShellProjectThumbnailResult = {
-  imageBase64: string;
-  mimeType: string;
-};
-
-type OpenCanvasShellBridge = {
-  captureProjectThumbnail?: (request: ShellProjectThumbnailRequest) => Promise<ShellProjectThumbnailResult | undefined>;
-};
-
-declare global {
-  interface Window {
-    openCanvasShell?: OpenCanvasShellBridge;
-  }
-}
+import { getOpenCanvasShell } from "./shellBridge";
 
 const thumbnailAspectRatio = 16 / 9;
 const thumbnailWidth = 800;
 const thumbnailHeight = 450;
 
 export async function captureProjectThumbnail() {
-  if (typeof window === "undefined") return undefined;
-  const capture = window.openCanvasShell?.captureProjectThumbnail;
+  const capture = getOpenCanvasShell()?.captureProjectThumbnail;
   if (!capture) return undefined;
   const target = document.querySelector<HTMLElement>("[data-project-thumbnail-target='true']");
   if (!target) return undefined;

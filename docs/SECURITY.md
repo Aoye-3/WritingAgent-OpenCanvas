@@ -60,3 +60,11 @@ When Agent Runtime is enabled, FacetWrite accesses protected runtime APIs throug
 - `start-opencanvas-shell.vbs` sets local mode only for its child process, preventing stale machine-level Docker mode variables from changing the one-click path.
 - App Shell, API, frontend, and Gateway logs are local ignored files. Startup logging records stages and errors but must not print environment values, auth cookies, CSRF tokens, provider keys, or MCP secrets.
 - The maintained local acceptance uses a temporary empty Project so its real provider and Web Search calls cannot transmit existing Project/thread context.
+
+## Source Git Update Boundary
+
+First-stage Harness updates are privileged local App Shell actions, not backend self-modification. Only the Electron main process may run the update Git commands, dependency install, service stop, and relaunch sequence. Express may expose read-only status in the future, but it must not apply source updates while it is serving the app.
+
+The source update channel is fixed to allowlisted `origin/main`. The product update flow must not accept arbitrary remotes, clone repositories, create worktrees, mirror a GitHub URL, auto-stash, rebase, reset, create merge commits, or resolve conflicts. Apply requires an expected HEAD match, clean tracked files, a non-detached branch with upstream tracking, and a fast-forward target.
+
+User and runtime data stay outside the update authority. Updates must block changes to `.facetwrite/**`, `FACETWRITE_APP_ROOT` data, `.env*`, provider API stores, SQLite database/WAL/SHM files, threads, Knowledge, Memory, thumbnails, uploads/outputs, `.git/**` internals outside normal Git operations, dependency folders, runtime temp roots, and local cache directories.

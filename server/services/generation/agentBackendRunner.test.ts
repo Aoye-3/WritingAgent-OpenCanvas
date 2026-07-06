@@ -46,7 +46,7 @@ test("forwards enabled stage-specific Plan tools even when Agent settings hide t
   assert.ok(allowedToolRefs.includes("plan_clarification_submit"));
 });
 
-test("forwards file delivery tools and scoped canvas_write for progressive Canvas runs", async () => {
+test("limits progressive Canvas runs to intake tools before execution", async () => {
   let allowedToolRefs: string[] = [];
   await runAgentBackendGeneration({
     payload: {
@@ -89,13 +89,10 @@ test("forwards file delivery tools and scoped canvas_write for progressive Canva
     }
   });
 
-  assert.ok(allowedToolRefs.includes("write_file"));
-  assert.ok(allowedToolRefs.includes("present_files"));
-  assert.ok(allowedToolRefs.includes("ask_clarification"));
-  assert.equal(allowedToolRefs.includes("canvas_write"), true);
+  assert.deepEqual(allowedToolRefs, ["ask_clarification", "agent_intake_complete"]);
 });
 
-test("keeps canvas_write for progressive Canvas runs when a Canvas action requires the tool", async () => {
+test("keeps canvas_write for progressive Canvas execution runs when a Canvas action requires the tool", async () => {
   let allowedToolRefs: string[] = [];
   await runAgentBackendGeneration({
     payload: {
@@ -104,6 +101,7 @@ test("keeps canvas_write for progressive Canvas runs when a Canvas action requir
       threadId: "thread_1",
       chatInstruction: "Create one Canvas node",
       contextValues: {
+        agentIntake: { phase: "execution", completed: true },
         progressiveCanvasDelivery: { enabled: true }
       },
       canvasAction: { id: "canvas_action_1", operation: "create", risk: "low", requiresTool: true }
@@ -141,6 +139,71 @@ test("keeps canvas_write for progressive Canvas runs when a Canvas action requir
 
   assert.ok(allowedToolRefs.includes("canvas_write"));
   assert.ok(allowedToolRefs.includes("write_file"));
+});
+
+test("starts an execution run with full delivery tools after intake completion", async () => {
+  const allowedToolRefsByRun: string[][] = [];
+  const agentIntakeByRun: unknown[] = [];
+  const result = await runAgentBackendGeneration({
+    payload: {
+      mode: "chat",
+      locale: "en",
+      threadId: "thread_1",
+      chatInstruction: "Review recent agent literature",
+      contextValues: {
+        progressiveCanvasDelivery: { enabled: true }
+      }
+    },
+    threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "model_1",
+    modelSettings: {
+      configuredModelApiId: "model_1",
+      providerId: "deepseek",
+      model: "deepseek-chat",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: true,
+      toolCallMode: "auto",
+      maxToolCalls: 20
+    },
+    runtimeConfig: { enabledTools: ["web_search", "canvas_write"], agentCard: {}, settings: {} } as never,
+    messages: [],
+    prompt: "prompt"
+  }, {
+    getRuntimeConfig: () => ({ enabled: true } as never),
+    runAgent: async (input) => {
+      allowedToolRefsByRun.push(input.allowedToolRefs ?? []);
+      agentIntakeByRun.push(input.contextValues?.agentIntake);
+      if (allowedToolRefsByRun.length === 1) {
+        return {
+          text: "",
+          finishReason: "agent_backend_completed",
+          events: [{ eventType: "agent_backend_agent_intake_complete", payload: { summary: "Ready" } }]
+        };
+      }
+      return {
+        text: "Done",
+        finishReason: "agent_backend_completed",
+        events: [{ eventType: "agent_backend_canvas_node_committed", payload: { nodeId: "node_1" } }]
+      };
+    }
+  });
+
+  assert.deepEqual(allowedToolRefsByRun[0], ["ask_clarification", "agent_intake_complete"]);
+  assert.equal(allowedToolRefsByRun[1]?.includes("web_search"), true);
+  assert.equal(allowedToolRefsByRun[1]?.includes("canvas_write"), true);
+  assert.equal(allowedToolRefsByRun[1]?.includes("write_file"), true);
+  assert.equal(allowedToolRefsByRun[1]?.includes("present_files"), true);
+  assert.deepEqual(agentIntakeByRun[1], { phase: "execution", completed: true });
+  assert.equal(result?.text, "Done");
+  assert.deepEqual(result?.events.map((event) => event.eventType), [
+    "agent_backend_agent_intake_complete",
+    "agent_backend_canvas_node_committed"
+  ]);
 });
 
 test("forwards ask_clarification for transient skill runs", async () => {

@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-06: First-Stage Harness Updates Use Source Git
+
+Decision: First-stage Harness/App Shell updates use the current source checkout and the allowlisted `origin/main` channel. Electron/App Shell owns `git fetch --prune origin`, preview, fast-forward apply, dependency install, service shutdown, and restart orchestration. Express may expose update status or preview data later, but must not run Git or overwrite its own running code in-process. Renderer UI calls Shell IPC only.
+
+Reason: OpenCanvas is currently operated as a source-development checkout rather than a packaged installer. The product needs a way to refresh Harness source, frontend/backend code, Agent Runtime source, built-in Skills, demo assets, docs, and defaults while preserving the local-first user data boundary.
+
+Impact: Apply requires a clean worktree, non-detached HEAD, allowlisted origin remote, expected HEAD match, no protected-path changes, and a fast-forward target. It must not clone, worktree, mirror, synchronize arbitrary GitHub URLs, stash, rebase, reset, resolve conflicts, or create merge commits. Source updates may update Git-tracked application files, but must never write `.facetwrite/**`, `FACETWRITE_APP_ROOT` data, `.env*`, provider API stores, SQLite files, Thread `user-data`, Knowledge, Memory, thumbnails, dependency folders, or test/runtime temp roots. Future packaged builds may add a separate GitHub Release artifact updater with the same data boundary. Detailed ADR: `docs/decisions/ADR-2026-07-06-use-source-git-updates-for-first-stage-harness-updates.md`.
+
 ## 2026-07-05: Agent Intake Is Isolated From Execution Delivery
 
 Decision: Split ordinary Agent clarification into an explicit `agent_intake` phase before execution. Intake exposes only side-effect-free decision tools: normal Agent intake may call `ask_clarification` or `agent_intake_complete`, while the legacy `skill_scope_guard` first pass remains ask-only for compatibility. Intake requests strip progressive Canvas delivery, Markdown file delivery, CanvasWrite policy, execution budgets, file tools, Plan execution tools, and full Canvas body content. After a user answers a LangGraph-backed clarification, FacetWrite resumes the same checkpoint with `Command(resume=...)`; the resumed checkpoint must decide whether to ask again or call `agent_intake_complete`. Only after that completion event does FacetWrite start an execution run with the full delivery tool surface.

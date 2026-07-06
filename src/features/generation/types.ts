@@ -11,7 +11,7 @@ export type GenerateRequest = {
   contextValues?: Record<string, unknown>;
   freeTextPrompt?: string;
   chatInstruction?: string;
-  toolState?: Partial<Record<"web_search" | "knowledge_base" | "clear_context" | "canvas_write" | "plan_update" | "plan_clarification_submit" | "plan_revision_submit" | "artifact_stage", boolean>>;
+  toolState?: Partial<Record<"web_search" | "knowledge_base" | "clear_context" | "canvas_write" | "plan_update" | "plan_clarification_submit" | "plan_revision_submit" | "artifact_stage" | "ask_clarification" | "agent_intake_complete", boolean>>;
   systemPrompt?: string;
   runtimeBudgetProfile?: "low" | "medium" | "high";
   modelOverrides?: {

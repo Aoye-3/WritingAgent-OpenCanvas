@@ -8,6 +8,13 @@ import type { ChatMessage } from "../../providerRuntime.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { StreamStatus } from "../../agentRunLoop.js";
 import { applyCanvasWriteToolExposure } from "./canvasWriteScopePolicy.js";
+import {
+  agentIntakeToolRefsForPayload,
+  isAgentIntakePhase,
+  isProgressiveCanvasDelivery,
+  withAgentIntakeExecutionPhase,
+  withSanitizedAgentIntakeCanvas
+} from "./agentIntakePolicy.js";
 
 export type AgentBackendRunnerInput = {
   payload: GenerateRequest;
@@ -35,6 +42,7 @@ export type AgentBackendRunnerDeps = {
 export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, deps: AgentBackendRunnerDeps = {}) {
   const config = (deps.getRuntimeConfig ?? getAgentBackendRuntimeConfig)();
   if (!config.enabled) return undefined;
+  input = { ...input, payload: withSanitizedAgentIntakeCanvas(input.payload) };
 
   const agentClarification = readRecord(input.payload.contextValues?.agentClarification);
   const runtimeResume = readRuntimeResumeMetadata(readRecord(agentClarification.resumeContext)?.runtimeResume);
@@ -42,7 +50,40 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     throw new Error("Agent clarification answer is missing runtime resume metadata; refresh the thread and answer the latest clarification.");
   }
 
-  const baseRunInput = {
+  const baseRunInput = buildBaseRunInput(input, config);
+
+  const run = runtimeResume
+    ? await (deps.resumeRun ?? resumeAgentBackendRun)({
+      ...baseRunInput,
+      threadId: runtimeResume.runtimeThreadId || input.threadId,
+      resume: buildClarificationResumePayload(agentClarification),
+      resumeOfRunId: runtimeResume.runtimeRunId,
+      interruptId: runtimeResume.interruptId,
+      checkpointId: runtimeResume.checkpointId
+    })
+    : await (deps.runAgent ?? runAgentBackendAgent)(baseRunInput);
+
+  if (isAgentIntakePhase(input.payload) && hasAgentIntakeCompleteEvent(run.events)) {
+    const executionPayload = withAgentIntakeExecutionPhase(input.payload);
+    const executionInput = buildBaseRunInput({ ...input, payload: executionPayload }, config);
+    const executionRun = await (deps.runAgent ?? runAgentBackendAgent)(executionInput);
+    return {
+      ...executionRun,
+      events: [...run.events, ...executionRun.events]
+    };
+  }
+
+  if (!run.text && !run.events.some((event) => /(?:^|_)(?:plan|artifact|canvas|agent_intake)_/.test(event.eventType))) {
+    if (!hasAgentClarificationEvent(run.events)) {
+      throw new Error("AgentBackend completed with no visible assistant text or structured lifecycle events");
+    }
+  }
+
+  return run;
+}
+
+function buildBaseRunInput(input: AgentBackendRunnerInput, config: AgentBackendRuntimeConfig) {
+  return {
     config,
     threadId: input.threadId,
     projectId: input.projectId,
@@ -68,29 +109,10 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     onStatus: input.onStatus,
     onRuntimeSignal: input.onRuntimeSignal
   };
-
-  const run = runtimeResume
-    ? await (deps.resumeRun ?? resumeAgentBackendRun)({
-      ...baseRunInput,
-      threadId: runtimeResume.runtimeThreadId || input.threadId,
-      resume: buildClarificationResumePayload(agentClarification),
-      resumeOfRunId: runtimeResume.runtimeRunId,
-      interruptId: runtimeResume.interruptId,
-      checkpointId: runtimeResume.checkpointId
-    })
-    : await (deps.runAgent ?? runAgentBackendAgent)(baseRunInput);
-
-  if (!run.text && !run.events.some((event) => /(?:^|_)(?:plan|artifact|canvas)_/.test(event.eventType))) {
-    if (!hasAgentClarificationEvent(run.events)) {
-      throw new Error("AgentBackend completed with no visible assistant text or structured lifecycle events");
-    }
-  }
-
-  return run;
 }
 
 function allowedToolsForRequest(input: AgentBackendRunnerInput) {
-  if (isSkillClarificationGuarded(input.payload)) return ["ask_clarification"];
+  if (isAgentIntakePhase(input.payload)) return agentIntakeToolRefsForPayload(input.payload);
   const allowed = new Set<string>(input.runtimeConfig.enabledTools);
   for (const tool of ["plan_clarification_submit", "plan_revision_submit", "artifact_stage"] as const) {
     if (input.payload.toolState?.[tool]) allowed.add(tool);
@@ -112,9 +134,7 @@ function allowedToolsForRequest(input: AgentBackendRunnerInput) {
 }
 
 function isProgressiveMarkdownFileDelivery(payload: GenerateRequest) {
-  const delivery = payload.contextValues?.progressiveCanvasDelivery;
-  if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) return false;
-  return (delivery as Record<string, unknown>).enabled === true;
+  return isProgressiveCanvasDelivery(payload);
 }
 
 function shouldAllowAgentClarification(payload: GenerateRequest) {
@@ -123,14 +143,12 @@ function shouldAllowAgentClarification(payload: GenerateRequest) {
   return Boolean(payload.contextValues?.facetwrite_clarification_policy);
 }
 
-function isSkillClarificationGuarded(payload: GenerateRequest) {
-  const policy = payload.contextValues?.facetwrite_clarification_policy;
-  if (!policy || typeof policy !== "object" || Array.isArray(policy)) return false;
-  return (policy as Record<string, unknown>).mode === "skill_scope_guard";
-}
-
 function hasAgentClarificationEvent(events: ToolEventRecord[]) {
   return events.some((event) => /agent_clarification_(?:requested|invalid)$/.test(event.eventType));
+}
+
+function hasAgentIntakeCompleteEvent(events: ToolEventRecord[]) {
+  return events.some((event) => event.eventType === "agent_backend_agent_intake_complete");
 }
 
 function buildClarificationResumePayload(agentClarification: Record<string, unknown>) {

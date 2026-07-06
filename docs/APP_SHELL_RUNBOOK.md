@@ -60,6 +60,20 @@ The acceptance starts through the same VBS used by double-click, reads the actua
 - Occupied ports, partial services, or incompatible project/bridge metadata block startup.
 - Startup failure rolls back every process created by that launch attempt.
 
+## Source Git Updates
+
+The development shell can preview and apply first-stage Harness source updates from the current checkout only. The update channel is fixed to allowlisted `origin/main`; the shell does not clone, create worktrees, mirror repositories, or accept arbitrary GitHub URLs.
+
+- Preview runs from Shell IPC and may fetch `origin`, then reports branch, current SHA, target SHA, ahead/behind counts, changed files, dependency changes, and blockers.
+- Apply is Shell-owned. Express never runs Git commands to replace its own source while serving requests, and the renderer only calls the shell bridge.
+- Apply requires a non-detached branch with upstream tracking, an allowlisted `origin`, no tracked local modifications, no untracked application files that could be overwritten, and a fast-forward target.
+- The shell uses `git merge --ff-only <resolved origin/main SHA>`. It never stashes, rebases, resets, creates merge commits, or resolves conflicts automatically.
+- If root dependency files changed, the shell runs `npm.cmd install` after the fast-forward merge and before restart.
+- Services are stopped only after merge and dependency installation succeed. The final step is a hard relaunch through Electron.
+- Protected local data paths such as `.facetwrite/**`, `.env*`, provider stores, SQLite files, Knowledge, Memory, uploads/outputs, runtime temp roots, and dependency/cache folders are never update targets. A target commit that touches them is blocked in preview/apply.
+
+Browser-only sessions do not expose the source update bridge and should show the update feature as unavailable.
+
 ## Troubleshooting
 
 - Local prerequisites: `npm.cmd run agent-runtime:doctor`.

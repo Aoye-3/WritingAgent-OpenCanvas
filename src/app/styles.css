@@ -5724,6 +5724,27 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   color: #b42318;
 }
 
+.source-update-status {
+  margin: 0 0 12px;
+}
+
+.source-update-blockers {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding-left: 18px;
+  color: #991b1b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.source-update-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .settings-actions {
   display: flex;
   justify-content: flex-end;

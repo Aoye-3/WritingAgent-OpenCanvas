@@ -62,6 +62,42 @@ test("progressive clarification events carry the active delivery id in resume co
   assert.equal((event.payload as { resumeContext: { canvas: { deliveryId: string } } }).resumeContext.canvas.deliveryId, "delivery_thread_1_3_direct");
 });
 
+test("progressive clarification resume context strips heavy Canvas content", () => {
+  const event = withAgentClarificationResumeContext({
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      question: "Which format should I use?",
+      options: [{ id: "apa", label: "APA" }, { id: "mla", label: "MLA" }],
+      resumeContext: {
+        originalInstruction: "Review recent Agent literature.",
+        canvas: {
+          selectedNodeId: "node_1",
+          selectedNode: { id: "node_1", kind: "document", title: "Draft", content: "Long body" },
+          reference: { id: "ref_1", title: "Reference", content: "Long reference", preview: "Preview" }
+        }
+      }
+    }
+  }, {
+    mode: "chat",
+    locale: "en",
+    chatInstruction: "Review recent Agent literature.",
+    contextValues: {
+      canvas: {
+        selectedNodeId: "node_1",
+        selectedNode: { id: "node_1", kind: "document", title: "Draft", content: "Long body" }
+      }
+    }
+  }, "delivery_thread_1_3_direct");
+
+  assert.deepEqual((event.payload as { resumeContext: { canvas: Record<string, unknown> } }).resumeContext.canvas, {
+    selectedNodeId: "node_1",
+    selectedNode: { id: "node_1", kind: "document", title: "Draft" },
+    reference: { id: "ref_1", title: "Reference" },
+    deliveryId: "delivery_thread_1_3_direct"
+  });
+});
+
 test("execution clarification events carry plan execution context in resume context", () => {
   const event = withAgentClarificationResumeContext({
     eventType: "agent_backend_agent_clarification_requested",

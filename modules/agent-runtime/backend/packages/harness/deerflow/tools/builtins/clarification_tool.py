@@ -1,3 +1,4 @@
+import json
 from typing import Literal
 
 from langchain.tools import tool
@@ -96,3 +97,25 @@ def ask_clarification_tool(
     # The actual logic is handled by ClarificationMiddleware which intercepts this tool call
     # and interrupts execution to present the question to the user
     return "Clarification request processed by middleware"
+
+
+@tool(
+    "agent_intake_complete",
+    description="Report that the clarification/intake phase has enough information and execution can begin.",
+    return_direct=True,
+)
+def agent_intake_complete_tool(summary: str) -> str:
+    """Complete intake without side effects so the host can start execution.
+
+    Args:
+        summary: Brief summary of the confirmed user intent and choices.
+    """
+    event = {
+        "eventType": "agent_intake_complete",
+        "type": "agent_intake_complete",
+        "summary": summary,
+    }
+    return "Agent intake complete. Execution can begin.\n__FACETWRITE_EVENT__" + json.dumps(
+        {"content": "Agent intake complete. Execution can begin.", "event": event},
+        ensure_ascii=False,
+    )

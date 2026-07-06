@@ -68,7 +68,7 @@ test("Agent clarification continuation preserves original task and skill overrid
   assert.match(source, /transientSkillRefs/);
   assert.match(source, /disabledSkillRefs: resumeDisabledSkillRefs/);
   assert.match(source, /runtimeBudgetProfile: resume\.runtimeBudgetProfile/);
-  assert.match(source, /canvas: resume\.canvas/);
+  assert.match(source, /sanitizeCanvasForAgentIntake\(resume\.canvas\)/);
   assert.match(source, /buildAgentClarificationSubmission/);
   assert.match(source, /selectedOptionId: selectedOption\.id/);
   assert.match(source, /answerText/);

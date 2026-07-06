@@ -200,7 +200,12 @@ test("custom Agent clarification answer builds an optimistic record and resume r
       transientSkillRefs: ["literature-review"],
       disabledSkillRefs: ["newsletter-generation"],
       runtimeBudgetProfile: "high",
-      canvas: { workflow: { mode: "batch_delivery" } }
+      canvas: {
+        workflow: { mode: "batch_delivery" },
+        selectedNodeId: "node_1",
+        selectedNode: { id: "node_1", kind: "document", title: "Draft", content: "Long draft body" },
+        references: [{ id: "ref_1", title: "Reference", content: "Long reference body", preview: "Preview text" }]
+      }
     },
     createdAt: "2026-06-24T00:00:00.000Z",
     updatedAt: "2026-06-24T00:00:01.000Z"
@@ -223,14 +228,22 @@ test("custom Agent clarification answer builds an optimistic record and resume r
   assert.deepEqual(submission.requestContext.transientSkillRefs, ["literature-review"]);
   assert.deepEqual(submission.requestContext.disabledSkillRefs, ["newsletter-generation"]);
   assert.equal(submission.requestContext.runtimeBudgetProfile, "high");
-  assert.deepEqual(submission.requestContext.canvas, { workflow: { mode: "batch_delivery" } });
+  assert.deepEqual(submission.requestContext.canvas, {
+    workflow: { mode: "batch_delivery" },
+    selectedNodeId: "node_1",
+    selectedNode: { id: "node_1", kind: "document", title: "Draft" },
+    references: [{ id: "ref_1", title: "Reference" }]
+  });
   assert.deepEqual(submission.requestContext.agentClarification, {
     clarificationId: "agent_clarification_scope",
     question: "Which scope should I use?",
     selectedOptionId: "custom",
     answer: "Use 25 papers from 2022-2026, APA 7, with a methods table.",
     option: { id: "custom", label: "Custom answer", detail: "Use 25 papers from 2022-2026, APA 7, with a methods table.", recommended: false },
-    resumeContext: clarification.resumeContext,
+    resumeContext: {
+      ...clarification.resumeContext,
+      canvas: submission.requestContext.canvas
+    },
     originalInstruction: "Review Agent literature."
   });
 });

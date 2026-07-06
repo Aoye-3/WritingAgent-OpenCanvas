@@ -1534,7 +1534,7 @@ test("agent intake suppresses equivalent answered clarification without runtime 
   assert.equal(secondRecord.events?.some((event) => event.eventType === "agent_backend_agent_clarification_requested"), false);
 });
 
-test("research skill intake allows evidence tools after three answered clarification rounds", async () => {
+test("research skill answered clarification stays in intake until completion", async () => {
   const { storage } = fakeStorage();
   let allowedToolRefs: string[] = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
@@ -1580,9 +1580,7 @@ test("research skill intake allows evidence tools after three answered clarifica
   });
 
   assert.equal(result.finishReason, "agent_backend_completed");
-  assert.ok(allowedToolRefs.includes("web_search"));
-  assert.ok(allowedToolRefs.includes("knowledge_base"));
-  assert.ok(allowedToolRefs.includes("ask_clarification"));
+  assert.deepEqual(allowedToolRefs, ["ask_clarification", "agent_intake_complete"]);
 });
 
 test("clarification process narration with appended sources is not recorded as assistant body text", async () => {

@@ -11,10 +11,12 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 - `SKILL_MANAGEMENT.md`: Skill catalog shape, folder management API, per-message enable/disable behavior, and safety rules.
 - `API.md`: HTTP API contracts, runtime environment variables, and response shape.
 - `AGENT_RUNTIME_RUNBOOK.md`: project-managed local Agent Runtime Gateway, explicit Docker mode, dependencies, dynamic ports, env, smoke checks, LangGraph clarification resume, and troubleshooting.
-- `APP_SHELL_RUNBOOK.md`: Windows Electron development shell startup, ports, ownership, shutdown, HMR, and troubleshooting.
+- `APP_SHELL_RUNBOOK.md`: Windows Electron development shell startup, ports, ownership, source updates, shutdown, HMR, and troubleshooting.
 - `DATABASE.md`: SQLite location, tables, Canvas write semantics, and migration notes.
-- `SECURITY.md`: local secret handling, tool permissions, Agent Runtime auth, and runtime redaction rules.
+- `DATA_STORAGE_SYSTEM.md`: user/runtime storage, development/sample data, configuration storage, and Harness source-update data boundaries.
+- `SECURITY.md`: local secret handling, tool permissions, Agent Runtime auth, source update boundary, and runtime redaction rules.
 - `DECISIONS.md`: dated technical decisions and their impacts.
+- `decisions/ADR-2026-07-06-use-source-git-updates-for-first-stage-harness-updates.md`: ADR for first-stage source Git Harness updates and protected local user data.
 - `REFACTOR_LOG.md`: review results, completed work, open TODOs, and next priority checks.
 - `superpowers/plans/2026-06-07-maintainability-concurrency-review.md`: executable maintainability, extensibility, decoupling, test-gap, and concurrency review plan.
 
@@ -24,6 +26,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 - Canvas interaction, geometry, node renderer, or write-safety changes update `CANVAS.md`.
 - API changes update `API.md`.
 - Database or storage changes update `DATABASE.md`.
+- Harness/App Shell update architecture changes update `ARCHITECTURE.md`, `DATA_STORAGE_SYSTEM.md`, and an ADR under `docs/decisions/`.
 - Agent, ToolUse, Skill, MCP, or Agent Runtime changes update `AGENT.md`.
 - Skill folder management, Skill catalog, or per-message Skill selection changes update `SKILL_MANAGEMENT.md`.
 - Security, auth, secret, approval, or side-effect changes update `SECURITY.md`.
