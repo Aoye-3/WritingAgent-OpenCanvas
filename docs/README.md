@@ -10,7 +10,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 - `AGENT.md`: AgentCard, Agent settings, Agent Runtime mapping, Tool catalog, and ToolUse safety.
 - `SKILL_MANAGEMENT.md`: Skill catalog shape, folder management API, per-message enable/disable behavior, and safety rules.
 - `API.md`: HTTP API contracts, runtime environment variables, and response shape.
-- `AGENT_RUNTIME_RUNBOOK.md`: Docker Desktop/local and Linux Docker Compose runtime acceptance, dependencies, ports, env, smoke checks, and troubleshooting.
+- `AGENT_RUNTIME_RUNBOOK.md`: project-managed local Agent Runtime Gateway, explicit Docker mode, dependencies, dynamic ports, env, smoke checks, LangGraph clarification resume, and troubleshooting.
 - `APP_SHELL_RUNBOOK.md`: Windows Electron development shell startup, ports, ownership, shutdown, HMR, and troubleshooting.
 - `DATABASE.md`: SQLite location, tables, Canvas write semantics, and migration notes.
 - `SECURITY.md`: local secret handling, tool permissions, Agent Runtime auth, and runtime redaction rules.
@@ -34,4 +34,4 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 ## Current Runtime Position
 FacetWrite is the workspace and control plane. It owns the frontend workspace, configuration surfaces, SQLite data, Canvas state, and Human-in-the-loop approval.
 
-Agent Runtime is FacetWrite's internal AI execution subsystem. The current implementation is the AgentBackend adapter under `server/runtime/agentBackendAdapter/` plus the source module under `modules/agent-runtime/`. When enabled, FacetWrite calls the Agent Runtime sidecar for Lead Agent, subagent, ToolUse, MCP, and intelligent orchestration behavior. The TypeScript provider runtime remains a fallback path while Agent Runtime integration matures.
+Agent Runtime is FacetWrite's internal AI execution subsystem. The current implementation is the AgentBackend adapter under `server/runtime/agentBackendAdapter/` plus the source module under `modules/agent-runtime/`. FacetWrite calls the project-managed LangGraph-compatible Gateway for Lead Agent, subagent, ToolUse, MCP, Memory, Knowledge, and intelligent orchestration behavior. Runtime/model failures return explicit diagnostics; Mock output is only available when `FACETWRITE_MOCK_FALLBACK_ENABLED=true` is deliberately enabled for local demonstration.

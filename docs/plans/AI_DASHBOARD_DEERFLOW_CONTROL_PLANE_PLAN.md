@@ -1,5 +1,7 @@
 # AI Dashboard And DeerFlow Runtime Control Plane Plan
 
+> Historical/superseded plan. The current AI Dashboard describes Agent Runtime/AgentBackend health, Skills/MCP, subagent mapping, ToolUse bridge, and FacetWrite-managed Memory through `/api/agent-runtime/*`. DeerFlow-specific names below are historical implementation context.
+
 Date: 2026-05-15
 Status: Implemented and validated
 

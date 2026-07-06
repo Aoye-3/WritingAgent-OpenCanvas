@@ -1,5 +1,7 @@
 # DeerFlow Main Agent + FacetWrite Subagent Runtime Integration Plan
 
+> Historical/superseded plan. Current implementation truth is AgentBackend as FacetWrite's internal LangGraph-compatible Agent Runtime under `modules/agent-runtime/`, reached through `/api/agent-runtime/*`, provider `agent-backend`, and `AGENT_BACKEND_*` configuration. Default local development uses the project-managed Gateway; Docker is explicit isolation/deployment mode.
+
 Date: 2026-05-15
 Status: First backend adapter slice implemented; live DeerFlow sidecar validation still pending
 

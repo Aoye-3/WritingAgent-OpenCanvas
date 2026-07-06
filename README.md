@@ -6,7 +6,7 @@
 
 **Language:** English | [中文](README.zh-CN.md)
 
-OpenCanvas is a local-first AI canvas workspace built on the FacetWrite architecture. It combines a FigJam-like board, editable writing nodes, Agent cards, configurable tools, project history, provider settings, Knowledge, Memory, and an internal Agent Runtime sidecar for richer AI orchestration.
+OpenCanvas is a local-first AI canvas workspace built on the FacetWrite architecture. It combines a FigJam-like board, editable writing nodes, Agent cards, configurable tools, project history, provider settings, Knowledge, Memory, and an internal LangGraph-based Agent Runtime Gateway for richer AI orchestration.
 
 OpenCanvas benchmarks the familiar board experience first: an infinite canvas, nodes, edges, a floating toolbar, contextual object actions, and local board-file behavior. The product innovation is the Agent layer on top: tool orchestration plus human-AI collaboration context management, where the Agent understands selection, explicit mind chains, workflow stages, Role nodes, and approval state before acting.
 
@@ -14,7 +14,7 @@ OpenCanvas benchmarks the familiar board experience first: an infinite canvas, n
 
 - **Local-first canvas:** Vite/React frontend, Express API, SQLite/local file persistence, and local workspace files under `.facetwrite/`.
 - **Canvas V2:** React Flow-based board with an active floating toolbar, select/pan modes, multi-selection, document/note/reference/role nodes, semantic directed edges, free arrows, basic shapes, lightweight tables, local asset cards, workflow stages, Role suggestions, and session undo.
-- **Agent Runtime:** AgentBackend sidecar for Lead Agent/subagent orchestration, ToolUse bridge, runtime dashboard, Knowledge, Memory controls, and provider fallback.
+- **Agent Runtime:** LangGraph-compatible AgentBackend Gateway for Lead Agent/subagent orchestration, ToolUse bridge, runtime dashboard, Knowledge, Memory controls, and explicit runtime/model diagnostics.
 - **Human-in-the-loop writes:** Agent-originated Canvas changes create pending write requests first. Canvas content changes only after user confirmation or the same-run explicit approval path.
 - **Board direction:** OpenCanvas should evolve toward a PS/Figma-like board file that stores nodes, edges, assets, workflow state, Agent conversations, tool events, and write approvals.
 
@@ -36,7 +36,7 @@ The double-click VBS entry always forces local Runtime mode and lets the shell c
 
 ### Recommended: OpenCanvas + Agent Runtime
 
-Use this path for local development. OpenCanvas runs the frontend/backend, while the project-managed Python Gateway runs the Agent Runtime directly. Docker Compose remains an explicit isolation and deployment mode. The Agent Runtime Next.js frontend and nginx are not part of the default application path.
+Use this path for local development. OpenCanvas runs the frontend/backend, while the project-managed Python Gateway runs the Agent Runtime directly. The Gateway exposes the LangGraph-compatible runs API, with `lead_agent` registered from `modules/agent-runtime/backend/langgraph.json` and implemented by `deerflow.agents:make_lead_agent`. Docker Compose remains an explicit isolation and deployment mode. The Agent Runtime Next.js frontend and nginx are not part of the default application path.
 
 Prerequisites:
 
@@ -80,9 +80,30 @@ Explicit Docker mode uses `AGENT_RUNTIME_MODE=docker`, `AGENT_BACKEND_BASE_URL=h
 
 ```bash
 npm run agent-runtime:docker:up
+npm run agent-runtime:docker:up:local-images
 npm run agent-runtime:docker:status
 npm run agent-runtime:docker:down
 ```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start the managed local development stack through `start-facetwrite.ps1`. |
+| `npm run shell:dev` | Open the Electron development shell. |
+| `npm run dev:services` | Start only Vite and the Express API for narrow debugging. |
+| `npm run agent-runtime:up` | Start or refresh the project-managed local Agent Runtime Gateway. |
+| `npm run agent-runtime:status` | Read local Runtime ownership/status metadata. |
+| `npm run agent-runtime:down` | Stop only the project-owned local Runtime process. |
+| `npm run agent-runtime:doctor` | Check local Runtime prerequisites. |
+| `npm run typecheck` | Run TypeScript project checks. |
+| `npm test` | Run server and lightweight frontend tests with Node's test runner. |
+| `npm run test:frontend` | Run frontend-focused Node tests. |
+| `npm run shell:test` | Run Electron shell unit tests. |
+| `npm run test:e2e` | Run the full Playwright suite. |
+| `npm run test:e2e:canvas` | Run the Canvas Playwright suite. |
+| `npm run build` | Typecheck and build the Vite app. |
+| `npm run preview` | Preview the production build locally. |
 
 ### Low-Level Service Debugging
 
@@ -120,6 +141,7 @@ This command starts through `start-opencanvas-shell.vbs`, performs five real no-
 - [API](docs/API.md)
 - [Database](docs/DATABASE.md)
 - [Agent And Tools](docs/AGENT.md)
+- [Agent Runtime Runbook](docs/AGENT_RUNTIME_RUNBOOK.md)
 - [Decisions](docs/DECISIONS.md)
 - [Refactor Log](docs/REFACTOR_LOG.md)
 - [Maintainability And Concurrency Review Plan](docs/superpowers/plans/2026-06-07-maintainability-concurrency-review.md)

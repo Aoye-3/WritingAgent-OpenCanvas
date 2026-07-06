@@ -17,10 +17,10 @@ The app is currently an MVP focused on Agent-assisted writing workflows rather t
 - Start, Home, Projects, Agent Settings, AI Dashboard, Knowledge Settings, and Workspace views.
 - Local UI asset library under `public/assets/ui/`, with shared frontend references in `src/shared/brandAssets.ts`; see `docs/UI_ASSETS.md`.
 - AI Dashboard view for Agent Runtime status, authenticated sidecar visibility, Skills/MCP overview, Agent mapping, and ToolUse bridge progress.
-- Predefined Agent cards for blog posts, summaries, emails, lesson plans, report outlines, and rewrite/polish.
-- Agent settings for model, prompt, tools, knowledge, memory, and quick messages.
-- Provider support through DeepSeek, OpenAI, OpenAI-compatible, and mock fallback paths.
-- FacetWrite-owned Agent Runtime Docker sidecar integration as the preferred AI execution subsystem when enabled, with the TypeScript provider runtime kept as fallback. The current runtime implementation is the AgentBackend adapter.
+- Neutral ChatAgent profile with compatibility aliases for historical task-card ids.
+- Agent settings for prompt, tools, Skills, Knowledge, Memory, and MCP references. Model identity is selected per Thread from Model Config, not owned by Agent settings.
+- Provider support through Model Config entries for DeepSeek, OpenAI, OpenAI-compatible providers, and explicit local Mock demonstration only.
+- FacetWrite-owned Agent Runtime is the only real generation subsystem. The current runtime implementation is the AgentBackend adapter talking to a project-managed LangGraph-compatible Python Gateway; Docker is an explicit isolation/deployment mode.
 - SQLite-backed threads, messages, runs, prompt versions, output versions, tool events, Agent settings, Canvas nodes, and Canvas write requests.
 - Project management for local threads, including custom thread titles, recent-project rename, project-list rename, trash/restore, batch move to trash, and batch hard delete from trash.
 - Canvas write workflow where the Agent can propose writes, selected assistant-response snippets can be annotated/highlighted, and user confirmation applies the write through the existing approval backend before Canvas content changes.
@@ -30,7 +30,7 @@ The app is currently an MVP focused on Agent-assisted writing workflows rather t
 - Agent cards are predefined in code; the current UI edits settings for existing cards.
 - `web_search`, `knowledge_base`, and `canvas_write` are in progressive Agent Runtime ToolUse/MCP bridging; not every configured capability is proven consumed by the runtime yet.
 - Canvas write requests are internal ToolUse operations, not direct model-side mutations. The current UI may auto-submit approval after explicit user confirmation, but the Agent never writes Canvas silently.
-- Knowledge settings exist as a product surface, but full knowledge ingestion is outside the current documented MVP.
+- Knowledge settings and ingestion are current product surfaces; generation can use selected Knowledge Bases through FacetWrite-owned retrieval and the Agent Runtime bridge.
 
 ## Do Not Do Yet
 - Do not expose high-risk tools that mutate user data without explicit approval.

@@ -50,7 +50,7 @@ npm.cmd run agent-runtime:docker:down
 
 ## Security And Capability Boundary
 
-Local mode uses `deerflow.sandbox.local:LocalSandboxProvider` with `allow_host_bash: false`. It preserves Gateway auth/cookies/CSRF, `/api/runs/stream`, Skills and hot reload, stdio/HTTP/SSE MCP, Memory/SQLite/uploads/events, web search, providers, ACP, subagents, and the FacetWrite bridge tools `knowledge_base`, `clear_context`, and `canvas_write`.
+Local mode uses `deerflow.sandbox.local:LocalSandboxProvider` with `allow_host_bash: false`. It preserves Gateway auth/cookies/CSRF, `/api/runs/stream`, Skills and hot reload, stdio/HTTP/SSE MCP, Memory/SQLite/uploads/events, web search, providers, ACP, subagents, and the FacetWrite bridge tools `knowledge_base`, `clear_context`, `plan_clarification_submit`, `plan_revision_submit`, `artifact_stage`, and `canvas_write`.
 
 `canvas_write` directly commits low-risk create and append operations with stable IDs. New low-risk create nodes are placed by FacetWrite near the selected/target Canvas node, or near the current node group center when no anchor exists, while avoiding persisted node-rectangle overlap. Replace, range replacement, delete, and other destructive operations remain approval-gated.
 
@@ -65,7 +65,7 @@ Invoke-RestMethod http://127.0.0.1:<metadata-port>/health
 Invoke-RestMethod http://127.0.0.1:8837/api/agent-runtime/status
 ```
 
-Expected FacetWrite status includes `reachable:true`, authenticated runtime state, `runtimeProvider:"agent-backend"`, `deploymentMode:"local"`, and the LocalSandbox provider. Acceptance should also execute Python and Node Skills, a temporary stdio MCP, built-in tools, all four bridge tools, repeated no-Mock generations, and verify Canvas approval.
+Expected FacetWrite status includes `reachable:true`, authenticated runtime state, `runtimeProvider:"agent-backend"`, `deploymentMode:"local"`, and the LocalSandbox provider. Acceptance should also execute Python and Node Skills, a temporary stdio MCP, built-in tools, the active FacetWrite bridge tool set, repeated no-Mock generations, and verify Canvas approval.
 
 The maintained end-to-end local acceptance is:
 

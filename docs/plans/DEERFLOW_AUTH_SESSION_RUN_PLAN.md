@@ -1,5 +1,7 @@
 # DeerFlow Auth Session Run Plan
 
+> Historical/superseded plan. Current runtime auth/session behavior belongs to the AgentBackend adapter and `/api/agent-runtime/*` surfaces. `DEERFLOW_*`, `/api/deerflow/*`, and provider `deerflow` wording below is retained as historical migration context.
+
 Date: 2026-05-15
 Status: Implemented and validated against Docker sidecar
 

@@ -1,5 +1,7 @@
 # DeerFlow Docker Sidecar Run Plan
 
+> Historical/superseded plan. Docker remains available only through explicit `agent-runtime:docker:*` commands; the default runtime path is the project-managed local AgentBackend/LangGraph Gateway. Current APIs use `/api/agent-runtime/*` with compatibility aliases only for migration.
+
 Date: 2026-05-15
 Status: Partially validated. Docker sidecar health/status are online; protected DeerFlow run/config endpoints require auth setup before generation can complete.
 

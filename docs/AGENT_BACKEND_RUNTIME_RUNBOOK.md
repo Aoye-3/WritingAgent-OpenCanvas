@@ -1,5 +1,7 @@
 # AgentBackend Runtime Runbook
 
+Compatibility note: this file is retained for historical AgentBackend diagnostics. The maintained runtime entry point is [`AGENT_RUNTIME_RUNBOOK.md`](AGENT_RUNTIME_RUNBOOK.md); use `/api/agent-runtime/*` and `npm run agent-runtime:*` commands for current work.
+
 ## Plan Stream Diagnostics
 
 FacetWrite requests `messages-tuple`, `custom`, and `values`; the Gateway may emit LangGraph `messages` after normalizing `messages-tuple`. The adapter accepts both names, subgraph tuples, text blocks, and final `values`. Deltas are accumulated per message id and only the final visible AI message is returned.
@@ -8,7 +10,7 @@ Plan/Artifact bridge results preserve structured payloads through the private `_
 
 `PlanToolChoiceMiddleware` enforces one stage-specific submission per stable phase attempt. Intake exposes `plan_clarification_submit`, revision exposes `plan_revision_submit`, and approved execution exposes `artifact_stage` for the current step. The product `PlanOrchestrator` owns lifecycle state; the model never calls the legacy broad `plan_update` path. FacetWrite validates stage postconditions after the stream, so unsupported provider behavior pauses visibly instead of producing a false successful answer.
 
-Middleware changes require restarting the project-owned local Gateway with `npm run agent:down` followed by `npm run agent:up`; reusing an already-running Gateway does not reload Python modules.
+Middleware changes require restarting the project-owned local Gateway with `npm run agent-runtime:down` followed by `npm run agent-runtime:up`; reusing an already-running Gateway does not reload Python modules.
 
 For a stuck Plan run, verify model sync, Gateway HTTP/run status, the bridge envelope, persisted PlanRun/current step, `plan_executions` lease, and `run_activities` in that order. A new server process clears stale execution leases before waking running Plans.
 
@@ -27,7 +29,7 @@ If the UI trace says clarification is waiting but no option card appears, inspec
 
 If no pending row exists, verify that the Runtime payload has `type:"agent_clarification_requested"`, a non-empty `question`, and 2-3 structured `options`. When the only violation is too many options, the generation service should perform one clarification-only repair pass and ask the Agent to regenerate 2-3 options. Do not truncate model-authored options in Node or the frontend; if the repair also fails, surface the invalid payload as a diagnostic rather than hidden buttons. A waiting trace without an actionable payload should show a recovery draft affordance so the user is not trapped in a dead composer state.
 
-When a clarification answer resumes a task, confirm `requestContext.agentClarification` includes the stored clarification id and selected option, and that the next runtime request restores the original instruction, transient Skills, disabled Skills, runtime budget, and Canvas workflow from `resumeContext`. For long Skill tasks, the resumed run should re-enter progressive Canvas delivery and emit/update progress, outline, or body-draft nodes before finalization when evidence tools run.
+When a clarification answer resumes a task, confirm `requestContext.agentClarification` includes the stored clarification id and selected option, and that the next runtime request restores the original instruction, transient Skills, disabled Skills, runtime budget, and Canvas workflow metadata from `resumeContext`. That resumed request is still an `agent_intake` checkpoint decision, not execution. It must expose only `ask_clarification` and `agent_intake_complete`, with progressive Canvas delivery, file delivery, CanvasWrite, Plan execution tools, evidence tools, and long Canvas bodies withheld. If the runtime asks another valid `ask_clarification`, the run stays waiting. If it emits `agent_backend_agent_intake_complete`, FacetWrite immediately starts the execution run with the full delivery surface restored.
 
 For LangGraph-backed clarification, `finishReason:"clarification_required"` is not a resume credential. The stored clarification must include a complete `resumeContext.runtimeResume` with `runtimeThreadId`, `runtimeRunId`, and `interruptId`; `checkpointId` should be preserved when present. If the stream contains both `ask_clarification` and `runtime_interrupt` events for the same question, the Runtime interrupt version must win. See the maintained details in [`AGENT_RUNTIME_RUNBOOK.md`](AGENT_RUNTIME_RUNBOOK.md#langgraph-resume-clarifications).
 
@@ -41,7 +43,15 @@ Progressive long-task runs should expose all three delivery surfaces together:
 
 Do not debug missing final documents by removing `canvas_write`; that also removes the Agent's short-node delivery path. Instead, confirm the request context includes `facetwrite_canvas_write_policy`, and inspect bridge failures for `short_progress_content_too_long`, `short_progress_long_form_title`, or `short_progress_node_kind_not_allowed`. Those failures mean the Agent tried to use CanvasWrite for long-form or file-document content and must switch to `write_file` plus `present_files`.
 
-Skill scope guard is the exception: its first pass must expose only `ask_clarification`, with no progressive delivery, file tools, evidence tools, or CanvasWrite scope. After the user answers, the resumed run restores progressive delivery and the short-node CanvasWrite scope.
+Agent intake is the exception to progressive delivery. Before execution begins, intake must expose no progressive delivery, file tools, evidence tools, or CanvasWrite scope. Normal intake may use `ask_clarification` or `agent_intake_complete`; the historical `skill_scope_guard` first pass remains ask-only. After `agent_intake_complete`, the execution run restores progressive delivery and the short-node CanvasWrite scope.
+
+If a post-clarification run appears stuck, check for these boundaries before tuning Canvas delivery:
+
+- `facetwrite_clarification_phase:"agent_intake"` or `"clarification_guard"` means the model is still deciding whether intake is complete.
+- `facetwrite_intake_phase:"intake"` means CanvasWrite, `write_file`, `present_files`, evidence tools, and execution budgets should be absent.
+- `agent_backend_agent_intake_complete` should clear UI waiting state and be followed by a new execution run.
+- `agentIntake.phase:"execution"` or `agentIntake.completed:true` means the request may restore progressive Canvas delivery, file delivery, and CanvasWrite.
+- Canvas context in intake should contain only metadata such as selected node id, node id/kind/title, workflow, and delivery id. If `selectedNode.content`, reference body text, Markdown bodies, previews, or file text appear in intake context, the sanitizer boundary has regressed.
 
 When diagnosing perceived stalls after Canvas updates, separate progress commits from terminal commits. `canvas_delivery_research_committed` and `canvas_delivery_body_checkpoint_committed` are lightweight progress events: the frontend applies their node snapshot immediately and debounces the expensive Thread-state refresh. Their payload should include `evidenceCount`, `bodyDraftWriteCount`, delivery limits, and `nextPhaseHint` so the drawer can show a phase-specific message. `canvas_delivery_body_final_committed`, `canvas_delivery_file_document_committed`, `canvas_delivery_sources_committed`, and `canvas_delivery_failed_summary_committed` are terminal/strong-sync events and should refresh immediately. If the UI still feels idle after a progress commit, inspect the next Runtime event or model call before treating the debounce as a Runtime stall.
 

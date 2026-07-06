@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-05: Agent Intake Is Isolated From Execution Delivery
+
+Decision: Split ordinary Agent clarification into an explicit `agent_intake` phase before execution. Intake exposes only side-effect-free decision tools: normal Agent intake may call `ask_clarification` or `agent_intake_complete`, while the legacy `skill_scope_guard` first pass remains ask-only for compatibility. Intake requests strip progressive Canvas delivery, Markdown file delivery, CanvasWrite policy, execution budgets, file tools, Plan execution tools, and full Canvas body content. After a user answers a LangGraph-backed clarification, FacetWrite resumes the same checkpoint with `Command(resume=...)`; the resumed checkpoint must decide whether to ask again or call `agent_intake_complete`. Only after that completion event does FacetWrite start an execution run with the full delivery tool surface.
+
+Reason: The recurring stall was not caused by the number of questions. It happened when a user answered a clarification and the next runtime request still mixed "decide whether intake is done" with execution/canvas delivery context. That let the model see Canvas/write tools and large Canvas bodies during the clarification checkpoint, which made state transitions ambiguous and could leave the UI waiting for the next model/tool decision after a Canvas-related context leak. LangGraph resume semantics rerun the interrupted node, so side effects and delivery tools must be excluded from the intake node.
+
+Impact: `server/services/generation/agentIntakePolicy.ts` owns phase detection, tool refs, execution promotion, and defensive Canvas sanitization. `agent_intake_complete` is an internal Agent Runtime tool that emits only `agent_backend_agent_intake_complete`; it must not write files, mutate Canvas, submit Plans, or present artifacts. Intake Canvas context is metadata-only: selected ids, node id/kind/title, workflow, and delivery ids are allowed; `content`, `body`, `markdown`, `preview`, raw text, file bodies, and reference bodies are removed before frontend submission and again before backend runtime request construction. Plan intake/revision/preflight/execution remains product-owned Plan workflow and does not enter generic Agent intake. Tests must cover intake allowed tools, resume checkpoint preservation, execution tool restoration after `agent_intake_complete`, Canvas-content stripping, and waiting-state reset when runtime emits non-waiting progress, model/token progress, intake completion, or final output.
+
 ## 2026-07-04: Markdown Preview Uses Real File Documents Before Fallback
 
 Decision: Treat Runtime-reported `/mnt/user-data/outputs/*.md` paths from `write_file` and `present_files` as the primary Markdown delivery source. If runtime artifact archiving fails but the current Thread outputs directory already contains a readable Markdown file for the reported virtual path, FacetWrite still creates the `file_document` node for that real path. Server fallback Markdown is allowed only when no real Markdown path exists or all reported Markdown files are unreadable.
@@ -383,7 +391,9 @@ Decision: Integrate AgentBackend as a sidecar Agent runtime and use its Lead Age
 
 Reason: FacetWrite needs mature Agent runtime capability without rebuilding LangGraph-style orchestration, subagents, skill/tool filtering, and streaming semantics from scratch.
 
-Impact: FacetWrite keeps ownership of product data, frontend interaction, SQLite persistence, Canvas writes, and approval flows. AgentBackend runtime events are adapted into FacetWrite run records, and the TypeScript run loop remains as a fallback during migration.
+Impact: FacetWrite keeps ownership of product data, frontend interaction, SQLite persistence, Canvas writes, and approval flows. AgentBackend runtime events are adapted into FacetWrite run records, and the TypeScript run loop remains as compatibility code during migration.
+
+Update 2026-07-06: Superseded for fallback semantics by the Agent Runtime-only decisions from 2026-06-11 and later. Normal runtime/model failure returns explicit diagnostics; Mock output requires `FACETWRITE_MOCK_FALLBACK_ENABLED=true`.
 
 ## 2026-05-15: AgentBackend Config Visibility Is Read-only First
 Decision: Expose AgentBackend runtime status, skills, and MCP server overview through FacetWrite as read-only observability before adding write controls.
@@ -445,13 +455,16 @@ Decision: Use Electron as a Windows source-development application shell around 
 Reason: The immediate goal is an independent application window with startup feedback, Vite HMR, and window-bound service lifecycle without prematurely designing an installer or native Agent Runtime.
 
 Impact: The shell uses fixed development ports `17776` and `17777`, starts Docker Desktop when available, owns only services it starts, and preserves complete compatible pre-existing Agent Runtime services. The planned Vite port `3100` was rejected because Windows dynamically reserved `3007-3106`. Docker Desktop remains required. Packaging, automatic updates, and a no-Docker local Runtime are deferred.
+
+Update 2026-07-06: Superseded for Runtime startup by `2026-06-12: Project-Managed Local Gateway Is The Default Runtime`. The double-click App Shell now forces local mode, does not start Docker, and uses launcher-managed dynamic Gateway ports unless explicitly pinned.
+
 ## 2026-06-12: Project-Managed Local Gateway Is The Default Runtime
 
 Decision: Default to `AGENT_RUNTIME_MODE=local`, running the Agent Runtime Gateway with project-managed Python 3.12 and `uv`; retain Docker Compose as an explicit isolation/deployment mode and support user-managed external Gateways.
 
 Reason: Core Agent capabilities live in the Python Gateway, not the Runtime Next.js frontend or nginx. Managing that Gateway directly removes the mandatory Docker Desktop startup dependency without rewriting the Agent protocol or dropping Skills, MCP, Memory, subagents, auth, SSE, or the FacetWrite bridge.
 
-Impact: Local mode uses `127.0.0.1:8001`, shared `.deer-flow` state, `LocalSandboxProvider`, and `allow_host_bash:false`. Docker remains required for `AioSandboxProvider`, Kubernetes provisioning, Docker socket workflows, and Linux-container Bash Skills. Status surfaces expose deployment mode and sandbox provider.
+Impact: Local mode uses a launcher-managed `127.0.0.1` Gateway port, shared `.deer-flow` state, `LocalSandboxProvider`, and `allow_host_bash:false`. Direct low-level debugging may still pin `AGENT_RUNTIME_PORT` or fall back to `127.0.0.1:8001`. Docker remains required for `AioSandboxProvider`, Kubernetes provisioning, Docker socket workflows, and Linux-container Bash Skills. Status surfaces expose deployment mode and sandbox provider.
 
 The Windows double-click entry `start-opencanvas-shell.vbs` is a stricter local-only contract: it overrides stale parent mode variables, never invokes Docker, and is covered by `npm.cmd run acceptance:local-runtime`. The acceptance must start from that VBS, perform five real no-Mock generations, execute Skill/Web Search, observe Memory persistence, preserve Canvas approval, and reclaim owned processes.
 

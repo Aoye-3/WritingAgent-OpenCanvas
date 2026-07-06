@@ -1,5 +1,7 @@
 # DeerFlow Runtime Live Validation Plan
 
+> Historical/superseded plan. Current validation truth is `npm.cmd run acceptance:local-runtime` against the project-managed AgentBackend/LangGraph Gateway, with `/api/agent-runtime/*` status and provider `agent-backend`. Old `/api/deerflow/*`, `DEERFLOW_*`, and provider `deerflow` references are migration history only.
+
 Date: 2026-05-15
 Status: Runtime observability implemented; real sidecar validation blocked by local uv cache permission error
 
