@@ -16,6 +16,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 - `DATA_STORAGE_SYSTEM.md`: user/runtime storage, development/sample data, configuration storage, and Harness source-update data boundaries.
 - `SECURITY.md`: local secret handling, tool permissions, Agent Runtime auth, source update boundary, and runtime redaction rules.
 - `DECISIONS.md`: dated technical decisions and their impacts.
+- `decisions/ADR-2026-07-06-layer-agent-budget-gates.md`: ADR for layered Agent Runtime budget gates, finalization tool narrowing, and Canvas terminal-delivery semantics.
 - `decisions/ADR-2026-07-06-use-source-git-updates-for-first-stage-harness-updates.md`: ADR for first-stage source Git Harness updates and protected local user data.
 - `REFACTOR_LOG.md`: review results, completed work, open TODOs, and next priority checks.
 - `superpowers/plans/2026-06-07-maintainability-concurrency-review.md`: executable maintainability, extensibility, decoupling, test-gap, and concurrency review plan.

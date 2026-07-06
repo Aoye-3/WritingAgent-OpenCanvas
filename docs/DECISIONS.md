@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-06: Agent Budget Gates Narrow Tools Before The LangGraph Fuse
+
+Decision: Keep the expanded LangGraph `config.recursion_limit` as the runaway-loop fuse, but make FacetWrite middleware the normal budget-stop path. When evidence, model-call, or step-reserve budgets reach synthesis territory, middleware emits `synthesis_gate`, appends a hidden synthesis notice, narrows available tools to finalization tools, and blocks later exploration tool calls or internal tool protocol with a finalization message. Completion evaluation treats final text, final Body, file document, committed Canvas mutation/node events, and committed Artifacts as terminal delivery; Canvas research/progress nodes and `Body draft` checkpoints remain recoverable intermediate artifacts only.
+
+Reason: Advisory-only budget notices let the Agent continue tool loops until LangGraph raised `GraphRecursionError`, which made budget exhaustion look like a runtime crash. Checkpoint-only Canvas delivery could also be mistaken for completion even though the final deliverable was not committed.
+
+Impact: `PlanToolChoiceMiddleware` owns budget-phase tool narrowing and exposes `budget_phase`, `allowed`, and `blocked_tool_calls` telemetry. `completionEvaluator` owns terminal-delivery classification and must not let body checkpoints complete a run by themselves. The 2026-07-04 recursion-budget decision remains valid for the larger hard guard, but its advisory-only middleware impact is superseded. Detailed ADR: `docs/decisions/ADR-2026-07-06-layer-agent-budget-gates.md`.
+
 ## 2026-07-06: First-Stage Harness Updates Use Source Git
 
 Decision: First-stage Harness/App Shell updates use the current source checkout and the allowlisted `origin/main` channel. Electron/App Shell owns `git fetch --prune origin`, preview, fast-forward apply, dependency install, service shutdown, and restart orchestration. Express may expose update status or preview data later, but must not run Git or overwrite its own running code in-process. Renderer UI calls Shell IPC only.
@@ -30,7 +38,7 @@ Decision: Keep `facetwrite_recursion_limit` as the FacetWrite advisory budget th
 
 Reason: LangGraph treats `recursion_limit` as a maximum graph-step safety clamp, not as a resumable business budget. Using the low profile's `80` directly as the top-level limit caused long batch-delivery runs to fail during final file writing before hitting a normal stop condition.
 
-Impact: The TypeScript AgentBackend adapter and Runtime Gateway must preserve `facetwrite_recursion_limit` in context/configurable fields for middleware `synthesis_gate` decisions, while expanding the top-level LangGraph limit to the hard guard. Budget middleware may emit telemetry and hidden final-synthesis reminders, but it must not clear tools, force failure, or treat the advisory threshold as completion. `GraphRecursionError` remains a failed but recoverable run state.
+Impact: The TypeScript AgentBackend adapter and Runtime Gateway must preserve `facetwrite_recursion_limit` in context/configurable fields for middleware `synthesis_gate` decisions, while expanding the top-level LangGraph limit to the hard guard. `GraphRecursionError` remains a failed but recoverable run state. The advisory-only middleware portion of this decision is superseded by `docs/decisions/ADR-2026-07-06-layer-agent-budget-gates.md`, which makes middleware tool narrowing the normal budget-stop path.
 
 ## 2026-07-03: Agent Clarification Uses LangGraph Checkpoint Resume
 
@@ -54,7 +62,7 @@ Decision: Treat runtime budget gates as advisory synthesis signals and internal-
 
 Reason: The previous hard-stop behavior made budget notices and internal-output redaction look like broken task chains. Budget gates were intended to nudge synthesis, but downstream completion logic treated generic waiting timeline entries as user clarification and treated redacted internal text as runtime failure. That caused runs to stall with "Answer the pending clarification before completion" even when the Agent was only synthesizing, waiting for a model response, or had already produced Canvas/file delivery evidence.
 
-Impact: `completionEvaluator` owns this distinction. Tests should cover ordinary waiting timeline entries, stale clarification followed by tool/Canvas progress, budget synthesis with final text, empty assistant text with durable delivery, and internal-output blocking without runtime failure. Frontend code should render choice cards from persisted valid clarifications first and use timeline inference only as fallback. Runtime middleware may continue emitting budget notices and telemetry, but it must not clear tools, force a second model pass, or throw solely because the model continues after a notice.
+Impact: `completionEvaluator` owns this distinction. Tests should cover ordinary waiting timeline entries, stale clarification followed by tool/Canvas progress, budget synthesis with final text, empty assistant text with durable delivery, and internal-output blocking without runtime failure. Frontend code should render choice cards from persisted valid clarifications first and use timeline inference only as fallback. The advisory-only budget middleware behavior in this entry is superseded by `docs/decisions/ADR-2026-07-06-layer-agent-budget-gates.md`; middleware now narrows tools and blocks exploration after the budget notice while still avoiding runtime failure for redaction-only diagnostics.
 
 ## 2026-07-02: Composer Thinking UI Uses Shared Model Capability Detection
 
