@@ -218,7 +218,7 @@ def test_keeps_evidence_tools_after_total_budget_reached():
     assert [tool.name for tool in captured["request"].tools] == ["web_search", "web_fetch", "read_file", "canvas_write"]
 
 
-def test_adds_budget_notice_after_evidence_budget_reached_without_removing_tools():
+def test_adds_budget_notice_after_evidence_budget_reached_and_removes_exploration_tools():
     middleware = PlanToolChoiceMiddleware()
     captured = {}
     messages = [
@@ -241,9 +241,9 @@ def test_adds_budget_notice_after_evidence_budget_reached_without_removing_tools
         lambda model_request: captured.setdefault("request", model_request),
     )
 
-    assert [tool.name for tool in captured["request"].tools] == ["web_search", "web_fetch", "read_file", "canvas_write"]
+    assert [tool.name for tool in captured["request"].tools] == ["canvas_write"]
     assert "runtime budget notice" in captured["request"].messages[-1].content
-    assert "stop calling tools now" not in captured["request"].messages[-1].content
+    assert "Do not call additional research or workspace inspection tools" in captured["request"].messages[-1].content
 
 
 def test_emits_synthesis_gate_event_after_evidence_budget_reached(monkeypatch: pytest.MonkeyPatch):
@@ -310,7 +310,7 @@ def test_emits_synthesis_gate_when_runtime_step_reserve_is_reached(monkeypatch: 
     assert events[0]["estimated_steps_used"] == 11
 
 
-def test_runtime_budget_file_delivery_keeps_tools_and_adds_delivery_notice():
+def test_runtime_budget_file_delivery_keeps_finalization_tools_and_adds_delivery_notice():
     middleware = PlanToolChoiceMiddleware()
     captured = {}
     messages = [
@@ -334,9 +334,50 @@ def test_runtime_budget_file_delivery_keeps_tools_and_adds_delivery_notice():
         lambda model_request: captured.setdefault("request", model_request),
     )
 
-    assert [tool.name for tool in captured["request"].tools] == ["web_search", "read_file", "write_file", "present_files"]
+    assert [tool.name for tool in captured["request"].tools] == ["write_file", "present_files"]
     assert "complete user deliverable" in captured["request"].messages[-1].content
     assert "Do not write a delivery note" in captured["request"].messages[-1].content
+
+
+def test_runtime_budget_allows_file_finalization_tool_calls_after_notice(monkeypatch: pytest.MonkeyPatch):
+    middleware = PlanToolChoiceMiddleware()
+    events = []
+    messages = [
+        HumanMessage(content="Write a complete report"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+    ]
+
+    def handler(model_request):
+        assert [tool.name for tool in model_request.tools] == ["write_file", "present_files"]
+        return AIMessage(content="", tool_calls=[{
+            "id": "call_write",
+            "name": "write_file",
+            "args": {"path": "/mnt/user-data/outputs/report.md", "content": "Report"},
+            "type": "tool_call",
+        }])
+
+    monkeypatch.setattr("langgraph.config.get_stream_writer", lambda: events.append)
+
+    result = middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            allowed_tool_refs=["web_search", "write_file", "present_files"],
+            tool_state={"web_search": True, "write_file": True, "present_files": True},
+            evidence_tool_limit=1,
+            evidence_tools=["web_search"],
+            progressive_enabled=True,
+            force_synthesis_after_evidence=True,
+            markdown_file_delivery_required=True,
+        ),
+        handler,
+    )
+
+    assert result.tool_calls[0]["name"] == "write_file"
+    synthesis_events = [event for event in events if event["type"] == "synthesis_gate"]
+    assert synthesis_events[-1]["continued_after_notice"] is True
+    assert synthesis_events[-1]["allowed"] is True
+    assert synthesis_events[-1]["blocked_tool_calls"] is False
 
 
 def test_runtime_budget_returns_after_successful_present_files_without_notice_or_gate(monkeypatch: pytest.MonkeyPatch):
@@ -428,7 +469,7 @@ def test_runtime_budget_does_not_skip_gate_when_error_follows_present_files(monk
     assert events[0]["type"] == "synthesis_gate"
 
 
-def test_adds_budget_notice_near_model_call_budget_without_removing_tools():
+def test_adds_budget_notice_near_model_call_budget_and_removes_exploration_tools():
     middleware = PlanToolChoiceMiddleware()
     captured = {}
     messages = [
@@ -453,7 +494,7 @@ def test_adds_budget_notice_near_model_call_budget_without_removing_tools():
         lambda model_request: captured.setdefault("request", model_request),
     )
 
-    assert [tool.name for tool in captured["request"].tools] == ["web_search", "read_file", "canvas_write"]
+    assert [tool.name for tool in captured["request"].tools] == ["canvas_write"]
     assert "model budget nearly exhausted" in captured["request"].messages[-1].content
 
 
@@ -688,7 +729,7 @@ def test_does_not_force_another_artifact_after_artifact_stage_returns():
     assert captured["request"].tool_choice is None
 
 
-def test_budget_notice_allows_model_to_keep_requesting_tools(monkeypatch: pytest.MonkeyPatch):
+def test_budget_notice_blocks_model_from_continuing_exploration_tools(monkeypatch: pytest.MonkeyPatch):
     middleware = PlanToolChoiceMiddleware()
     calls = []
     events = []
@@ -719,16 +760,18 @@ def test_budget_notice_allows_model_to_keep_requesting_tools(monkeypatch: pytest
         handler,
     )
 
-    assert calls == [[tool.name for tool in request(phase="chat").tools]]
-    assert result.tool_calls[0]["name"] == "web_search"
+    assert calls == [["canvas_write"]]
+    assert not getattr(result, "tool_calls", None)
+    assert "budget gate" in result.content
     synthesis_events = [event for event in events if event["type"] == "synthesis_gate"]
     assert [event["second_handler"] for event in synthesis_events] == [False, False]
     assert synthesis_events[-1]["continued_after_notice"] is True
-    assert synthesis_events[-1]["allowed"] is True
+    assert synthesis_events[-1]["allowed"] is False
+    assert synthesis_events[-1]["blocked_tool_calls"] is True
     assert synthesis_events[-1]["contains_tool_call"] is True
 
 
-def test_budget_notice_does_not_fail_if_model_still_requests_tools():
+def test_budget_notice_returns_finalization_message_if_model_still_requests_exploration_tools():
     middleware = PlanToolChoiceMiddleware()
     messages = [
         HumanMessage(content="Research this"),
@@ -755,10 +798,11 @@ def test_budget_notice_does_not_fail_if_model_still_requests_tools():
         handler,
     )
 
-    assert result.tool_calls[0]["name"] == "web_search"
+    assert not getattr(result, "tool_calls", None)
+    assert "budget gate" in result.content
 
 
-def test_budget_notice_allows_model_result_when_model_emits_text_tool_protocol(monkeypatch: pytest.MonkeyPatch):
+def test_budget_notice_blocks_model_result_when_model_emits_text_tool_protocol(monkeypatch: pytest.MonkeyPatch):
     middleware = PlanToolChoiceMiddleware()
     calls = []
     events = []
@@ -784,14 +828,16 @@ def test_budget_notice_allows_model_result_when_model_emits_text_tool_protocol(m
         handler,
     )
 
-    assert calls == [[tool.name for tool in request(phase="chat").tools]]
-    assert result.content == '< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">'
+    assert calls == [["canvas_write"]]
+    assert result.content != '< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">'
+    assert "budget gate" in result.content
     synthesis_events = [event for event in events if event["type"] == "synthesis_gate"]
     assert [event["second_handler"] for event in synthesis_events] == [False, False]
     assert synthesis_events[-1]["contains_internal_runtime_protocol"] is True
+    assert synthesis_events[-1]["allowed"] is False
 
 
-def test_budget_notice_does_not_fail_if_model_still_emits_text_tool_protocol():
+def test_budget_notice_returns_finalization_message_if_model_still_emits_text_tool_protocol():
     middleware = PlanToolChoiceMiddleware()
     messages = [
         HumanMessage(content="Research this"),
@@ -813,4 +859,5 @@ def test_budget_notice_does_not_fail_if_model_still_emits_text_tool_protocol():
         handler,
     )
 
-    assert result.content == '< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">'
+    assert result.content != '< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">'
+    assert "budget gate" in result.content

@@ -36,7 +36,7 @@ export function evaluateRunCompletion(input: {
     return verdict("failed", reasons, missingRequirements);
   }
 
-  const durableDelivery = hasDurableDelivery(events);
+  const durableDelivery = hasTerminalDelivery(events);
 
   if (!text && !durableDelivery) {
     reasons.push("No final user-facing answer was produced.");
@@ -155,14 +155,19 @@ function requiresDurableCanvasCommit(payload: GenerateRequest) {
     || payload.orchestrationPolicy?.deliveryPolicy === "canvas_required";
 }
 
-function hasDurableDelivery(events: ToolEventRecord[]) {
-  return events.some((event) => (
-    /(?:^|_)canvas_.*(?:committed|approved)$/.test(event.eventType)
-    || /(?:^|_)artifact_(?:committed|staged)$/.test(event.eventType)
-    || event.eventType === "canvas_delivery_body_final_committed"
-    || event.eventType === "canvas_delivery_outline_committed"
-    || event.eventType === "canvas_delivery_body_checkpoint_committed"
-  ));
+function hasTerminalDelivery(events: ToolEventRecord[]) {
+  return events.some((event) => {
+    const payload = record(event.payload);
+    const payloadEventType = string(payload.eventType) || string(payload.type);
+    return isTerminalDeliveryEvent(event.eventType) || isTerminalDeliveryEvent(payloadEventType);
+  });
+}
+
+function isTerminalDeliveryEvent(eventType: string) {
+  return eventType === "canvas_delivery_body_final_committed"
+    || eventType === "canvas_delivery_file_document_committed"
+    || /(?:^|_)canvas_(?:mutation|node)_committed$/.test(eventType)
+    || /(?:^|_)artifact_committed$/.test(eventType);
 }
 
 function hasTodoCompletionReminderCap(events: ToolEventRecord[]) {

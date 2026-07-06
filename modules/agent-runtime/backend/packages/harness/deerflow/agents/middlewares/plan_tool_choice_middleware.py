@@ -19,6 +19,8 @@ _INTERNAL_RUNTIME_PROTOCOL_PATTERNS = (
     re.compile(r"\binvoke\s+name\s*=\s*[\"']?(?:readfile|read_file|webfetch|web_fetch|websearch|web_search|bash|grep|glob|ls)\b[\s\S]{0,160}\bDSML\b", re.IGNORECASE),
     re.compile(r"\bDSML\b[\s\S]{0,160}\bparameter\s+name\s*=\s*[\"']?(?:url|filepath|file_path|path|maxcontentlength|max_content_length|query)\b", re.IGNORECASE),
 )
+_BUDGET_FINAL_CANVAS_TOOL_NAMES = {"canvas_write"}
+_BUDGET_FILE_FINALIZATION_TOOL_NAMES = {"write_file", "present_files"}
 
 
 class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
@@ -138,10 +140,12 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         if PlanToolChoiceMiddleware._has_successful_tool_result_without_later_error(request, "present_files"):
             return request
 
+        budget_phase = "evidence_exhausted" if evidence_exhausted else "model_exhausting" if model_exhausting else "recursion_reserve_reached"
         reason = "evidence budget reached" if evidence_exhausted else "model budget nearly exhausted" if model_exhausting else "runtime step reserve reached"
         PlanToolChoiceMiddleware._emit_synthesis_event({
             "type": "synthesis_gate",
             "phase": "budget_synthesis",
+            "budget_phase": budget_phase,
             "reason": reason,
             "completed_evidence_tools": completed_evidence_tools,
             "evidence_limit": evidence_limit,
@@ -156,6 +160,11 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         })
         file_delivery_required = context.get("facetwrite_markdown_file_delivery_required") is True
         file_presented = PlanToolChoiceMiddleware._has_successful_tool_result_without_later_error(request, "present_files")
+        finalization_tools = PlanToolChoiceMiddleware._budget_finalization_tool_names(context)
+        narrowed_tools = [
+            tool for tool in request.tools
+            if PlanToolChoiceMiddleware._tool_name(tool) in finalization_tools
+        ]
         if file_delivery_required and not file_presented:
             reminder = HumanMessage(
                 content=(
@@ -166,20 +175,20 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
                     "Markdown deliverable to `/mnt/user-data/outputs/*.md` with write_file, and call present_files for "
                     "that file. Do not write a delivery note, skill-loading note, "
                     "clarification question, or file-save status as the file content. Keep the chat response concise "
-                    "only after the complete file is presented."
+                    "only after the complete file is presented. Do not call additional research or workspace inspection tools."
                 ),
                 additional_kwargs={"hide_from_ui": True, "facetwrite_budget_notice": True},
             )
             messages = list(request.messages)
             if not any(isinstance(message, HumanMessage) and message.additional_kwargs.get("facetwrite_budget_notice") for message in messages[-3:]):
                 messages.append(reminder)
-            return request.override(messages=messages)
+            return request.override(messages=messages, tools=narrowed_tools)
 
         reminder = HumanMessage(
             content=(
                 "FacetWrite runtime budget notice: the budget is reached or nearly reached. "
                 f"Reason: {reason}. Prefer producing the final user-facing answer from the evidence already gathered. "
-                "If more tool work is still necessary for task completion, keep it minimal. Include concrete conclusions, "
+                "Do not call additional research or workspace inspection tools. Include concrete conclusions, "
                 "any caveats, and source/file references that are already available."
             ),
             additional_kwargs={"hide_from_ui": True, "facetwrite_budget_notice": True},
@@ -187,7 +196,7 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         messages = list(request.messages)
         if not any(isinstance(message, HumanMessage) and message.additional_kwargs.get("facetwrite_budget_notice") for message in messages[-3:]):
             messages.append(reminder)
-        return request.override(messages=messages)
+        return request.override(messages=messages, tools=narrowed_tools)
 
     @staticmethod
     def _has_recent_budget_notice(request: ModelRequest) -> bool:
@@ -196,6 +205,36 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             and message.additional_kwargs.get("facetwrite_budget_notice")
             for message in request.messages[-4:]
         )
+
+    @staticmethod
+    def _budget_finalization_tool_names(context: object) -> set[str]:
+        names = set(_BUDGET_FINAL_CANVAS_TOOL_NAMES)
+        if isinstance(context, dict) and context.get("facetwrite_markdown_file_delivery_required") is True:
+            names.update(_BUDGET_FILE_FINALIZATION_TOOL_NAMES)
+        return names
+
+    @staticmethod
+    def _budget_allows_result_tools(request: ModelRequest, result: ModelCallResult) -> bool:
+        runtime = getattr(request, "runtime", None)
+        context = getattr(runtime, "context", None)
+        allowed = PlanToolChoiceMiddleware._budget_finalization_tool_names(context)
+        return all(name in allowed for name in PlanToolChoiceMiddleware._result_tool_call_names(result))
+
+    @staticmethod
+    def _result_tool_call_names(result: ModelCallResult) -> list[str]:
+        names: list[str] = []
+        for message in PlanToolChoiceMiddleware._result_messages(result):
+            for tool_call in getattr(message, "tool_calls", None) or []:
+                if isinstance(tool_call, dict) and isinstance(tool_call.get("name"), str):
+                    names.append(tool_call["name"])
+        return names
+
+    @staticmethod
+    def _budget_finalization_message() -> AIMessage:
+        return AIMessage(content=(
+            "The runtime budget gate has been reached. I will stop requesting additional tools and provide the final "
+            "user-facing answer from the evidence already gathered."
+        ))
 
     @staticmethod
     def _emit_synthesis_event(payload: dict[str, Any]) -> None:
@@ -376,6 +415,11 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         if PlanToolChoiceMiddleware._has_recent_budget_notice(prepared) and (
             contains_tool_call or contains_internal_protocol
         ):
+            allowed = (
+                contains_tool_call
+                and not contains_internal_protocol
+                and PlanToolChoiceMiddleware._budget_allows_result_tools(prepared, result)
+            )
             PlanToolChoiceMiddleware._emit_synthesis_event({
                 "type": "synthesis_gate",
                 "phase": "budget_synthesis",
@@ -383,10 +427,13 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
                 "second_handler": False,
                 "entered_second_handler": False,
                 "continued_after_notice": True,
-                "allowed": True,
+                "allowed": allowed,
+                "blocked_tool_calls": contains_tool_call and not allowed,
                 "contains_tool_call": contains_tool_call,
                 "contains_internal_runtime_protocol": contains_internal_protocol,
             })
+            if not allowed:
+                return PlanToolChoiceMiddleware._budget_finalization_message()
         return result
 
     @override
@@ -402,6 +449,11 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         if PlanToolChoiceMiddleware._has_recent_budget_notice(prepared) and (
             contains_tool_call or contains_internal_protocol
         ):
+            allowed = (
+                contains_tool_call
+                and not contains_internal_protocol
+                and PlanToolChoiceMiddleware._budget_allows_result_tools(prepared, result)
+            )
             PlanToolChoiceMiddleware._emit_synthesis_event({
                 "type": "synthesis_gate",
                 "phase": "budget_synthesis",
@@ -409,8 +461,11 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
                 "second_handler": False,
                 "entered_second_handler": False,
                 "continued_after_notice": True,
-                "allowed": True,
+                "allowed": allowed,
+                "blocked_tool_calls": contains_tool_call and not allowed,
                 "contains_tool_call": contains_tool_call,
                 "contains_internal_runtime_protocol": contains_internal_protocol,
             })
+            if not allowed:
+                return PlanToolChoiceMiddleware._budget_finalization_message()
         return result

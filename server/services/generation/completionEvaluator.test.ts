@@ -144,6 +144,39 @@ test("completion evaluator allows runtime budget gates to complete with final te
   assert.match(verdict.reasons.join(" "), /budget gate/);
 });
 
+test("completion evaluator keeps checkpoint-only Canvas delivery partial", () => {
+  const verdict = evaluateRunCompletion({
+    payload: basePayload,
+    text: "",
+    events: [{
+      eventType: "canvas_delivery_body_checkpoint_committed",
+      payload: { title: "Body draft", status: "committed" }
+    }],
+    finishReason: "agent_backend_completed"
+  });
+
+  assert.equal(verdict.status, "partial");
+  assert.match(verdict.missingRequirements[0] ?? "", /final answer|clarification/);
+});
+
+test("completion evaluator keeps budget-gated checkpoint-only Canvas delivery partial", () => {
+  const verdict = evaluateRunCompletion({
+    payload: basePayload,
+    text: "",
+    events: [
+      { eventType: "agent_backend_synthesis_gate", payload: { type: "synthesis_gate", reason: "budget_synthesis" } },
+      {
+        eventType: "canvas_delivery_body_checkpoint_committed",
+        payload: { title: "Body draft", status: "committed" }
+      }
+    ],
+    finishReason: "agent_backend_completed"
+  });
+
+  assert.equal(verdict.status, "partial");
+  assert.match(verdict.missingRequirements[0] ?? "", /final answer|clarification/);
+});
+
 test("completion evaluator completes empty assistant text when durable delivery exists", () => {
   const verdict = evaluateRunCompletion({
     payload: basePayload,
@@ -151,6 +184,20 @@ test("completion evaluator completes empty assistant text when durable delivery 
     events: [{
       eventType: "canvas_delivery_file_document_committed",
       payload: { title: "Report", status: "committed" }
+    }],
+    finishReason: "agent_backend_completed"
+  });
+
+  assert.equal(verdict.status, "completed");
+});
+
+test("completion evaluator completes empty assistant text when final body delivery exists", () => {
+  const verdict = evaluateRunCompletion({
+    payload: basePayload,
+    text: "",
+    events: [{
+      eventType: "canvas_delivery_body_final_committed",
+      payload: { title: "Body", status: "committed" }
     }],
     finishReason: "agent_backend_completed"
   });

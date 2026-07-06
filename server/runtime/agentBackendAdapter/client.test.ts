@@ -592,22 +592,32 @@ test("maps thinking/tool_choice stream errors to actionable messages", async () 
 
 test("surfaces LLM provider lifecycle custom events without creating tool events", async () => {
   const statuses: string[] = [];
-  const signals: string[] = [];
+  const signals: Array<{ type: string; payload?: Record<string, unknown> }> = [];
   const body = [
     'event: custom\ndata: {"type":"llm_call_start","attempt":1,"max_attempts":3,"phase":"provider_call"}\n\n',
     'event: custom\ndata: {"type":"llm_call_end","attempt":1,"max_attempts":3,"elapsed_ms":1200,"phase":"provider_call"}\n\n',
-    'event: custom\ndata: {"type":"synthesis_gate","phase":"budget_synthesis","reason":"model returned tools after budget synthesis notice","second_handler":true}\n\n',
+    'event: custom\ndata: {"type":"synthesis_gate","phase":"budget_synthesis","budget_phase":"evidence_exhausted","reason":"model returned tools after budget synthesis notice","second_handler":true,"blocked_tool_calls":true,"allowed":false,"contains_tool_call":true}\n\n',
     'event: messages-tuple\ndata: [{"type":"ai","content":"Done"}]\n\n'
   ].join("");
 
   const result = await runWithBody(body, {
     onStatus: (status) => statuses.push(status.label),
-    onRuntimeSignal: (signal) => signals.push(signal.type)
+    onRuntimeSignal: (signal) => signals.push(signal)
   });
 
   assert.equal(result.text, "Done");
   assert.equal(result.events.length, 0);
-  assert.deepEqual(signals, ["llm_call_start", "llm_call_end", "synthesis_gate"]);
+  assert.deepEqual(signals.map((signal) => signal.type), ["llm_call_start", "llm_call_end", "synthesis_gate"]);
+  assert.deepEqual(signals[2]?.payload, {
+    type: "synthesis_gate",
+    phase: "budget_synthesis",
+    budget_phase: "evidence_exhausted",
+    reason: "model returned tools after budget synthesis notice",
+    second_handler: true,
+    blocked_tool_calls: true,
+    allowed: false,
+    contains_tool_call: true
+  });
   assert.ok(statuses.includes("Waiting for model response..."));
   assert.ok(statuses.includes("Model response received."));
   assert.ok(statuses.includes("Forcing final synthesis..."));
