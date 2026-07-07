@@ -14,9 +14,10 @@ The app is currently an MVP focused on Agent-assisted writing workflows rather t
 - Local-first builders testing Agent, Tool, and Canvas workflows before introducing cloud collaboration.
 
 ## Current Capabilities
-- Start, Home, Projects, Agent Settings, AI Dashboard, Knowledge Settings, and Workspace views.
+- Start, Home, Projects, Agent Settings, AI Dashboard, App Updates, Knowledge Settings, and Workspace views.
 - Local UI asset library under `public/assets/ui/`, with shared frontend references in `src/shared/brandAssets.ts`; see `docs/UI_ASSETS.md`.
 - AI Dashboard view for Agent Runtime status, authenticated sidecar visibility, Skills/MCP overview, Agent mapping, and ToolUse bridge progress.
+- App Updates view for desktop Shell/source-checkout updates. It previews and applies the allowlisted Source Git update path while protecting local Projects, secrets, Knowledge, Memory, uploads, thumbnails, SQLite files, and runtime caches.
 - Neutral ChatAgent profile with compatibility aliases for historical task-card ids.
 - Agent settings for prompt, tools, Skills, Knowledge, Memory, and MCP references. Model identity is selected per Thread from Model Config, not owned by Agent settings.
 - Provider support through Model Config entries for DeepSeek, OpenAI, OpenAI-compatible providers, and explicit local Mock demonstration only.

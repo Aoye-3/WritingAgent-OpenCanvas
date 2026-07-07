@@ -108,6 +108,15 @@ Home / Task Cards
       Prompt Preview
       Refine Controls
 
+Left App Navigation
+  -> Projects
+  -> Agent Settings
+  -> Canvas Nodes
+  -> Model Config
+  -> AI Dashboard
+  -> App Updates
+  -> Knowledge Settings
+
 Comparison Mode
   -> Traditional Free-text Chat
 ```
@@ -669,6 +678,7 @@ floating shadow: 0 16px 40px rgba(15, 23, 42, 0.14)
 
 - Back behavior must be predictable.
 - Returning from workspace to Home should preserve selected/search state where feasible.
+- App-level management pages live in the shared left navigation. `App Updates` is a Harness/App Shell page, not a Project Settings panel, because applying updates affects the application shell rather than the active Project.
 - Switching to Comparison Mode should be explicit.
 - If there are unsaved changes, show a confirm dialog before reset or leaving.
 

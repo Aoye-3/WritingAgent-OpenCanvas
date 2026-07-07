@@ -15,6 +15,7 @@ OpenCanvas benchmarks the familiar board experience first: an infinite canvas, n
 - **Local-first canvas:** Vite/React frontend, Express API, SQLite/local file persistence, and local workspace files under `.facetwrite/`.
 - **Canvas V2:** React Flow-based board with an active floating toolbar, select/pan modes, multi-selection, document/note/reference/role nodes, semantic directed edges, free arrows, basic shapes, lightweight tables, local asset cards, workflow stages, Role suggestions, and session undo.
 - **Agent Runtime:** LangGraph-compatible AgentBackend Gateway for Lead Agent/subagent orchestration, ToolUse bridge, runtime dashboard, Knowledge, Memory controls, and explicit runtime/model diagnostics.
+- **App shell updates:** In the desktop Shell/source-checkout path, the left navigation exposes App Updates for safe Source Git update preview/apply without touching local Project data or secrets.
 - **Human-in-the-loop writes:** Agent-originated Canvas changes create pending write requests first. Canvas content changes only after user confirmation or the same-run explicit approval path.
 - **Board direction:** OpenCanvas should evolve toward a PS/Figma-like board file that stores nodes, edges, assets, workflow state, Agent conversations, tool events, and write approvals.
 
@@ -33,6 +34,8 @@ npm.cmd run shell:dev
 ```
 
 The double-click VBS entry always forces local Runtime mode and lets the shell choose an available Runtime port; machine-level or stale Docker mode variables cannot change that entry. The shell shows startup progress, uses Vite `17776` and API `17777`, and stops Vite/API plus only the Runtime process it created. Docker Desktop is not started or required. This remains a source-development shell, not an installer. See [App Shell Runbook](docs/APP_SHELL_RUNBOOK.md).
+
+Source-checkout updates are available from the left navigation `App Updates` page when running inside the desktop Shell. Browser-only sessions show that Shell source updates are unavailable.
 
 ### Recommended: OpenCanvas + Agent Runtime
 

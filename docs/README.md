@@ -3,8 +3,8 @@
 This directory contains the maintained technical memory for FacetWrite. Treat these files as current project facts. Historical plans and research belong in `docs/reference/` or `docs/plans/`.
 
 ## Core Documents
-- `PROJECT_BRIEF.md`: product goal, current capabilities, MVP boundaries, and non-goals.
-- `DESIGN.md`: maintained product design system, layout rules, interaction rules, and component guardrails.
+- `PROJECT_BRIEF.md`: product goal, current capabilities including App Updates, MVP boundaries, and non-goals.
+- `DESIGN.md`: maintained product design system, left-navigation information architecture, layout rules, interaction rules, and component guardrails.
 - `ARCHITECTURE.md`: frontend, backend, internal Agent Runtime module, storage, and boundary rules.
 - `CANVAS.md`: Canvas V2 frontend architecture, React Flow mapping, node geometry, resize behavior, and write-safety boundary.
 - `AGENT.md`: AgentCard, Agent settings, Agent Runtime mapping, Tool catalog, and ToolUse safety.
@@ -23,7 +23,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 
 ## Update Rules
 - Code structure changes update `ARCHITECTURE.md`.
-- Product layout, component, visual-system, or interaction-design changes update `DESIGN.md`.
+- Product layout, navigation, component, visual-system, or interaction-design changes update `DESIGN.md`.
 - Canvas interaction, geometry, node renderer, or write-safety changes update `CANVAS.md`.
 - API changes update `API.md`.
 - Database or storage changes update `DATABASE.md`.
@@ -32,7 +32,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 - Skill folder management, Skill catalog, or per-message Skill selection changes update `SKILL_MANAGEMENT.md`.
 - Security, auth, secret, approval, or side-effect changes update `SECURITY.md`.
 - Important design tradeoffs update `DECISIONS.md`.
-- Application-shell lifecycle changes update `APP_SHELL_RUNBOOK.md`.
+- Application-shell lifecycle or update-entry UI changes update `APP_SHELL_RUNBOOK.md`.
 - Every review or refactor updates `REFACTOR_LOG.md`.
 
 ## Current Runtime Position

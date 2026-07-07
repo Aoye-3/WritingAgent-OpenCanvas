@@ -88,6 +88,7 @@ export const StarIcon = createIcon(Star);
 export const StatusIcon = createIcon(Circle);
 export const TrashIcon = createIcon(Trash2);
 export const ArchiveIcon = createIcon(Archive);
+export const UpdateIcon = createIcon(RefreshCcw);
 export const ZoomInIcon = createIcon(ZoomIn);
 export const ZoomOutIcon = createIcon(ZoomOut);
 

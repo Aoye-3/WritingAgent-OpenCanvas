@@ -78,6 +78,7 @@ textarea:focus-visible,
 .app-shell[data-view="agentSettings"] .management-app[data-active="true"],
 .app-shell[data-view="modelConfig"] .management-app[data-active="true"],
 .app-shell[data-view="canvasNodeSettings"] .management-app[data-active="true"],
+.app-shell[data-view="sourceUpdate"] .management-app[data-active="true"],
 .app-shell[data-view="knowledgeSettings"] .management-app[data-active="true"] { display: grid; }
 
 .topbar {
@@ -5794,6 +5795,7 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
 .app-shell[data-view="agentSettings"] .management-app[data-active="true"],
 .app-shell[data-view="aiDashboard"] .management-app[data-active="true"],
 .app-shell[data-view="modelConfig"] .management-app[data-active="true"],
+.app-shell[data-view="sourceUpdate"] .management-app[data-active="true"],
 .app-shell[data-view="knowledgeSettings"] .management-app[data-active="true"] {
   display: grid;
 }
@@ -5828,6 +5830,10 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   margin: 0;
   color: var(--color-text-muted);
   line-height: 1.5;
+}
+
+.source-update-main {
+  max-width: 980px;
 }
 
 .management-toolbar {

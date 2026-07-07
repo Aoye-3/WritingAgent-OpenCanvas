@@ -1,5 +1,23 @@
 # FacetWrite Refactor Log
 
+## 2026-07-06: Source Git Update Navigation And Docs
+Scope: Moved the Harness Source Git update surface into the shared left navigation and refreshed maintained docs around the new App Updates page.
+
+Findings:
+- Source Git updates are application-shell operations, not Project Settings. Keeping the control in the Project Settings dialog made the safety boundary easy to misread.
+- The existing update architecture docs already described Shell-owned apply and protected data paths; the user-facing navigation and design docs needed the same fact.
+
+Completed:
+- Added `App Updates` as the left-navigation home for Source Git update preview/apply.
+- Removed the duplicate update panel from Project Settings.
+- Updated `PROJECT_BRIEF.md`, `DESIGN.md`, `ARCHITECTURE.md`, `APP_SHELL_RUNBOOK.md`, `docs/README.md`, and root `README.md` so navigation, safety boundary, and documentation rules match the UI.
+
+Validation:
+- `npm.cmd run typecheck`
+- `npm.cmd test`
+- `npm.cmd run shell:test`
+- `git diff --check` reported only CRLF normalization warnings.
+
 ## 2026-06-07: Maintainability And Concurrency Review Planning
 Scope: Inspected the FacetWrite-owned architecture and test suite, identified concurrency-risk boundaries, and created an executable review and test-supplement plan.
 

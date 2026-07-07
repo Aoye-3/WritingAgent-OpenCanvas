@@ -65,6 +65,7 @@ The acceptance starts through the same VBS used by double-click, reads the actua
 The development shell can preview and apply first-stage Harness source updates from the current checkout only. The update channel is fixed to allowlisted `origin/main`; the shell does not clone, create worktrees, mirror repositories, or accept arbitrary GitHub URLs.
 
 - Preview runs from Shell IPC and may fetch `origin`, then reports branch, current SHA, target SHA, ahead/behind counts, changed files, dependency changes, and blockers.
+- The renderer exposes this flow through the left navigation `App updates` page.
 - Apply is Shell-owned. Express never runs Git commands to replace its own source while serving requests, and the renderer only calls the shell bridge.
 - Apply requires a non-detached branch with upstream tracking, an allowlisted `origin`, no tracked local modifications, no untracked application files that could be overwritten, and a fast-forward target.
 - The shell uses `git merge --ff-only <resolved origin/main SHA>`. It never stashes, rebases, resets, creates merge commits, or resolves conflicts automatically.

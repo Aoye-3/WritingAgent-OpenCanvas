@@ -29,6 +29,7 @@ export const en = {
   "sidebar.canvasNodeSettings": "Canvas nodes",
   "sidebar.modelConfig": "Model config",
   "sidebar.aiDashboard": "AI Dashboard",
+  "sidebar.sourceUpdate": "Updates",
   "sidebar.knowledgeSettings": "Knowledge settings",
 
   "home.eyebrow": "AI canvas workspace",
@@ -262,6 +263,7 @@ const zh = {
   "sidebar.canvasNodeSettings": "Canvas 节点",
   "sidebar.modelConfig": "模型配置",
   "sidebar.aiDashboard": "AI 仪表盘",
+  "sidebar.sourceUpdate": "应用更新",
   "sidebar.knowledgeSettings": "知识库设置",
 
   "home.eyebrow": "AI 画板工作台",

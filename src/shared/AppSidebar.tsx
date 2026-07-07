@@ -1,7 +1,7 @@
 import type { AppView } from "../app/App";
 import { useI18n } from "../features/i18n/I18nProvider";
 import type { TranslationKey } from "../features/i18n/translations";
-import { AgentIcon, BookIcon, BrandIcon, CanvasNodesIcon, DocumentIcon, HomeIcon, ModelConfigIcon, RuntimeIcon } from "./icons";
+import { AgentIcon, BookIcon, BrandIcon, CanvasNodesIcon, DocumentIcon, HomeIcon, ModelConfigIcon, RuntimeIcon, UpdateIcon } from "./icons";
 import { Button } from "./ui";
 
 type AppSidebarProps = {
@@ -18,6 +18,7 @@ const navItems: Array<{ view: AppView; icon: typeof HomeIcon; labelKey: Translat
   { view: "canvasNodeSettings", icon: CanvasNodesIcon, labelKey: "sidebar.canvasNodeSettings" },
   { view: "modelConfig", icon: ModelConfigIcon, labelKey: "sidebar.modelConfig" },
   { view: "aiDashboard", icon: RuntimeIcon, labelKey: "sidebar.aiDashboard" },
+  { view: "sourceUpdate", icon: UpdateIcon, labelKey: "sidebar.sourceUpdate" },
   { view: "knowledgeSettings", icon: BookIcon, labelKey: "sidebar.knowledgeSettings" }
 ];
 

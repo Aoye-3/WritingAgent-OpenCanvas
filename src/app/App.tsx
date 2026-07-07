@@ -8,6 +8,7 @@ import { useAppNavigation } from "../features/app/useAppNavigation";
 import type { GenerateRequest } from "../features/generation/types";
 import { I18nProvider, useI18n } from "../features/i18n/I18nProvider";
 import { ProjectSettingsPanel } from "../features/settings/ProjectSettingsPanel";
+import { SourceUpdateView } from "../features/settings/SourceUpdateView";
 import { getAgentBackendRuntimeStatus, getCanvasSettings, getProjectRuntimeSettings } from "../features/settings/settingsClient";
 import { StartView } from "../features/start/StartView";
 import { HomeView } from "../features/home/HomeView";
@@ -30,7 +31,7 @@ import { buildCanvasWorkflowContext } from "../../shared/canvasWorkflow";
 import { assertProjectFirstContract } from "./projectWorkspace";
 import { captureProjectThumbnail } from "./projectThumbnailCapture";
 
-export type AppView = "start" | "home" | "workspace" | "projects" | "agentSettings" | "modelConfig" | "aiDashboard" | "knowledgeSettings" | "canvasNodeSettings";
+export type AppView = "start" | "home" | "workspace" | "projects" | "agentSettings" | "modelConfig" | "aiDashboard" | "knowledgeSettings" | "canvasNodeSettings" | "sourceUpdate";
 
 const fallbackAgentCards: AgentCard[] = [
   {
@@ -634,6 +635,7 @@ function AppContent() {
       <ModelConfigView activeView={view} onNavigate={navigateFromWorkspace} />
       <KnowledgeSettingsView activeView={view} onNavigate={navigateFromWorkspace} />
       <CanvasNodeSettingsView activeView={view} onNavigate={navigateFromWorkspace} />
+      <SourceUpdateView activeView={view} onNavigate={navigateFromWorkspace} />
       <WorkspaceView
         activeAgent={activeAgent}
         agentCards={agentCards}
