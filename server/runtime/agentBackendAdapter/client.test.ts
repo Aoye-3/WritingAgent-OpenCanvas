@@ -194,6 +194,7 @@ test("builds clarification resume request with delivery tools after user answer"
         answer: "Use recent sources"
       },
       taskHandlingPolicy: { kind: "long_task" },
+      canvasAction: { id: "canvas_action_1", operation: "create", risk: "low", requiresTool: true },
       canvas: { workflow: { mode: "batch_delivery" } },
       progressiveCanvasDelivery: {
         enabled: true,
@@ -227,6 +228,9 @@ test("builds clarification resume request with delivery tools after user answer"
   assert.equal(request.context.facetwrite_model_call_limit, 18);
   assert.equal(request.context.facetwrite_evidence_tool_limit, 8);
   assert.equal(request.context.facetwrite_markdown_file_delivery_required, true);
+  assert.deepEqual(request.context.facetwrite_canvas_action, { id: "canvas_action_1", operation: "create", risk: "low", requiresTool: true });
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("canvas_write"), true);
+  assert.equal((request.context.facetwrite_tool_state as Record<string, unknown>).canvas_write, true);
   assert.equal(request.context.facetwrite_allowed_tool_refs.includes("write_file"), true);
   assert.equal(request.context.facetwrite_allowed_tool_refs.includes("present_files"), true);
   assert.notDeepEqual(request.context.facetwrite_allowed_tool_refs, ["ask_clarification", "agent_intake_complete"]);
@@ -1637,6 +1641,14 @@ test("maps canvas_write tool_failed envelopes as Canvas mutation failures", asyn
 
   assert.ok(result.events.some((event) => event.eventType === "agent_backend_tool_failed" && event.payload.reason === "request_failed" && event.payload.summary === "Canvas write request failed: Missing target."));
   assert.ok(result.events.some((event) => event.eventType === "agent_backend_canvas_mutation_failed" && event.payload.reason === "request_failed"));
+});
+
+test("maps plain canvas_write tool errors as Canvas mutation failures", async () => {
+  const body = `event: messages\ndata: [{"type":"tool","name":"canvas_write","tool_call_id":"call_canvas","content":"Error: Canvas write request failed: bridge unavailable"}]\n\n`;
+  const result = await runWithBody(body);
+
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_tool_failed" && event.payload.toolName === "canvas_write"));
+  assert.ok(result.events.some((event) => event.eventType === "agent_backend_canvas_mutation_failed" && event.payload.reason === "request_failed" && event.payload.summary === "Canvas write request failed: bridge unavailable"));
 });
 
 test("marks slash Plan requests as the AgentBackend planning phase", () => {

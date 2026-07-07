@@ -1335,7 +1335,35 @@ function mapMessageToolEvents(message: unknown, toolCallArgsById: Map<string, Re
       ...(structured[0]?.payload?.summary ? { summary: structured[0].payload.summary } : {})
     }
   };
-  return [terminal, ...structured];
+  const canvasMutationFailed = plainCanvasMutationFailedEvent(toolName, toolCallId, message.content, structured);
+  return canvasMutationFailed ? [terminal, canvasMutationFailed, ...structured] : [terminal, ...structured];
+}
+
+function plainCanvasMutationFailedEvent(
+  toolName: string,
+  toolCallId: string | undefined,
+  content: unknown,
+  structured: ToolEventRecord[]
+): ToolEventRecord | undefined {
+  if (toolName !== "canvas_write") return undefined;
+  if (structured.some((event) => /(?:^|_)canvas_mutation_failed$/.test(event.eventType))) return undefined;
+  const summary = plainToolErrorSummary(content);
+  if (!summary) return undefined;
+  return {
+    eventType: "agent_backend_canvas_mutation_failed",
+    payload: {
+      type: "canvas_mutation_failed",
+      toolName,
+      toolCallId,
+      reason: "request_failed",
+      summary
+    }
+  };
+}
+
+function plainToolErrorSummary(content: unknown) {
+  if (typeof content !== "string" || !content.startsWith("Error:")) return undefined;
+  return content.replace(/^Error:\s*/, "").trim() || "Canvas write request failed";
 }
 
 function toolFunctionName(toolCall: Record<string, unknown>) {

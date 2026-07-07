@@ -339,6 +339,36 @@ def test_runtime_budget_file_delivery_keeps_finalization_tools_and_adds_delivery
     assert "Do not write a delivery note" in captured["request"].messages[-1].content
 
 
+def test_runtime_budget_required_canvas_action_keeps_canvas_write_and_adds_action_notice():
+    middleware = PlanToolChoiceMiddleware()
+    captured = {}
+    messages = [
+        HumanMessage(content="Write this to Canvas"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+    ]
+
+    middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            canvas_action={"id": "canvas_action_1", "operation": "replace", "requiresTool": True},
+            allowed_tool_refs=["web_search", "canvas_write", "write_file", "present_files"],
+            tool_state={"web_search": True, "canvas_write": True, "write_file": True, "present_files": True},
+            evidence_tool_limit=1,
+            evidence_tools=["web_search"],
+            progressive_enabled=True,
+            force_synthesis_after_evidence=True,
+            markdown_file_delivery_required=True,
+        ),
+        lambda model_request: captured.setdefault("request", model_request),
+    )
+
+    assert [tool.name for tool in captured["request"].tools] == ["canvas_write", "write_file", "present_files"]
+    assert "required Canvas action" in captured["request"].messages[-1].content
+    assert "canvas_write" in captured["request"].messages[-1].content
+    assert "Do not finish with text only" in captured["request"].messages[-1].content
+
+
 def test_runtime_budget_allows_file_finalization_tool_calls_after_notice(monkeypatch: pytest.MonkeyPatch):
     middleware = PlanToolChoiceMiddleware()
     events = []
@@ -374,6 +404,48 @@ def test_runtime_budget_allows_file_finalization_tool_calls_after_notice(monkeyp
     )
 
     assert result.tool_calls[0]["name"] == "write_file"
+    synthesis_events = [event for event in events if event["type"] == "synthesis_gate"]
+    assert synthesis_events[-1]["continued_after_notice"] is True
+    assert synthesis_events[-1]["allowed"] is True
+    assert synthesis_events[-1]["blocked_tool_calls"] is False
+
+
+def test_runtime_budget_allows_canvas_write_after_notice(monkeypatch: pytest.MonkeyPatch):
+    middleware = PlanToolChoiceMiddleware()
+    events = []
+    messages = [
+        HumanMessage(content="Write this to Canvas"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+    ]
+
+    def handler(model_request):
+        assert [tool.name for tool in model_request.tools] == ["canvas_write", "write_file", "present_files"]
+        return AIMessage(content="", tool_calls=[{
+            "id": "call_canvas",
+            "name": "canvas_write",
+            "args": {"operation": "replace", "content": "Updated Canvas content"},
+            "type": "tool_call",
+        }])
+
+    monkeypatch.setattr("langgraph.config.get_stream_writer", lambda: events.append)
+
+    result = middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            canvas_action={"id": "canvas_action_1", "operation": "replace", "requiresTool": True},
+            allowed_tool_refs=["web_search", "canvas_write", "write_file", "present_files"],
+            tool_state={"web_search": True, "canvas_write": True, "write_file": True, "present_files": True},
+            evidence_tool_limit=1,
+            evidence_tools=["web_search"],
+            progressive_enabled=True,
+            force_synthesis_after_evidence=True,
+            markdown_file_delivery_required=True,
+        ),
+        handler,
+    )
+
+    assert result.tool_calls[0]["name"] == "canvas_write"
     synthesis_events = [event for event in events if event["type"] == "synthesis_gate"]
     assert synthesis_events[-1]["continued_after_notice"] is True
     assert synthesis_events[-1]["allowed"] is True

@@ -9,7 +9,7 @@ export async function runAgentRuntimeGeneration(input: AgentRuntimeRunnerInput, 
   if (!run) return undefined;
   const phase = resolvePlanRequestPolicy(input.payload).phase;
   const canvasActionRequired = input.payload.canvasAction?.requiresTool === true;
-  if (phase === "chat" && canvasActionRequired && !hasCanvasWriteResult(run.events)) {
+  if (phase === "chat" && canvasActionRequired && !hasCanvasActionDeliveryResult(run.events)) {
     throw new Error("Canvas action completed without a committed node or pending approval request.");
   }
   if (phase === "chat" && !run.text && !hasStructuredLifecycleEvent(run.events)) {
@@ -18,8 +18,13 @@ export async function runAgentRuntimeGeneration(input: AgentRuntimeRunnerInput, 
   return run;
 }
 
-function hasCanvasWriteResult(events: AgentRuntimeRunResult["events"]) {
-  return events.some((event) => /(?:^|_)canvas_(?:mutation_committed|write_pending_approval|mutation_failed)$/.test(event.eventType));
+function hasCanvasActionDeliveryResult(events: AgentRuntimeRunResult["events"]) {
+  return events.some((event) => {
+    if (/(?:^|_)canvas_(?:mutation_committed|write_pending_approval|mutation_failed)$/.test(event.eventType)) {
+      return true;
+    }
+    return /(?:^|_)canvas_delivery_(?:body_final|file_document)_committed$/.test(event.eventType);
+  });
 }
 
 function hasStructuredLifecycleEvent(events: AgentRuntimeRunResult["events"]) {
