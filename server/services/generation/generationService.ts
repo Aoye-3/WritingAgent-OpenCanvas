@@ -2274,7 +2274,9 @@ async function finalizeProgressiveCanvasDelivery(input: {
       kind: "document",
       title: bodyTitle,
       content: deliveryFilePaths.length
-        ? fileDeliveryBodySummary(input.payload.locale, bodyMarkdownForCanvas)
+        ? fileDeliveryBodySummary(input.payload.locale, bodyMarkdownForCanvas, {
+          bodySummaryMarkdown: content.bodySummaryMarkdown
+        })
         : bodyMarkdownForCanvas,
       x: 1280,
       y: 120,
@@ -2564,14 +2566,32 @@ function mergeSourceLinks(...groups: SourceLink[][]) {
   return merged;
 }
 
-function fileDeliveryBodySummary(locale: GenerateRequest["locale"], bodyMarkdown: string) {
+function fileDeliveryBodySummary(
+  locale: GenerateRequest["locale"],
+  bodyMarkdown: string,
+  options: { bodySummaryMarkdown?: string } = {}
+) {
   const title = locale === "zh" ? "正文摘要" : "Body summary";
-  const summary = canvasBodyExcerpt(bodyMarkdown, locale);
+  const summary = canvasBodySummaryMarkdown(locale, bodyMarkdown, options);
   return [
     `# ${title}`,
     "",
     summary
   ].join("\n");
+}
+
+function canvasBodySummaryMarkdown(
+  locale: GenerateRequest["locale"],
+  bodyMarkdown: string,
+  options: { bodySummaryMarkdown?: string }
+) {
+  const explicitSummary = normalizeCanvasSummaryMarkdown(options.bodySummaryMarkdown ?? "");
+  if (explicitSummary) return explicitSummary;
+
+  const extractedSummary = extractMarkdownSummarySection(bodyMarkdown);
+  if (extractedSummary) return extractedSummary;
+
+  return canvasBodyExcerpt(bodyMarkdown, locale);
 }
 
 function fileDeliveryAssistantText(locale: GenerateRequest["locale"], filePaths: string[]) {
@@ -2680,9 +2700,105 @@ function canvasBodyExcerpt(value: string, locale: GenerateRequest["locale"]) {
     .join("\n")
     .trim();
   if (!cleaned) return locale === "zh" ? "最终摘要已生成，完整内容请打开文档节点预览。" : "The final summary is ready. Open the document node for the full content.";
-  const limit = 2600;
-  if (cleaned.length <= limit) return cleaned;
-  return `${cleaned.slice(0, limit).trimEnd()}\n\n...`;
+  const lines = cleaned.split(/\r?\n/);
+  const summaryLines: string[] = [];
+  let sawContent = false;
+  for (const line of lines) {
+    if (/^#{1,6}\s+\S/.test(line)) {
+      if (sawContent) break;
+      continue;
+    }
+    if (!line.trim() && !sawContent) continue;
+    if (line.trim()) sawContent = true;
+    summaryLines.push(line);
+    if (summaryLines.join("\n").replace(/\s+/g, " ").length >= 850) break;
+  }
+  const summary = summaryLines.join("\n").trim();
+  if (!summary) return locale === "zh" ? "最终摘要已生成，完整内容请打开文档节点预览。" : "The final summary is ready. Open the document node for the full content.";
+  return truncateCanvasSummary(summary);
+}
+
+function extractMarkdownSummarySection(markdown: string) {
+  const cleaned = sanitizeFinalBodyCandidate(markdown);
+  if (!cleaned) return "";
+  const lines = cleaned.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const heading = markdownHeading(lines[index] ?? "");
+    if (!heading || !isSummaryHeading(heading.title)) continue;
+    let end = lines.length;
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const nextHeading = markdownHeading(lines[cursor] ?? "");
+      if (nextHeading && nextHeading.level <= heading.level) {
+        end = cursor;
+        break;
+      }
+    }
+    return normalizeCanvasSummaryMarkdown(lines.slice(index, end).join("\n"));
+  }
+  return "";
+}
+
+function normalizeCanvasSummaryMarkdown(value: string) {
+  const cleaned = sanitizeFinalBodyCandidate(value)
+    .replace(/^#+\s*(?:sources|references|来源|参考文献)\b[\s\S]*$/gim, "")
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => !/^\s*(?:完整 Markdown|The full Markdown|Document:|文档:).*(?:\/mnt\/user-data\/outputs|document node|文档节点)/i.test(line))
+    .filter((line) => !isRawToolOutputLine(line))
+    .join("\n")
+    .trim();
+  if (isProcessOrDeliveryChatterSummary(cleaned)) return "";
+  const nonHeadingText = nonHeadingSummaryText(cleaned);
+  if (!nonHeadingText || isOnlySourceSummary(nonHeadingText)) return "";
+  return truncateCanvasSummary(cleaned);
+}
+
+function truncateCanvasSummary(value: string) {
+  const limit = 900;
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit).trimEnd()}\n\n...`;
+}
+
+function markdownHeading(line: string) {
+  const match = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line.trim());
+  if (!match) return undefined;
+  return { level: match[1]!.length, title: match[2]!.trim() };
+}
+
+function isProcessOrDeliveryChatterSummary(value: string) {
+  const withoutHeadings = nonHeadingSummaryText(value);
+  return isProcessOrDeliveryChatter(value) || (withoutHeadings ? isProcessOrDeliveryChatter(withoutHeadings) : false);
+}
+
+function nonHeadingSummaryText(value: string) {
+  return value
+    .split(/\r?\n/)
+    .filter((line) => !/^#{1,6}\s+\S/.test(line.trim()))
+    .join("\n")
+    .trim();
+}
+
+function isOnlySourceSummary(value: string) {
+  const normalized = value
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^(?:[-*+]\s+|\d+[.)]\s+)/, "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .replace(/[：:。.!！?？-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  return /^(?:sources?|references?|来源|参考文献)$/.test(normalized);
+}
+
+function isSummaryHeading(value: string) {
+  const normalized = value
+    .replace(/[*_`[\]()]/g, "")
+    .replace(/[：:。.!！?？-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  return /^(?:summary|executive summary|body summary|abstract|摘要|正文摘要|执行摘要|内容摘要)$/.test(normalized);
 }
 
 function outlineFromFinalBody(body: string, locale: GenerateRequest["locale"]) {

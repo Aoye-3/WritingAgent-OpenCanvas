@@ -142,6 +142,10 @@ test("keeps progressive recursion budget after Agent intake completes", () => {
   assert.equal(request.context.facetwrite_progressive_canvas_delivery_enabled, true);
   assert.equal(request.context.facetwrite_allowed_tool_refs.includes("write_file"), true);
   assert.equal(request.context.facetwrite_allowed_tool_refs.includes("present_files"), true);
+  assert.match(String(request.context.facetwrite_markdown_file_delivery_policy), /## Summary|## 摘要/);
+  assert.match(String(request.context.facetwrite_markdown_file_delivery_policy), /Hard requirement/);
+  assert.match(String(request.context.facetwrite_markdown_file_delivery_policy), /before any outline\/table of contents/);
+  assert.match(String(request.context.facetwrite_markdown_file_delivery_policy), /Do not call present_files until/);
 });
 
 test("builds AgentBackend resume run request with Command resume payload", () => {

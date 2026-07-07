@@ -30,6 +30,30 @@ test("canvas delivery content separates assistant reply from structured Canvas b
   assert.match(result.assistantText, /\[News A\]\(https:\/\/news\.example\/a\)/);
 });
 
+test("canvas delivery content parses structured body summary markdown", () => {
+  const result = resolveCanvasDeliveryContent({
+    instruction: "Create a Canvas report",
+    locale: "en",
+    text: [
+      "Done.",
+      "",
+      "```facetwrite_canvas_delivery",
+      JSON.stringify({
+        assistant_reply: "Done.",
+        outline_markdown: "# Overview\nA short overview.",
+        body_summary_markdown: "## Summary\nThis is the concise Canvas summary.",
+        body_markdown: "# Full report\n\nDetailed section that belongs in the document."
+      }),
+      "```"
+    ].join("\n"),
+    events: []
+  });
+
+  assert.equal(result.usedStructuredBlock, true);
+  assert.match(result.bodySummaryMarkdown, /concise Canvas summary/);
+  assert.match(result.bodyMarkdown, /Detailed section/);
+});
+
 test("canvas delivery content fallback removes completion chatter from Canvas body", () => {
   const result = resolveCanvasDeliveryContent({
     instruction: "帮我查最近新闻，然后总结到画板里",

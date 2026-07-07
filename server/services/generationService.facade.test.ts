@@ -2203,6 +2203,217 @@ test("progressive Canvas creates a file document node for Markdown output files"
   }
 });
 
+test("progressive Canvas uses Markdown summary section for the Body summary node", async () => {
+  const appRoot = `.facetwrite-test/md-summary-section-${Date.now()}`;
+  const previousRoot = process.env.FACETWRITE_APP_ROOT;
+  process.env.FACETWRITE_APP_ROOT = appRoot;
+  try {
+    const { storage, canvasNodes } = fakeStorage();
+    const reportPath = "/mnt/user-data/outputs/summary-report.md";
+    const reportMarkdown = [
+      "# AI Transparency Review",
+      "",
+      "## Summary",
+      "",
+      "This concise summary should be shown on the Canvas body summary node.",
+      "",
+      "## Detailed Analysis",
+      "",
+      "UNIQUE_DEEP_FILE_CONTENT_SHOULD_ONLY_BE_IN_MARKDOWN_FILE",
+      "Long detailed analysis. ".repeat(120)
+    ].join("\n");
+    const service = createGenerationService(storage, fakeAgentRuntime(), {
+      modelRuntime: fakeModelRuntime,
+      archiveMarkdownOutput: (threadId, virtualPath) => archiveMarkdownForTest(threadId, virtualPath, reportMarkdown),
+      agentBackend: {
+        getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+        runAgent: async (input) => {
+          input.onToolEvent?.({
+            eventType: "agent_backend_tool_completed",
+            payload: { toolName: "write_file", path: reportPath }
+          });
+          input.onToolEvent?.({
+            eventType: "agent_backend_tool_completed",
+            payload: { toolName: "present_files", filepaths: [reportPath] }
+          });
+          return {
+            text: "Document ready.",
+            finishReason: "agent_backend_completed",
+            events: []
+          };
+        }
+      }
+    });
+
+    await service.generateAndRecordStream({
+      mode: "chat",
+      locale: "en",
+      threadId: "thread_md_summary_section",
+      agentCardId: "chat-agent",
+      chatInstruction: "Research and write a detailed report",
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
+    });
+
+    const body = canvasNodes.find((node) => node.title === "Body");
+    assert.ok(body);
+    assert.ok(String(body.content).startsWith("# Body summary"));
+    assert.ok(String(body.content).includes("concise summary should be shown"));
+    assert.equal(String(body.content).includes("UNIQUE_DEEP_FILE_CONTENT_SHOULD_ONLY_BE_IN_MARKDOWN_FILE"), false);
+    const fileNode = canvasNodes.find((node) => node.kind === "file_document");
+    assert.ok(fileNode);
+    assert.ok(String(fileNode.content).includes(reportPath));
+    const saved = await readFile(path.resolve(process.cwd(), appRoot, "threads", "thread_md_summary_section", "user-data", "outputs", "summary-report.md"), "utf8");
+    assert.ok(saved.includes("UNIQUE_DEEP_FILE_CONTENT_SHOULD_ONLY_BE_IN_MARKDOWN_FILE"));
+  } finally {
+    if (previousRoot === undefined) {
+      delete process.env.FACETWRITE_APP_ROOT;
+    } else {
+      process.env.FACETWRITE_APP_ROOT = previousRoot;
+    }
+    await rm(path.resolve(process.cwd(), appRoot), { recursive: true, force: true });
+  }
+});
+
+test("progressive Canvas fallback Body summary does not copy deep Markdown body sections", async () => {
+  const appRoot = `.facetwrite-test/md-summary-fallback-${Date.now()}`;
+  const previousRoot = process.env.FACETWRITE_APP_ROOT;
+  process.env.FACETWRITE_APP_ROOT = appRoot;
+  try {
+    const { storage, canvasNodes } = fakeStorage();
+    const reportPath = "/mnt/user-data/outputs/no-summary-report.md";
+    const reportMarkdown = [
+      "# Full Report",
+      "",
+      "This opening paragraph gives a compact overview of the result and should be enough for the Canvas summary.",
+      "",
+      "## Detailed Analysis",
+      "",
+      "UNIQUE_DEEP_FALLBACK_BODY_SHOULD_ONLY_BE_IN_MARKDOWN_FILE",
+      "Detailed body content. ".repeat(80)
+    ].join("\n");
+    const service = createGenerationService(storage, fakeAgentRuntime(), {
+      modelRuntime: fakeModelRuntime,
+      archiveMarkdownOutput: (threadId, virtualPath) => archiveMarkdownForTest(threadId, virtualPath, reportMarkdown),
+      agentBackend: {
+        getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+        runAgent: async (input) => {
+          input.onToolEvent?.({
+            eventType: "agent_backend_tool_completed",
+            payload: { toolName: "write_file", path: reportPath }
+          });
+          input.onToolEvent?.({
+            eventType: "agent_backend_tool_completed",
+            payload: { toolName: "present_files", filepaths: [reportPath] }
+          });
+          return {
+            text: "Document ready.",
+            finishReason: "agent_backend_completed",
+            events: []
+          };
+        }
+      }
+    });
+
+    await service.generateAndRecordStream({
+      mode: "chat",
+      locale: "en",
+      threadId: "thread_md_summary_fallback",
+      agentCardId: "chat-agent",
+      chatInstruction: "Research and write a detailed report",
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
+    });
+
+    const body = canvasNodes.find((node) => node.title === "Body");
+    assert.ok(body);
+    assert.ok(String(body.content).startsWith("# Body summary"));
+    assert.ok(String(body.content).includes("compact overview"));
+    assert.equal(String(body.content).includes("UNIQUE_DEEP_FALLBACK_BODY_SHOULD_ONLY_BE_IN_MARKDOWN_FILE"), false);
+    const saved = await readFile(path.resolve(process.cwd(), appRoot, "threads", "thread_md_summary_fallback", "user-data", "outputs", "no-summary-report.md"), "utf8");
+    assert.ok(saved.includes("UNIQUE_DEEP_FALLBACK_BODY_SHOULD_ONLY_BE_IN_MARKDOWN_FILE"));
+  } finally {
+    if (previousRoot === undefined) {
+      delete process.env.FACETWRITE_APP_ROOT;
+    } else {
+      process.env.FACETWRITE_APP_ROOT = previousRoot;
+    }
+    await rm(path.resolve(process.cwd(), appRoot), { recursive: true, force: true });
+  }
+});
+
+test("progressive Canvas Body summary ignores outline table of contents", async () => {
+  const appRoot = `.facetwrite-test/md-summary-outline-${Date.now()}`;
+  const previousRoot = process.env.FACETWRITE_APP_ROOT;
+  process.env.FACETWRITE_APP_ROOT = appRoot;
+  try {
+    const { storage, canvasNodes } = fakeStorage();
+    const reportPath = "/mnt/user-data/outputs/outline-summary-report.md";
+    const reportMarkdown = [
+      "# AI Transparency Review",
+      "",
+      "This narrative opening paragraph belongs in the Canvas summary when no explicit summary section exists.",
+      "",
+      "## Detailed Analysis",
+      "",
+      "UNIQUE_OUTLINE_DEEP_BODY_SHOULD_ONLY_BE_IN_MARKDOWN_FILE",
+      "Detailed body content. ".repeat(80)
+    ].join("\n");
+    const service = createGenerationService(storage, fakeAgentRuntime(), {
+      modelRuntime: fakeModelRuntime,
+      archiveMarkdownOutput: (threadId, virtualPath) => archiveMarkdownForTest(threadId, virtualPath, reportMarkdown),
+      agentBackend: {
+        getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+        runAgent: async (input) => {
+          input.onToolEvent?.({
+            eventType: "agent_backend_tool_completed",
+            payload: { toolName: "write_file", path: reportPath }
+          });
+          input.onToolEvent?.({
+            eventType: "agent_backend_tool_completed",
+            payload: { toolName: "present_files", filepaths: [reportPath] }
+          });
+          return {
+            text: [
+              "Done.",
+              "",
+              "```facetwrite_canvas_delivery",
+              JSON.stringify({
+                assistant_reply: "Document ready.",
+                outline_markdown: "# Overview\n- Mini Literature Review completed",
+                body_markdown: reportMarkdown
+              }),
+              "```"
+            ].join("\n"),
+            finishReason: "agent_backend_completed",
+            events: []
+          };
+        }
+      }
+    });
+
+    await service.generateAndRecordStream({
+      mode: "chat",
+      locale: "en",
+      threadId: "thread_md_summary_outline",
+      agentCardId: "chat-agent",
+      chatInstruction: "Research and write a detailed report",
+      contextValues: { canvas: { workflow: { mode: "batch_delivery" } }, autoPreflightPlan: { enabled: false } }
+    });
+
+    const body = canvasNodes.find((node) => node.title === "Body");
+    assert.ok(body);
+    assert.ok(String(body.content).includes("narrative opening paragraph"));
+    assert.equal(String(body.content).includes("Mini Literature Review completed"), false);
+    assert.equal(String(body.content).includes("UNIQUE_OUTLINE_DEEP_BODY_SHOULD_ONLY_BE_IN_MARKDOWN_FILE"), false);
+  } finally {
+    if (previousRoot === undefined) {
+      delete process.env.FACETWRITE_APP_ROOT;
+    } else {
+      process.env.FACETWRITE_APP_ROOT = previousRoot;
+    }
+    await rm(path.resolve(process.cwd(), appRoot), { recursive: true, force: true });
+  }
+});
+
 test("progressive Canvas prefers a readable Markdown output over fallback when runtime archive fails", async () => {
   const appRoot = `.facetwrite-test/md-runtime-local-output-${Date.now()}`;
   const previousRoot = process.env.FACETWRITE_APP_ROOT;
@@ -2346,7 +2557,7 @@ test("progressive Canvas finalizes files after clarification when runtime keeps 
     assert.ok(String(fileNode.content).includes(reportPath));
     assert.ok(canvasNodes.some((node) => node.title === "正文"));
     const body = canvasNodes.find((node) => node.title === "正文");
-    assert.ok(String(body?.content).includes("Systematic Literature Review"));
+    assert.ok(String(body?.content).includes("Agent literature synthesis"), String(body?.content));
   } finally {
     if (previousRoot === undefined) {
       delete process.env.FACETWRITE_APP_ROOT;
@@ -2460,8 +2671,7 @@ test("progressive Canvas falls back to a Markdown file document after multiple w
 
     const body = canvasNodes.find((node) => node.title === "Body");
     assert.ok(body);
-    assert.ok(String(body.content).includes("Full literature report"));
-    assert.ok(String(body.content).includes("Long section content."));
+    assert.ok(String(body.content).startsWith("# Body summary"));
     assert.equal(String(body.content).includes("UNIQUE_TAIL_SHOULD_ONLY_BE_IN_FILE"), false);
     assert.equal(result.text.includes("UNIQUE_TAIL_SHOULD_ONLY_BE_IN_FILE"), false);
     assert.ok(result.text.includes("/mnt/user-data/outputs/"));
@@ -2570,8 +2780,8 @@ test("progressive Canvas recovers final body and fallback Markdown from committe
 
     const body = canvasNodes.find((node) => node.title === "Body");
     assert.ok(body);
-    assert.ok(String(body.content).includes("Core Findings"));
     assert.ok(String(body.content).includes("Comprehensive Review of AI Agents"));
+    assert.equal(String(body.content).includes("Detailed Synthesis"), false);
     assert.equal(String(body.content).includes("Let me clarify"), false);
     assert.equal(String(body.content).includes("UNIQUE_RECOVERED_TAIL"), false);
 
