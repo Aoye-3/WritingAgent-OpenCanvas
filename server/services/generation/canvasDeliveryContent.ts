@@ -42,6 +42,7 @@ export type DiagramDeliveryContent = {
 export type CanvasDeliveryContent = {
   assistantText: string;
   outlineMarkdown: string;
+  bodySummaryMarkdown?: string;
   bodyMarkdown: string;
   sources: SourceLink[];
   usedStructuredBlock: boolean;
@@ -98,6 +99,7 @@ export function resolveCanvasDeliveryContent(input: {
     return {
       assistantText: assistantTextWithSources(parsed.assistantText || stripDeliveryBlocks(input.text), sources, input.locale),
       outlineMarkdown: parsed.outlineMarkdown || outlineFromBody(parsed.bodyMarkdown, input.locale),
+      bodySummaryMarkdown: parsed.bodySummaryMarkdown,
       bodyMarkdown: parsed.bodyMarkdown || stripDeliveryBlocks(input.text),
       sources,
       usedStructuredBlock: true
@@ -139,6 +141,7 @@ function parseStructuredDeliveryBlock(text: string): CanvasDeliveryContent | und
     return {
       assistantText: readString(record.assistant_reply) || readString(record.assistantText),
       outlineMarkdown: readString(record.outline_markdown) || readString(record.outlineMarkdown),
+      bodySummaryMarkdown: readString(record.body_summary_markdown) || readString(record.bodySummaryMarkdown),
       bodyMarkdown: readString(record.body_markdown) || readString(record.bodyMarkdown),
       sources,
       usedStructuredBlock: true

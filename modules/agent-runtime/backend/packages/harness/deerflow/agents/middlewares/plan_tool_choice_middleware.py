@@ -142,6 +142,9 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
 
         budget_phase = "evidence_exhausted" if evidence_exhausted else "model_exhausting" if model_exhausting else "recursion_reserve_reached"
         reason = "evidence budget reached" if evidence_exhausted else "model budget nearly exhausted" if model_exhausting else "runtime step reserve reached"
+        file_delivery_required = context.get("facetwrite_markdown_file_delivery_required") is True
+        canvas_action = context.get("facetwrite_canvas_action")
+        canvas_action_required = isinstance(canvas_action, dict) and canvas_action.get("requiresTool") is True
         PlanToolChoiceMiddleware._emit_synthesis_event({
             "type": "synthesis_gate",
             "phase": "budget_synthesis",
@@ -154,21 +157,28 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             "recursion_limit": recursion_limit,
             "estimated_steps_used": estimated_steps_used,
             "reserve_steps": effective_reserve_steps,
-            "file_delivery_required": context.get("facetwrite_markdown_file_delivery_required") is True,
+            "file_delivery_required": file_delivery_required,
+            "canvas_action_required": canvas_action_required,
             "second_handler": False,
             "entered_second_handler": False,
         })
-        file_delivery_required = context.get("facetwrite_markdown_file_delivery_required") is True
         file_presented = PlanToolChoiceMiddleware._has_successful_tool_result_without_later_error(request, "present_files")
         finalization_tools = PlanToolChoiceMiddleware._budget_finalization_tool_names(context)
         narrowed_tools = [
             tool for tool in request.tools
             if PlanToolChoiceMiddleware._tool_name(tool) in finalization_tools
         ]
+        canvas_action_notice = (
+            "This run has a required Canvas action. Complete it with canvas_write before finishing. "
+            "Do not finish with text only. "
+            if canvas_action_required
+            else ""
+        )
         if file_delivery_required and not file_presented:
             reminder = HumanMessage(
                 content=(
                     "FacetWrite runtime budget notice: the budget is reached or nearly reached. "
+                    f"{canvas_action_notice}"
                     f"Reason: {reason}. Prefer synthesizing the complete user deliverable from the gathered evidence, "
                     "including the actual report, summary tables, findings, and references when applicable. "
                     "If more tool work is still necessary for completion, keep it minimal. When ready, write that full "
@@ -187,6 +197,7 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         reminder = HumanMessage(
             content=(
                 "FacetWrite runtime budget notice: the budget is reached or nearly reached. "
+                f"{canvas_action_notice}"
                 f"Reason: {reason}. Prefer producing the final user-facing answer from the evidence already gathered. "
                 "Do not call additional research or workspace inspection tools. Include concrete conclusions, "
                 "any caveats, and source/file references that are already available."

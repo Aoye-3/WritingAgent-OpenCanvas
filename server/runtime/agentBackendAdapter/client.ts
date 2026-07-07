@@ -500,7 +500,7 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     ? true
     : undefined;
   const markdownFileDeliveryPolicy = progressiveCanvasDeliveryEnabled
-    ? "For medium or long text deliverables, especially if you perform two or more web_search calls or use a complex writing/research skill, first draft the complete user deliverable, then write that full Markdown report to /mnt/user-data/outputs/*.md with write_file and call present_files. The file content must contain the actual report, summary tables, findings, and references when applicable. Never write a delivery note, skill-loading note, clarification question, or file-save status as the Markdown file content. Use canvas_write only for short progressive nodes such as summaries, overviews, progress/reference notes, and references; never use canvas_write for the body, final body, full report, or full document. After present_files succeeds, produce the final chat response without further tool calls unless a blocking error remains. Keep the final chat response concise only after the full file is saved and presented; the Canvas body should contain a readable summary, while the full document lives in the Markdown file."
+    ? "For medium or long text deliverables, especially if you perform two or more web_search calls or use a complex writing/research skill, first draft the complete user deliverable, then write that full Markdown report to /mnt/user-data/outputs/*.md with write_file and call present_files. The file content must contain the actual report, summary tables, findings, and references when applicable. Hard requirement: every final Markdown deliverable must include a concise `## Summary`, `## Executive Summary`, or `## 摘要` section near the top, immediately after the title and before any outline/table of contents, because FacetWrite uses that section for the Canvas body summary. This section must be a real 3-6 sentence or bullet summary of the document's thesis, scope, key findings, and conclusion; do not use an outline, table of contents, file-save note, or progress note as the summary. Do not call present_files until the Markdown file contains this summary section. Never write a delivery note, skill-loading note, clarification question, or file-save status as the Markdown file content. Use canvas_write only for short progressive nodes such as summaries, overviews, progress/reference notes, and references; never use canvas_write for the body, final body, full report, or full document. After present_files succeeds, produce the final chat response without further tool calls unless a blocking error remains. Keep the final chat response concise only after the full file is saved and presented; the Canvas body should contain a readable summary, while the full document lives in the Markdown file."
     : undefined;
   const taskCompletionPolicy = planPolicy.phase === "chat"
     ? "Complete the user's task directly when reasonable defaults are enough. If a selected skill genuinely needs missing information before continuing, ask exactly one structured multiple-choice clarification with 2-3 mutually exclusive options and one recommended option. Do not ask open-ended questions, and do not write clarification text into final deliverables or Markdown files. After canvas_write commits successfully or present_files succeeds, produce a concise final response and stop calling tools unless a blocking error or missing requirement remains."
@@ -1335,7 +1335,35 @@ function mapMessageToolEvents(message: unknown, toolCallArgsById: Map<string, Re
       ...(structured[0]?.payload?.summary ? { summary: structured[0].payload.summary } : {})
     }
   };
-  return [terminal, ...structured];
+  const canvasMutationFailed = plainCanvasMutationFailedEvent(toolName, toolCallId, message.content, structured);
+  return canvasMutationFailed ? [terminal, canvasMutationFailed, ...structured] : [terminal, ...structured];
+}
+
+function plainCanvasMutationFailedEvent(
+  toolName: string,
+  toolCallId: string | undefined,
+  content: unknown,
+  structured: ToolEventRecord[]
+): ToolEventRecord | undefined {
+  if (toolName !== "canvas_write") return undefined;
+  if (structured.some((event) => /(?:^|_)canvas_mutation_failed$/.test(event.eventType))) return undefined;
+  const summary = plainToolErrorSummary(content);
+  if (!summary) return undefined;
+  return {
+    eventType: "agent_backend_canvas_mutation_failed",
+    payload: {
+      type: "canvas_mutation_failed",
+      toolName,
+      toolCallId,
+      reason: "request_failed",
+      summary
+    }
+  };
+}
+
+function plainToolErrorSummary(content: unknown) {
+  if (typeof content !== "string" || !content.startsWith("Error:")) return undefined;
+  return content.replace(/^Error:\s*/, "").trim() || "Canvas write request failed";
 }
 
 function toolFunctionName(toolCall: Record<string, unknown>) {

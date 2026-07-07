@@ -51,6 +51,108 @@ test("rejects empty server-managed Canvas delivery instead of pretending it comp
   );
 });
 
+test("accepts required Canvas action after canvas_write commits", async () => {
+  const result = await runAgentRuntimeGeneration({
+      ...input,
+      payload: {
+        ...input.payload,
+        chatInstruction: "Create one Canvas node",
+        canvasAction: { id: "canvas_action_1", operation: "create", risk: "low", requiresTool: true }
+      }
+    }, {
+      ...runtimeBase,
+      run: async () => ({
+        text: "",
+        finishReason: "agent_backend_completed",
+        events: [{ eventType: "agent_backend_canvas_mutation_committed", payload: { nodeId: "node_1" } }]
+      })
+    });
+  assert.equal(result?.events[0]?.eventType, "agent_backend_canvas_mutation_committed");
+});
+
+test("accepts required Canvas action after final body delivery commits", async () => {
+  const result = await runAgentRuntimeGeneration({
+      ...input,
+      payload: {
+        ...input.payload,
+        chatInstruction: "Write this to Canvas",
+        canvasAction: { id: "canvas_action_1", operation: "create", risk: "low", requiresTool: true }
+      }
+    }, {
+      ...runtimeBase,
+      run: async () => ({
+        text: "",
+        finishReason: "agent_backend_completed",
+        events: [{ eventType: "canvas_delivery_body_final_committed", payload: { nodeId: "node_final" } }]
+      })
+    });
+  assert.equal(result?.events[0]?.eventType, "canvas_delivery_body_final_committed");
+});
+
+test("accepts required Canvas action after file document delivery commits", async () => {
+  const result = await runAgentRuntimeGeneration({
+      ...input,
+      payload: {
+        ...input.payload,
+        chatInstruction: "Save this report to Canvas",
+        canvasAction: { id: "canvas_action_1", operation: "create", risk: "low", requiresTool: true }
+      }
+    }, {
+      ...runtimeBase,
+      run: async () => ({
+        text: "",
+        finishReason: "agent_backend_completed",
+        events: [{ eventType: "canvas_delivery_file_document_committed", payload: { nodeId: "file_1" } }]
+      })
+    });
+  assert.equal(result?.events[0]?.eventType, "canvas_delivery_file_document_committed");
+});
+
+test("rejects required Canvas action with only recoverable delivery checkpoints", async () => {
+  await assert.rejects(
+    () => runAgentRuntimeGeneration({
+      ...input,
+      payload: {
+        ...input.payload,
+        chatInstruction: "Write this to Canvas",
+        canvasAction: { id: "canvas_action_1", operation: "create", risk: "low", requiresTool: true }
+      }
+    }, {
+      ...runtimeBase,
+      run: async () => ({
+        text: "I have a draft.",
+        finishReason: "agent_backend_completed",
+        events: [
+          { eventType: "canvas_delivery_research_committed", payload: { nodeId: "research_1" } },
+          { eventType: "canvas_delivery_body_checkpoint_committed", payload: { nodeId: "draft_1" } }
+        ]
+      })
+    }),
+    /Canvas action completed without/i
+  );
+});
+
+test("rejects required Canvas action with only failed summary delivery", async () => {
+  await assert.rejects(
+    () => runAgentRuntimeGeneration({
+      ...input,
+      payload: {
+        ...input.payload,
+        chatInstruction: "Write this to Canvas",
+        canvasAction: { id: "canvas_action_1", operation: "create", risk: "low", requiresTool: true }
+      }
+    }, {
+      ...runtimeBase,
+      run: async () => ({
+        text: "The run failed.",
+        finishReason: "agent_backend_completed",
+        events: [{ eventType: "canvas_delivery_failed_summary_committed", payload: { nodeId: "failed_1" } }]
+      })
+    }),
+    /Canvas action completed without/i
+  );
+});
+
 test("defers Plan planning postconditions to persisted state validation", async () => {
   const result = await runAgentRuntimeGeneration({
       ...input,
