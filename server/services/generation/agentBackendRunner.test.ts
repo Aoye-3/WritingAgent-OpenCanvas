@@ -206,6 +206,77 @@ test("starts an execution run with full delivery tools after intake completion",
   ]);
 });
 
+test("starts answered clarification delivery runs in execution with file tools", async () => {
+  let allowedToolRefs: string[] = [];
+  let agentIntake: unknown;
+  const result = await runAgentBackendGeneration({
+    payload: {
+      mode: "chat",
+      locale: "en",
+      threadId: "thread_1",
+      chatInstruction: "Review recent agent literature\n\nSelected clarification: 2023-2026",
+      transientSkillRefs: ["literature-review"],
+      contextValues: {
+        agentClarification: {
+          clarificationId: "skill_clarification_1",
+          selectedOptionId: "recent",
+          answer: "2023-2026"
+        },
+        taskHandlingPolicy: { kind: "long_task" },
+        canvas: { workflow: { mode: "batch_delivery" } },
+        progressiveCanvasDelivery: {
+          enabled: true,
+          runtimeBudgetProfile: "low",
+          recursionLimit: 80,
+          modelCallLimit: 18,
+          evidenceToolLimit: 8,
+          bodyDraftWriteLimit: 2,
+          synthesisReserveSteps: 16
+        }
+      },
+      toolState: { web_search: true, canvas_write: true }
+    },
+    threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "model_1",
+    modelSettings: {
+      configuredModelApiId: "model_1",
+      providerId: "deepseek",
+      model: "deepseek-chat",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: true,
+      toolCallMode: "auto",
+      maxToolCalls: 20
+    },
+    runtimeConfig: { enabledTools: ["web_search", "canvas_write"], agentCard: {}, settings: {} } as never,
+    messages: [],
+    prompt: "prompt"
+  }, {
+    getRuntimeConfig: () => ({ enabled: true } as never),
+    runAgent: async (input) => {
+      allowedToolRefs = input.allowedToolRefs ?? [];
+      agentIntake = input.contextValues?.agentIntake;
+      return {
+        text: "Done",
+        finishReason: "agent_backend_completed",
+        events: [{ eventType: "agent_backend_canvas_node_committed", payload: { nodeId: "node_1" } }]
+      };
+    }
+  });
+
+  assert.equal(allowedToolRefs.includes("web_search"), true);
+  assert.equal(allowedToolRefs.includes("canvas_write"), true);
+  assert.equal(allowedToolRefs.includes("write_file"), true);
+  assert.equal(allowedToolRefs.includes("present_files"), true);
+  assert.notDeepEqual(allowedToolRefs, ["ask_clarification", "agent_intake_complete"]);
+  assert.deepEqual(agentIntake, { phase: "execution", completed: true });
+  assert.equal(result?.text, "Done");
+});
+
 test("forwards ask_clarification for transient skill runs", async () => {
   let allowedToolRefs: string[] = [];
   await runAgentBackendGeneration({

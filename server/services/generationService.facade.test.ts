@@ -1534,15 +1534,17 @@ test("agent intake suppresses equivalent answered clarification without runtime 
   assert.equal(secondRecord.events?.some((event) => event.eventType === "agent_backend_agent_clarification_requested"), false);
 });
 
-test("research skill answered clarification stays in intake until completion", async () => {
+test("research skill answered clarification resumes execution with low delivery budget", async () => {
   const { storage } = fakeStorage();
   let allowedToolRefs: string[] = [];
+  let observedContextValues: Record<string, unknown> = {};
   const service = createGenerationService(storage, fakeAgentRuntime(), {
     modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async (input) => {
         allowedToolRefs = input.allowedToolRefs ?? [];
+        observedContextValues = input.contextValues ?? {};
         return {
           text: "Continuing with the scoped literature review.",
           finishReason: "agent_backend_completed",
@@ -1571,6 +1573,8 @@ test("research skill answered clarification stays in intake until completion", a
         selectedOptionId: "format_apa",
         answer: "30 papers, APA format",
         resumeContext: {
+          runtimeBudgetProfile: "low",
+          canvas: { workflow: { mode: "batch_delivery" } },
           intakeRound: 3,
           answeredSummary: "Scope: Multi-agent systems; Time range: 2023-2026; Format: 30 papers, APA format"
         }
@@ -1580,7 +1584,18 @@ test("research skill answered clarification stays in intake until completion", a
   });
 
   assert.equal(result.finishReason, "agent_backend_completed");
-  assert.deepEqual(allowedToolRefs, ["ask_clarification", "agent_intake_complete"]);
+  assert.equal(allowedToolRefs.includes("web_search"), true);
+  assert.equal(allowedToolRefs.includes("write_file"), true);
+  assert.equal(allowedToolRefs.includes("present_files"), true);
+  assert.notDeepEqual(allowedToolRefs, ["ask_clarification", "agent_intake_complete"]);
+  assert.deepEqual(observedContextValues.agentIntake, { phase: "execution", completed: true });
+  const delivery = observedContextValues.progressiveCanvasDelivery as Record<string, unknown>;
+  assert.equal(delivery.enabled, true);
+  assert.equal(delivery.runtimeBudgetProfile, "low");
+  assert.equal(delivery.recursionLimit, 80);
+  assert.equal(delivery.modelCallLimit, 18);
+  assert.equal(delivery.evidenceToolLimit, 8);
+  assert.equal(delivery.forceSynthesisAfterEvidence, true);
 });
 
 test("clarification process narration with appended sources is not recorded as assistant body text", async () => {

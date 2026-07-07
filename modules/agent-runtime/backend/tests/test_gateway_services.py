@@ -529,3 +529,23 @@ def test_build_run_config_no_request_config():
     config = build_run_config("thread-abc", None, None)
     assert config["configurable"] == {"thread_id": "thread-abc"}
     assert "context" not in config
+
+
+def test_build_run_record_kwargs_preserves_context_for_budget_diagnostics():
+    """Run records must keep the original context so budget failures are auditable."""
+    from types import SimpleNamespace
+
+    from app.gateway.services import build_run_record_kwargs
+
+    context = {
+        "facetwrite_runtime_budget_profile": "low",
+        "facetwrite_recursion_limit": 80,
+        "facetwrite_model_call_limit": 18,
+        "facetwrite_progressive_canvas_delivery_enabled": True,
+    }
+    body = SimpleNamespace(input={"messages": []}, command=None, config={}, context=context)
+
+    kwargs = build_run_record_kwargs(body)
+
+    assert kwargs["context"] == context
+    assert kwargs["context"]["facetwrite_recursion_limit"] == 80

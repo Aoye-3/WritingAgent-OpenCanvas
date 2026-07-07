@@ -8,6 +8,7 @@ export function isAgentIntakePhase(payload: GenerateRequest) {
   if (isAgentIntakeExecution(payload.contextValues)) return false;
   if (isPlanGenerationPhase(payload)) return false;
   if (isSkillClarificationGuarded(payload)) return true;
+  if (hasAnsweredAgentClarification(payload.contextValues)) return false;
   if (isRecord(payload.contextValues?.agentClarification)) return true;
   if ((payload.transientSkillRefs ?? []).length > 0) return true;
   if (isProgressiveCanvasDelivery(payload)) return true;
@@ -71,6 +72,17 @@ function isAgentIntakeExecution(contextValues: GenerateRequest["contextValues"])
   return intake.phase === "execution" || intake.completed === true;
 }
 
+export function hasAnsweredAgentClarification(contextValues: GenerateRequest["contextValues"]) {
+  const clarification = readRecord(contextValues?.agentClarification);
+  const option = readRecord(clarification.option);
+  return Boolean(
+    readString(clarification.answer)
+    || readString(clarification.selectedOptionId)
+    || readString(option.id)
+    || readString(option.label)
+  );
+}
+
 function isPlanGenerationPhase(payload: GenerateRequest) {
   if (payload.planPhase) return true;
   if (isRecord(payload.planGeneration)) return true;
@@ -79,6 +91,10 @@ function isPlanGenerationPhase(payload: GenerateRequest) {
 
 function readRecord(value: unknown) {
   return isRecord(value) ? value : {};
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

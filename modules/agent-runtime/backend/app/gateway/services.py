@@ -214,6 +214,16 @@ def inject_authenticated_user_context(config: dict[str, Any], request: Request) 
         runtime_context["user_id"] = str(user_id)
 
 
+def build_run_record_kwargs(body: Any) -> dict[str, Any]:
+    """Preserve the request envelope needed for post-failure diagnostics."""
+    return {
+        "input": body.input,
+        "command": body.command,
+        "config": body.config,
+        "context": getattr(body, "context", None),
+    }
+
+
 def resolve_agent_factory(assistant_id: str | None):
     """Resolve the agent factory callable from config.
 
@@ -352,7 +362,7 @@ async def start_run(
             body.assistant_id,
             on_disconnect=disconnect,
             metadata=body.metadata or {},
-            kwargs={"input": body.input, "command": body.command, "config": body.config},
+            kwargs=build_run_record_kwargs(body),
             multitask_strategy=body.multitask_strategy,
             model_name=model_name,
         )

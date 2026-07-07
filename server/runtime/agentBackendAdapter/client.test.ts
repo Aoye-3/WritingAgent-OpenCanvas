@@ -173,7 +173,7 @@ test("builds AgentBackend resume run request with Command resume payload", () =>
   assert.equal(request.checkpoint_id, "checkpoint_1");
 });
 
-test("builds clarification resume request with intake tools and checkpoint metadata", () => {
+test("builds clarification resume request with delivery tools after user answer", () => {
   const card = getAgentCard("summary");
   const settings = defaultAgentSettings(card);
   const request = buildResumeRunRequest({
@@ -193,9 +193,18 @@ test("builds clarification resume request with intake tools and checkpoint metad
         clarificationId: "clarification_1",
         answer: "Use recent sources"
       },
+      taskHandlingPolicy: { kind: "long_task" },
+      canvas: { workflow: { mode: "batch_delivery" } },
       progressiveCanvasDelivery: {
         enabled: true,
-        recursionLimit: 80
+        runtimeBudgetProfile: "low",
+        recursionLimit: 80,
+        modelCallLimit: 18,
+        evidenceToolLimit: 8,
+        bodyDraftWriteLimit: 2,
+        synthesisReserveSteps: 16,
+        forceSynthesisAfterEvidence: true,
+        evidenceTools: ["web_search", "web_fetch", "read_file", "bash"]
       }
     },
     toolState: { web_search: true, canvas_write: true }
@@ -211,10 +220,17 @@ test("builds clarification resume request with intake tools and checkpoint metad
   assert.equal(request.metadata.interruptId, "interrupt_1");
   assert.equal(request.metadata.checkpointId, "checkpoint_1");
   assert.equal(request.checkpoint_id, "checkpoint_1");
-  assert.deepEqual(request.context.facetwrite_allowed_tool_refs, ["ask_clarification", "agent_intake_complete"]);
-  assert.deepEqual(request.context.facetwrite_tool_state, { ask_clarification: true, agent_intake_complete: true });
-  assert.equal(request.context.facetwrite_progressive_canvas_delivery_enabled, undefined);
-  assert.equal(request.context.facetwrite_canvas_write_scope, undefined);
+  assert.equal(request.config.configurable.facetwrite_recursion_limit, 80);
+  assert.equal(request.context.facetwrite_recursion_limit, 80);
+  assert.equal(request.config.recursion_limit, 160);
+  assert.equal(request.context.facetwrite_progressive_canvas_delivery_enabled, true);
+  assert.equal(request.context.facetwrite_model_call_limit, 18);
+  assert.equal(request.context.facetwrite_evidence_tool_limit, 8);
+  assert.equal(request.context.facetwrite_markdown_file_delivery_required, true);
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("write_file"), true);
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("present_files"), true);
+  assert.notDeepEqual(request.context.facetwrite_allowed_tool_refs, ["ask_clarification", "agent_intake_complete"]);
+  assert.equal(request.context.facetwrite_intake_phase, "execution");
 });
 
 test("posts AgentBackend resume run through authenticated runtime API", async () => {
@@ -1262,7 +1278,7 @@ test("limits progressive Canvas skill long tasks to intake tools before executio
   assert.equal(request.context.facetwrite_intake_phase, "intake");
 });
 
-test("keeps answered skill clarification resumes in Agent intake", () => {
+test("keeps answered skill clarification resumes in delivery execution", () => {
   const card = getAgentCard("summary");
   const request = buildRunRequest({
     threadId: "thread_skill_long_task_answered",
@@ -1295,16 +1311,17 @@ test("keeps answered skill clarification resumes in Agent intake", () => {
     toolState: { web_search: true }
   }, { enabled: true, baseUrl: "http://127.0.0.1:8000", assistantId: "lead_agent" });
 
-  assert.equal(request.config.recursion_limit, undefined);
-  assert.equal(request.context.facetwrite_progressive_canvas_delivery_enabled, undefined);
-  assert.equal(request.context.facetwrite_runtime_budget_profile, undefined);
-  assert.deepEqual(request.context.facetwrite_allowed_tool_refs, ["ask_clarification", "agent_intake_complete"]);
-  assert.deepEqual(request.context.facetwrite_tool_state, { ask_clarification: true, agent_intake_complete: true });
-  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("web_search"), false);
-  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("write_file"), false);
-  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("canvas_write"), false);
-  assert.equal(request.context.facetwrite_canvas_write_scope, undefined);
-  assert.equal(request.context.facetwrite_clarification_phase, "agent_intake");
+  assert.equal(request.config.recursion_limit, 220);
+  assert.equal(request.context.facetwrite_progressive_canvas_delivery_enabled, true);
+  assert.equal(request.context.facetwrite_runtime_budget_profile, "medium");
+  assert.equal(request.context.facetwrite_recursion_limit, 110);
+  assert.equal(request.context.facetwrite_model_call_limit, 24);
+  assert.equal(request.context.facetwrite_evidence_tool_limit, 12);
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("web_search"), true);
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("write_file"), true);
+  assert.equal(request.context.facetwrite_allowed_tool_refs.includes("present_files"), true);
+  assert.equal(request.context.facetwrite_intake_phase, "execution");
+  assert.equal(request.context.facetwrite_clarification_phase, undefined);
 });
 
 test("skill clarification guard exposes only ask_clarification even with progressive Canvas context", () => {

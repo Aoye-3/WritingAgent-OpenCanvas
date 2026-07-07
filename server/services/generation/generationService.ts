@@ -36,7 +36,7 @@ import {
 import { isCanvasWorkflowMode, type CanvasWorkflowMode } from "../../../shared/canvasWorkflow.js";
 import { sanitizeCanvasForAgentIntake } from "../../../shared/agentIntakeCanvas.js";
 import { containsInternalRuntimeProtocol } from "../../../shared/internalRuntimeProtocol.js";
-import { withSanitizedAgentIntakeCanvas } from "./agentIntakePolicy.js";
+import { withAgentIntakeExecutionPhase, withSanitizedAgentIntakeCanvas } from "./agentIntakePolicy.js";
 import {
   archiveMarkdownOutputFromRuntime,
   readArchivedMarkdownOutputSync,
@@ -153,6 +153,7 @@ export function createGenerationService(
     payload = withAutoPreflightPlan(payload, threadId, projectRuntimeSettings, agentPlanOrchestrator);
     payload = withPlanGeneration(payload, threadId, storage);
     payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
+    payload = withAnsweredAgentClarificationExecutionContext(payload);
     payload = withSanitizedAgentIntakeCanvas(payload);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     payload = withTaskHandlingPolicy(payload, context);
@@ -435,6 +436,7 @@ export function createGenerationService(
     payload = withAutoPreflightPlan(payload, threadId, projectRuntimeSettings, agentPlanOrchestrator);
     payload = withPlanGeneration(payload, threadId, storage);
     payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
+    payload = withAnsweredAgentClarificationExecutionContext(payload);
     payload = withSanitizedAgentIntakeCanvas(payload);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     payload = withTaskHandlingPolicy(payload, context);
@@ -1553,6 +1555,36 @@ function withSkillClarificationGuard(payload: GenerateRequest, threadId: string,
       }
     }
   };
+}
+
+function withAnsweredAgentClarificationExecutionContext(payload: GenerateRequest): GenerateRequest {
+  if (isSkillClarificationGuarded(payload)) return payload;
+  if (!readCurrentAgentClarificationAnswer(payload)) return payload;
+  const clarification = record(payload.contextValues?.agentClarification);
+  const resumeContext = record(clarification.resumeContext);
+  const resumeCanvas = sanitizeCanvasForAgentIntake(resumeContext.canvas);
+  const contextCanvas = record(payload.contextValues?.canvas);
+  const runtimeBudgetProfile = readOptionalRuntimeBudgetProfile(resumeContext.runtimeBudgetProfile)
+    ?? readOptionalRuntimeBudgetProfile(payload.contextValues?.runtimeBudgetProfile)
+    ?? payload.runtimeBudgetProfile;
+  const transientSkillRefs = (payload.transientSkillRefs ?? []).length
+    ? payload.transientSkillRefs
+    : readStringList(resumeContext.transientSkillRefs);
+  const disabledSkillRefs = (payload.disabledSkillRefs ?? []).length
+    ? payload.disabledSkillRefs
+    : readStringList(resumeContext.disabledSkillRefs);
+  const nextPayload = withAgentIntakeExecutionPhase({
+    ...payload,
+    ...(runtimeBudgetProfile ? { runtimeBudgetProfile } : {}),
+    ...(transientSkillRefs.length ? { transientSkillRefs } : {}),
+    ...(disabledSkillRefs.length ? { disabledSkillRefs } : {}),
+    contextValues: {
+      ...payload.contextValues,
+      ...(runtimeBudgetProfile ? { runtimeBudgetProfile } : {}),
+      ...(!Object.keys(contextCanvas).length && Object.keys(resumeCanvas).length ? { canvas: resumeCanvas } : {})
+    }
+  });
+  return nextPayload;
 }
 
 function needsSkillScopeClarification(payload: GenerateRequest) {

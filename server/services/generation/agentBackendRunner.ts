@@ -10,8 +10,10 @@ import type { StreamStatus } from "../../agentRunLoop.js";
 import { applyCanvasWriteToolExposure } from "./canvasWriteScopePolicy.js";
 import {
   agentIntakeToolRefsForPayload,
+  hasAnsweredAgentClarification,
   isAgentIntakePhase,
   isProgressiveCanvasDelivery,
+  isSkillClarificationGuarded,
   withAgentIntakeExecutionPhase,
   withSanitizedAgentIntakeCanvas
 } from "./agentIntakePolicy.js";
@@ -42,7 +44,10 @@ export type AgentBackendRunnerDeps = {
 export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, deps: AgentBackendRunnerDeps = {}) {
   const config = (deps.getRuntimeConfig ?? getAgentBackendRuntimeConfig)();
   if (!config.enabled) return undefined;
-  input = { ...input, payload: withSanitizedAgentIntakeCanvas(input.payload) };
+  const preparedPayload = hasAnsweredAgentClarification(input.payload.contextValues) && !isSkillClarificationGuarded(input.payload)
+    ? withAgentIntakeExecutionPhase(input.payload)
+    : input.payload;
+  input = { ...input, payload: withSanitizedAgentIntakeCanvas(preparedPayload) };
 
   const agentClarification = readRecord(input.payload.contextValues?.agentClarification);
   const runtimeResume = readRuntimeResumeMetadata(readRecord(agentClarification.resumeContext)?.runtimeResume);

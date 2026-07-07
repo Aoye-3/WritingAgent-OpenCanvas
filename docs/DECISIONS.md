@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-07: Answered Clarification Restores Execution Budgets
+
+Decision: Treat an answered Agent clarification as execution once the server scope guard has enough information, or once its maximum intake rounds have been reached. In that state FacetWrite marks the payload `agentIntake.phase:"execution"` / `completed:true`, restores progressive Canvas delivery, evidence tools, `write_file`, `present_files`, and the effective runtime budget profile from clarification `resumeContext`. The ask-only `skill_scope_guard` path remains active only while required slots are still missing.
+
+Reason: The previous clarification-resume rule treated every answer as another intake checkpoint. That protected Canvas context during early clarification, but it also stripped `progressiveCanvasDelivery` and the low-profile `facetwrite_*` budget fields from answered execution requests. Long research tasks then ran without middleware synthesis pressure and fell through to the LangGraph `recursion_limit:160` fuse, making the product budget look like it had been ignored.
+
+Impact: `agentIntakePolicy` detects answered clarifications separately from pending intake, `generationService` rebuilds execution context from `resumeContext`, and `agentBackendRunner` applies the same execution marker for direct runner inputs. Gateway run records preserve original `body.context` in `kwargs.context` so post-failure diagnostics can verify whether `facetwrite_recursion_limit:80` and related budget fields were present. The 2026-07-05 intake isolation decision still applies to pending or under-scoped clarification, but not to answered requests that are ready to execute.
+
 ## 2026-07-06: Agent Budget Gates Narrow Tools Before The LangGraph Fuse
 
 Decision: Keep the expanded LangGraph `config.recursion_limit` as the runaway-loop fuse, but make FacetWrite middleware the normal budget-stop path. When evidence, model-call, or step-reserve budgets reach synthesis territory, middleware emits `synthesis_gate`, appends a hidden synthesis notice, narrows available tools to finalization tools, and blocks later exploration tool calls or internal tool protocol with a finalization message. Completion evaluation treats final text, final Body, file document, committed Canvas mutation/node events, and committed Artifacts as terminal delivery; Canvas research/progress nodes and `Body draft` checkpoints remain recoverable intermediate artifacts only.
