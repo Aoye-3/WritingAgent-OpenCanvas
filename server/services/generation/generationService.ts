@@ -9,6 +9,7 @@ import type { AgentBackendRuntimeSignal } from "../../runtime/agentBackendAdapte
 import type { AgentRuntimeMemoryService } from "../agentRuntimeMemoryService.js";
 import { createAgentBackendRuntimePort } from "../../runtime/agentBackendAdapter/index.js";
 import { randomThreadId, safeId } from "../../utils/ids.js";
+import { getAgentCard } from "../../agentCards.js";
 import type { AgentBackendRunnerDeps } from "./agentBackendRunner.js";
 import { runAgentRuntimeGeneration } from "./agentRuntimeRunner.js";
 import { mockText } from "./mockFallback.js";
@@ -147,6 +148,9 @@ export function createGenerationService(
   async function generateAndRecord(payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
     markAnsweredAgentClarification(storage, threadId, payload);
+    const finalSupplementAction = readFinalSupplementAction(payload.contextValues);
+    const finalSupplementAnswer = finalSupplementAnswerEvent(payload);
+    payload = withFinalSupplementAnswerApplied(payload);
     payload = withOrchestrationPolicy(withCanvasAction(payload, threadId, storage));
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
     const projectRuntimeSettings = storage.getProjectRuntimeSettings(selection.projectId);
@@ -155,13 +159,22 @@ export function createGenerationService(
     payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
     payload = withOrdinaryClarificationIntake(payload, threadId, storage);
     payload = withAnsweredAgentClarificationExecutionContext(payload);
+    if (shouldRequestFinalSupplement(payload, finalSupplementAction)) {
+      return recordFinalSupplementRequest({
+        storage,
+        payload,
+        threadId,
+        selection,
+        onToolEvent
+      });
+    }
     payload = withSanitizedAgentIntakeCanvas(payload);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     payload = withTaskHandlingPolicy(payload, context);
     payload = withRuntimeContext(payload, context.canvasDeliveryContract);
     payload = withProgressiveCanvasDeliveryContext(payload, context, projectRuntimeSettings);
     const agentCard = context.runtimeConfig.agentCard;
-    const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
+    const runtimeEvents: ToolEventRecord[] = [...(finalSupplementAnswer ? [finalSupplementAnswer] : []), ...context.knowledgeEvents];
     const timeline = createRunTimelineBuilder({ threadId, locale: payload.locale });
     const timelineEvents: RunTimelineEvent[] = [];
     const deliveryId = stableCanvasDeliveryId(threadId, payload, storage);
@@ -323,6 +336,18 @@ export function createGenerationService(
             usage: agentBackendRun.usage
           });
         }
+        if (isFinalSupplementReintake(payload) && hasAgentIntakeCompleteEvent(baseEvents)) {
+          agentPlanOrchestrator.complete(threadId, payload, baseEvents);
+          return recordFinalSupplementRequest({
+            storage,
+            payload,
+            threadId,
+            selection,
+            context,
+            priorEvents: baseEvents,
+            onToolEvent
+          });
+        }
         const finalized = finalizeCanvasDelivery({
           payload,
           threadId,
@@ -431,6 +456,9 @@ export function createGenerationService(
   ): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
     markAnsweredAgentClarification(storage, threadId, payload);
+    const finalSupplementAction = readFinalSupplementAction(payload.contextValues);
+    const finalSupplementAnswer = finalSupplementAnswerEvent(payload);
+    payload = withFinalSupplementAnswerApplied(payload);
     payload = withOrchestrationPolicy(withCanvasAction(payload, threadId, storage));
     const selection = await prepareThreadModelSelection(payload, threadId, storage, deps.modelRuntime);
     const projectRuntimeSettings = storage.getProjectRuntimeSettings(selection.projectId);
@@ -439,6 +467,19 @@ export function createGenerationService(
     payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
     payload = withOrdinaryClarificationIntake(payload, threadId, storage);
     payload = withAnsweredAgentClarificationExecutionContext(payload);
+    if (shouldRequestFinalSupplement(payload, finalSupplementAction)) {
+      callbacks.onStatus?.({
+        phase: "finalizing",
+        label: payload.locale === "zh" ? "等待最终补充确认..." : "Waiting for final supplement confirmation..."
+      });
+      return recordFinalSupplementRequest({
+        storage,
+        payload,
+        threadId,
+        selection,
+        onToolEvent: callbacks.onToolEvent
+      });
+    }
     payload = withSanitizedAgentIntakeCanvas(payload);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     payload = withTaskHandlingPolicy(payload, context);
@@ -446,7 +487,7 @@ export function createGenerationService(
     payload = withProgressiveCanvasDeliveryContext(payload, context, projectRuntimeSettings);
     const agentCard = context.runtimeConfig.agentCard;
     let textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
-    const runtimeEvents: ToolEventRecord[] = [...context.knowledgeEvents];
+    const runtimeEvents: ToolEventRecord[] = [...(finalSupplementAnswer ? [finalSupplementAnswer] : []), ...context.knowledgeEvents];
     const timeline = createRunTimelineBuilder({ threadId, locale: payload.locale });
     const timelineEvents: RunTimelineEvent[] = [];
     const deliveryId = stableCanvasDeliveryId(threadId, payload, storage);
@@ -823,6 +864,23 @@ export function createGenerationService(
               runtimeRunId: agentBackendRun.runtimeRunId,
               runtimeThreadId: agentBackendRun.runtimeThreadId,
               usage: agentBackendRun.usage
+            });
+          }
+          if (isFinalSupplementReintake(payload) && hasAgentIntakeCompleteEvent(baseEvents)) {
+            textGate.flush();
+            callbacks.onStatus?.({
+              phase: "finalizing",
+              label: payload.locale === "zh" ? "等待最终补充确认..." : "Waiting for final supplement confirmation..."
+            });
+            agentPlanOrchestrator.complete(threadId, payload, baseEvents);
+            return recordFinalSupplementRequest({
+              storage,
+              payload,
+              threadId,
+              selection,
+              context,
+              priorEvents: [...baseEvents, ...timelineEvents.map(timelineEventToToolEvent)],
+              onToolEvent: callbacks.onToolEvent
             });
           }
           const finalized = finalizeCanvasDelivery({
@@ -1522,6 +1580,7 @@ function skillUsageTimelineEvent(
 }
 
 function withSkillClarificationGuard(payload: GenerateRequest, threadId: string, projectSettings: ProjectRuntimeSettings): GenerateRequest {
+  if (record(payload.contextValues?.finalSupplementFeedback).action === "execute") return payload;
   if (!needsSkillScopeClarification(payload)) return payload;
   const intake = skillScopeIntake(payload);
   const skillRefs = (payload.transientSkillRefs ?? []).map((skillRef) => skillRef.toLowerCase());
@@ -1590,6 +1649,178 @@ function withAnsweredAgentClarificationExecutionContext(payload: GenerateRequest
     }
   });
   return nextPayload;
+}
+
+type FinalSupplementAction = "execute" | "supplement";
+
+function shouldRequestFinalSupplement(payload: GenerateRequest, action?: FinalSupplementAction) {
+  if (action === "execute" || action === "supplement") return false;
+  if (!readCurrentAgentClarificationAnswer(payload)) return false;
+  const intake = record(payload.contextValues?.agentIntake);
+  return intake.phase === "execution" || intake.completed === true;
+}
+
+function recordFinalSupplementRequest(input: {
+  storage: SQLiteStorageRepository;
+  payload: GenerateRequest;
+  threadId: string;
+  selection: { configuredModel?: ConfiguredModelApi };
+  context?: Awaited<ReturnType<typeof buildGenerationRunContext>>;
+  priorEvents?: ToolEventRecord[];
+  onToolEvent?: (event: ToolEventRecord) => void;
+}) {
+  const event = finalSupplementRequestEvent(input.payload, input.threadId);
+  input.onToolEvent?.(event);
+  const agentCard = getAgentCard(input.payload.agentCardId ?? input.payload.taskId);
+  return recordGenerationRun({
+    storage: input.storage,
+    payload: input.payload,
+    threadId: input.threadId,
+    agentCardId: agentCard.id,
+    agentTitle: agentCard.title[input.payload.locale],
+    configuredModelApiId: input.context?.modelSettings.configuredModelApiId ?? input.selection.configuredModel?.id,
+    modelId: input.context?.modelSettings.model ?? input.selection.configuredModel?.modelId,
+    mode: input.context?.mode ?? (input.payload.mode === "chat" ? "chat" : "structured"),
+    prompt: input.context?.prompt ?? currentInstruction(input.payload),
+    text: finalSupplementWaitingText(input.payload.locale),
+    provider: "agent-backend",
+    usedMock: false,
+    toolState: input.context?.effectiveToolState ?? input.payload.toolState ?? {},
+    events: [...(input.priorEvents ?? []), event],
+    finishReason: "final_supplement_required"
+  });
+}
+
+function finalSupplementRequestEvent(payload: GenerateRequest, threadId: string): ToolEventRecord {
+  const finalSupplementId = stableFinalSupplementId(threadId, payload);
+  return {
+    eventType: "agent_final_supplement_requested",
+    payload: {
+      type: "agent_final_supplement_requested",
+      finalSupplementId,
+      question: payload.locale === "zh" ? "是否还有要补充的？" : "Is there anything else to add?",
+      executeLabel: payload.locale === "zh" ? "否，请执行任务" : "No, execute the task",
+      supplementLabel: payload.locale === "zh" ? "是，我要补充" : "Yes, I want to add something",
+      instructionText: currentInstruction(payload),
+      requestContext: finalSupplementRequestContext(payload)
+    }
+  };
+}
+
+function finalSupplementAnswerEvent(payload: GenerateRequest): ToolEventRecord | undefined {
+  const supplement = readFinalSupplement(payload.contextValues);
+  const finalSupplementId = readString(supplement.finalSupplementId);
+  const action = readFinalSupplementAction(payload.contextValues);
+  if (!finalSupplementId || !action) return undefined;
+  return {
+    eventType: "agent_final_supplement_answered",
+    payload: {
+      type: "agent_final_supplement_answered",
+      finalSupplementId,
+      action,
+      answer: action === "supplement" ? readString(supplement.supplement) : "execute"
+    }
+  };
+}
+
+function withFinalSupplementAnswerApplied(payload: GenerateRequest): GenerateRequest {
+  const supplement = readFinalSupplement(payload.contextValues);
+  const action = readFinalSupplementAction(payload.contextValues);
+  if (!action) return payload;
+  if (action === "supplement") {
+    const finalSupplementId = readString(supplement.finalSupplementId);
+    const supplementText = readString(supplement.supplement);
+    return {
+      ...payload,
+      contextValues: {
+        ...omitRecordKeys(payload.contextValues, ["agentClarification", "agentIntake", "ordinaryClarificationIntake", "finalSupplement"]),
+        agentClarification: {
+          clarificationId: finalSupplementId,
+          question: payload.locale === "zh" ? "是否还有要补充的？" : "Is there anything else to add?",
+          resumeContext: {
+            originalInstruction: currentInstruction(payload)
+          }
+        },
+        finalSupplementFeedback: {
+          action,
+          finalSupplementId,
+          supplement: supplementText
+        }
+      }
+    };
+  }
+  return {
+    ...payload,
+    contextValues: {
+      ...omitRecordKey(payload.contextValues, "finalSupplement"),
+      agentIntake: {
+        ...record(payload.contextValues?.agentIntake),
+        phase: "execution",
+        completed: true
+      },
+      finalSupplementFeedback: {
+        action,
+        finalSupplementId: readString(supplement.finalSupplementId)
+      }
+    }
+  };
+}
+
+function finalSupplementRequestContext(payload: GenerateRequest) {
+  return {
+    ...omitRecordKey(payload.contextValues, "finalSupplement"),
+    ...(payload.transientSkillRefs?.length ? { transientSkillRefs: payload.transientSkillRefs } : {}),
+    ...(payload.disabledSkillRefs?.length ? { disabledSkillRefs: payload.disabledSkillRefs } : {}),
+    ...(payload.runtimeBudgetProfile ? { runtimeBudgetProfile: payload.runtimeBudgetProfile } : {}),
+    ...(payload.planId && payload.stepId ? { planExecution: { planId: payload.planId, stepId: payload.stepId } } : {})
+  };
+}
+
+function readFinalSupplement(contextValues: GenerateRequest["contextValues"]) {
+  return record(contextValues?.finalSupplement);
+}
+
+function readFinalSupplementAction(contextValues: GenerateRequest["contextValues"]): FinalSupplementAction | undefined {
+  const action = readString(readFinalSupplement(contextValues).action);
+  return action === "execute" || action === "supplement" ? action : undefined;
+}
+
+function stableFinalSupplementId(threadId: string, payload: GenerateRequest) {
+  const clarification = record(payload.contextValues?.agentClarification);
+  const basis = [
+    threadId,
+    readString(clarification.clarificationId),
+    readString(clarification.question),
+    currentInstruction(payload)
+  ].join("|");
+  return `final_supplement_${hashString(basis).toString(36)}`;
+}
+
+function currentInstruction(payload: GenerateRequest) {
+  return payload.chatInstruction || payload.freeTextPrompt || "Continue the task";
+}
+
+function finalSupplementWaitingText(locale: GenerateRequest["locale"]) {
+  return locale === "zh"
+    ? "在执行前，请确认是否还有要补充的信息。"
+    : "Before execution, please confirm whether there is anything else to add.";
+}
+
+function omitRecordKey(value: unknown, key: string) {
+  return omitRecordKeys(value, [key]);
+}
+
+function omitRecordKeys(value: unknown, keys: string[]) {
+  const source = record(value);
+  return Object.fromEntries(Object.entries(source).filter(([entryKey]) => !keys.includes(entryKey)));
+}
+
+function isFinalSupplementReintake(payload: GenerateRequest) {
+  return record(payload.contextValues?.finalSupplementFeedback).action === "supplement";
+}
+
+function hasAgentIntakeCompleteEvent(events: ToolEventRecord[]) {
+  return events.some((event) => event.eventType === "agent_backend_agent_intake_complete");
 }
 
 const MAX_ORDINARY_CLARIFICATION_ROUNDS = 3;

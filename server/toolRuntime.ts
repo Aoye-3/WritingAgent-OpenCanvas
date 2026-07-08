@@ -63,6 +63,8 @@ export type ToolEventRecord = {
     | "completion_evaluated"
     | "todo_completion_incomplete"
     | "internal_output_blocked"
+    | "agent_final_supplement_requested"
+    | "agent_final_supplement_answered"
     | "knowledge_search_completed"
     | "knowledge_search_failed"
     | `web_search_${string}`

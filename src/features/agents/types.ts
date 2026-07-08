@@ -256,6 +256,15 @@ export type AgentClarification = {
   updatedAt: string;
 };
 
+export type FinalSupplement = {
+  id: string;
+  status: "pending";
+  question: string;
+  instructionText: string;
+  requestContext: Record<string, unknown>;
+  createdAt: string;
+};
+
 export type RunTimelineEvent = {
   id: string;
   threadId?: string;
@@ -411,6 +420,7 @@ export type ThreadStateResponse = {
   outputVersions: StoredOutputVersion[];
   toolEvents: StoredToolEvent[];
   agentClarifications?: AgentClarification[];
+  finalSupplement?: FinalSupplement;
   runTimelineEvents?: RunTimelineEvent[];
   runCompletion?: RunCompletionVerdict;
   canvasNodes?: CanvasNode[];

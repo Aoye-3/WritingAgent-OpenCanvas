@@ -76,6 +76,7 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     isAgentIntakePhase(input.payload)
     && hasAgentIntakeCompleteEvent(run.events)
     && ordinaryClarificationIntakeCanComplete(input.payload.contextValues)
+    && !isFinalSupplementReintake(input.payload.contextValues)
   ) {
     const executionPayload = withAgentIntakeExecutionPhase(input.payload);
     const executionInput = buildBaseRunInput({ ...input, payload: executionPayload }, config);
@@ -127,6 +128,9 @@ function buildBaseRunInput(input: AgentBackendRunnerInput, config: AgentBackendR
 function allowedToolsForRequest(input: AgentBackendRunnerInput) {
   if (isAgentIntakePhase(input.payload)) return agentIntakeToolRefsForPayload(input.payload);
   const allowed = new Set<string>(input.runtimeConfig.enabledTools);
+  for (const [tool, enabled] of Object.entries(input.payload.toolState ?? {})) {
+    if (enabled) allowed.add(tool);
+  }
   for (const tool of ["plan_clarification_submit", "plan_revision_submit", "artifact_stage"] as const) {
     if (input.payload.toolState?.[tool]) allowed.add(tool);
   }
@@ -162,6 +166,10 @@ function hasAgentClarificationEvent(events: ToolEventRecord[]) {
 
 function hasAgentIntakeCompleteEvent(events: ToolEventRecord[]) {
   return events.some((event) => event.eventType === "agent_backend_agent_intake_complete");
+}
+
+function isFinalSupplementReintake(contextValues: GenerateRequest["contextValues"]) {
+  return readRecord(contextValues?.finalSupplementFeedback).action === "supplement";
 }
 
 function buildClarificationResumePayload(agentClarification: Record<string, unknown>) {

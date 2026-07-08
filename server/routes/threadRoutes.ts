@@ -190,6 +190,7 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
     storage.migrateCanvasWorkflowRoleNodes(projectId);
     const plans = storage.listPlanRuns(request.params.threadId);
     const toolEvents = storage.listToolEvents(request.params.threadId);
+    const finalSupplement = pendingFinalSupplement(toolEvents);
     const outputVersions = storage.listOutputVersions(request.params.threadId);
     const latestRunId = outputVersions[0]?.runId;
     const runTimelineSourceEvents = latestRunId
@@ -207,6 +208,7 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
       outputVersions,
       toolEvents,
       agentClarifications: storage.listAgentClarifications(request.params.threadId),
+      ...(finalSupplement ? { finalSupplement } : {}),
       runTimelineEvents: runTimelineSourceEvents.map(timelineEventFromToolEvent).filter((event): event is NonNullable<typeof event> => Boolean(event)),
       runCompletion: latestCompletion,
       canvasNodes: storage.listCanvasNodes(projectId),
@@ -220,6 +222,33 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
       planActivities: plans.flatMap((plan) => storage.listPlanActivities(request.params.threadId, plan.id))
     });
   });
+}
+
+function pendingFinalSupplement(events: Array<{ eventType: string; payload: unknown; createdAt: string }>) {
+  const answeredIds = new Set(events
+    .filter((event) => event.eventType === "agent_final_supplement_answered")
+    .map((event) => readString(record(event.payload).finalSupplementId))
+    .filter(Boolean));
+  const request = events
+    .filter((event) => event.eventType === "agent_final_supplement_requested")
+    .find((event) => {
+      const id = readString(record(event.payload).finalSupplementId);
+      return id && !answeredIds.has(id);
+    });
+  const payload = record(request?.payload);
+  const finalSupplementId = readString(payload.finalSupplementId);
+  const question = readString(payload.question);
+  const instructionText = readString(payload.instructionText);
+  const requestContext = record(payload.requestContext);
+  if (!request || !finalSupplementId || !question || !instructionText) return undefined;
+  return {
+    id: finalSupplementId,
+    status: "pending" as const,
+    question,
+    instructionText,
+    requestContext,
+    createdAt: request.createdAt
+  };
 }
 
 function latestRunCompletion(events: Array<{ eventType: string; payload: unknown; createdAt: string }>) {

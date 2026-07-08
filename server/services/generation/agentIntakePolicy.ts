@@ -5,6 +5,7 @@ export const AGENT_INTAKE_TOOL_REFS = ["ask_clarification", "agent_intake_comple
 export const SKILL_SCOPE_GUARD_TOOL_REFS = ["ask_clarification"] as const;
 
 export function isAgentIntakePhase(payload: GenerateRequest) {
+  if (readRecord(payload.contextValues?.finalSupplementFeedback).action === "execute") return false;
   if (isAgentIntakeExecution(payload.contextValues)) return false;
   if (isPlanGenerationPhase(payload)) return false;
   if (isSkillClarificationGuarded(payload)) return true;
