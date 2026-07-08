@@ -83,8 +83,12 @@ test("ordinary clarification policy allows one-at-a-time follow-up rounds", () =
   });
 
   const policy = String(request.context.facetwrite_clarification_policy);
+  assert.match(policy, /Ordinary intake is active/i);
+  assert.match(policy, /privately build a clarification agenda/i);
+  assert.match(policy, /materially narrow scope, format, audience, constraints, risk, or delivery expectations/i);
   assert.match(policy, /ask one structured multiple-choice clarification at a time/i);
-  assert.match(policy, /After the user answers, you may ask another only if still blocking/i);
+  assert.match(policy, /collect at least 2 high-value clarification rounds before completing intake/i);
+  assert.match(policy, /Do not ask filler questions/i);
   assert.match(policy, /Ordinary clarification rounds used: 0\/3; remaining: 3/i);
   assert.doesNotMatch(policy, /ask exactly one clarification/i);
 });
@@ -101,8 +105,11 @@ test("ordinary clarification policy includes answered summary and avoids repeats
     messages: [{ role: "user", content: "Review recent papers" }],
     prompt: "Review recent papers",
     contextValues: {
-      ordinaryClarificationLoop: {
+      ordinaryClarificationIntake: {
+        mode: "ordinary",
+        state: "collecting",
         maxRounds: 3,
+        minAnsweredRoundsAfterFirstAsk: 2,
         answeredRounds: 2,
         remainingRounds: 1,
         answeredSummary: "1. Which scope? => Recent papers\n2. Which format? => Markdown"
@@ -132,8 +139,11 @@ test("ordinary clarification policy forbids ask_clarification after round limit"
     messages: [{ role: "user", content: "Review recent papers" }],
     prompt: "Review recent papers",
     contextValues: {
-      ordinaryClarificationLoop: {
+      ordinaryClarificationIntake: {
+        mode: "ordinary",
+        state: "completed",
         maxRounds: 3,
+        minAnsweredRoundsAfterFirstAsk: 2,
         answeredRounds: 3,
         remainingRounds: 0,
         answeredSummary: "1. Which scope? => Recent papers"
@@ -146,8 +156,46 @@ test("ordinary clarification policy forbids ask_clarification after round limit"
   });
 
   const policy = String(request.context.facetwrite_clarification_policy);
-  assert.match(policy, /ordinary clarification limit has been reached \(3\/3\)/i);
+  assert.match(policy, /Ordinary intake is complete or the clarification limit has been reached \(3\/3\)/i);
   assert.match(policy, /do not call ask_clarification again/i);
+});
+
+test("ordinary intake uses dynamic tool refs after one answered round", () => {
+  const card = getAgentCard("summary");
+  const settings = defaultAgentSettings(card);
+  const request = buildRunRequest({
+    threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings,
+    messages: [{ role: "user", content: "Review recent papers" }],
+    prompt: "Review recent papers",
+    contextValues: {
+      agentClarification: {
+        clarificationId: "clarification_1",
+        selectedOptionId: "recent",
+        answer: "Recent papers"
+      },
+      ordinaryClarificationIntake: {
+        mode: "ordinary",
+        state: "collecting",
+        maxRounds: 3,
+        minAnsweredRoundsAfterFirstAsk: 2,
+        answeredRounds: 1,
+        remainingRounds: 2,
+        answeredSummary: "1. Which scope? => Recent papers"
+      }
+    }
+  }, {
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8000",
+    assistantId: "lead_agent"
+  });
+
+  assert.equal(request.context.facetwrite_intake_phase, "intake");
+  assert.deepEqual(request.context.facetwrite_allowed_tool_refs, ["ask_clarification"]);
+  assert.deepEqual(request.context.facetwrite_tool_state, { ask_clarification: true });
 });
 
 test("strips progressive execution budget during Agent intake", () => {

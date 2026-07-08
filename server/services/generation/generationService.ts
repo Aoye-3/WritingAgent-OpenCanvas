@@ -36,7 +36,7 @@ import {
 import { isCanvasWorkflowMode, type CanvasWorkflowMode } from "../../../shared/canvasWorkflow.js";
 import { sanitizeCanvasForAgentIntake } from "../../../shared/agentIntakeCanvas.js";
 import { containsInternalRuntimeProtocol } from "../../../shared/internalRuntimeProtocol.js";
-import { withAgentIntakeExecutionPhase, withSanitizedAgentIntakeCanvas } from "./agentIntakePolicy.js";
+import { isOrdinaryClarificationIntakeCollecting, withAgentIntakeExecutionPhase, withSanitizedAgentIntakeCanvas } from "./agentIntakePolicy.js";
 import {
   archiveMarkdownOutputFromRuntime,
   readArchivedMarkdownOutputSync,
@@ -153,7 +153,7 @@ export function createGenerationService(
     payload = withAutoPreflightPlan(payload, threadId, projectRuntimeSettings, agentPlanOrchestrator);
     payload = withPlanGeneration(payload, threadId, storage);
     payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
-    payload = withOrdinaryClarificationLoop(payload, threadId, storage);
+    payload = withOrdinaryClarificationIntake(payload, threadId, storage);
     payload = withAnsweredAgentClarificationExecutionContext(payload);
     payload = withSanitizedAgentIntakeCanvas(payload);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
@@ -437,7 +437,7 @@ export function createGenerationService(
     payload = withAutoPreflightPlan(payload, threadId, projectRuntimeSettings, agentPlanOrchestrator);
     payload = withPlanGeneration(payload, threadId, storage);
     payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
-    payload = withOrdinaryClarificationLoop(payload, threadId, storage);
+    payload = withOrdinaryClarificationIntake(payload, threadId, storage);
     payload = withAnsweredAgentClarificationExecutionContext(payload);
     payload = withSanitizedAgentIntakeCanvas(payload);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
@@ -1562,6 +1562,7 @@ function withSkillClarificationGuard(payload: GenerateRequest, threadId: string,
 function withAnsweredAgentClarificationExecutionContext(payload: GenerateRequest): GenerateRequest {
   if (isSkillClarificationGuarded(payload)) return payload;
   if (!readCurrentAgentClarificationAnswer(payload)) return payload;
+  if (isOrdinaryClarificationIntakeCollecting(payload.contextValues)) return payload;
   const clarification = record(payload.contextValues?.agentClarification);
   const resumeContext = record(clarification.resumeContext);
   const resumeCanvas = sanitizeCanvasForAgentIntake(resumeContext.canvas);
@@ -1592,9 +1593,13 @@ function withAnsweredAgentClarificationExecutionContext(payload: GenerateRequest
 }
 
 const MAX_ORDINARY_CLARIFICATION_ROUNDS = 3;
+const MIN_ORDINARY_CLARIFICATION_ROUNDS_AFTER_FIRST_ASK = 2;
 
-export function withOrdinaryClarificationLoop(payload: GenerateRequest, threadId: string, storage: SQLiteStorageRepository): GenerateRequest {
+export function withOrdinaryClarificationIntake(payload: GenerateRequest, threadId: string, storage: SQLiteStorageRepository): GenerateRequest {
   if (isSkillClarificationGuarded(payload)) return payload;
+  if (readPlanExecutionContext(payload.contextValues?.planExecution) || payload.planPhase || payload.planGeneration) return payload;
+  const existingIntake = record(payload.contextValues?.ordinaryClarificationIntake);
+  if (existingIntake.state === "completed") return payload;
   const originalInstruction = currentOrdinaryClarificationOriginalInstruction(payload);
   const answered = originalInstruction
     ? storage.listAgentClarifications(threadId)
@@ -1605,15 +1610,20 @@ export function withOrdinaryClarificationLoop(payload: GenerateRequest, threadId
     : [];
   const answeredRounds = Math.min(answered.length, MAX_ORDINARY_CLARIFICATION_ROUNDS);
   const remainingRounds = Math.max(0, MAX_ORDINARY_CLARIFICATION_ROUNDS - answeredRounds);
+  const answeredSummary = ordinaryClarificationAnsweredSummary(answered.slice(-MAX_ORDINARY_CLARIFICATION_ROUNDS));
+  const state = answeredRounds >= MAX_ORDINARY_CLARIFICATION_ROUNDS ? "completed" : "collecting";
   return {
     ...payload,
     contextValues: {
       ...payload.contextValues,
-      ordinaryClarificationLoop: {
+      ordinaryClarificationIntake: {
+        mode: "ordinary",
+        state,
         maxRounds: MAX_ORDINARY_CLARIFICATION_ROUNDS,
+        minAnsweredRoundsAfterFirstAsk: MIN_ORDINARY_CLARIFICATION_ROUNDS_AFTER_FIRST_ASK,
         answeredRounds,
         remainingRounds,
-        answeredSummary: ordinaryClarificationAnsweredSummary(answered.slice(-MAX_ORDINARY_CLARIFICATION_ROUNDS))
+        answeredSummary
       }
     }
   };

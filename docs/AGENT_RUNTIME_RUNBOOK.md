@@ -160,13 +160,15 @@ Regression coverage lives in `server/runtime/agentBackendAdapter/client.test.ts`
 node --import tsx --test server/runtime/agentBackendAdapter/client.test.ts server/services/generation/agentBackendRunner.test.ts server/services/generationService.facade.test.ts server/storageFacade.test.ts tests/frontend/agentClarification.test.ts
 ```
 
-### Ordinary Clarification Loop
+### Ordinary Intake Clarification
 
 Ordinary Agent clarification is still a single-question protocol. Do not add `questions[]`, multi-field form payloads, or a new frontend interaction table for this path unless the product explicitly adopts a broader Human Interaction architecture. The maintained behavior is up to three rounds of `ask_clarification`, one structured multiple-choice question per round, scoped to the same original instruction.
 
-On a resumed ordinary clarification, inspect `contextValues.ordinaryClarificationLoop`. It should contain `maxRounds:3`, the answered round count, remaining round count, and an answered-summary string built from prior persisted `agent_clarifications`. Skill scope guard records, Plan clarification records, and records carrying `facetwrite_clarification_policy.mode:"skill_scope_guard"` must not count toward ordinary rounds.
+On a resumed ordinary clarification, inspect `contextValues.ordinaryClarificationIntake`. It should contain `mode:"ordinary"`, `state:"collecting"`, `maxRounds:3`, `minAnsweredRoundsAfterFirstAsk:2`, the answered round count, remaining round count, and an answered-summary string built from prior persisted `agent_clarifications`. Skill scope guard records, Plan clarification records, and records carrying `facetwrite_clarification_policy.mode:"skill_scope_guard"` must not count toward ordinary rounds.
 
-The Runtime prompt should say "ask one clarification at a time", not "ask exactly one clarification". If `remainingRounds` is `0`, the prompt must prohibit another `ask_clarification` call and instruct the Agent to continue with reasonable defaults or explain what remains impossible. If the same topic is asked again, first inspect whether the answered summary was injected and whether the previous clarification had the same `resumeContext.originalInstruction`.
+After the first ordinary clarification answer, the next Runtime request should still be `facetwrite_intake_phase:"intake"` with only `ask_clarification` exposed until two ordinary rounds have been answered. After two answered rounds, `agent_intake_complete` is exposed alongside `ask_clarification`; after three rounds, the backend should stop exposing ordinary `ask_clarification` and move to execution. If a run jumps to execution after only one answered ordinary clarification, inspect `isAgentIntakePhase`, `agentIntakeToolRefsForPayload`, and the answered-clarification promotion logic before debugging the frontend card.
+
+The Runtime prompt should tell the Agent to privately build a clarification agenda and ask one clarification at a time, not "ask exactly one clarification". If `remainingRounds` is `0` or `state:"completed"`, the prompt must prohibit another ordinary `ask_clarification` call. If the same topic is asked again, first inspect whether the answered summary was injected and whether the previous clarification had the same `resumeContext.originalInstruction`.
 
 Focused regression coverage for this policy lives in `server/runtime/agentBackendAdapter/client.test.ts`, `server/services/generation/clarificationContinuity.test.ts`, and `modules/agent-runtime/backend/tests/test_clarification_middleware.py`.
 

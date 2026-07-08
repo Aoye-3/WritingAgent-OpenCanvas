@@ -321,6 +321,205 @@ test("forwards ask_clarification for transient skill runs", async () => {
   assert.ok(allowedToolRefs.includes("ask_clarification"));
 });
 
+test("keeps ordinary clarification intake ask-only after one answered round", async () => {
+  let allowedToolRefs: string[] = [];
+  let agentIntake: unknown;
+  const result = await runAgentBackendGeneration({
+    payload: {
+      mode: "chat",
+      locale: "en",
+      threadId: "thread_1",
+      chatInstruction: "Review recent papers\n\nSelected clarification: Recent sources",
+      contextValues: {
+        agentClarification: {
+          clarificationId: "clarification_1",
+          selectedOptionId: "recent",
+          answer: "Recent sources"
+        },
+        ordinaryClarificationIntake: {
+          mode: "ordinary",
+          state: "collecting",
+          maxRounds: 3,
+          minAnsweredRoundsAfterFirstAsk: 2,
+          answeredRounds: 1,
+          remainingRounds: 2,
+          answeredSummary: "1. Which sources? => Recent sources"
+        }
+      }
+    },
+    threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "model_1",
+    modelSettings: {
+      configuredModelApiId: "model_1",
+      providerId: "deepseek",
+      model: "deepseek-chat",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: true,
+      toolCallMode: "auto",
+      maxToolCalls: 20
+    },
+    runtimeConfig: { enabledTools: ["web_search"], agentCard: {}, settings: {} } as never,
+    messages: [],
+    prompt: "prompt"
+  }, {
+    getRuntimeConfig: () => ({ enabled: true } as never),
+    runAgent: async (input) => {
+      allowedToolRefs = input.allowedToolRefs ?? [];
+      agentIntake = input.contextValues?.agentIntake;
+      return {
+        text: "",
+        finishReason: "clarification_required",
+        events: [{
+          eventType: "agent_backend_agent_clarification_requested",
+          payload: { question: "Which output?", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] }
+        }]
+      };
+    }
+  });
+
+  assert.deepEqual(allowedToolRefs, ["ask_clarification"]);
+  assert.equal(agentIntake, undefined);
+  assert.equal(result?.finishReason, "clarification_required");
+});
+
+test("ordinary clarification intake can complete after two answered rounds", async () => {
+  const allowedToolRefsByRun: string[][] = [];
+  const agentIntakeByRun: unknown[] = [];
+  await runAgentBackendGeneration({
+    payload: {
+      mode: "chat",
+      locale: "en",
+      threadId: "thread_1",
+      chatInstruction: "Review recent papers\n\nSelected clarification: Recent sources",
+      contextValues: {
+        agentClarification: {
+          clarificationId: "clarification_1",
+          selectedOptionId: "recent",
+          answer: "Recent sources"
+        },
+        ordinaryClarificationIntake: {
+          mode: "ordinary",
+          state: "collecting",
+          maxRounds: 3,
+          minAnsweredRoundsAfterFirstAsk: 2,
+          answeredRounds: 2,
+          remainingRounds: 1,
+          answeredSummary: "1. Which sources? => Recent sources\n2. Which output? => Markdown"
+        }
+      }
+    },
+    threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "model_1",
+    modelSettings: {
+      configuredModelApiId: "model_1",
+      providerId: "deepseek",
+      model: "deepseek-chat",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: true,
+      toolCallMode: "auto",
+      maxToolCalls: 20
+    },
+    runtimeConfig: { enabledTools: ["web_search"], agentCard: {}, settings: {} } as never,
+    messages: [],
+    prompt: "prompt"
+  }, {
+    getRuntimeConfig: () => ({ enabled: true } as never),
+    runAgent: async (input) => {
+      allowedToolRefsByRun.push(input.allowedToolRefs ?? []);
+      agentIntakeByRun.push(input.contextValues?.agentIntake);
+      if (allowedToolRefsByRun.length === 1) {
+        return {
+          text: "",
+          finishReason: "agent_backend_completed",
+          events: [{ eventType: "agent_backend_agent_intake_complete", payload: { summary: "Ready" } }]
+        };
+      }
+      return {
+        text: "Done",
+        finishReason: "agent_backend_completed",
+        events: []
+      };
+    }
+  });
+
+  assert.deepEqual(allowedToolRefsByRun[0], ["ask_clarification", "agent_intake_complete"]);
+  assert.equal(allowedToolRefsByRun[1]?.includes("ask_clarification"), false);
+  assert.equal(allowedToolRefsByRun[1]?.includes("web_search"), true);
+  assert.deepEqual(agentIntakeByRun[1], { phase: "execution", completed: true });
+});
+
+test("ordinary clarification intake round limit starts execution without ask_clarification", async () => {
+  let allowedToolRefs: string[] = [];
+  let ordinaryIntake: unknown;
+  await runAgentBackendGeneration({
+    payload: {
+      mode: "chat",
+      locale: "en",
+      threadId: "thread_1",
+      chatInstruction: "Review recent papers\n\nSelected clarification: Recent sources",
+      contextValues: {
+        agentClarification: {
+          clarificationId: "clarification_1",
+          selectedOptionId: "recent",
+          answer: "Recent sources"
+        },
+        ordinaryClarificationIntake: {
+          mode: "ordinary",
+          state: "completed",
+          maxRounds: 3,
+          minAnsweredRoundsAfterFirstAsk: 2,
+          answeredRounds: 3,
+          remainingRounds: 0,
+          answeredSummary: "1. Which sources? => Recent sources"
+        }
+      }
+    },
+    threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "model_1",
+    modelSettings: {
+      configuredModelApiId: "model_1",
+      providerId: "deepseek",
+      model: "deepseek-chat",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: true,
+      toolCallMode: "auto",
+      maxToolCalls: 20
+    },
+    runtimeConfig: { enabledTools: ["web_search"], agentCard: {}, settings: {} } as never,
+    messages: [],
+    prompt: "prompt"
+  }, {
+    getRuntimeConfig: () => ({ enabled: true } as never),
+    runAgent: async (input) => {
+      allowedToolRefs = input.allowedToolRefs ?? [];
+      ordinaryIntake = input.contextValues?.ordinaryClarificationIntake;
+      return {
+        text: "Done",
+        finishReason: "agent_backend_completed",
+        events: []
+      };
+    }
+  });
+
+  assert.equal(allowedToolRefs.includes("ask_clarification"), false);
+  assert.deepEqual(ordinaryIntake, { mode: "ordinary", state: "completed", maxRounds: 3, minAnsweredRoundsAfterFirstAsk: 2, answeredRounds: 3, remainingRounds: 0, answeredSummary: "1. Which sources? => Recent sources" });
+});
+
 test("skill clarification guard only allows ask_clarification and accepts structured clarification without text", async () => {
   let allowedToolRefs: string[] = [];
   const result = await runAgentBackendGeneration({
