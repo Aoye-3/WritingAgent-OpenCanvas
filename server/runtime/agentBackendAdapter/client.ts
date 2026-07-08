@@ -19,8 +19,8 @@ import {
   canvasWriteScopeForRun
 } from "../../services/generation/canvasWriteScopePolicy.js";
 import {
-  AGENT_INTAKE_TOOL_REFS,
   SKILL_SCOPE_GUARD_TOOL_REFS,
+  agentIntakeToolRefsForPayload,
   isAgentIntakePhase,
   withSanitizedAgentIntakeCanvas
 } from "../../services/generation/agentIntakePolicy.js";
@@ -297,6 +297,19 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
   const skillScopeGuardPolicy = skillScopeGuardPolicyFromContext(input.contextValues);
   const skillScopeGuard = Boolean(skillScopeGuardPolicy);
   const agentIntake = isAgentIntakeRunInput(input);
+  const agentIntakeToolRefs = agentIntake ? agentIntakeToolRefsForPayload({
+    mode: "chat",
+    locale: "en",
+    contextValues: input.contextValues,
+    chatInstruction: input.chatInstruction,
+    toolState: input.toolState,
+    transientSkillRefs: [],
+    disabledSkillRefs: [],
+    planPhase: input.planPhase,
+    planId: input.planId,
+    stepId: input.stepId,
+    planGeneration: input.planGeneration
+  }) : [];
   const runtimeContext = agentIntake
     ? withAgentIntakeContext(baseRuntimeContext, skillScopeGuardPolicy, skillScopeGuard ? "clarification_guard" : "agent_intake")
     : baseRuntimeContext;
@@ -314,7 +327,7 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
   const baseAllowedToolRefs = skillScopeGuard
     ? [...SKILL_SCOPE_GUARD_TOOL_REFS]
     : agentIntake
-    ? [...AGENT_INTAKE_TOOL_REFS]
+    ? agentIntakeToolRefs
     : canvasAction?.requiresTool
     ? [...new Set([...(input.allowedToolRefs ?? input.agentCard.toolRefs), "canvas_write"])]
     : input.allowedToolRefs ?? input.agentCard.toolRefs;
@@ -329,7 +342,7 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
   const baseToolState = skillScopeGuard
     ? { ask_clarification: true }
     : agentIntake
-    ? { ask_clarification: true, agent_intake_complete: true }
+    ? Object.fromEntries(agentIntakeToolRefs.map((tool) => [tool, true]))
     : canvasAction?.requiresTool
     ? { ...(input.toolState ?? {}), canvas_write: true }
     : input.toolState ?? {};
@@ -502,8 +515,8 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
   const markdownFileDeliveryPolicy = progressiveCanvasDeliveryEnabled
     ? "For medium or long text deliverables, especially if you perform two or more web_search calls or use a complex writing/research skill, first draft the complete user deliverable, then write that full Markdown report to /mnt/user-data/outputs/*.md with write_file and call present_files. The file content must contain the actual report, summary tables, findings, and references when applicable. Hard requirement: every final Markdown deliverable must include a concise `## Summary`, `## Executive Summary`, or `## 摘要` section near the top, immediately after the title and before any outline/table of contents, because FacetWrite uses that section for the Canvas body summary. This section must be a real 3-6 sentence or bullet summary of the document's thesis, scope, key findings, and conclusion; do not use an outline, table of contents, file-save note, or progress note as the summary. Do not call present_files until the Markdown file contains this summary section. Never write a delivery note, skill-loading note, clarification question, or file-save status as the Markdown file content. Use canvas_write only for short progressive nodes such as summaries, overviews, progress/reference notes, and references; never use canvas_write for the body, final body, full report, or full document. After present_files succeeds, produce the final chat response without further tool calls unless a blocking error remains. Keep the final chat response concise only after the full file is saved and presented; the Canvas body should contain a readable summary, while the full document lives in the Markdown file."
     : undefined;
-  const ordinaryClarificationLoop = readOrdinaryClarificationLoop(input.contextValues?.ordinaryClarificationLoop);
-  const ordinaryClarificationPolicy = ordinaryClarificationPolicyText(ordinaryClarificationLoop);
+  const ordinaryClarificationIntake = readOrdinaryClarificationIntake(input.contextValues?.ordinaryClarificationIntake);
+  const ordinaryClarificationPolicy = ordinaryClarificationPolicyText(ordinaryClarificationIntake);
   const taskCompletionPolicy = planPolicy.phase === "chat"
     ? `Complete the user's task directly when reasonable defaults are enough. ${ordinaryClarificationPolicy} Do not ask open-ended questions, and do not write clarification text into final deliverables or Markdown files. After canvas_write commits successfully or present_files succeeds, produce a concise final response and stop calling tools unless a blocking error or missing requirement remains.`
     : undefined;
@@ -597,30 +610,36 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
   };
 }
 
-type OrdinaryClarificationLoopPolicy = {
+type OrdinaryClarificationIntakePolicy = {
+  state: "collecting" | "completed";
   maxRounds: number;
+  minAnsweredRoundsAfterFirstAsk: number;
   answeredRounds: number;
   remainingRounds: number;
   answeredSummary: string;
 };
 
-function readOrdinaryClarificationLoop(value: unknown): OrdinaryClarificationLoopPolicy {
+function readOrdinaryClarificationIntake(value: unknown): OrdinaryClarificationIntakePolicy {
   const record = isRecord(value) ? value : {};
+  const state = record.state === "completed" ? "completed" : "collecting";
   const maxRounds = readPositiveInteger(record.maxRounds) ?? 3;
+  const minAnsweredRoundsAfterFirstAsk = readPositiveInteger(record.minAnsweredRoundsAfterFirstAsk) ?? 2;
   const answeredRounds = readNonNegativeInteger(record.answeredRounds) ?? 0;
   const remainingRounds = readNonNegativeInteger(record.remainingRounds) ?? Math.max(0, maxRounds - answeredRounds);
   return {
+    state,
     maxRounds,
+    minAnsweredRoundsAfterFirstAsk,
     answeredRounds,
     remainingRounds,
     answeredSummary: readSourceString(record.answeredSummary)
   };
 }
 
-function ordinaryClarificationPolicyText(policy: OrdinaryClarificationLoopPolicy) {
-  const base = policy.remainingRounds <= 0
-    ? `The ordinary clarification limit has been reached (${policy.answeredRounds}/${policy.maxRounds}); do not call ask_clarification again for this task. Continue with the best available assumptions or clearly state what cannot be completed.`
-    : `If missing information is genuinely blocking, ask one structured multiple-choice clarification at a time with 2-3 mutually exclusive options and one recommended option. After the user answers, you may ask another only if still blocking. Ordinary clarification rounds used: ${policy.answeredRounds}/${policy.maxRounds}; remaining: ${policy.remainingRounds}. Prefer reasonable defaults over asking.`;
+function ordinaryClarificationPolicyText(policy: OrdinaryClarificationIntakePolicy) {
+  const base = policy.state === "completed" || policy.remainingRounds <= 0
+    ? `Ordinary intake is complete or the clarification limit has been reached (${policy.answeredRounds}/${policy.maxRounds}); do not call ask_clarification again for this task. Execute with the confirmed answers and reasonable defaults, or clearly state what cannot be completed.`
+    : `Ordinary intake is active. Before executing an underspecified ordinary task, privately build a clarification agenda: identify which missing details would materially narrow scope, format, audience, constraints, risk, or delivery expectations, then ask one structured multiple-choice clarification at a time with 2-3 mutually exclusive options and one recommended option. If you have not asked any clarification and the task is already sufficiently scoped, call agent_intake_complete. Once you start asking, collect at least ${policy.minAnsweredRoundsAfterFirstAsk} high-value clarification rounds before completing intake, unless the round limit is reached. Do not ask filler questions. Ordinary clarification rounds used: ${policy.answeredRounds}/${policy.maxRounds}; remaining: ${policy.remainingRounds}.`;
   return policy.answeredSummary
     ? `${base} Already answered clarifications for this task:\n${policy.answeredSummary}\nDo not repeat these topics.`
     : base;

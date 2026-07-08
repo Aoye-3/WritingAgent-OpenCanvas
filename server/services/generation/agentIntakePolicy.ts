@@ -8,6 +8,7 @@ export function isAgentIntakePhase(payload: GenerateRequest) {
   if (isAgentIntakeExecution(payload.contextValues)) return false;
   if (isPlanGenerationPhase(payload)) return false;
   if (isSkillClarificationGuarded(payload)) return true;
+  if (isOrdinaryClarificationIntakeCollecting(payload.contextValues)) return true;
   if (hasAnsweredAgentClarification(payload.contextValues)) return false;
   if (isRecord(payload.contextValues?.agentClarification)) return true;
   if ((payload.transientSkillRefs ?? []).length > 0) return true;
@@ -24,7 +25,16 @@ export function withAgentIntakeExecutionPhase(payload: GenerateRequest): Generat
         ...readRecord(payload.contextValues?.agentIntake),
         phase: "execution",
         completed: true
-      }
+      },
+      ...(isOrdinaryClarificationIntake(payload.contextValues)
+        ? {
+          ordinaryClarificationIntake: {
+            ...readRecord(payload.contextValues?.ordinaryClarificationIntake),
+            mode: "ordinary",
+            state: "completed"
+          }
+        }
+        : {})
     }
   };
 }
@@ -57,9 +67,20 @@ export function isSkillClarificationGuarded(payload: GenerateRequest) {
 }
 
 export function agentIntakeToolRefsForPayload(payload: GenerateRequest) {
-  return isSkillClarificationGuarded(payload)
-    ? [...SKILL_SCOPE_GUARD_TOOL_REFS]
-    : [...AGENT_INTAKE_TOOL_REFS];
+  if (isSkillClarificationGuarded(payload)) return [...SKILL_SCOPE_GUARD_TOOL_REFS];
+  const ordinaryIntake = readOrdinaryClarificationIntake(payload.contextValues);
+  if (ordinaryIntake?.state === "collecting") {
+    if (ordinaryIntake.remainingRounds <= 0) {
+      return ["agent_intake_complete"];
+    }
+    if (ordinaryIntake.answeredRounds >= ordinaryIntake.minAnsweredRoundsAfterFirstAsk) {
+      return [...AGENT_INTAKE_TOOL_REFS];
+    }
+    if (ordinaryIntake.answeredRounds > 0) {
+      return ["ask_clarification"];
+    }
+  }
+  return [...AGENT_INTAKE_TOOL_REFS];
 }
 
 export function isProgressiveCanvasDelivery(payload: GenerateRequest) {
@@ -83,6 +104,33 @@ export function hasAnsweredAgentClarification(contextValues: GenerateRequest["co
   );
 }
 
+export function isOrdinaryClarificationIntakeCollecting(contextValues: GenerateRequest["contextValues"]) {
+  return readOrdinaryClarificationIntake(contextValues)?.state === "collecting";
+}
+
+export function ordinaryClarificationIntakeCanComplete(contextValues: GenerateRequest["contextValues"]) {
+  const intake = readOrdinaryClarificationIntake(contextValues);
+  if (!intake || intake.state !== "collecting") return true;
+  return intake.answeredRounds === 0
+    || intake.answeredRounds >= intake.minAnsweredRoundsAfterFirstAsk
+    || intake.remainingRounds <= 0;
+}
+
+function isOrdinaryClarificationIntake(contextValues: GenerateRequest["contextValues"]) {
+  return readRecord(contextValues?.ordinaryClarificationIntake).mode === "ordinary";
+}
+
+function readOrdinaryClarificationIntake(contextValues: GenerateRequest["contextValues"]) {
+  const intake = readRecord(contextValues?.ordinaryClarificationIntake);
+  if (intake.mode !== "ordinary") return undefined;
+  return {
+    state: intake.state === "completed" ? "completed" as const : "collecting" as const,
+    answeredRounds: readNonNegativeInteger(intake.answeredRounds),
+    remainingRounds: readNonNegativeInteger(intake.remainingRounds),
+    minAnsweredRoundsAfterFirstAsk: readPositiveInteger(intake.minAnsweredRoundsAfterFirstAsk) || 2
+  };
+}
+
 function isPlanGenerationPhase(payload: GenerateRequest) {
   if (payload.planPhase) return true;
   if (isRecord(payload.planGeneration)) return true;
@@ -95,6 +143,16 @@ function readRecord(value: unknown) {
 
 function readString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function readNonNegativeInteger(value: unknown) {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : undefined;
+  return typeof number === "number" && Number.isInteger(number) && number >= 0 ? number : 0;
+}
+
+function readPositiveInteger(value: unknown) {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : undefined;
+  return typeof number === "number" && Number.isInteger(number) && number > 0 ? number : 0;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

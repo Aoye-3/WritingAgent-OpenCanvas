@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { stableCanvasDeliveryId, withAgentClarificationResumeContext, withOrdinaryClarificationLoop } from "./generationService.js";
+import { stableCanvasDeliveryId, withAgentClarificationResumeContext, withOrdinaryClarificationIntake } from "./generationService.js";
 
 function answeredClarification(
   id: string,
@@ -161,9 +161,9 @@ test("execution clarification events carry plan execution context in resume cont
   );
 });
 
-test("ordinary clarification loop summarizes answered ordinary rounds", () => {
+test("ordinary clarification intake summarizes answered ordinary rounds", () => {
   const instruction = "Review recent Agent literature.";
-  const result = withOrdinaryClarificationLoop({
+  const result = withOrdinaryClarificationIntake({
     mode: "chat",
     locale: "en",
     chatInstruction: instruction,
@@ -180,15 +180,16 @@ test("ordinary clarification loop summarizes answered ordinary rounds", () => {
     })
   ]));
 
-  const loop = (result.contextValues as { ordinaryClarificationLoop: { answeredRounds: number; remainingRounds: number; answeredSummary: string } }).ordinaryClarificationLoop;
-  assert.equal(loop.answeredRounds, 1);
-  assert.equal(loop.remainingRounds, 2);
-  assert.match(loop.answeredSummary, /Which scope\? => Recent papers/);
+  const intake = (result.contextValues as { ordinaryClarificationIntake: { state: string; answeredRounds: number; remainingRounds: number; answeredSummary: string } }).ordinaryClarificationIntake;
+  assert.equal(intake.state, "collecting");
+  assert.equal(intake.answeredRounds, 1);
+  assert.equal(intake.remainingRounds, 2);
+  assert.match(intake.answeredSummary, /Which scope\? => Recent papers/);
 });
 
-test("ordinary clarification loop stops after three answered rounds", () => {
+test("ordinary clarification intake completes after three answered rounds", () => {
   const instruction = "Review recent Agent literature.";
-  const result = withOrdinaryClarificationLoop({
+  const result = withOrdinaryClarificationIntake({
     mode: "chat",
     locale: "en",
     chatInstruction: instruction,
@@ -203,12 +204,13 @@ test("ordinary clarification loop stops after three answered rounds", () => {
     answeredClarification("clarification_3", "Which audience?", "Engineering", { originalInstruction: instruction }, "2026-01-01T00:02:00.000Z")
   ]));
 
-  const loop = (result.contextValues as { ordinaryClarificationLoop: { answeredRounds: number; remainingRounds: number } }).ordinaryClarificationLoop;
-  assert.equal(loop.answeredRounds, 3);
-  assert.equal(loop.remainingRounds, 0);
+  const intake = (result.contextValues as { ordinaryClarificationIntake: { state: string; answeredRounds: number; remainingRounds: number } }).ordinaryClarificationIntake;
+  assert.equal(intake.state, "completed");
+  assert.equal(intake.answeredRounds, 3);
+  assert.equal(intake.remainingRounds, 0);
 });
 
-test("ordinary clarification loop does not replace skill intake guard policy", () => {
+test("ordinary clarification intake does not replace skill intake guard policy", () => {
   const payload = {
     mode: "chat",
     locale: "en",
@@ -221,7 +223,7 @@ test("ordinary clarification loop does not replace skill intake guard policy", (
     }
   } as const;
 
-  const result = withOrdinaryClarificationLoop(payload as never, "thread_1", storageWithClarifications([
+  const result = withOrdinaryClarificationIntake(payload as never, "thread_1", storageWithClarifications([
     answeredClarification("clarification_1", "Which scope?", "Recent papers", { intakeState: "intake_collecting" })
   ]));
 

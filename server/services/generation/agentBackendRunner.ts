@@ -12,8 +12,10 @@ import {
   agentIntakeToolRefsForPayload,
   hasAnsweredAgentClarification,
   isAgentIntakePhase,
+  isOrdinaryClarificationIntakeCollecting,
   isProgressiveCanvasDelivery,
   isSkillClarificationGuarded,
+  ordinaryClarificationIntakeCanComplete,
   withAgentIntakeExecutionPhase,
   withSanitizedAgentIntakeCanvas
 } from "./agentIntakePolicy.js";
@@ -44,7 +46,9 @@ export type AgentBackendRunnerDeps = {
 export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, deps: AgentBackendRunnerDeps = {}) {
   const config = (deps.getRuntimeConfig ?? getAgentBackendRuntimeConfig)();
   if (!config.enabled) return undefined;
-  const preparedPayload = hasAnsweredAgentClarification(input.payload.contextValues) && !isSkillClarificationGuarded(input.payload)
+  const preparedPayload = hasAnsweredAgentClarification(input.payload.contextValues)
+    && !isSkillClarificationGuarded(input.payload)
+    && !isOrdinaryClarificationIntakeCollecting(input.payload.contextValues)
     ? withAgentIntakeExecutionPhase(input.payload)
     : input.payload;
   input = { ...input, payload: withSanitizedAgentIntakeCanvas(preparedPayload) };
@@ -68,7 +72,11 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     })
     : await (deps.runAgent ?? runAgentBackendAgent)(baseRunInput);
 
-  if (isAgentIntakePhase(input.payload) && hasAgentIntakeCompleteEvent(run.events)) {
+  if (
+    isAgentIntakePhase(input.payload)
+    && hasAgentIntakeCompleteEvent(run.events)
+    && ordinaryClarificationIntakeCanComplete(input.payload.contextValues)
+  ) {
     const executionPayload = withAgentIntakeExecutionPhase(input.payload);
     const executionInput = buildBaseRunInput({ ...input, payload: executionPayload }, config);
     const executionRun = await (deps.runAgent ?? runAgentBackendAgent)(executionInput);
