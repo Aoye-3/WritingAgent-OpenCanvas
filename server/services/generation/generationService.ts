@@ -153,6 +153,7 @@ export function createGenerationService(
     payload = withAutoPreflightPlan(payload, threadId, projectRuntimeSettings, agentPlanOrchestrator);
     payload = withPlanGeneration(payload, threadId, storage);
     payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
+    payload = withOrdinaryClarificationLoop(payload, threadId, storage);
     payload = withAnsweredAgentClarificationExecutionContext(payload);
     payload = withSanitizedAgentIntakeCanvas(payload);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
@@ -436,6 +437,7 @@ export function createGenerationService(
     payload = withAutoPreflightPlan(payload, threadId, projectRuntimeSettings, agentPlanOrchestrator);
     payload = withPlanGeneration(payload, threadId, storage);
     payload = withSkillClarificationGuard(payload, threadId, projectRuntimeSettings);
+    payload = withOrdinaryClarificationLoop(payload, threadId, storage);
     payload = withAnsweredAgentClarificationExecutionContext(payload);
     payload = withSanitizedAgentIntakeCanvas(payload);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
@@ -1567,11 +1569,13 @@ function withAnsweredAgentClarificationExecutionContext(payload: GenerateRequest
   const runtimeBudgetProfile = readOptionalRuntimeBudgetProfile(resumeContext.runtimeBudgetProfile)
     ?? readOptionalRuntimeBudgetProfile(payload.contextValues?.runtimeBudgetProfile)
     ?? payload.runtimeBudgetProfile;
-  const transientSkillRefs = (payload.transientSkillRefs ?? []).length
-    ? payload.transientSkillRefs
+  const payloadTransientSkillRefs = payload.transientSkillRefs ?? [];
+  const transientSkillRefs = payloadTransientSkillRefs.length
+    ? payloadTransientSkillRefs
     : readStringList(resumeContext.transientSkillRefs);
-  const disabledSkillRefs = (payload.disabledSkillRefs ?? []).length
-    ? payload.disabledSkillRefs
+  const payloadDisabledSkillRefs = payload.disabledSkillRefs ?? [];
+  const disabledSkillRefs = payloadDisabledSkillRefs.length
+    ? payloadDisabledSkillRefs
     : readStringList(resumeContext.disabledSkillRefs);
   const nextPayload = withAgentIntakeExecutionPhase({
     ...payload,
@@ -1585,6 +1589,60 @@ function withAnsweredAgentClarificationExecutionContext(payload: GenerateRequest
     }
   });
   return nextPayload;
+}
+
+const MAX_ORDINARY_CLARIFICATION_ROUNDS = 3;
+
+export function withOrdinaryClarificationLoop(payload: GenerateRequest, threadId: string, storage: SQLiteStorageRepository): GenerateRequest {
+  if (isSkillClarificationGuarded(payload)) return payload;
+  const originalInstruction = currentOrdinaryClarificationOriginalInstruction(payload);
+  const answered = originalInstruction
+    ? storage.listAgentClarifications(threadId)
+      .filter((clarification) => clarification.status === "answered")
+      .filter(isOrdinaryAgentClarification)
+      .filter((clarification) => readString(record(clarification.resumeContext).originalInstruction) === originalInstruction)
+      .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
+    : [];
+  const answeredRounds = Math.min(answered.length, MAX_ORDINARY_CLARIFICATION_ROUNDS);
+  const remainingRounds = Math.max(0, MAX_ORDINARY_CLARIFICATION_ROUNDS - answeredRounds);
+  return {
+    ...payload,
+    contextValues: {
+      ...payload.contextValues,
+      ordinaryClarificationLoop: {
+        maxRounds: MAX_ORDINARY_CLARIFICATION_ROUNDS,
+        answeredRounds,
+        remainingRounds,
+        answeredSummary: ordinaryClarificationAnsweredSummary(answered.slice(-MAX_ORDINARY_CLARIFICATION_ROUNDS))
+      }
+    }
+  };
+}
+
+function currentOrdinaryClarificationOriginalInstruction(payload: GenerateRequest) {
+  const clarification = record(payload.contextValues?.agentClarification);
+  const resumeContext = record(clarification.resumeContext);
+  return readString(resumeContext.originalInstruction);
+}
+
+function isOrdinaryAgentClarification(clarification: ReturnType<SQLiteStorageRepository["listAgentClarifications"]>[number]) {
+  const resumeContext = record(clarification.resumeContext);
+  if (record(resumeContext.facetwrite_clarification_policy).mode === "skill_scope_guard") return false;
+  if (readString(resumeContext.intakeState) || readPositiveInteger(resumeContext.intakeRound) || readPositiveInteger(resumeContext.maxIntakeRounds)) return false;
+  if (readPlanExecutionContext(resumeContext.planExecution)) return false;
+  return true;
+}
+
+function ordinaryClarificationAnsweredSummary(clarifications: ReturnType<SQLiteStorageRepository["listAgentClarifications"]>) {
+  return clarifications
+    .map((clarification, index) => {
+      const question = readString(clarification.question);
+      const answer = readString(clarification.answer) || readString(clarification.selectedOptionLabel) || readString(clarification.selectedOptionId);
+      if (!question && !answer) return "";
+      return `${index + 1}. ${question}${answer ? ` => ${answer}` : ""}`;
+    })
+    .filter(Boolean)
+    .join("\n");
 }
 
 function needsSkillScopeClarification(payload: GenerateRequest) {

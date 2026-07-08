@@ -45,7 +45,7 @@ class AskClarificationArgs(BaseModel):
 @tool(
     "ask_clarification",
     args_schema=AskClarificationArgs,
-    description="Ask the user one structured clarification with a question and two or three choices.",
+    description="Ask the user one structured clarification at a time with a question and two or three choices.",
     return_direct=True,
 )
 def ask_clarification_tool(
@@ -82,6 +82,7 @@ def ask_clarification_tool(
 
     Best practices:
     - Ask ONE clarification at a time for clarity
+    - Multi-round clarification is controlled by the host policy; do not combine multiple questions into one prompt
     - Be specific and clear in your question
     - Don't make assumptions when clarification is needed
     - For risky operations, ALWAYS ask for confirmation

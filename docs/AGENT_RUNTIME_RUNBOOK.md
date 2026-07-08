@@ -160,6 +160,16 @@ Regression coverage lives in `server/runtime/agentBackendAdapter/client.test.ts`
 node --import tsx --test server/runtime/agentBackendAdapter/client.test.ts server/services/generation/agentBackendRunner.test.ts server/services/generationService.facade.test.ts server/storageFacade.test.ts tests/frontend/agentClarification.test.ts
 ```
 
+### Ordinary Clarification Loop
+
+Ordinary Agent clarification is still a single-question protocol. Do not add `questions[]`, multi-field form payloads, or a new frontend interaction table for this path unless the product explicitly adopts a broader Human Interaction architecture. The maintained behavior is up to three rounds of `ask_clarification`, one structured multiple-choice question per round, scoped to the same original instruction.
+
+On a resumed ordinary clarification, inspect `contextValues.ordinaryClarificationLoop`. It should contain `maxRounds:3`, the answered round count, remaining round count, and an answered-summary string built from prior persisted `agent_clarifications`. Skill scope guard records, Plan clarification records, and records carrying `facetwrite_clarification_policy.mode:"skill_scope_guard"` must not count toward ordinary rounds.
+
+The Runtime prompt should say "ask one clarification at a time", not "ask exactly one clarification". If `remainingRounds` is `0`, the prompt must prohibit another `ask_clarification` call and instruct the Agent to continue with reasonable defaults or explain what remains impossible. If the same topic is asked again, first inspect whether the answered summary was injected and whether the previous clarification had the same `resumeContext.originalInstruction`.
+
+Focused regression coverage for this policy lives in `server/runtime/agentBackendAdapter/client.test.ts`, `server/services/generation/clarificationContinuity.test.ts`, and `modules/agent-runtime/backend/tests/test_clarification_middleware.py`.
+
 ### Skill Clarification Budget Continuation
 
 The Skill scope guard is still a strict two-phase protocol. Phase one exposes only `ask_clarification` and removes Canvas/progressive/file/evidence delivery context from the Runtime request, but the structured clarification event must carry enough `resumeContext` for phase two: original instruction, transient Skills, disabled Skills, effective `runtimeBudgetProfile`, and the original Canvas workflow. If Runtime returns only a partial `resumeContext`, the Node generation service fills missing fields from the server guard policy. Phase two is not always another ask-only checkpoint: if the selected answer completes the scope or the guard has reached its max rounds, Node marks the payload as execution and rebuilds progressive Canvas delivery before calling Runtime.

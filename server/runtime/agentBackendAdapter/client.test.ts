@@ -65,6 +65,91 @@ test("builds LangGraph-compatible AgentBackend run request", () => {
   assert.equal(request.multitask_strategy, "interrupt");
 });
 
+test("ordinary clarification policy allows one-at-a-time follow-up rounds", () => {
+  const card = getAgentCard("summary");
+  const settings = defaultAgentSettings(card);
+  const request = buildRunRequest({
+    threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings,
+    messages: [{ role: "user", content: "Review recent papers" }],
+    prompt: "Review recent papers"
+  }, {
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8000",
+    assistantId: "lead_agent"
+  });
+
+  const policy = String(request.context.facetwrite_clarification_policy);
+  assert.match(policy, /ask one structured multiple-choice clarification at a time/i);
+  assert.match(policy, /After the user answers, you may ask another only if still blocking/i);
+  assert.match(policy, /Ordinary clarification rounds used: 0\/3; remaining: 3/i);
+  assert.doesNotMatch(policy, /ask exactly one clarification/i);
+});
+
+test("ordinary clarification policy includes answered summary and avoids repeats", () => {
+  const card = getAgentCard("summary");
+  const settings = defaultAgentSettings(card);
+  const request = buildRunRequest({
+    threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings,
+    messages: [{ role: "user", content: "Review recent papers" }],
+    prompt: "Review recent papers",
+    contextValues: {
+      ordinaryClarificationLoop: {
+        maxRounds: 3,
+        answeredRounds: 2,
+        remainingRounds: 1,
+        answeredSummary: "1. Which scope? => Recent papers\n2. Which format? => Markdown"
+      }
+    }
+  }, {
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8000",
+    assistantId: "lead_agent"
+  });
+
+  const policy = String(request.context.facetwrite_clarification_policy);
+  assert.match(policy, /Ordinary clarification rounds used: 2\/3; remaining: 1/i);
+  assert.match(policy, /Which scope\? => Recent papers/);
+  assert.match(policy, /Do not repeat these topics/i);
+});
+
+test("ordinary clarification policy forbids ask_clarification after round limit", () => {
+  const card = getAgentCard("summary");
+  const settings = defaultAgentSettings(card);
+  const request = buildRunRequest({
+    threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings,
+    messages: [{ role: "user", content: "Review recent papers" }],
+    prompt: "Review recent papers",
+    contextValues: {
+      ordinaryClarificationLoop: {
+        maxRounds: 3,
+        answeredRounds: 3,
+        remainingRounds: 0,
+        answeredSummary: "1. Which scope? => Recent papers"
+      }
+    }
+  }, {
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8000",
+    assistantId: "lead_agent"
+  });
+
+  const policy = String(request.context.facetwrite_clarification_policy);
+  assert.match(policy, /ordinary clarification limit has been reached \(3\/3\)/i);
+  assert.match(policy, /do not call ask_clarification again/i);
+});
+
 test("strips progressive execution budget during Agent intake", () => {
   const card = getAgentCard("summary");
   const settings = defaultAgentSettings(card);

@@ -50,7 +50,7 @@ test("canvas delivery content parses structured body summary markdown", () => {
   });
 
   assert.equal(result.usedStructuredBlock, true);
-  assert.match(result.bodySummaryMarkdown, /concise Canvas summary/);
+  assert.match(result.bodySummaryMarkdown ?? "", /concise Canvas summary/);
   assert.match(result.bodyMarkdown, /Detailed section/);
 });
 

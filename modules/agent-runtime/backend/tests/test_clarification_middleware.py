@@ -137,6 +137,15 @@ class TestFormatClarificationMessage:
 
 
 class TestAskClarificationToolSchema:
+    def test_schema_remains_single_question(self):
+        schema = ask_clarification_tool.args_schema
+        assert schema is not None
+        assert "question" in schema.model_fields
+        assert "options" in schema.model_fields
+        assert "questions" not in schema.model_fields
+        assert "fields" not in schema.model_fields
+        assert "at a time" in ask_clarification_tool.description
+
     def test_requires_two_structured_options(self):
         schema = ask_clarification_tool.args_schema
         assert schema is not None

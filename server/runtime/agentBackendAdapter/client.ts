@@ -502,10 +502,12 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
   const markdownFileDeliveryPolicy = progressiveCanvasDeliveryEnabled
     ? "For medium or long text deliverables, especially if you perform two or more web_search calls or use a complex writing/research skill, first draft the complete user deliverable, then write that full Markdown report to /mnt/user-data/outputs/*.md with write_file and call present_files. The file content must contain the actual report, summary tables, findings, and references when applicable. Hard requirement: every final Markdown deliverable must include a concise `## Summary`, `## Executive Summary`, or `## 摘要` section near the top, immediately after the title and before any outline/table of contents, because FacetWrite uses that section for the Canvas body summary. This section must be a real 3-6 sentence or bullet summary of the document's thesis, scope, key findings, and conclusion; do not use an outline, table of contents, file-save note, or progress note as the summary. Do not call present_files until the Markdown file contains this summary section. Never write a delivery note, skill-loading note, clarification question, or file-save status as the Markdown file content. Use canvas_write only for short progressive nodes such as summaries, overviews, progress/reference notes, and references; never use canvas_write for the body, final body, full report, or full document. After present_files succeeds, produce the final chat response without further tool calls unless a blocking error remains. Keep the final chat response concise only after the full file is saved and presented; the Canvas body should contain a readable summary, while the full document lives in the Markdown file."
     : undefined;
+  const ordinaryClarificationLoop = readOrdinaryClarificationLoop(input.contextValues?.ordinaryClarificationLoop);
+  const ordinaryClarificationPolicy = ordinaryClarificationPolicyText(ordinaryClarificationLoop);
   const taskCompletionPolicy = planPolicy.phase === "chat"
-    ? "Complete the user's task directly when reasonable defaults are enough. If a selected skill genuinely needs missing information before continuing, ask exactly one structured multiple-choice clarification with 2-3 mutually exclusive options and one recommended option. Do not ask open-ended questions, and do not write clarification text into final deliverables or Markdown files. After canvas_write commits successfully or present_files succeeds, produce a concise final response and stop calling tools unless a blocking error or missing requirement remains."
+    ? `Complete the user's task directly when reasonable defaults are enough. ${ordinaryClarificationPolicy} Do not ask open-ended questions, and do not write clarification text into final deliverables or Markdown files. After canvas_write commits successfully or present_files succeeds, produce a concise final response and stop calling tools unless a blocking error or missing requirement remains.`
     : undefined;
-  const clarificationPolicy = "When clarification is blocking, emit only the structured clarification protocol. Prefer the ask_clarification tool. The payload must be { type:'agent_clarification_requested', question:string, options:[2-3 items] }, and every option must include id, label, and detail or description; at most one option may be recommended. If tool calling is unavailable, output exactly one JSON object with the same fields and no surrounding prose or Markdown. Never answer with ordinary clarification prose, Markdown option lists, or a sentence ending in a colon.";
+  const clarificationPolicy = `When clarification is blocking, emit only the structured clarification protocol. Prefer the ask_clarification tool. Ask one clarification at a time; never combine multiple questions in one question string. ${ordinaryClarificationPolicy} The payload must be { type:'agent_clarification_requested', question:string, options:[2-3 items] }, and every option must include id, label, and detail or description; at most one option may be recommended. If tool calling is unavailable, output exactly one JSON object with the same fields and no surrounding prose or Markdown. Never answer with ordinary clarification prose, Markdown option lists, or a sentence ending in a colon.`;
   const evidenceTools = Array.isArray(progressiveDelivery?.evidenceTools)
     ? progressiveDelivery.evidenceTools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0)
     : undefined;
@@ -593,6 +595,40 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     facetwrite_intake_phase: "execution",
     ...(memoryContent ? { facetwrite_memory_content: memoryContent } : {})
   };
+}
+
+type OrdinaryClarificationLoopPolicy = {
+  maxRounds: number;
+  answeredRounds: number;
+  remainingRounds: number;
+  answeredSummary: string;
+};
+
+function readOrdinaryClarificationLoop(value: unknown): OrdinaryClarificationLoopPolicy {
+  const record = isRecord(value) ? value : {};
+  const maxRounds = readPositiveInteger(record.maxRounds) ?? 3;
+  const answeredRounds = readNonNegativeInteger(record.answeredRounds) ?? 0;
+  const remainingRounds = readNonNegativeInteger(record.remainingRounds) ?? Math.max(0, maxRounds - answeredRounds);
+  return {
+    maxRounds,
+    answeredRounds,
+    remainingRounds,
+    answeredSummary: readSourceString(record.answeredSummary)
+  };
+}
+
+function ordinaryClarificationPolicyText(policy: OrdinaryClarificationLoopPolicy) {
+  const base = policy.remainingRounds <= 0
+    ? `The ordinary clarification limit has been reached (${policy.answeredRounds}/${policy.maxRounds}); do not call ask_clarification again for this task. Continue with the best available assumptions or clearly state what cannot be completed.`
+    : `If missing information is genuinely blocking, ask one structured multiple-choice clarification at a time with 2-3 mutually exclusive options and one recommended option. After the user answers, you may ask another only if still blocking. Ordinary clarification rounds used: ${policy.answeredRounds}/${policy.maxRounds}; remaining: ${policy.remainingRounds}. Prefer reasonable defaults over asking.`;
+  return policy.answeredSummary
+    ? `${base} Already answered clarifications for this task:\n${policy.answeredSummary}\nDo not repeat these topics.`
+    : base;
+}
+
+function readNonNegativeInteger(value: unknown) {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : undefined;
+  return typeof number === "number" && Number.isInteger(number) && number >= 0 ? number : undefined;
 }
 
 function normalizeAgentBackendReasoningEffort(effort: ConversationModelRuntimeSettings["reasoningEffort"]) {

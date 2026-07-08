@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-08: Ordinary Agent Clarification Uses Multi-Round Single-Question Policy
+
+Decision: Keep the existing `agent_clarification_requested { question, options }` protocol for ordinary Agent clarification, but allow ordinary tasks to ask up to three clarification rounds, one structured multiple-choice question per round. The generation service injects `ordinaryClarificationLoop` with `maxRounds`, `answeredRounds`, `remainingRounds`, and an answered question/answer summary. Runtime policy tells the Agent to ask another clarification only when the answered information is still genuinely blocking, to avoid repeating answered topics, and to continue with reasonable defaults once the round limit is reached.
+
+Reason: The stable product surface is already built around a single pending clarification row, a single composer choice card, and a single-answer resume payload. Moving to a multi-field Human Interaction protocol would be a larger architecture change and would risk the current durable clarification path. The Skill scope guard already proved that multiple turns of single-question intake can work without changing storage or frontend rendering; ordinary tasks need that same loop behavior, not a new UI contract.
+
+Impact: `ask_clarification` remains a single `question` plus 2-3 structured `options`; there is no `questions[]`, no new Human Interaction table, and no frontend form migration. Ordinary clarification counts exclude Skill scope guard and Plan clarification records. Skill intake keeps its separate slot-based `MAX_SKILL_INTAKE_ROUNDS` behavior. Tests should cover policy text, answered-summary injection, the 3-round stop condition, and the Python tool schema staying single-question.
+
 ## 2026-07-07: Answered Clarification Restores Execution Budgets
 
 Decision: Treat an answered Agent clarification as execution once the server scope guard has enough information, or once its maximum intake rounds have been reached. In that state FacetWrite marks the payload `agentIntake.phase:"execution"` / `completed:true`, restores progressive Canvas delivery, evidence tools, `write_file`, `present_files`, and the effective runtime budget profile from clarification `resumeContext`. The ask-only `skill_scope_guard` path remains active only while required slots are still missing.
