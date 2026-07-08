@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-08: Budget Gate Violations Use Finite Finalization Retries
+
+Decision: Keep budget-gate tool narrowing, but replace the first-violation hard replacement with a bounded 1+3+1 finalization retry loop. After the hidden budget notice, non-finalization tool calls or internal tool protocol count as violations. The first violation appends a strong hidden finalization prompt; violations two through four append stricter prompts that list the allowed finalization paths; the fifth violation emits `finalization_retry_exhausted` telemetry and returns a recoverable partial state. Allowed finalization tools such as `canvas_write`, and for file delivery `write_file` / `present_files`, continue normally and do not count as violations.
+
+Reason: The old immediate replacement prevented runaway exploration, but it could surface a status sentence that looked like a final answer and left the UI in an ambiguous "continuing" state. Fully removing the guard would push normal budget behavior back toward the LangGraph `recursion_limit:160` fuse. Finite retries give the Agent a few chances to obey the narrowed tool surface while still bounding cost and preserving the hard fuse as a last-resort safety guard.
+
+Impact: `PlanToolChoiceMiddleware` owns retry prompting and emits `finalization_retry_count`, `finalization_retry_limit`, and `finalization_retry_exhausted` in `synthesis_gate` telemetry. `completionEvaluator` treats exhausted finalization retries as `partial` even when fallback text exists. The AI drawer recognizes this telemetry as a budget-continuation condition and offers the existing continue-finalization draft. Detailed ADR: `docs/decisions/ADR-2026-07-06-layer-agent-budget-gates.md`.
+
 ## 2026-07-08: Ordinary Agent Clarification Uses Ordinary Intake
 
 Decision: Keep the existing `agent_clarification_requested { question, options }` protocol for ordinary Agent clarification, but move ordinary multi-question behavior into an explicit Ordinary Intake stage before execution. The generation service injects `ordinaryClarificationIntake` with `state`, `maxRounds`, `minAnsweredRoundsAfterFirstAsk`, `answeredRounds`, `remainingRounds`, and an answered question/answer summary. While intake is collecting, Runtime can only use intake tools: `ask_clarification` and, when allowed by the round policy, `agent_intake_complete`. After intake completes, execution no longer exposes ordinary `ask_clarification`.
@@ -18,7 +26,7 @@ Impact: `agentIntakePolicy` detects answered clarifications separately from pend
 
 ## 2026-07-06: Agent Budget Gates Narrow Tools Before The LangGraph Fuse
 
-Decision: Keep the expanded LangGraph `config.recursion_limit` as the runaway-loop fuse, but make FacetWrite middleware the normal budget-stop path. When evidence, model-call, or step-reserve budgets reach synthesis territory, middleware emits `synthesis_gate`, appends a hidden synthesis notice, narrows available tools to finalization tools, and blocks later exploration tool calls or internal tool protocol with a finalization message. Completion evaluation treats final text, final Body, file document, committed Canvas mutation/node events, and committed Artifacts as terminal delivery; Canvas research/progress nodes and `Body draft` checkpoints remain recoverable intermediate artifacts only.
+Decision: Keep the expanded LangGraph `config.recursion_limit` as the runaway-loop fuse, but make FacetWrite middleware the normal budget-stop path. When evidence, model-call, or step-reserve budgets reach synthesis territory, middleware emits `synthesis_gate`, appends a hidden synthesis notice, narrows available tools to finalization tools, and treats later exploration tool calls or internal tool protocol as budget-finalization violations. Completion evaluation treats final text, final Body, file document, committed Canvas mutation/node events, and committed Artifacts as terminal delivery; Canvas research/progress nodes and `Body draft` checkpoints remain recoverable intermediate artifacts only.
 
 Reason: Advisory-only budget notices let the Agent continue tool loops until LangGraph raised `GraphRecursionError`, which made budget exhaustion look like a runtime crash. Checkpoint-only Canvas delivery could also be mistaken for completion even though the final deliverable was not committed.
 

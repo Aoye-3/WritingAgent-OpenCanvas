@@ -28,8 +28,9 @@ Budget handling is layered:
 4. After the gate, middleware narrows tools to finalization only.
 5. File-delivery runs may continue with `write_file` and `present_files`.
 6. Non-file runs may continue only with explicit final Canvas write tools.
-7. Model attempts to continue exploration tool calls or emit internal tool protocol after the budget notice are blocked and replaced with a finalization message.
-8. LangGraph `GraphRecursionError` remains recoverable failure telemetry, not the expected budget-stop path.
+7. Model attempts to continue exploration tool calls or emit internal tool protocol after the budget notice enter a bounded finalization retry loop instead of being treated as immediate final output.
+8. The retry loop uses a 1+3+1 policy: the first violation gets a strong hidden finalization prompt, the next three violations get stricter finalization prompts, and the fifth violation emits `finalization_retry_exhausted` telemetry and a recoverable partial result.
+9. LangGraph `GraphRecursionError` remains recoverable failure telemetry, not the expected budget-stop path.
 
 Completion evaluation now treats only terminal delivery as durable completion:
 
@@ -40,6 +41,8 @@ Completion evaluation now treats only terminal delivery as durable completion:
 - committed Artifact events.
 
 Canvas research/progress nodes, outline events, and `canvas_delivery_body_checkpoint_committed` are recoverable intermediate artifacts only.
+
+When the finalization retry limit is exhausted, completion evaluation must mark the run `partial` even if the fallback status text is present. The frontend should treat this as a resumable budget-continuation state and offer "continue finalization" rather than showing it as a completed answer or a generic unfinished-tool wait.
 
 ## Alternatives Considered
 
@@ -60,6 +63,7 @@ Deferred. A custom graph could model explicit evidence, synthesis, finalization,
 - Budgeted runs should enter final synthesis before hitting the LangGraph recursion fuse.
 - File delivery remains possible after the synthesis gate because `write_file` and `present_files` stay exposed for file-delivery runs.
 - Exploration tools such as search, fetch, file read, shell, grep, glob, ls, and knowledge lookup are no longer available after the synthesis gate.
+- Budget-notice violations now get up to five finalization attempts before being downgraded to a resumable partial state.
 - Canvas checkpoints remain visible and recoverable, but do not mark a run complete by themselves.
-- Runtime custom `synthesis_gate` payloads expose budget phase and blocked/allowed tool-call metadata for diagnostics.
+- Runtime custom `synthesis_gate` payloads expose budget phase, blocked/allowed tool-call metadata, `finalization_retry_count`, `finalization_retry_limit`, and `finalization_retry_exhausted` for diagnostics.
 - The earlier 2026-07-04 decision remains valid for the expanded hard guard, but its advisory-only middleware impact is superseded by this ADR.

@@ -24,6 +24,12 @@ export function evaluateRunCompletion(input: {
     return verdict("waiting", reasons, missingRequirements);
   }
 
+  if (hasBudgetFinalizationRetryExhausted(events)) {
+    reasons.push("The runtime reached a budget gate and could not complete finalization after repeated prompts.");
+    missingRequirements.push("Continue finalization from gathered evidence.");
+    return verdict("partial", reasons, missingRequirements);
+  }
+
   if (hasUnfinishedToolCall(events)) {
     reasons.push("A tool action started without a matching completion event.");
     missingRequirements.push("Wait for the outstanding tool action to finish or fail.");
@@ -187,6 +193,15 @@ function hasBudgetSynthesisSignal(events: ToolEventRecord[]) {
     return type === "synthesis_gate"
       || /budget|recursion|GRAPH_RECURSION_LIMIT/i.test(reason)
       || /budget_exhausted|recursion/i.test(event.eventType);
+  });
+}
+
+function hasBudgetFinalizationRetryExhausted(events: ToolEventRecord[]) {
+  return events.some((event) => {
+    const payload = record(event.payload);
+    const reason = string(payload.reason);
+    return payload.finalization_retry_exhausted === true
+      || /budget finalization retry exhausted/i.test(reason);
   });
 }
 
