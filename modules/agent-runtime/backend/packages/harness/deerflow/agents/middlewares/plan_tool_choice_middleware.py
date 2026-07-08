@@ -10,7 +10,6 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-
 _INTERNAL_RUNTIME_PROTOCOL_PATTERNS = (
     re.compile(r"<\s*(?:[\/|]\s*){0,4}DSML\s*(?:[\/|]\s*){0,4}", re.IGNORECASE),
     re.compile(r"\bDSML\b[\s\S]{0,120}\btool[_-]?calls?\b", re.IGNORECASE),
@@ -21,6 +20,7 @@ _INTERNAL_RUNTIME_PROTOCOL_PATTERNS = (
 )
 _BUDGET_FINAL_CANVAS_TOOL_NAMES = {"canvas_write"}
 _BUDGET_FILE_FINALIZATION_TOOL_NAMES = {"write_file", "present_files"}
+_BUDGET_FINALIZATION_RETRY_LIMIT = 5
 
 
 class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
@@ -241,11 +241,88 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         return names
 
     @staticmethod
-    def _budget_finalization_message() -> AIMessage:
+    def _budget_finalization_retry_message(retry_count: int, context: object) -> HumanMessage:
+        finalization_tools = sorted(PlanToolChoiceMiddleware._budget_finalization_tool_names(context))
+        allowed_tools = ", ".join(finalization_tools) if finalization_tools else "no tools"
+        file_delivery_required = isinstance(context, dict) and context.get("facetwrite_markdown_file_delivery_required") is True
+        canvas_action = context.get("facetwrite_canvas_action") if isinstance(context, dict) else None
+        canvas_action_required = isinstance(canvas_action, dict) and canvas_action.get("requiresTool") is True
+        delivery_requirement = (
+            "Complete the required Canvas action with canvas_write before finishing. Do not finish with text only. "
+            if canvas_action_required
+            else ""
+        )
+        if file_delivery_required:
+            delivery_requirement += (
+                "For file delivery, write the full Markdown deliverable with write_file and then call present_files. "
+            )
+        if retry_count <= 1:
+            content = (
+                "FacetWrite budget finalization retry: exploration and workspace inspection tools are unavailable. "
+                f"Allowed finalization tools: {allowed_tools}. "
+                f"{delivery_requirement}"
+                "Either provide the final user-facing answer directly from gathered evidence, or use only an allowed "
+                "finalization tool to complete delivery."
+            )
+        else:
+            content = (
+                "FacetWrite budget finalization retry: previous output still attempted unavailable tools or internal "
+                "tool protocol after the budget notice. "
+                f"Allowed finalization tools: {allowed_tools}. "
+                f"{delivery_requirement}"
+                "Do not call search, fetch, read, shell, grep, glob, ls, or knowledge lookup tools. Do not emit tool "
+                "protocol as text. Produce concrete conclusions, caveats, and available source/file references now."
+            )
+        return HumanMessage(
+            content=content,
+            additional_kwargs={
+                "hide_from_ui": True,
+                "facetwrite_budget_notice": True,
+                "facetwrite_budget_finalization_retry": retry_count,
+            },
+        )
+
+    @staticmethod
+    def _budget_finalization_retry_exhausted_message() -> AIMessage:
         return AIMessage(content=(
-            "The runtime budget gate has been reached. I will stop requesting additional tools and provide the final "
-            "user-facing answer from the evidence already gathered."
+            "Budget finalization retry limit reached. The agent could not complete finalization after repeated budget "
+            "prompts. Continue finalization from the gathered evidence and existing Canvas progress."
         ))
+
+    @staticmethod
+    def _budget_result_report(request: ModelRequest, result: ModelCallResult) -> dict[str, Any] | None:
+        contains_tool_call = PlanToolChoiceMiddleware._contains_tool_call(result)
+        contains_internal_protocol = PlanToolChoiceMiddleware._contains_internal_runtime_protocol(result)
+        if not PlanToolChoiceMiddleware._has_recent_budget_notice(request) or not (
+            contains_tool_call or contains_internal_protocol
+        ):
+            return None
+        allowed = (
+            contains_tool_call
+            and not contains_internal_protocol
+            and PlanToolChoiceMiddleware._budget_allows_result_tools(request, result)
+        )
+        return {
+            "allowed": allowed,
+            "blocked_tool_calls": contains_tool_call and not allowed,
+            "contains_tool_call": contains_tool_call,
+            "contains_internal_runtime_protocol": contains_internal_protocol,
+        }
+
+    @staticmethod
+    def _emit_budget_retry_event(report: dict[str, Any], retry_count: int, *, exhausted: bool = False) -> None:
+        PlanToolChoiceMiddleware._emit_synthesis_event({
+            "type": "synthesis_gate",
+            "phase": "budget_synthesis",
+            "reason": "budget finalization retry exhausted" if exhausted else "model continued after budget notice",
+            "second_handler": False,
+            "entered_second_handler": False,
+            "continued_after_notice": True,
+            "finalization_retry_count": retry_count,
+            "finalization_retry_limit": _BUDGET_FINALIZATION_RETRY_LIMIT,
+            **({"finalization_retry_exhausted": True} if exhausted else {}),
+            **report,
+        })
 
     @staticmethod
     def _emit_synthesis_event(payload: dict[str, Any]) -> None:
@@ -420,32 +497,30 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelCallResult:
         prepared = self._prepare(request)
-        result = handler(prepared)
-        contains_tool_call = PlanToolChoiceMiddleware._contains_tool_call(result)
-        contains_internal_protocol = PlanToolChoiceMiddleware._contains_internal_runtime_protocol(result)
-        if PlanToolChoiceMiddleware._has_recent_budget_notice(prepared) and (
-            contains_tool_call or contains_internal_protocol
-        ):
-            allowed = (
-                contains_tool_call
-                and not contains_internal_protocol
-                and PlanToolChoiceMiddleware._budget_allows_result_tools(prepared, result)
+        for retry_count in range(1, _BUDGET_FINALIZATION_RETRY_LIMIT + 1):
+            result = handler(prepared)
+            report = PlanToolChoiceMiddleware._budget_result_report(prepared, result)
+            if report is None:
+                return result
+            PlanToolChoiceMiddleware._emit_budget_retry_event(
+                report,
+                retry_count,
+                exhausted=retry_count >= _BUDGET_FINALIZATION_RETRY_LIMIT and not report["allowed"],
             )
-            PlanToolChoiceMiddleware._emit_synthesis_event({
-                "type": "synthesis_gate",
-                "phase": "budget_synthesis",
-                "reason": "model continued after budget notice",
-                "second_handler": False,
-                "entered_second_handler": False,
-                "continued_after_notice": True,
-                "allowed": allowed,
-                "blocked_tool_calls": contains_tool_call and not allowed,
-                "contains_tool_call": contains_tool_call,
-                "contains_internal_runtime_protocol": contains_internal_protocol,
-            })
-            if not allowed:
-                return PlanToolChoiceMiddleware._budget_finalization_message()
-        return result
+            if report["allowed"]:
+                return result
+            if retry_count >= _BUDGET_FINALIZATION_RETRY_LIMIT:
+                return PlanToolChoiceMiddleware._budget_finalization_retry_exhausted_message()
+            runtime = getattr(prepared, "runtime", None)
+            context = getattr(runtime, "context", None)
+            prepared = prepared.override(
+                messages=[
+                    *list(prepared.messages),
+                    PlanToolChoiceMiddleware._budget_finalization_retry_message(retry_count, context),
+                ],
+                tool_choice=None,
+            )
+        return PlanToolChoiceMiddleware._budget_finalization_retry_exhausted_message()
 
     @override
     async def awrap_model_call(
@@ -454,29 +529,27 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelCallResult:
         prepared = self._prepare(request)
-        result = await handler(prepared)
-        contains_tool_call = PlanToolChoiceMiddleware._contains_tool_call(result)
-        contains_internal_protocol = PlanToolChoiceMiddleware._contains_internal_runtime_protocol(result)
-        if PlanToolChoiceMiddleware._has_recent_budget_notice(prepared) and (
-            contains_tool_call or contains_internal_protocol
-        ):
-            allowed = (
-                contains_tool_call
-                and not contains_internal_protocol
-                and PlanToolChoiceMiddleware._budget_allows_result_tools(prepared, result)
+        for retry_count in range(1, _BUDGET_FINALIZATION_RETRY_LIMIT + 1):
+            result = await handler(prepared)
+            report = PlanToolChoiceMiddleware._budget_result_report(prepared, result)
+            if report is None:
+                return result
+            PlanToolChoiceMiddleware._emit_budget_retry_event(
+                report,
+                retry_count,
+                exhausted=retry_count >= _BUDGET_FINALIZATION_RETRY_LIMIT and not report["allowed"],
             )
-            PlanToolChoiceMiddleware._emit_synthesis_event({
-                "type": "synthesis_gate",
-                "phase": "budget_synthesis",
-                "reason": "model continued after budget notice",
-                "second_handler": False,
-                "entered_second_handler": False,
-                "continued_after_notice": True,
-                "allowed": allowed,
-                "blocked_tool_calls": contains_tool_call and not allowed,
-                "contains_tool_call": contains_tool_call,
-                "contains_internal_runtime_protocol": contains_internal_protocol,
-            })
-            if not allowed:
-                return PlanToolChoiceMiddleware._budget_finalization_message()
-        return result
+            if report["allowed"]:
+                return result
+            if retry_count >= _BUDGET_FINALIZATION_RETRY_LIMIT:
+                return PlanToolChoiceMiddleware._budget_finalization_retry_exhausted_message()
+            runtime = getattr(prepared, "runtime", None)
+            context = getattr(runtime, "context", None)
+            prepared = prepared.override(
+                messages=[
+                    *list(prepared.messages),
+                    PlanToolChoiceMiddleware._budget_finalization_retry_message(retry_count, context),
+                ],
+                tool_choice=None,
+            )
+        return PlanToolChoiceMiddleware._budget_finalization_retry_exhausted_message()

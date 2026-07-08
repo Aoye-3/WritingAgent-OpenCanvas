@@ -1193,23 +1193,29 @@ function streamingStatusLabel(message: CollaborationMessage, fallback: string) {
   return message.statusLabel || fallback;
 }
 
-function latestBudgetLimitFailure(messages: CollaborationMessage[]) {
+export function latestBudgetLimitFailure(messages: CollaborationMessage[]) {
   const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant" && (message.text.trim() || message.timeline?.length));
   if (!latestAssistant) return false;
   const haystack = [
     latestAssistant.text,
     latestAssistant.statusLabel,
+    ...(latestAssistant.completion?.reasons ?? []),
+    ...(latestAssistant.completion?.missingRequirements ?? []),
     ...(latestAssistant.timeline ?? []).flatMap((event) => [
       event.title,
       event.summary,
       String(event.payload?.status ?? ""),
       String(event.payload?.type ?? ""),
+      String(event.payload?.phase ?? ""),
+      String(event.payload?.reason ?? ""),
       String(event.payload?.canResume ?? ""),
       String(event.payload?.error ?? ""),
-      String(event.payload?.message ?? "")
+      String(event.payload?.message ?? ""),
+      String(event.payload?.finalization_retry_exhausted ?? ""),
+      String(event.payload?.finalization_retry_count ?? "")
     ])
   ].join("\n");
-  return /budget_exhausted|Recursion limit of \d+ reached|GRAPH_RECURSION_LIMIT/i.test(haystack);
+  return /budget_exhausted|Recursion limit of \d+ reached|GRAPH_RECURSION_LIMIT|finalization_retry_exhausted|budget finalization retry|Continue finalization from gathered evidence/i.test(haystack);
 }
 
 export function agentPlanTraceTarget(events: RunTimelineEvent[] | undefined, plans: PlanRun[] = []) {

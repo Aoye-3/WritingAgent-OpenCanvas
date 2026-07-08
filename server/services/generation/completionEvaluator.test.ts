@@ -144,6 +144,25 @@ test("completion evaluator allows runtime budget gates to complete with final te
   assert.match(verdict.reasons.join(" "), /budget gate/);
 });
 
+test("completion evaluator marks exhausted budget finalization retries partial even with fallback text", () => {
+  const verdict = evaluateRunCompletion({
+    payload: basePayload,
+    text: "Budget finalization retry limit reached. Continue finalization from gathered evidence.",
+    events: [{
+      eventType: "agent_backend_synthesis_gate",
+      payload: {
+        type: "synthesis_gate",
+        reason: "budget finalization retry exhausted",
+        finalization_retry_exhausted: true
+      }
+    }],
+    finishReason: "agent_backend_completed"
+  });
+
+  assert.equal(verdict.status, "partial");
+  assert.match(verdict.missingRequirements[0] ?? "", /Continue finalization from gathered evidence/);
+});
+
 test("completion evaluator keeps checkpoint-only Canvas delivery partial", () => {
   const verdict = evaluateRunCompletion({
     payload: basePayload,

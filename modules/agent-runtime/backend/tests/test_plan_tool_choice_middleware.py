@@ -801,7 +801,7 @@ def test_does_not_force_another_artifact_after_artifact_stage_returns():
     assert captured["request"].tool_choice is None
 
 
-def test_budget_notice_blocks_model_from_continuing_exploration_tools(monkeypatch: pytest.MonkeyPatch):
+def test_budget_notice_retries_once_then_uses_final_text(monkeypatch: pytest.MonkeyPatch):
     middleware = PlanToolChoiceMiddleware()
     calls = []
     events = []
@@ -811,9 +811,90 @@ def test_budget_notice_blocks_model_from_continuing_exploration_tools(monkeypatc
     ]
 
     def handler(model_request):
-        calls.append([tool.name for tool in model_request.tools])
+        calls.append(model_request)
+        if len(calls) == 1:
+            return AIMessage(content="", tool_calls=[{
+                "id": "call_search",
+                "name": "web_search",
+                "args": {"query": "more"},
+                "type": "tool_call",
+            }])
+        return AIMessage(content="Final synthesized answer.")
+
+    monkeypatch.setattr("langgraph.config.get_stream_writer", lambda: events.append)
+    result = middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            progressive_enabled=True,
+            evidence_tool_limit=1,
+            evidence_tools=["web_search"],
+            force_synthesis_after_evidence=True,
+        ),
+        handler,
+    )
+
+    assert [[tool.name for tool in call.tools] for call in calls] == [["canvas_write"], ["canvas_write"]]
+    assert calls[1].messages[-1].additional_kwargs["facetwrite_budget_finalization_retry"] == 1
+    assert result.content == "Final synthesized answer."
+    assert "runtime budget gate" not in result.content
+    synthesis_events = [event for event in events if event["type"] == "synthesis_gate"]
+    assert synthesis_events[-1]["continued_after_notice"] is True
+    assert synthesis_events[-1]["finalization_retry_count"] == 1
+    assert "finalization_retry_exhausted" not in synthesis_events[-1]
+
+
+def test_budget_notice_uses_enhanced_prompts_for_retry_counts_two_through_four():
+    middleware = PlanToolChoiceMiddleware()
+    calls = []
+    messages = [
+        HumanMessage(content="Research this"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+    ]
+
+    def handler(model_request):
+        calls.append(model_request)
+        if len(calls) <= 4:
+            return AIMessage(content="", tool_calls=[{
+                "id": f"call_search_{len(calls)}",
+                "name": "web_search",
+                "args": {"query": "more"},
+                "type": "tool_call",
+            }])
+        return AIMessage(content="Final synthesized answer after retries.")
+
+    result = middleware.wrap_model_call(
+        request(
+            phase="chat",
+            messages=messages,
+            progressive_enabled=True,
+            evidence_tool_limit=1,
+            evidence_tools=["web_search"],
+            force_synthesis_after_evidence=True,
+        ),
+        handler,
+    )
+
+    assert len(calls) == 5
+    assert result.content == "Final synthesized answer after retries."
+    retry_messages = [call.messages[-1].content for call in calls[1:]]
+    assert "exploration and workspace inspection tools are unavailable" in retry_messages[0]
+    assert all("previous output still attempted unavailable tools" in message for message in retry_messages[1:])
+
+
+def test_budget_notice_exhausts_after_five_finalization_retries(monkeypatch: pytest.MonkeyPatch):
+    middleware = PlanToolChoiceMiddleware()
+    calls = []
+    events = []
+    messages = [
+        HumanMessage(content="Research this"),
+        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
+    ]
+
+    def handler(model_request):
+        calls.append(model_request)
         return AIMessage(content="", tool_calls=[{
-            "id": "call_search",
+            "id": f"call_search_{len(calls)}",
             "name": "web_search",
             "args": {"query": "more"},
             "type": "tool_call",
@@ -832,29 +913,42 @@ def test_budget_notice_blocks_model_from_continuing_exploration_tools(monkeypatc
         handler,
     )
 
-    assert calls == [["canvas_write"]]
+    assert len(calls) == 5
     assert not getattr(result, "tool_calls", None)
-    assert "budget gate" in result.content
+    assert "Budget finalization retry limit reached" in result.content
     synthesis_events = [event for event in events if event["type"] == "synthesis_gate"]
-    assert [event["second_handler"] for event in synthesis_events] == [False, False]
+    assert [event["second_handler"] for event in synthesis_events] == [False] * 6
     assert synthesis_events[-1]["continued_after_notice"] is True
     assert synthesis_events[-1]["allowed"] is False
     assert synthesis_events[-1]["blocked_tool_calls"] is True
     assert synthesis_events[-1]["contains_tool_call"] is True
+    assert synthesis_events[-1]["finalization_retry_count"] == 5
+    assert synthesis_events[-1]["finalization_retry_limit"] == 5
+    assert synthesis_events[-1]["finalization_retry_exhausted"] is True
 
 
-def test_budget_notice_returns_finalization_message_if_model_still_requests_exploration_tools():
+@pytest.mark.parametrize(
+    ("tool_name", "args", "markdown_file_delivery_required"),
+    [
+        ("canvas_write", {"operation": "create", "content": "Final"}, None),
+        ("write_file", {"path": "/mnt/user-data/outputs/report.md", "content": "Final"}, True),
+        ("present_files", {"paths": ["/mnt/user-data/outputs/report.md"]}, True),
+    ],
+)
+def test_budget_notice_allows_finalization_tools(tool_name: str, args: dict, markdown_file_delivery_required: bool | None):
     middleware = PlanToolChoiceMiddleware()
+    calls = []
     messages = [
         HumanMessage(content="Research this"),
         ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
     ]
 
-    def handler(_model_request):
+    def handler(model_request):
+        calls.append(model_request)
         return AIMessage(content="", tool_calls=[{
-            "id": "call_search",
-            "name": "web_search",
-            "args": {"query": "more"},
+            "id": f"call_{tool_name}",
+            "name": tool_name,
+            "args": args,
             "type": "tool_call",
         }])
 
@@ -866,15 +960,17 @@ def test_budget_notice_returns_finalization_message_if_model_still_requests_expl
             evidence_tool_limit=1,
             evidence_tools=["web_search"],
             force_synthesis_after_evidence=True,
+            markdown_file_delivery_required=markdown_file_delivery_required,
         ),
         handler,
     )
 
-    assert not getattr(result, "tool_calls", None)
-    assert "budget gate" in result.content
+    assert len(calls) == 1
+    assert getattr(result, "tool_calls", None)
+    assert result.tool_calls[0]["name"] == tool_name
 
 
-def test_budget_notice_blocks_model_result_when_model_emits_text_tool_protocol(monkeypatch: pytest.MonkeyPatch):
+def test_budget_notice_retries_internal_tool_protocol_text(monkeypatch: pytest.MonkeyPatch):
     middleware = PlanToolChoiceMiddleware()
     calls = []
     events = []
@@ -884,8 +980,10 @@ def test_budget_notice_blocks_model_result_when_model_emits_text_tool_protocol(m
     ]
 
     def handler(model_request):
-        calls.append([tool.name for tool in model_request.tools])
-        return AIMessage(content='< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">')
+        calls.append(model_request)
+        if len(calls) == 1:
+            return AIMessage(content='< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">')
+        return AIMessage(content="Final answer after protocol retry.")
 
     monkeypatch.setattr("langgraph.config.get_stream_writer", lambda: events.append)
     result = middleware.wrap_model_call(
@@ -900,36 +998,8 @@ def test_budget_notice_blocks_model_result_when_model_emits_text_tool_protocol(m
         handler,
     )
 
-    assert calls == [["canvas_write"]]
-    assert result.content != '< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">'
-    assert "budget gate" in result.content
+    assert len(calls) == 2
+    assert result.content == "Final answer after protocol retry."
     synthesis_events = [event for event in events if event["type"] == "synthesis_gate"]
-    assert [event["second_handler"] for event in synthesis_events] == [False, False]
     assert synthesis_events[-1]["contains_internal_runtime_protocol"] is True
     assert synthesis_events[-1]["allowed"] is False
-
-
-def test_budget_notice_returns_finalization_message_if_model_still_emits_text_tool_protocol():
-    middleware = PlanToolChoiceMiddleware()
-    messages = [
-        HumanMessage(content="Research this"),
-        ToolMessage(content="result 1", name="web_search", tool_call_id="call_1"),
-    ]
-
-    def handler(_model_request):
-        return AIMessage(content='< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">')
-
-    result = middleware.wrap_model_call(
-        request(
-            phase="chat",
-            messages=messages,
-            progressive_enabled=True,
-            evidence_tool_limit=1,
-            evidence_tools=["web_search"],
-            force_synthesis_after_evidence=True,
-        ),
-        handler,
-    )
-
-    assert result.content != '< | | DSML | | tool_calls> < / | / DSML / / invoke name="webfetch">'
-    assert "budget gate" in result.content
