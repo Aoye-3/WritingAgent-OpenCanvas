@@ -1443,6 +1443,147 @@ test("answered intake slot suppresses repeated citation-format clarification fro
   assert.ok(record.events?.some((event) => event.eventType === "agent_backend_duplicate_clarification_suppressed"));
 });
 
+test("answered clarification requests final supplement before execution", async () => {
+  const { storage, records } = fakeStorage();
+  let calls = 0;
+  const events: ToolEventRecord[] = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => {
+        calls += 1;
+        return { text: "Executed", finishReason: "agent_backend_completed", events: [] };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "写一份 Agent 调研报告\n\nSelected clarification: recent systems",
+    contextValues: {
+      agentClarification: {
+        clarificationId: "agent_clarification_scope",
+        question: "Which scope?",
+        selectedOptionId: "recent",
+        answer: "recent systems"
+      },
+      agentIntake: { phase: "execution", completed: true }
+    }
+  }, {
+    onToolEvent: (event) => events.push(event)
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.finishReason, "final_supplement_required");
+  assert.equal(events.some((event) => event.eventType === "agent_final_supplement_requested"), true);
+  const record = records[0] as { events?: ToolEventRecord[] };
+  const request = record.events?.find((event) => event.eventType === "agent_final_supplement_requested");
+  assert.equal(request?.payload.question, "是否还有要补充的？");
+  assert.equal(Boolean((request?.payload.requestContext as Record<string, unknown>).finalSupplement), false);
+});
+
+test("final supplement execute answer resumes execution and records the answer", async () => {
+  const { storage, records } = fakeStorage();
+  let calls = 0;
+  let observedContextValues: Record<string, unknown> = {};
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        calls += 1;
+        observedContextValues = input.contextValues ?? {};
+        return { text: "Executed", finishReason: "agent_backend_completed", events: [] };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "Write the report\n\nSelected clarification: recent systems",
+    contextValues: {
+      agentClarification: {
+        clarificationId: "agent_clarification_scope",
+        question: "Which scope?",
+        selectedOptionId: "recent",
+        answer: "recent systems"
+      },
+      agentIntake: { phase: "execution", completed: true },
+      finalSupplement: {
+        finalSupplementId: "final_supplement_1",
+        action: "execute"
+      }
+    }
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.finishReason, "agent_backend_completed");
+  assert.equal(Boolean(observedContextValues.finalSupplement), false);
+  const record = records[0] as { events?: ToolEventRecord[] };
+  assert.equal(record.events?.some((event) => event.eventType === "agent_final_supplement_answered"), true);
+});
+
+test("final supplement text returns to intake and asks final supplement again after intake completes", async () => {
+  const { storage, records } = fakeStorage();
+  let calls = 0;
+  let observedAllowedToolRefs: string[] = [];
+  let observedContextValues: Record<string, unknown> = {};
+  const intakeComplete: ToolEventRecord = {
+    eventType: "agent_backend_agent_intake_complete",
+    payload: { type: "agent_intake_complete", summary: "Ready after supplement" }
+  };
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        calls += 1;
+        observedAllowedToolRefs = input.allowedToolRefs ?? [];
+        observedContextValues = input.contextValues ?? {};
+        return { text: "", finishReason: "agent_backend_completed", events: [intakeComplete] };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "Write the report\n\nFinal supplements:\n1. Focus on enterprise workflows",
+    contextValues: {
+      agentClarification: {
+        clarificationId: "agent_clarification_scope",
+        question: "Which scope?",
+        selectedOptionId: "recent",
+        answer: "recent systems"
+      },
+      agentIntake: { phase: "execution", completed: true },
+      finalSupplement: {
+        finalSupplementId: "final_supplement_1",
+        action: "supplement",
+        supplement: "Focus on enterprise workflows"
+      }
+    }
+  });
+
+  assert.equal(calls, 1);
+  assert.deepEqual(observedAllowedToolRefs, ["ask_clarification", "agent_intake_complete"]);
+  assert.equal((observedContextValues.finalSupplementFeedback as Record<string, unknown>).supplement, "Focus on enterprise workflows");
+  assert.equal(result.finishReason, "final_supplement_required");
+  const record = records[0] as { events?: ToolEventRecord[] };
+  assert.equal(record.events?.some((event) => event.eventType === "agent_final_supplement_answered"), true);
+  assert.equal(record.events?.some((event) => event.eventType === "agent_backend_agent_intake_complete"), true);
+  assert.equal(record.events?.some((event) => event.eventType === "agent_final_supplement_requested"), true);
+});
+
 test("agent intake suppresses equivalent answered clarification without runtime slot id", async () => {
   const { storage, agentClarifications, records } = fakeStorage();
   let calls = 0;
@@ -1564,27 +1705,31 @@ test("research skill answered clarification resumes execution with low delivery 
       "",
       "Selected clarification: Multi-agent systems",
       "Selected clarification: 2023-2026",
-      "Selected clarification: 30 papers, APA format"
+      "Selected clarification: Continue with 30 papers, APA format"
     ].join("\n"),
     transientSkillRefs: ["database-lookup", "literature-review"],
     contextValues: {
       agentClarification: {
         clarificationId: "agent_clarification_format",
         selectedOptionId: "format_apa",
-        answer: "30 papers, APA format",
+        answer: "Continue with 30 papers, APA format",
         resumeContext: {
           runtimeBudgetProfile: "low",
           canvas: { workflow: { mode: "batch_delivery" } },
           intakeRound: 3,
           answeredSummary: "Scope: Multi-agent systems; Time range: 2023-2026; Format: 30 papers, APA format"
         }
+      },
+      finalSupplement: {
+        finalSupplementId: "final_supplement_budget",
+        action: "execute"
       }
     },
     toolState: { web_search: true, knowledge_base: true }
   });
 
   assert.equal(result.finishReason, "agent_backend_completed");
-  assert.equal(allowedToolRefs.includes("web_search"), true);
+  assert.equal(allowedToolRefs.includes("web_search"), true, JSON.stringify(allowedToolRefs));
   assert.equal(allowedToolRefs.includes("write_file"), true);
   assert.equal(allowedToolRefs.includes("present_files"), true);
   assert.notDeepEqual(allowedToolRefs, ["ask_clarification", "agent_intake_complete"]);
@@ -3687,12 +3832,15 @@ test("generation facade passes policy-aware tool context to AgentBackend", async
     threadId: "thread_provider_facade",
     chatInstruction: "Use canvas",
     toolState: { canvas_write: true },
+    contextValues: {
+      agentIntake: { phase: "execution", completed: true }
+    },
     selectedCanvasNodeId: "node_123"
   });
 
   assert.equal(result.provider, "agent-backend");
   assert.equal((observedInput as { selectedCanvasNodeId: string }).selectedCanvasNodeId, "node_123");
-  assert.deepEqual((observedInput as { allowedToolRefs: string[] }).allowedToolRefs.includes("canvas_write"), true);
+  assert.deepEqual((observedInput as { allowedToolRefs: string[] }).allowedToolRefs.includes("canvas_write"), true, JSON.stringify((observedInput as { allowedToolRefs: string[] }).allowedToolRefs));
   assert.equal((observedInput as { toolState: Record<string, boolean> }).toolState.canvas_write, true);
   assert.ok(observedMessages.some((message) => (message as { content?: string }).content === "Old assistant"));
   assert.equal((records[0] as { mode: string }).mode, "chat");

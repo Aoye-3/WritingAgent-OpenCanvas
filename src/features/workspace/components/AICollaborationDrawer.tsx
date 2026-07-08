@@ -4,7 +4,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, LightbulbIcon, ModelConfigIcon, SearchIcon, SendIcon, StopIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
-import type { AgentCard, AgentClarification, CanvasNode, CanvasWriteRequest, CanvasWriteSuggestion, PlanRun, RunTimelineEvent, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
+import type { AgentCard, AgentClarification, CanvasNode, CanvasWriteRequest, CanvasWriteSuggestion, FinalSupplement, PlanRun, RunTimelineEvent, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
 import type { CanvasNodePatch } from "../../canvas/canvasClient";
 import { fetchRuntimeRunEvents } from "../../generation/generationClient";
 import type { CollaborationMessage, GenerateRequest, RuntimeRunEvent } from "../../generation/types";
@@ -46,6 +46,7 @@ type AICollaborationDrawerProps = {
   canvasWriteRequests: CanvasWriteRequest[];
   canvasWriteSuggestions: CanvasWriteSuggestion[];
   agentClarifications: AgentClarification[];
+  finalSupplement?: FinalSupplement;
   canvasNodes: CanvasNode[];
   collapsed: boolean;
   inputDraft: string;
@@ -118,6 +119,7 @@ export function AICollaborationDrawer({
   canvasWriteRequests,
   canvasWriteSuggestions,
   agentClarifications,
+  finalSupplement,
   collapsed,
   inputDraft,
   mindChainContext,
@@ -181,6 +183,7 @@ export function AICollaborationDrawer({
   const [contextResetNotice, setContextResetNotice] = useState(false);
   const [clarificationBusy, setClarificationBusy] = useState(false);
   const [planPanelCollapsed, setPlanPanelCollapsed] = useState(false);
+  const [finalSupplementAdditions, setFinalSupplementAdditions] = useState<Record<string, string[]>>({});
   const [submittedAgentClarificationKeys, setSubmittedAgentClarificationKeys] = useState<Set<string>>(() => new Set());
   const [optimisticAgentClarifications, setOptimisticAgentClarifications] = useState<AgentClarification[]>([]);
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -213,6 +216,7 @@ export function AICollaborationDrawer({
     () => agentClarificationFromRecord(agentClarifications.find((clarification) => clarification.status === "pending" && !isAgentClarificationRecordAnswered(clarification, answeredAgentClarificationKeys)), answeredAgentClarificationKeys) ?? latestPendingAgentClarification(messages, answeredAgentClarificationKeys),
     [agentClarifications, answeredAgentClarificationKeys, messages]
   );
+  const pendingFinalSupplement = pendingClarificationPlan || pendingAgentClarification ? undefined : finalSupplement;
   const missingAgentClarificationPayload = useMemo(
     () => !pendingAgentClarification && hasUnresolvedAgentClarificationTrace(messages, answeredAgentClarificationKeys),
     [answeredAgentClarificationKeys, messages, pendingAgentClarification]
@@ -223,7 +227,7 @@ export function AICollaborationDrawer({
     [plans]
   );
   const floatingPlan = pendingClarificationPlan ?? floatingBoardPlan;
-  const floatingPlanPanelStyle = { "--plan-panel-bottom": `${pendingClarificationPlan || pendingAgentClarification ? 142 : composerHeight + 142}px` } as CSSProperties;
+  const floatingPlanPanelStyle = { "--plan-panel-bottom": `${pendingClarificationPlan || pendingAgentClarification || pendingFinalSupplement ? 142 : composerHeight + 142}px` } as CSSProperties;
   const showStopControl = shouldShowStopControl(isSending, input);
 
   useEffect(() => {
@@ -252,11 +256,12 @@ export function AICollaborationDrawer({
   useEffect(() => {
     setSubmittedAgentClarificationKeys(new Set());
     setOptimisticAgentClarifications([]);
+    setFinalSupplementAdditions({});
     setPlanPanelCollapsed(false);
   }, [currentThreadId]);
   useEffect(() => {
     setPlanPanelCollapsed(false);
-  }, [floatingPlan?.id, floatingPlan?.status, pendingAgentClarification?.clarificationId]);
+  }, [floatingPlan?.id, floatingPlan?.status, pendingAgentClarification?.clarificationId, pendingFinalSupplement?.id]);
 
   useEffect(() => {
     if (skillPickerOpen) onRequestSkillCatalog();
@@ -310,7 +315,7 @@ export function AICollaborationDrawer({
   const submitComposerPayload = async (payload: AIComposerSubmitPayload) => {
     const text = payload.text.trim();
     if (!text) return;
-    if (pendingAgentClarification) return;
+    if (pendingAgentClarification || pendingFinalSupplement) return;
     setInput("");
     const runtimeBudgetOverride = payload.runtimeBudgetProfile === (runtimeBudgetProfile ?? "low")
       ? undefined
@@ -474,6 +479,65 @@ export function AICollaborationDrawer({
       setSubmittedAgentClarificationKeys((current) => removeSubmittedAgentClarificationKeys(current, submission.submittedKeys));
       setOptimisticAgentClarifications((current) => removeOptimisticAgentClarification(current, submission.optimisticClarification));
       throw error;
+    } finally {
+      setClarificationBusy(false);
+    }
+  };
+
+  const addFinalSupplement = async (supplement: string) => {
+    if (!pendingFinalSupplement) return;
+    const text = supplement.trim();
+    if (!text) return;
+    setFinalSupplementAdditions((current) => ({
+      ...current,
+      [pendingFinalSupplement.id]: [...(current[pendingFinalSupplement.id] ?? []), text]
+    }));
+    setClarificationBusy(true);
+    try {
+      const result = await onSend(finalSupplementInstruction(pendingFinalSupplement.instructionText, [text], locale), undefined, {
+        ...pendingFinalSupplement.requestContext,
+        finalSupplement: {
+          finalSupplementId: pendingFinalSupplement.id,
+          action: "supplement",
+          supplement: text
+        }
+      });
+      if (isFailedSendResult(result)) {
+        setFinalSupplementAdditions((current) => ({
+          ...current,
+          [pendingFinalSupplement.id]: (current[pendingFinalSupplement.id] ?? []).filter((item) => item !== text)
+        }));
+      }
+    } catch (error) {
+      setFinalSupplementAdditions((current) => ({
+        ...current,
+        [pendingFinalSupplement.id]: (current[pendingFinalSupplement.id] ?? []).filter((item) => item !== text)
+      }));
+      throw error;
+    } finally {
+      setClarificationBusy(false);
+    }
+  };
+
+  const executeFinalSupplement = async (supplement: FinalSupplement) => {
+    const additions = finalSupplementAdditions[supplement.id] ?? [];
+    const instructionText = finalSupplementInstruction(supplement.instructionText, additions, locale);
+    setClarificationBusy(true);
+    try {
+      const result = await onSend(instructionText, undefined, {
+        ...supplement.requestContext,
+        finalSupplement: {
+          finalSupplementId: supplement.id,
+          action: "execute"
+        }
+      });
+      if (!isFailedSendResult(result)) {
+        setFinalSupplementAdditions((current) => {
+          const next = { ...current };
+          delete next[supplement.id];
+          return next;
+        });
+      }
     } finally {
       setClarificationBusy(false);
     }
@@ -718,7 +782,7 @@ export function AICollaborationDrawer({
         </button>
       ) : null}
 
-      {floatingPlan || pendingAgentClarification ? (
+      {floatingPlan || pendingAgentClarification || pendingFinalSupplement ? (
         <section
           className={planPanelCollapsed ? "floating-plan-panel is-collapsed" : "floating-plan-panel"}
           style={floatingPlanPanelStyle}
@@ -729,7 +793,7 @@ export function AICollaborationDrawer({
             onClick={() => setPlanPanelCollapsed((value) => !value)}
             type="button"
           >
-            <strong>{floatingPlan ? t("plan.progress") : locale === "zh" ? "补充信息" : "Clarification"}</strong>
+            <strong>{floatingPlan && !pendingFinalSupplement ? t("plan.progress") : locale === "zh" ? "\u8865\u5145\u4fe1\u606f" : "Clarification"}</strong>
             <span>{planPanelCollapsed ? "+" : "-"}</span>
           </button>
           {!planPanelCollapsed && pendingClarificationPlan ? (
@@ -740,7 +804,7 @@ export function AICollaborationDrawer({
               onAnswer={(answer) => answerClarification(pendingClarificationPlan, answer)}
             />
           ) : null}
-          {!planPanelCollapsed && floatingPlan && floatingPlan.id !== pendingClarificationPlan?.id ? (
+          {!planPanelCollapsed && floatingPlan && floatingPlan.id !== pendingClarificationPlan?.id && !pendingFinalSupplement ? (
             <AgentPlanBoard
               plan={floatingPlan}
               threadId={currentThreadId}
@@ -756,6 +820,16 @@ export function AICollaborationDrawer({
               locale={locale}
               variant="composer"
               onAnswer={(answer) => answerAgentClarification(pendingAgentClarification, answer)}
+            />
+          ) : null}
+          {!planPanelCollapsed && pendingFinalSupplement ? (
+            <FinalSupplementCard
+              additions={finalSupplementAdditions[pendingFinalSupplement.id] ?? []}
+              busy={clarificationBusy}
+              locale={locale}
+              supplement={pendingFinalSupplement}
+              onAdd={addFinalSupplement}
+              onExecute={() => executeFinalSupplement(pendingFinalSupplement)}
             />
           ) : null}
         </section>
@@ -792,7 +866,7 @@ export function AICollaborationDrawer({
           </div>
         ) : null}
       </div>
-      {pendingClarificationPlan || pendingAgentClarification ? null : (
+      {pendingClarificationPlan || pendingAgentClarification || pendingFinalSupplement ? null : (
         <AIComposer
           activeAgent={activeAgent}
           agentCards={agentCards}
@@ -1511,6 +1585,77 @@ function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "
       </div>
     </section>
   );
+}
+
+function FinalSupplementCard({ additions, busy, locale, supplement, onAdd, onExecute }: {
+  additions: string[];
+  busy: boolean;
+  locale: "en" | "zh";
+  supplement: FinalSupplement;
+  onAdd: (supplement: string) => Promise<void>;
+  onExecute: () => Promise<void>;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+  const submit = async () => {
+    const text = draft.trim();
+    if (!text) return;
+    await onAdd(text);
+    setDraft("");
+    setAdding(false);
+  };
+  return (
+    <section className="plan-clarification-card plan-clarification-card-composer" data-status="pending">
+      <div className="plan-clarification-heading">
+        <strong>{locale === "zh" ? "\u6700\u7ec8\u786e\u8ba4" : "Final confirmation"}</strong>
+        <span>{locale === "zh" ? "\u6267\u884c\u524d\u8865\u5145" : "Before execution"}</span>
+      </div>
+      <p>{supplement.question}</p>
+      {additions.length ? (
+        <div className="plan-clarification-custom-entry">
+          <span>{locale === "zh" ? "\u5df2\u6dfb\u52a0\u8865\u5145" : "Added supplements"}</span>
+          <ul>
+            {additions.map((item, index) => <li key={`${index}:${item}`}>{item}</li>)}
+          </ul>
+        </div>
+      ) : null}
+      <div className="plan-clarification-options" role="group" aria-label={supplement.question}>
+        <button disabled={busy} onClick={() => setAdding(true)} type="button">
+          <span><strong>{locale === "zh" ? "\u662f\uff0c\u6211\u8981\u8865\u5145" : "Yes, I want to add something"}</strong></span>
+        </button>
+        <button disabled={busy} onClick={() => void onExecute()} type="button">
+          <span><strong>{locale === "zh" ? "\u5426\uff0c\u8bf7\u6267\u884c\u4efb\u52a1" : "No, execute the task"}</strong></span>
+        </button>
+      </div>
+      {adding ? (
+        <div className="plan-clarification-custom-entry">
+          <label>
+            <span>{locale === "zh" ? "\u81ea\u7531\u8f93\u5165" : "Custom supplement"}</span>
+            <textarea
+              disabled={busy}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void submit();
+              }}
+              placeholder={locale === "zh" ? "\u8f93\u5165\u8981\u8865\u5145\u7684\u4fe1\u606f..." : "Type the information to add..."}
+              rows={2}
+              value={draft}
+            />
+          </label>
+          <button disabled={busy || !draft.trim()} onClick={() => void submit()} type="button">
+            {locale === "zh" ? "\u6dfb\u52a0\u8865\u5145" : "Add supplement"}
+          </button>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+export function finalSupplementInstruction(instruction: string, additions: string[], locale: "en" | "zh") {
+  const clean = additions.map((item) => item.trim()).filter(Boolean);
+  if (!clean.length) return instruction;
+  const heading = locale === "zh" ? "\u6700\u7ec8\u8865\u5145\uff1a" : "Final supplements:";
+  return [instruction, "", heading, ...clean.map((item, index) => `${index + 1}. ${item}`)].join("\n");
 }
 
 function progressSegmentsForMessage(message: CollaborationMessage) {

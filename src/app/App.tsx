@@ -128,6 +128,7 @@ function AppContent() {
     generationRun.setToolEvents(state.toolEvents);
     generationRun.setRunTimelineEvents(state.runTimelineEvents ?? []);
     generationRun.setAgentClarifications(state.agentClarifications ?? []);
+    generationRun.setFinalSupplement(state.finalSupplement);
     generationRun.setCanvasWriteSuggestions(state.canvasWriteSuggestions ?? []);
     canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? [], state.canvasWorkflow, state.canvasWorkflowSuggestions ?? [], state.canvasObjects ?? []);
     const latestVersion = state.outputVersions[0];
@@ -220,6 +221,7 @@ function AppContent() {
     generationRun.setToolEvents(state.toolEvents);
     generationRun.setRunTimelineEvents(state.runTimelineEvents ?? []);
     generationRun.setAgentClarifications(state.agentClarifications ?? []);
+    generationRun.setFinalSupplement(state.finalSupplement);
     generationRun.setCanvasWriteSuggestions(state.canvasWriteSuggestions ?? []);
     generationRun.setActiveVersionId(state.outputVersions[0]?.id);
     generationRun.applyCollaborationMessagesFromThreadState(state);
@@ -235,6 +237,7 @@ function AppContent() {
     generationRun.setToolEvents(state.toolEvents);
     generationRun.setRunTimelineEvents(state.runTimelineEvents ?? []);
     generationRun.setAgentClarifications(state.agentClarifications ?? []);
+    generationRun.setFinalSupplement(state.finalSupplement);
     generationRun.setCanvasWriteSuggestions(state.canvasWriteSuggestions ?? []);
     generationRun.setPlans(state.plans ?? []);
     canvasState.applyCanvasState(state.canvasNodes ?? [], state.canvasWriteRequests ?? [], state.canvasEdges ?? [], state.canvasWorkflow, state.canvasWorkflowSuggestions ?? [], state.canvasObjects ?? []);
@@ -656,6 +659,7 @@ function AppContent() {
         canvasWriteRequests={canvasState.canvasWriteRequests}
         canvasWriteSuggestions={generationRun.canvasWriteSuggestions}
         agentClarifications={generationRun.agentClarifications}
+        finalSupplement={generationRun.finalSupplement}
         canvasWorkflow={canvasState.canvasWorkflow}
         canvasWorkflowSuggestions={canvasState.canvasWorkflowSuggestions}
         selectedCanvasNodeId={canvasState.selectedCanvasNodeId}
