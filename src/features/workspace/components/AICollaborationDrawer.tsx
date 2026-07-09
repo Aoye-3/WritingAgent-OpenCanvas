@@ -184,6 +184,7 @@ export function AICollaborationDrawer({
   const [clarificationBusy, setClarificationBusy] = useState(false);
   const [planPanelCollapsed, setPlanPanelCollapsed] = useState(false);
   const [finalSupplementAdditions, setFinalSupplementAdditions] = useState<Record<string, string[]>>({});
+  const [submittedFinalSupplementIds, setSubmittedFinalSupplementIds] = useState<Set<string>>(() => new Set());
   const [submittedAgentClarificationKeys, setSubmittedAgentClarificationKeys] = useState<Set<string>>(() => new Set());
   const [optimisticAgentClarifications, setOptimisticAgentClarifications] = useState<AgentClarification[]>([]);
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -216,7 +217,7 @@ export function AICollaborationDrawer({
     () => agentClarificationFromRecord(agentClarifications.find((clarification) => clarification.status === "pending" && !isAgentClarificationRecordAnswered(clarification, answeredAgentClarificationKeys)), answeredAgentClarificationKeys) ?? latestPendingAgentClarification(messages, answeredAgentClarificationKeys),
     [agentClarifications, answeredAgentClarificationKeys, messages]
   );
-  const pendingFinalSupplement = pendingClarificationPlan || pendingAgentClarification ? undefined : finalSupplement;
+  const pendingFinalSupplement = pendingClarificationPlan || pendingAgentClarification ? undefined : pendingFinalSupplementForDisplay(finalSupplement, submittedFinalSupplementIds);
   const missingAgentClarificationPayload = useMemo(
     () => !pendingAgentClarification && hasUnresolvedAgentClarificationTrace(messages, answeredAgentClarificationKeys),
     [answeredAgentClarificationKeys, messages, pendingAgentClarification]
@@ -257,6 +258,7 @@ export function AICollaborationDrawer({
     setSubmittedAgentClarificationKeys(new Set());
     setOptimisticAgentClarifications([]);
     setFinalSupplementAdditions({});
+    setSubmittedFinalSupplementIds(new Set());
     setPlanPanelCollapsed(false);
   }, [currentThreadId]);
   useEffect(() => {
@@ -523,6 +525,7 @@ export function AICollaborationDrawer({
     const additions = finalSupplementAdditions[supplement.id] ?? [];
     const instructionText = finalSupplementInstruction(supplement.instructionText, additions, locale);
     setClarificationBusy(true);
+    setSubmittedFinalSupplementIds((current) => addSubmittedFinalSupplementId(current, supplement.id));
     try {
       const result = await onSend(instructionText, undefined, {
         ...supplement.requestContext,
@@ -537,7 +540,12 @@ export function AICollaborationDrawer({
           delete next[supplement.id];
           return next;
         });
+      } else {
+        setSubmittedFinalSupplementIds((current) => removeSubmittedFinalSupplementId(current, supplement.id));
       }
+    } catch (error) {
+      setSubmittedFinalSupplementIds((current) => removeSubmittedFinalSupplementId(current, supplement.id));
+      throw error;
     } finally {
       setClarificationBusy(false);
     }
@@ -1525,6 +1533,21 @@ export function removeSubmittedAgentClarificationKeys(current: ReadonlySet<strin
 
 export function removeOptimisticAgentClarification(current: AgentClarification[], optimisticClarification: AgentClarification) {
   return current.filter((item) => item !== optimisticClarification);
+}
+
+export function pendingFinalSupplementForDisplay(finalSupplement: FinalSupplement | undefined, submittedIds: ReadonlySet<string>) {
+  if (!finalSupplement || submittedIds.has(finalSupplement.id)) return undefined;
+  return finalSupplement;
+}
+
+export function addSubmittedFinalSupplementId(current: ReadonlySet<string>, id: string) {
+  return new Set([...current, id]);
+}
+
+export function removeSubmittedFinalSupplementId(current: ReadonlySet<string>, id: string) {
+  const next = new Set(current);
+  next.delete(id);
+  return next;
 }
 
 function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "message", onAnswer }: {
