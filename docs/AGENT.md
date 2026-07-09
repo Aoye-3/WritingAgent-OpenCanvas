@@ -203,6 +203,8 @@ A tool can auto-run only when it is enabled, does not require approval, and does
 
 `canvas_write` defaults created nodes to `document` unless the tool request explicitly supplies a valid Canvas node kind. This preserves the rule that AI output appears as editable documents by default.
 
+Progressive long-task delivery keeps `canvas_write` scoped to `short_progress_nodes`, including runs where a server-recognized `canvasAction.requiresTool` forces the tool to be available. Forced replace/delete operations must resolve a real target from `canvasAction.targetNodeId`, the tool arguments, or the selected Canvas node before Tool Runtime may create an approval request. Without a target, the bridge returns a recoverable `canvas_mutation_failed` event with `reason:"missing_target_node"` and leaves final `canvas_delivery` responsibility with the server-owned delivery path.
+
 If the user directly says to write/save/add content to Canvas and the operation is low risk, the server may commit it during the run and emit safe Canvas node timeline summaries. Existing pending requests from earlier runs are deliberately excluded so stale suggestions cannot be applied accidentally.
 
 When a model proposes a `replace` Canvas operation without an explicit user replace/overwrite instruction, the runtime downgrades it to `append` for the selected node or `create` when no node is selected. This keeps ordinary "write this to Canvas" requests non-destructive by default.
@@ -275,7 +277,7 @@ When transient Skills are successfully loaded for a streaming run, the backend e
 
 ## Canvas Action Orchestration
 
-Explicit single-node Canvas create/append instructions are recognized before generation and carried as a structured `canvasAction`. Agent Runtime forces `canvas_write` once for those tool-managed actions; the server-recognized operation is authoritative over model arguments. The internal Bridge resolves the real Project from the Thread, commits low-risk create/append operations directly, and returns a real `nodeId`. Replace and other destructive operations remain pending for approval. An Agent response is not evidence of success without a structured committed event.
+Explicit single-node Canvas create/append instructions are recognized before generation and carried as a structured `canvasAction`. Agent Runtime forces `canvas_write` once for those tool-managed actions; the server-recognized operation is authoritative over model arguments. The internal Bridge resolves the real Project from the Thread, commits low-risk create/append operations directly, and returns a real `nodeId`. Replace and other destructive operations remain pending for approval only when a target node is resolved; an untargeted forced update/delete is skipped as `missing_target_node`. An Agent response is not evidence of success without a structured committed or pending event.
 
 Direct multi-node Canvas delivery is server-managed and does not depend on the model calling `canvas_write`. It is handled after output normalization for requests such as "总结到画板里", "整理成节点", "放进 Canvas", "summarize this to canvas", "turn this into nodes", and "make canvas cards". The Agent prompt receives a private `Canvas Delivery Contract` asking for a `facetwrite_canvas_delivery` block with `assistant_reply`, `outline_markdown`, `body_markdown`, and `sources`; this block is deliverable content, not hidden reasoning. If the block is missing, the server falls back to cleaning completion chatter from the assistant text and extracting headings/lists and source links.
 

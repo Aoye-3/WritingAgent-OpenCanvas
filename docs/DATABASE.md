@@ -91,20 +91,20 @@ Knowledge Base vector stores and uploads are created under:
   - Audit trail for base creation, item indexing, indexing failures, search failures, rerank fallback, and deletion.
 
 ## Canvas Write Semantics
-`canvas_write_requests` is the safety buffer between Agent output and user data mutation.
+`canvas_write_requests` is the safety buffer for approval-gated Agent output. Low-risk `canvas_write` create/append operations may commit directly through the server-owned bridge and are audited through run/tool events; destructive or approval-required operations enter this table.
 
-- `create` creates a new Canvas node on approval.
+- `create` creates a new Canvas node on approval when routed through the proposal path.
 - `replace` replaces an existing node on approval.
-- `append` appends to an existing node on approval.
+- `append` appends to an existing node on approval when routed through the proposal path.
 - `pending` requests are shown to the user.
 - `approved` requests are applied and marked approved.
 - `rejected` requests are not applied.
 
-The current frontend labels these as Canvas write proposals. This changes the interaction model, not the schema: proposed writes still enter `canvas_write_requests` and only mutate `canvas_nodes` through the approve path.
+The current frontend labels these rows as Canvas write proposals. This changes the interaction model, not the schema: proposed writes still enter `canvas_write_requests` and mutate `canvas_nodes` only through the approve path.
 
 Temporary assistant-message annotations are not persisted. Annotated snippets and highlight state live in React state only and are cleared after write, cancel, or page refresh.
 
-Direct user write intent does not add a new table or bypass the request table. The frontend can auto-approve only newly created pending requests from the same generation run, so `canvas_write_requests` remains the audit/safety buffer even when the UI feels like a direct write.
+Direct user write intent does not add a new table. Low-risk same-run create/append may commit through the server-owned direct path; destructive same-run requests can be auto-approved only when they created a fresh pending request for that run. Older pending requests still require visible confirmation, so `canvas_write_requests` remains the audit/safety buffer for approval-gated writes.
 
 Canvas V2 stores node geometry in the existing `x`, `y`, `width`, and `height` fields. Dragging updates position; resizing updates dimensions and may also update position when resizing from north or west handles. These are presentation/editor interactions and do not require a schema migration.
 

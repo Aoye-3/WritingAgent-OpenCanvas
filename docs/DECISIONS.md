@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-09: Progressive CanvasWrite Keeps Scope And Skips Untargeted Updates
+
+Decision: Keep progressive long-task `canvas_write` inside the `short_progress_nodes` scope even when a structured `canvasAction.requiresTool` forces the tool to be available. Tool Runtime must reject a forced `replace` or `delete` before storage when no target node is resolved from `canvasAction.targetNodeId`, tool args, or the selected Canvas node. The diagnostic is `canvas_mutation_failed` with `reason:"missing_target_node"` and should be treated as recoverable noise in live/timeline UI.
+
+Reason: A reproduced long-task run completed through server-owned `canvas_delivery`, but Agent Runtime also emitted repeated `canvas_write` failures because a forced update path reached `createCanvasWriteRequest()` without a valid target node. Those failures polluted the run trace and could make visible Canvas summaries look failed even though `file_document` and final delivery events existed. The fix should protect the auxiliary ToolUse path without changing final Markdown, file document, or `canvas_delivery` finalization.
+
+Impact: `canvasWriteScopeForRun()` no longer clears progressive scope for `canvasActionRequiresTool`. `toolRuntime` guards untargeted `replace/delete` before repository validation. Frontend live tool presentation and persisted run timelines suppress this specific guard event as a main failure while retaining the diagnostic payload. Targeted destructive writes still require approval, low-risk create/append behavior is unchanged, and terminal delivery remains based on `canvas_delivery_body_final_committed`, `canvas_delivery_file_document_committed`, committed Canvas mutations, final assistant text, or committed Plan/Artifact events.
+
 ## 2026-07-08: Budget Gate Violations Use Finite Finalization Retries
 
 Decision: Keep budget-gate tool narrowing, but replace the first-violation hard replacement with a bounded 1+3+1 finalization retry loop. After the hidden budget notice, non-finalization tool calls or internal tool protocol count as violations. The first violation appends a strong hidden finalization prompt; violations two through four append stricter prompts that list the allowed finalization paths; the fifth violation emits `finalization_retry_exhausted` telemetry and returns a recoverable partial state. Allowed finalization tools such as `canvas_write`, and for file delivery `write_file` / `present_files`, continue normally and do not count as violations.
