@@ -4,6 +4,7 @@ import shlex
 from pathlib import Path
 
 from langchain.tools import tool
+from pydantic import BaseModel, Field
 
 from deerflow.agents.thread_state import ThreadDataState
 from deerflow.config import get_app_config
@@ -19,6 +20,14 @@ from deerflow.sandbox.sandbox_provider import get_sandbox_provider
 from deerflow.sandbox.search import GrepMatch
 from deerflow.sandbox.security import LOCAL_HOST_BASH_DISABLED_MESSAGE, is_host_bash_allowed
 from deerflow.tools.types import Runtime
+
+
+class WriteFileToolInput(BaseModel):
+    description: str = Field(description="Explain why you are writing to this file in short words. ALWAYS PROVIDE THIS PARAMETER FIRST.")
+    path: str = Field(description="The absolute path to the file to write to. ALWAYS PROVIDE THIS PARAMETER SECOND. Use this field, not file_path.")
+    content: str = Field(description="The complete text content to write to the file. ALWAYS PROVIDE THIS PARAMETER THIRD.")
+    file_path: str | None = Field(default=None, description="Compatibility alias for path. Prefer path for all new calls.")
+    append: bool = Field(default=False, description="Whether to append content to the end of the file instead of overwriting it. Defaults to false.")
 
 _ABSOLUTE_PATH_PATTERN = re.compile(r"(?<![:\w])(?<!:/)/(?:[^\s\"'`;&|<>()]+)")
 _FILE_URL_PATTERN = re.compile(r"\bfile://\S+", re.IGNORECASE)
@@ -1507,7 +1516,7 @@ def read_file_tool(
         return f"Error: Unexpected error reading file: {_sanitize_error(e, runtime)}"
 
 
-@tool("write_file", parse_docstring=True)
+@tool("write_file", args_schema=WriteFileToolInput, description="Write text content to a file. Always provide description, path, content, and optional append.", parse_docstring=True)
 def write_file_tool(
     runtime: Runtime,
     description: str,

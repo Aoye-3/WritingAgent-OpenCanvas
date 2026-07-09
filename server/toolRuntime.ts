@@ -203,8 +203,13 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
     const content = readString(args.content);
     const targetNodeId = readString(context.canvasAction?.targetNodeId) || readString(args.targetNodeId) || context.selectedCanvasNodeId || undefined;
     const actionOperation = readCanvasOperation(context.canvasAction?.operation);
-    const requestedOperation = actionOperation ?? readCanvasOperation(args.operation);
-    const operation = actionOperation === "append" && !targetNodeId
+    const toolOperation = readCanvasOperation(args.operation);
+    const requestedOperation = toolOperation ?? actionOperation;
+    const operation = toolOperation
+      ? toolOperation === "append" && !targetNodeId
+        ? "create"
+        : toolOperation
+      : actionOperation === "append" && !targetNodeId
       ? "create"
       : actionOperation ?? normalizeCanvasOperation(requestedOperation, targetNodeId, context.chatInstruction);
     if (!operation) {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -40,6 +41,15 @@ def _make_model(name: str, *, supports_thinking: bool, supports_tool_choice_with
 
 def test_make_lead_agent_signature_matches_langgraph_server_factory_abi():
     assert list(inspect.signature(lead_agent_module.make_lead_agent).parameters) == ["config"]
+
+
+def test_clarification_system_includes_question_quality_guidance():
+    prompt_source = Path(lead_agent_module.__file__).with_name("prompt.py").read_text(encoding="utf-8")
+
+    assert "**Question Quality:**" in prompt_source
+    assert "Socratic clarification" in prompt_source
+    assert "one highest-value question" in prompt_source
+    assert "mutually exclusive and actionable" in prompt_source
 
 
 def test_internal_make_lead_agent_uses_explicit_app_config(monkeypatch):

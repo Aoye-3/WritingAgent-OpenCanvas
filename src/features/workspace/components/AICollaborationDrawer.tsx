@@ -445,37 +445,7 @@ export function AICollaborationDrawer({
 
   const addFinalSupplement = async (supplement: string) => {
     if (!pendingFinalSupplement) return;
-    const text = supplement.trim();
-    if (!text) return;
-    setFinalSupplementAdditions((current) => ({
-      ...current,
-      [pendingFinalSupplement.id]: [...(current[pendingFinalSupplement.id] ?? []), text]
-    }));
-    setClarificationBusy(true);
-    try {
-      const result = await onSend(finalSupplementInstruction(pendingFinalSupplement.instructionText, [text], locale), undefined, {
-        ...pendingFinalSupplement.requestContext,
-        finalSupplement: {
-          finalSupplementId: pendingFinalSupplement.id,
-          action: "supplement",
-          supplement: text
-        }
-      });
-      if (isFailedSendResult(result)) {
-        setFinalSupplementAdditions((current) => ({
-          ...current,
-          [pendingFinalSupplement.id]: (current[pendingFinalSupplement.id] ?? []).filter((item) => item !== text)
-        }));
-      }
-    } catch (error) {
-      setFinalSupplementAdditions((current) => ({
-        ...current,
-        [pendingFinalSupplement.id]: (current[pendingFinalSupplement.id] ?? []).filter((item) => item !== text)
-      }));
-      throw error;
-    } finally {
-      setClarificationBusy(false);
-    }
+    setFinalSupplementAdditions((current) => appendFinalSupplementAddition(current, pendingFinalSupplement.id, supplement));
   };
 
   const executeFinalSupplement = async (supplement: FinalSupplement) => {
@@ -1233,6 +1203,15 @@ export function removeSubmittedFinalSupplementId(current: ReadonlySet<string>, i
   const next = new Set(current);
   next.delete(id);
   return next;
+}
+
+export function appendFinalSupplementAddition(current: Record<string, string[]>, id: string, supplement: string) {
+  const text = supplement.trim();
+  if (!text) return current;
+  return {
+    ...current,
+    [id]: [...(current[id] ?? []), text]
+  };
 }
 
 function AgentClarificationChoiceCard({ clarification, busy, locale, variant = "message", onAnswer }: {

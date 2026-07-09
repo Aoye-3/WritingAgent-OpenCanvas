@@ -160,7 +160,7 @@ test("passes selected knowledge bases to the local knowledge tool", async () => 
   assert.match(result.content, /No local context/);
 });
 
-test("canvas_write normalizes replace unless the user explicitly asks to replace", async () => {
+test("canvas_write keeps explicit replace pending even when chat wording is ambiguous", async () => {
   const result = await executeToolCall(
     {
       id: "call_replace",
@@ -178,17 +178,21 @@ test("canvas_write normalizes replace unless the user explicitly asks to replace
     {
       selectedCanvasNodeId: "node_1",
       chatInstruction: "写入画板",
-      commitCanvasWrite(input) {
-        assert.equal(input.operation, "append");
+      createCanvasWriteRequest(input) {
+        assert.equal(input.operation, "replace");
         assert.equal(input.targetNodeId, "node_1");
-        return { id: "node_1", projectId: "project_1", kind: "document", title: "Draft" };
+        return { id: "write_replace", operation: "replace", targetNodeId: "node_1", nodeKind: "document", title: "Draft", status: "pending" };
+      },
+      commitCanvasWrite() {
+        throw new Error("explicit replace must not commit directly");
       }
     }
   );
 
   assert.equal(result.ok, true);
-  assert.equal(result.payload.operation, "append");
-  assert.equal(result.payload.status, "committed");
+  assert.equal(result.payload.eventType, "canvas_write_pending_approval");
+  assert.equal(result.payload.operation, "replace");
+  assert.equal(result.payload.status, "pending");
 });
 
 test("canvas_write keeps delete operations pending for approval", async () => {
@@ -363,7 +367,6 @@ test("canvas_write guards progressive required replace without a target node", a
       function: {
         name: "canvas_write",
         arguments: JSON.stringify({
-          operation: "create",
           nodeKind: "document",
           title: "Overview",
           content: "Replacement content"
@@ -396,7 +399,7 @@ test("canvas_write still allows required replace with an explicit target node", 
     {
       id: "call_targeted_replace",
       type: "function",
-      function: { name: "canvas_write", arguments: JSON.stringify({ operation: "create", content: "Replacement content" }) }
+      function: { name: "canvas_write", arguments: JSON.stringify({ content: "Replacement content" }) }
     },
     {
       canvasAction: { operation: "replace", targetNodeId: "node_1" },
@@ -511,7 +514,7 @@ test("canvas_write allows progressive append when a target node is available", a
   assert.equal(result.payload.operation, "append");
 });
 
-test("canvas_write uses the server-recognized operation instead of the model-selected operation", async () => {
+test("canvas_write uses explicit model-selected operation before stale server context", async () => {
   const result = await executeToolCall(
     {
       id: "call_authoritative_action",
@@ -520,19 +523,20 @@ test("canvas_write uses the server-recognized operation instead of the model-sel
     },
     {
       canvasAction: { operation: "replace", targetNodeId: "node_1" },
-      createCanvasWriteRequest(input) {
-        assert.equal(input.operation, "replace");
+      commitCanvasWrite(input) {
+        assert.equal(input.operation, "create");
         assert.equal(input.targetNodeId, "node_1");
-        return { id: "write_replace", operation: "replace", targetNodeId: "node_1", nodeKind: "document", title: "", status: "pending" };
+        return { id: "node_created", projectId: "project_1", kind: "document", title: input.title ?? "Untitled" };
       },
-      commitCanvasWrite() {
-        throw new Error("high-risk replacement must not commit directly");
+      createCanvasWriteRequest(input) {
+        throw new Error(`explicit create must not create a ${input.operation} proposal`);
       }
     }
   );
 
-  assert.equal(result.payload.eventType, "canvas_write_pending_approval");
-  assert.equal(result.payload.status, "pending");
+  assert.equal(result.payload.eventType, "canvas_mutation_committed");
+  assert.equal(result.payload.operation, "create");
+  assert.equal(result.payload.status, "committed");
 });
 
 test("plan_clarification_submit updates only the server-created intake Plan", async () => {

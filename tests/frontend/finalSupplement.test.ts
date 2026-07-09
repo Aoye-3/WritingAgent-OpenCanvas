@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   addSubmittedFinalSupplementId,
+  appendFinalSupplementAddition,
   finalSupplementInstruction,
   pendingFinalSupplementForDisplay,
   removeSubmittedFinalSupplementId
@@ -13,6 +15,30 @@ test("final supplement instruction appends trimmed supplements", () => {
     finalSupplementInstruction("Write the report", [" Focus on enterprise workflows ", "Include risks"], "en"),
     "Write the report\n\nFinal supplements:\n1. Focus on enterprise workflows\n2. Include risks"
   );
+});
+
+test("final supplement additions append locally in order", () => {
+  const first = appendFinalSupplementAddition({}, "final_supplement_1", " Focus on enterprise workflows ");
+  const second = appendFinalSupplementAddition(first, "final_supplement_1", "Include risks");
+
+  assert.deepEqual(second.final_supplement_1, ["Focus on enterprise workflows", "Include risks"]);
+});
+
+test("empty final supplement addition is ignored", () => {
+  const current = { final_supplement_1: ["Keep this"] };
+
+  assert.equal(appendFinalSupplementAddition(current, "final_supplement_1", "   "), current);
+});
+
+test("adding final supplement does not send a supplement run", () => {
+  const source = readFileSync("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
+  const addStart = source.indexOf("const addFinalSupplement = async");
+  const executeStart = source.indexOf("const executeFinalSupplement = async");
+  const addSource = source.slice(addStart, executeStart);
+
+  assert.match(addSource, /appendFinalSupplementAddition/);
+  assert.doesNotMatch(addSource, /onSend/);
+  assert.doesNotMatch(addSource, /action:\s*"supplement"/);
 });
 
 test("submitted final supplement is hidden from the composer while execution is in flight", () => {

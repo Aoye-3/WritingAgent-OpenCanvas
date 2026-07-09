@@ -177,6 +177,52 @@ test("canvas_write bridge keeps replacements pending in the real Thread project"
   assert.equal(storage.createdRequests[0]?.projectId, "project_bridge");
 });
 
+test("canvas_write bridge lets explicit tool create override stale replacement context", async () => {
+  const storage = fakeStorage();
+  const app = createTestApp(storage, "agent-runtime");
+  const result = await request(app, {
+    threadId: "thread_bridge",
+    projectId: "project_bridge",
+    toolName: "canvas_write",
+    arguments: {
+      operation: "create",
+      nodeKind: "document",
+      title: "New report",
+      content: "Created despite stale context"
+    },
+    allowedToolRefs: ["canvas_write"],
+    toolState: { canvas_write: true },
+    canvasAction: { operation: "replace" }
+  }, bridgeHeaders("agent-runtime"), "/api/internal/agent-runtime/tool-call");
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.equal((result.body.payload as { operation: string }).operation, "create");
+  assert.equal((result.body.payload as { status: string }).status, "committed");
+  assert.deepEqual(storage.createdRequests, []);
+  assert.equal(storage.createdNodes.length, 1);
+});
+
+test("canvas_write bridge still rejects replacement context without a target when tool operation is absent", async () => {
+  const storage = fakeStorage();
+  const app = createTestApp(storage, "agent-runtime");
+  const result = await request(app, {
+    threadId: "thread_bridge",
+    projectId: "project_bridge",
+    toolName: "canvas_write",
+    arguments: { content: "Replacement without target" },
+    allowedToolRefs: ["canvas_write"],
+    toolState: { canvas_write: true },
+    canvasAction: { operation: "replace" }
+  }, bridgeHeaders("agent-runtime"), "/api/internal/agent-runtime/tool-call");
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, false);
+  assert.equal((result.body.payload as { reason: string }).reason, "missing_target_node");
+  assert.deepEqual(storage.createdNodes, []);
+  assert.deepEqual(storage.createdRequests, []);
+});
+
 test("canvas_write bridge commits append without a target as a new node", async () => {
   const storage = fakeStorage();
   const app = createTestApp(storage, "agent-runtime");

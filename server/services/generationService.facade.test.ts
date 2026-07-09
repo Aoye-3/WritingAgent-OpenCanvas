@@ -1379,6 +1379,10 @@ test("answered intake clarification keeps research skills in clarification guard
   assert.equal(policy.intakeState, "intake_collecting");
   assert.equal(policy.intakeRound, 2);
   assert.match(String(policy.answeredSummary), /Multi-agent systems/);
+  assert.match(String(policy.instruction), /Question quality strategy/);
+  assert.match(String(policy.instruction), /Socratic clarification/);
+  assert.match(String(policy.instruction), /highest-impact missing slot/);
+  assert.match(String(policy.instruction), /low-value generic confirmation/);
 });
 
 test("answered intake slot suppresses repeated citation-format clarification from backend", async () => {
@@ -1528,60 +1532,6 @@ test("final supplement execute answer resumes execution and records the answer",
   assert.equal(Boolean(observedContextValues.finalSupplement), false);
   const record = records[0] as { events?: ToolEventRecord[] };
   assert.equal(record.events?.some((event) => event.eventType === "agent_final_supplement_answered"), true);
-});
-
-test("final supplement text returns to intake and asks final supplement again after intake completes", async () => {
-  const { storage, records } = fakeStorage();
-  let calls = 0;
-  let observedAllowedToolRefs: string[] = [];
-  let observedContextValues: Record<string, unknown> = {};
-  const intakeComplete: ToolEventRecord = {
-    eventType: "agent_backend_agent_intake_complete",
-    payload: { type: "agent_intake_complete", summary: "Ready after supplement" }
-  };
-  const service = createGenerationService(storage, fakeAgentRuntime(), {
-    modelRuntime: fakeModelRuntime,
-    agentBackend: {
-      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
-      runAgent: async (input) => {
-        calls += 1;
-        observedAllowedToolRefs = input.allowedToolRefs ?? [];
-        observedContextValues = input.contextValues ?? {};
-        return { text: "", finishReason: "agent_backend_completed", events: [intakeComplete] };
-      }
-    }
-  });
-
-  const result = await service.generateAndRecordStream({
-    mode: "chat",
-    locale: "en",
-    threadId: "thread_test",
-    agentCardId: "chat-agent",
-    chatInstruction: "Write the report\n\nFinal supplements:\n1. Focus on enterprise workflows",
-    contextValues: {
-      agentClarification: {
-        clarificationId: "agent_clarification_scope",
-        question: "Which scope?",
-        selectedOptionId: "recent",
-        answer: "recent systems"
-      },
-      agentIntake: { phase: "execution", completed: true },
-      finalSupplement: {
-        finalSupplementId: "final_supplement_1",
-        action: "supplement",
-        supplement: "Focus on enterprise workflows"
-      }
-    }
-  });
-
-  assert.equal(calls, 1);
-  assert.deepEqual(observedAllowedToolRefs, ["ask_clarification", "agent_intake_complete"]);
-  assert.equal((observedContextValues.finalSupplementFeedback as Record<string, unknown>).supplement, "Focus on enterprise workflows");
-  assert.equal(result.finishReason, "final_supplement_required");
-  const record = records[0] as { events?: ToolEventRecord[] };
-  assert.equal(record.events?.some((event) => event.eventType === "agent_final_supplement_answered"), true);
-  assert.equal(record.events?.some((event) => event.eventType === "agent_backend_agent_intake_complete"), true);
-  assert.equal(record.events?.some((event) => event.eventType === "agent_final_supplement_requested"), true);
 });
 
 test("agent intake suppresses equivalent answered clarification without runtime slot id", async () => {

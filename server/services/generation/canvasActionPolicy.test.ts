@@ -34,6 +34,37 @@ test("classifies append as low risk and destructive operations as approval-gated
   assert.equal(deletion?.requiresTool, true);
 });
 
+test("does not treat literature coverage wording as Canvas replacement", () => {
+  for (const instruction of [
+    "\u6587\u732e\u5168\u8986\u76d6\uff0c\u517c\u987e\u7ecf\u5178\u4e0e\u524d\u6cbf",
+    "\u8986\u76d6 2026 \u5e74\u8bba\u6587"
+  ]) {
+    assert.notEqual(resolveCanvasAction({
+      threadId: "t",
+      instruction
+    })?.operation, "replace", instruction);
+  }
+});
+
+test("requires explicit Canvas or node targets for replacement intent", () => {
+  assert.equal(resolveCanvasAction({
+    threadId: "t",
+    instruction: "\u8986\u76d6\u5f53\u524d\u8282\u70b9\u5185\u5bb9",
+    selectedCanvasNodeId: "node_1"
+  })?.operation, "replace");
+  assert.equal(resolveCanvasAction({
+    threadId: "t",
+    instruction: "\u66ff\u6362\u753b\u5e03\u5185\u5bb9"
+  })?.operation, "replace");
+  const selectedCard = resolveCanvasAction({
+    threadId: "t",
+    instruction: "\u91cd\u5199\u9009\u4e2d\u7684\u5361\u7247",
+    selectedCanvasNodeId: "node_1"
+  });
+  assert.equal(selectedCard?.operation, "replace");
+  assert.equal(selectedCard?.targetNodeId, "node_1");
+});
+
 test("recognizes English and mixed Canvas delivery wording as create actions", () => {
   for (const instruction of [
     "turn this into nodes",
