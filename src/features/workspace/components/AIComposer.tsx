@@ -6,7 +6,7 @@ import type { GenerateRequest } from "../../generation/types";
 import { useI18n } from "../../i18n/I18nProvider";
 import type { ConfiguredModelApiSummary } from "../../settings/types";
 import { visibleComposerTools } from "../planUiPolicy";
-import { SkillFolderPicker } from "./SkillFolderPicker";
+import { SkillPickerDialog } from "./SkillPickerDialog";
 import { supportsModelThinking } from "../../../../shared/modelCapabilities";
 
 type ToolKey = NonNullable<GenerateRequest["toolState"]> extends Partial<Record<infer Key, boolean>> ? Key : never;
@@ -244,6 +244,7 @@ export function AIComposer({
         <div className="composer-skill-picker">
           <button
             aria-expanded={skillPickerOpen}
+            aria-haspopup="dialog"
             aria-label={skillText(locale, "skills")}
             className={enabledSkillRefs.length || disabledSkillRefs.length ? "tool-icon-button is-active" : "tool-icon-button"}
             onClick={() => setSkillPickerOpen((open) => !open)}
@@ -252,21 +253,19 @@ export function AIComposer({
           >
             <AddIcon aria-hidden="true" size={15} />
           </button>
-          {skillPickerOpen ? (
-            <div className="composer-skill-menu" role="menu">
-              <strong>{skillText(locale, "skills")}</strong>
-              <SkillFolderPicker
-                activeSkillRefs={activeAgent.skillRefs}
-                disabledSkillRefs={disabledSkillRefs}
-                enabledSkillRefs={enabledSkillRefs}
-                folders={skillFolders}
-                locale={locale}
-                skills={skillCatalog}
-                status={skillCatalogStatus}
-                onToggleSkill={onToggleSkill}
-              />
-            </div>
-          ) : null}
+          <SkillPickerDialog
+            activeSkillRefs={activeAgent.skillRefs}
+            disabledSkillRefs={disabledSkillRefs}
+            enabledSkillRefs={enabledSkillRefs}
+            folders={skillFolders}
+            locale={locale}
+            open={skillPickerOpen}
+            skills={skillCatalog}
+            status={skillCatalogStatus}
+            title={skillText(locale, "skills")}
+            onClose={() => setSkillPickerOpen(false)}
+            onToggleSkill={onToggleSkill}
+          />
         </div>
         <select
           aria-label={t("workspace.conversationModel")}

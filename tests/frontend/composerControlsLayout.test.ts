@@ -28,8 +28,11 @@ test("composer keeps skill and plan controls as accessible icon buttons", () => 
   const source = readFileSync("src/features/workspace/components/AIComposer.tsx", "utf8");
 
   assert.match(source, /aria-label=\{skillText\(locale, "skills"\)\}/);
+  assert.match(source, /aria-haspopup="dialog"/);
+  assert.match(source, /<SkillPickerDialog/);
   assert.match(source, /aria-label=\{t\("workspace\.createTaskPlan"\)\}/);
   assert.match(source, /<ModelConfigIcon aria-hidden="true" size=\{15\} \/>/);
+  assert.doesNotMatch(source, /composer-skill-menu/);
   assert.doesNotMatch(source, />Plan<\/button>/);
   assert.doesNotMatch(source, /<span>Skill<\/span>/);
 });

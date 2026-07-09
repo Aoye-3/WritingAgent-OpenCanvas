@@ -42,13 +42,14 @@ test("workspace uses independent dual-layer Briefs and moves model selection int
   const appSource = await readFile("src/app/App.tsx", "utf8");
   const inputDrawerSource = await readFile("src/features/workspace/components/AgentInputDrawer.tsx", "utf8");
   const collaborationSource = await readFile("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
+  const composerSource = await readFile("src/features/workspace/components/AIComposer.tsx", "utf8");
   const generationSource = await readFile("src/app/hooks/useGenerationRun.ts", "utf8");
 
   assert.match(inputDrawerSource, /Project Brief/);
   assert.match(inputDrawerSource, /Current Task Brief/);
   assert.doesNotMatch(inputDrawerSource, /Conversation model/);
   assert.doesNotMatch(inputDrawerSource, /activeAgent\.fields/);
-  assert.match(collaborationSource, /composer-model-select/);
+  assert.match(composerSource, /composer-model-select/);
   assert.match(collaborationSource, /onSelectModel/);
   assert.doesNotMatch(appSource, /saveThreadInputs/);
   assert.doesNotMatch(appSource, /projectInputs/);

@@ -104,6 +104,8 @@ test("AIComposer renders the thinking button for detected reasoning models", () 
   assert.match(markup, /aria-label="Thinking mode"/);
   assert.match(markup, /class="thinking-mode-control"/);
   assert.match(markup, /class="thinking-mode-button"/);
+  assert.match(markup, /aria-haspopup="dialog"/);
+  assert.doesNotMatch(markup, /composer-skill-menu/);
 });
 
 test("AIComposer does not render thinking controls for non-thinking chat models", () => {

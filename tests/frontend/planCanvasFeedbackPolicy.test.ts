@@ -33,8 +33,8 @@ test("pending Plan clarification is rendered in a floating composer-adjacent pan
   assert.match(source, /planPanelCollapsed/);
   assert.match(source, /setPlanPanelCollapsed/);
   assert.match(source, /variant="composer"/);
-  assert.match(source, /hidden=\{Boolean\(pendingClarificationPlan \|\| pendingAgentClarification\)\}/);
-  assert.match(source, /disabled=\{Boolean\(pendingClarificationPlan \|\| pendingAgentClarification\)\}/);
+  assert.match(source, /pendingClarificationPlan \|\| pendingAgentClarification \|\| pendingFinalSupplement \? null : \(/);
+  assert.match(source, /<AIComposer/);
 });
 
 test("Agent clarification timeline events render the composer choice card", async () => {
@@ -101,10 +101,11 @@ test("chat generation can be stopped while the agent is thinking", async () => {
   const clientSource = await readFile("src/features/generation/generationClient.ts", "utf8");
   const hookSource = await readFile("src/app/hooks/useGenerationRun.ts", "utf8");
   const drawerSource = await readFile("src/features/workspace/components/AICollaborationDrawer.tsx", "utf8");
+  const composerSource = await readFile("src/features/workspace/components/AIComposer.tsx", "utf8");
   assert.match(clientSource, /signal: options\.signal/);
   assert.match(hookSource, /stopChatGeneration/);
   assert.match(hookSource, /chatAbortControllerRef\.current\?\.abort\(\)/);
   assert.match(drawerSource, /onStopSending/);
-  assert.match(drawerSource, /StopIcon/);
-  assert.match(drawerSource, /type=\{showStopControl \? "button" : "submit"\}/);
+  assert.match(composerSource, /StopIcon/);
+  assert.match(composerSource, /type=\{showStopControl \? "button" : "submit"\}/);
 });

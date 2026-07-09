@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
   ArrowUpRight,
   BookOpen,
@@ -20,7 +20,7 @@ import { iconProps } from "../../../shared/icons";
 import type { SkillCatalogItem, SkillFolderItem } from "../../agents/types";
 import { useI18n } from "../../i18n/I18nProvider";
 import type { TranslationKey } from "../../i18n/translations";
-import { SkillFolderPicker } from "./SkillFolderPicker";
+import { SkillPickerDialog } from "./SkillPickerDialog";
 import type { CanvasTool } from "./canvas/toolState";
 
 type BoardTool = {
@@ -87,28 +87,10 @@ export function WorkspaceUtilityBar({
 }) {
   const { t } = useI18n();
   const reduceMotion = useReducedMotion();
-  const skillPickerRef = useRef<HTMLDivElement | null>(null);
   const [skillMenuOpen, setSkillMenuOpen] = useState(false);
   const hasPrompt = promptPreview.trim().length > 0;
   const hasSkillOverrides = enabledSkillRefs.length > 0 || disabledSkillRefs.length > 0;
   const dockTransition = reduceMotion ? { duration: 0 } : { type: "spring" as const, stiffness: 360, damping: 32 };
-
-  useEffect(() => {
-    if (!skillMenuOpen) return;
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSkillMenuOpen(false);
-    };
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (event.target instanceof Node && skillPickerRef.current?.contains(event.target)) return;
-      setSkillMenuOpen(false);
-    };
-    window.addEventListener("keydown", close);
-    window.addEventListener("pointerdown", closeOnOutsidePointer);
-    return () => {
-      window.removeEventListener("keydown", close);
-      window.removeEventListener("pointerdown", closeOnOutsidePointer);
-    };
-  }, [skillMenuOpen]);
 
   return (
     <motion.aside
@@ -130,9 +112,10 @@ export function WorkspaceUtilityBar({
         {otherTools.map((tool) => <BoardToolButton active={tool.id === activeTool} key={tool.id} tool={tool} onClick={onToolChange} />)}
       </motion.div>
       <div className="board-tool-divider" aria-hidden="true" />
-      <div className="board-tool-skill-picker" ref={skillPickerRef}>
+      <div className="board-tool-skill-picker">
         <motion.button
           aria-expanded={skillMenuOpen}
+          aria-haspopup="dialog"
           className={`board-tool-button board-tool-add${hasSkillOverrides || skillMenuOpen ? " is-active" : ""}`}
           type="button"
           title={skillLabel(locale, "skills")}
@@ -145,38 +128,25 @@ export function WorkspaceUtilityBar({
         >
           <Plus {...iconProps} size={18} aria-hidden="true" />
         </motion.button>
-        <AnimatePresence>
-          {skillMenuOpen ? (
-            <motion.div
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              className="board-skill-menu"
-              data-testid="toolbar-skill-picker"
-              exit={{ opacity: 0, y: 8, scale: 0.98 }}
-              initial={reduceMotion ? false : { opacity: 0, y: 8, scale: 0.98 }}
-              role="dialog"
-              transition={dockTransition}
-            >
-              <header>
-                <strong>{skillLabel(locale, "skills")}</strong>
-                <small>{skillLabel(locale, "hint")}</small>
-              </header>
-              <SkillFolderPicker
-                activeSkillRefs={activeSkillRefs}
-                disabledSkillRefs={disabledSkillRefs}
-                enabledSkillRefs={enabledSkillRefs}
-                folders={skillFolders}
-                locale={locale}
-                onCreateFolder={onCreateSkillFolder}
-                onDeleteFolder={onDeleteSkillFolder}
-                onMoveSkill={onMoveSkillToFolder}
-                onRenameFolder={onRenameSkillFolder}
-                skills={skillCatalog}
-                status={skillCatalogStatus}
-                onToggleSkill={onToggleSkill}
-              />
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
+        <SkillPickerDialog
+          activeSkillRefs={activeSkillRefs}
+          description={skillLabel(locale, "hint")}
+          disabledSkillRefs={disabledSkillRefs}
+          enabledSkillRefs={enabledSkillRefs}
+          folders={skillFolders}
+          locale={locale}
+          open={skillMenuOpen}
+          testId="toolbar-skill-picker"
+          onClose={() => setSkillMenuOpen(false)}
+          onCreateFolder={onCreateSkillFolder}
+          onDeleteFolder={onDeleteSkillFolder}
+          onMoveSkill={onMoveSkillToFolder}
+          onRenameFolder={onRenameSkillFolder}
+          skills={skillCatalog}
+          status={skillCatalogStatus}
+          title={skillLabel(locale, "skills")}
+          onToggleSkill={onToggleSkill}
+        />
       </div>
       <AnimatePresence>
         {hasPrompt ? (

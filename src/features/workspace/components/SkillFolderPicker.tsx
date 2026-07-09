@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SkillCatalogItem, SkillFolderItem } from "../../agents/types";
 
-type SkillFolderPickerProps = {
+export type SkillFolderPickerProps = {
   activeSkillRefs: string[];
   disabledSkillRefs: string[];
   enabledSkillRefs: string[];

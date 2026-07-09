@@ -125,6 +125,10 @@ Plan-forced Skills are server policy and cannot be disabled by the UI. Per-messa
 - Compact selector: used in the right collaboration composer. It groups Skills by folder and exposes only per-message enable/disable.
 - Management panel: used from the bottom Canvas toolbar `Skills` button. It has three independently scrollable columns: folders, Skills, and Skill details.
 
+Both entry points render through `src/features/workspace/components/SkillPickerDialog.tsx`. The dialog is a presentation shell only: it mounts with a React portal to `document.body`, uses the modal z-layer, handles backdrop/Escape/close dismissal, and constrains scrolling to the viewport. `SkillFolderPicker` remains responsible for selection, folder expansion, folder management actions, and read-only state.
+
+Do not reintroduce local absolute Skill menus such as `.composer-skill-menu` or `.board-skill-menu`. The Home composer and Canvas toolbar live inside different overflow and stacking contexts, so local popovers can be clipped even when their z-index is raised. Any new Skill picker launcher should open `SkillPickerDialog` and pass through the existing catalog/toggle props.
+
 The management panel can:
 
 - Create a project folder.
@@ -181,5 +185,7 @@ npx.cmd playwright test tests/e2e/canvas.spec.ts -g "skill folder"
 Relevant tests:
 
 - `server/skillLoader.test.ts`: recursive loading, legacy default categorization, folder CRUD, safe path validation, project Skill moves, runtime read-only behavior.
-- `tests/frontend/composerSkillPicker.test.ts`: frontend wiring, request payloads, and management component structure.
+- `tests/frontend/composerSkillPicker.test.ts`: frontend wiring, request payloads, shared dialog usage, and management component structure.
 - `tests/e2e/canvas.spec.ts`: toolbar Skill panel, folder creation, moving `summary`, scrolling runtime Skills, and streaming request payload overrides.
+
+For the dialog layer specifically, browser-check both the Home composer and Canvas toolbar paths. Confirm the dialog is not clipped by the sidebar, drawer, board shell, or Canvas container; Escape and close button dismissal work; the dialog body scrolls; and a Skill checkbox can still toggle.

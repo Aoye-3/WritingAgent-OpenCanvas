@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, FormEvent } from "react";
+import type { CSSProperties } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { AddIcon, AgentIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon, KnowledgeIcon, LightbulbIcon, ModelConfigIcon, SearchIcon, SendIcon, StopIcon } from "../../../shared/icons";
+import { AddIcon, ChevronLeftIcon, ChevronRightIcon, HistoryIcon } from "../../../shared/icons";
 import { MarkdownText } from "../../../shared/MarkdownText";
 import type { AgentCard, AgentClarification, CanvasNode, CanvasWriteRequest, CanvasWriteSuggestion, FinalSupplement, PlanRun, RunTimelineEvent, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
 import type { CanvasNodePatch } from "../../canvas/canvasClient";
@@ -15,16 +15,13 @@ import type { CanvasMindChainContext } from "../../../../shared/canvasMindChain"
 import { AgentPlanBoard } from "./AgentPlanBoard";
 import { PlanClarificationCard } from "./PlanClarificationCard";
 import { acceptCanvasWriteSuggestion, answerPlan, dismissCanvasWriteSuggestion, pausePlan } from "../../agents/agentClient";
-import { visibleComposerTools } from "../planUiPolicy";
 import { buildPlanTimeline } from "../planTimeline";
 import { sanitizeCanvasForAgentIntake } from "../../../../shared/agentIntakeCanvas";
 import type { ConfiguredModelApiSummary } from "../../settings/types";
 import { AIComposer, isThinkingSupportedModel, type AIComposerSubmitPayload, type ConversationModelControls, type RuntimeBudgetChoice } from "./AIComposer";
-import { SkillFolderPicker } from "./SkillFolderPicker";
 
 export type { ConversationModelControls } from "./AIComposer";
 
-type ToolKey = NonNullable<GenerateRequest["toolState"]> extends Partial<Record<infer Key, boolean>> ? Key : never;
 type ThinkingChoice = "disabled" | "high" | "max";
 
 type SelectionAction = {
@@ -99,19 +96,6 @@ type AICollaborationDrawerProps = {
   toolState: GenerateRequest["toolState"];
 };
 
-const toolMeta: Record<string, { en: string; zh: string; hint: string }> = {
-  web_search: { en: "Web search", zh: "联网搜索", hint: "Web search intent only" },
-  knowledge_base: { en: "Knowledge base", zh: "知识库引用", hint: "Use selected knowledge hints" },
-  clear_context: { en: "Clear context", zh: "清除上下文", hint: "Ignore previous conversational context" }
-};
-
-const COMPOSER_MIN_HEIGHT = 72;
-const COMPOSER_MAX_HEIGHT = 240;
-
-export function shouldShowStopControl(isSending: boolean, input: string) {
-  return isSending && input.trim().length === 0;
-}
-
 export function AICollaborationDrawer({
   allowedTools,
   activeAgent,
@@ -171,15 +155,13 @@ export function AICollaborationDrawer({
   const supportsThinking = isThinkingSupportedModel(modelSettings);
   const [thinkingChoice, setThinkingChoice] = useState<ThinkingChoice>(modelSettingsToThinkingChoice(modelSettings));
   const [runtimeBudgetChoice, setRuntimeBudgetChoice] = useState<RuntimeBudgetChoice>(runtimeBudgetProfile ?? "low");
-  const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
   const [annotations, setAnnotations] = useState<MessageAnnotation[]>([]);
   const [writeDraft, setWriteDraft] = useState<WriteDraft | null>(null);
   const [selectionAction, setSelectionAction] = useState<SelectionAction | null>(null);
   const [writeBusy, setWriteBusy] = useState(false);
   const [writeStatus, setWriteStatus] = useState("");
-  const [composerHeight, setComposerHeight] = useState(72);
+  const composerHeight = 72;
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [contextResetNotice, setContextResetNotice] = useState(false);
   const [clarificationBusy, setClarificationBusy] = useState(false);
   const [planPanelCollapsed, setPlanPanelCollapsed] = useState(false);
@@ -229,15 +211,10 @@ export function AICollaborationDrawer({
   );
   const floatingPlan = pendingClarificationPlan ?? floatingBoardPlan;
   const floatingPlanPanelStyle = { "--plan-panel-bottom": `${pendingClarificationPlan || pendingAgentClarification || pendingFinalSupplement ? 142 : composerHeight + 142}px` } as CSSProperties;
-  const showStopControl = shouldShowStopControl(isSending, input);
 
   useEffect(() => {
     setThinkingChoice(modelSettingsToThinkingChoice(modelSettings));
   }, [modelSettings?.providerId, modelSettings?.modelId, modelSettings?.modelName, modelSettings?.supportsThinking, modelSettings?.thinkingMode, modelSettings?.reasoningEffort]);
-
-  useEffect(() => {
-    if (!supportsThinking) setThinkingMenuOpen(false);
-  }, [supportsThinking]);
 
   useEffect(() => {
     setRuntimeBudgetChoice(runtimeBudgetProfile ?? "low");
@@ -264,10 +241,6 @@ export function AICollaborationDrawer({
   useEffect(() => {
     setPlanPanelCollapsed(false);
   }, [floatingPlan?.id, floatingPlan?.status, pendingAgentClarification?.clarificationId, pendingFinalSupplement?.id]);
-
-  useEffect(() => {
-    if (skillPickerOpen) onRequestSkillCatalog();
-  }, [onRequestSkillCatalog, skillPickerOpen]);
 
   const resetWriteDraft = () => {
     setAnnotations([]);
@@ -332,7 +305,6 @@ export function AICollaborationDrawer({
     if (isSending) {
       onQueueInput(text, messageModelOverrides, messageRequestContext);
       onSkillOverridesConsumed();
-      setSkillPickerOpen(false);
       if (mindChainContext) onMindChainContextConsumed();
       return;
     }
@@ -363,27 +335,12 @@ export function AICollaborationDrawer({
       if (sendResult) {
         if (!isAgentClarificationRequired(sendResult)) {
           onSkillOverridesConsumed();
-          setSkillPickerOpen(false);
         }
       }
       if (mindChainContext) onMindChainContextConsumed();
     } catch {
       setInput(text);
     }
-  };
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    await submitComposerPayload({
-      text: input.trim(),
-      agentId: activeAgent.id,
-      enabledSkillRefs,
-      disabledSkillRefs,
-      selectedModelConfigId,
-      runtimeBudgetProfile: runtimeBudgetChoice,
-      thinkingChoice,
-      toolState
-    });
   };
 
   const captureSelection = (event: React.MouseEvent<HTMLDivElement>, message: CollaborationMessage) => {
@@ -549,34 +506,6 @@ export function AICollaborationDrawer({
     } finally {
       setClarificationBusy(false);
     }
-  };
-
-  const startComposerResize = (event: ReactPointerEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const startY = event.clientY;
-    const startHeight = composerHeight;
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-
-    document.body.style.cursor = "ns-resize";
-    document.body.style.userSelect = "none";
-
-    const onPointerMove = (moveEvent: PointerEvent) => {
-      const nextHeight = Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, startHeight + startY - moveEvent.clientY));
-      setComposerHeight(nextHeight);
-    };
-
-    const stopResize = () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", stopResize);
-      window.removeEventListener("pointercancel", stopResize);
-    };
-
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", stopResize);
-    window.addEventListener("pointercancel", stopResize);
   };
 
   if (collapsed) {
@@ -904,162 +833,6 @@ export function AICollaborationDrawer({
           onValueChange={setInput}
         />
       )}
-      {false ? (
-      <form className="drawer-chat-composer" onSubmit={submit}>
-        <div className="composer-control-row" data-testid="composer-control-row">
-          <div className="composer-agent-section">
-            <AgentIcon aria-hidden="true" size={16} />
-            <select className="composer-agent-select" aria-label={t("workspace.agentForMessage")}
-              value={activeAgent.id} onChange={(event) => onSelectAgent(event.target.value)}>
-              {agentCards.map((agent) => <option key={agent.id} value={agent.id}>{agent.title[locale]}</option>)}
-            </select>
-          </div>
-          {supportsThinking ? (
-            <div className="composer-thinking-section">
-              <ThinkingModeButton
-                choice={thinkingChoice}
-                open={thinkingMenuOpen}
-                onChange={setThinkingChoice}
-                onOpenChange={setThinkingMenuOpen}
-              />
-            </div>
-          ) : null}
-          <RuntimeBudgetControl value={runtimeBudgetChoice} onChange={setRuntimeBudgetChoice} />
-        </div>
-        <AnnotationChipRow annotations={annotations} compact onRemoveAnnotation={removeAnnotation} />
-        {enabledSkillRefs.length || disabledSkillRefs.length ? (
-          <div className="composer-skill-chips" aria-label={skillText(locale, "selectedSkills")}>
-            {enabledSkillRefs.map((skillRef) => (
-              <span className="composer-skill-chip" key={`enabled:${skillRef}`}>
-                {skillRef}
-                <button
-                  aria-label={skillText(locale, "removeSkill", skillRef)}
-                  onClick={() => onToggleSkill(findSkill(skillCatalog, skillRef), false)}
-                  type="button"
-                >
-                  x
-                </button>
-              </span>
-            ))}
-            {disabledSkillRefs.map((skillRef) => (
-              <span className="composer-skill-chip is-disabled" key={`disabled:${skillRef}`}>
-                {skillText(locale, "disabledSkill", skillRef)}
-                <button
-                  aria-label={skillText(locale, "restoreSkill", skillRef)}
-                  onClick={() => onToggleSkill(findSkill(skillCatalog, skillRef), true)}
-                  type="button"
-                >
-                  x
-                </button>
-              </span>
-            ))}
-          </div>
-        ) : null}
-        {mindChainContext ? (
-          <div className="mind-chain-context-chip" data-testid="mind-chain-context-chip">
-            <span>{t("workspace.mindChainContext", { count: mindChainContext?.nodeCount ?? 0 })}</span>
-            <button
-              aria-label={t("workspace.removeMindChain")}
-              onClick={onRemoveMindChainContext}
-              type="button"
-            >
-              ×
-            </button>
-          </div>
-        ) : null}
-        {missingAgentClarificationPayload && !pendingClarificationPlan ? (
-          <div className="budget-continuation-chip">
-            <span>{locale === "zh" ? "\u7b49\u5f85\u8865\u5145\u4fe1\u606f\uff0c\u4f46\u7f3a\u5c11\u53ef\u64cd\u4f5c\u9009\u9879\u3002" : "Clarification is waiting, but no choices were saved."}</span>
-            <button type="button" onClick={fillClarificationRecovery}>
-              {locale === "zh" ? "\u586b\u5165\u6062\u590d" : "Draft recovery"}
-            </button>
-          </div>
-        ) : null}
-        {budgetLimitFailure && !pendingClarificationPlan && !pendingAgentClarification && !missingAgentClarificationPayload ? (
-          <div className="budget-continuation-chip">
-            <span>{locale === "zh" ? "上次运行达到步骤预算，可继续完成。" : "The last run reached its step budget."}</span>
-            <button type="button" onClick={fillBudgetContinuation}>
-              {locale === "zh" ? "填入继续" : "Draft continue"}
-            </button>
-          </div>
-        ) : null}
-        <div
-          aria-label={t("workspace.resizeMessageInput")}
-          aria-orientation="horizontal"
-          className="composer-resize-handle"
-          data-testid="composer-resize-handle"
-          hidden={Boolean(pendingClarificationPlan || pendingAgentClarification)}
-          onPointerDown={startComposerResize}
-          role="separator"
-          title={t("workspace.resizeMessageInputTitle")}
-        >
-          <span aria-hidden="true" />
-        </div>
-        <textarea
-          aria-label={t("workspace.aiMessage")}
-          data-testid="ai-collaboration-input"
-          disabled={Boolean(pendingClarificationPlan || pendingAgentClarification)}
-          hidden={Boolean(pendingClarificationPlan || pendingAgentClarification)}
-          placeholder={t("workspace.askAiPlaceholder")}
-          rows={3}
-          style={{ height: composerHeight }}
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-        />
-        <div className="composer-tool-row" hidden={Boolean(pendingClarificationPlan || pendingAgentClarification)}>
-          <ToolUseIconBar allowedTools={allowedTools} toolState={toolState} onToolStateChange={onToolStateChange} />
-          <div className="composer-skill-picker">
-            <button
-              aria-expanded={skillPickerOpen}
-              aria-label={skillText(locale, "skills")}
-              className={enabledSkillRefs.length || disabledSkillRefs.length ? "tool-icon-button is-active" : "tool-icon-button"}
-              onClick={() => setSkillPickerOpen((value) => !value)}
-              title={skillText(locale, "skills")}
-              type="button"
-            >
-              <AddIcon aria-hidden="true" size={15} />
-            </button>
-            {skillPickerOpen ? (
-              <div className="composer-skill-menu" role="menu">
-                <strong>{skillText(locale, "skills")}</strong>
-                <SkillFolderPicker
-                  activeSkillRefs={activeAgent.skillRefs}
-                  disabledSkillRefs={disabledSkillRefs}
-                  enabledSkillRefs={enabledSkillRefs}
-                  folders={skillFolders}
-                  locale={locale}
-                  skills={skillCatalog}
-                  status={skillCatalogStatus}
-                  onToggleSkill={onToggleSkill}
-                />
-              </div>
-            ) : null}
-          </div>
-          <select
-            aria-label={t("workspace.conversationModel")}
-            className="composer-model-select"
-            disabled={modelSelectionDisabled}
-            value={selectedModelConfigId ?? ""}
-            onChange={(event) => { void onSelectModel(event.target.value); }}
-          >
-            <option value="">{t("workspace.selectModel")}</option>
-            {modelGroups(locale).map((group) => {
-              const models = configuredModels.filter((model) => model.capabilityGroup === group.id);
-              return models.length ? <optgroup key={group.id} label={group.label}>
-                {models.map((model) => <option key={model.id} value={model.id}>{model.providerLabel} / {model.modelName}</option>)}
-              </optgroup> : null;
-            })}
-          </select>
-          <button className="tool-icon-button plan-command-button" type="button" onClick={() => setInput((value) => value.startsWith("/plan") ? value : `/plan ${value}`)} aria-label={t("workspace.createTaskPlan")} title={t("workspace.createTaskPlan")}>
-            <ModelConfigIcon aria-hidden="true" size={15} />
-          </button>
-          <button className={showStopControl ? "button button-primary chat-send chat-send-icon is-stopping" : "button button-primary chat-send chat-send-icon"} type={showStopControl ? "button" : "submit"} disabled={writeBusy} onClick={showStopControl ? onStopSending : undefined}
-            aria-label={showStopControl ? (locale === "zh" ? "停止" : "Stop") : t("workspace.send")} title={showStopControl ? (locale === "zh" ? "停止当前任务" : "Stop current run") : isSending ? (locale === "zh" ? "发送并排队" : "Send and queue") : t("workspace.send")}>
-            {showStopControl ? <StopIcon aria-hidden="true" size={18} /> : <SendIcon aria-hidden="true" size={18} />}
-          </button>
-        </div>
-      </form>
-      ) : null}
     </motion.aside>
   );
 }
@@ -1164,94 +937,6 @@ function StreamingStatus({ label }: { label: string }) {
     <div className="streaming-status" aria-live="polite">
       <span>{label}</span>
       <i aria-hidden="true" />
-    </div>
-  );
-}
-
-function ThinkingModeButton({
-  choice,
-  open,
-  onChange,
-  onOpenChange
-}: {
-  choice: ThinkingChoice;
-  open: boolean;
-  onChange: (choice: ThinkingChoice) => void;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const { t } = useI18n();
-  const options: Array<{ value: ThinkingChoice; label: string }> = [
-    { value: "disabled", label: t("workspace.disabled") },
-    { value: "high", label: t("workspace.high") },
-    { value: "max", label: t("workspace.max") }
-  ];
-  const current = options.find((option) => option.value === choice) ?? options[0];
-
-  return (
-    <div className="thinking-mode-control">
-      <button
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label={t("workspace.thinkMode")}
-        className={choice === "disabled" ? "thinking-mode-button" : "thinking-mode-button is-active"}
-        onClick={() => onOpenChange(!open)}
-        title={t("workspace.thinkMode")}
-        type="button"
-      >
-        <span aria-hidden="true"><LightbulbIcon size={13} /></span>
-        <strong>{current.label}</strong>
-      </button>
-      {open ? (
-        <div className="thinking-mode-menu" role="menu">
-          {options.map((option) => (
-            <button
-              aria-checked={choice === option.value}
-              className={choice === option.value ? "is-active" : ""}
-              key={option.value}
-              onClick={() => {
-                onChange(option.value);
-                onOpenChange(false);
-              }}
-              role="menuitemradio"
-              type="button"
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function RuntimeBudgetControl({
-  value,
-  onChange
-}: {
-  value: RuntimeBudgetChoice;
-  onChange: (value: RuntimeBudgetChoice) => void;
-}) {
-  const { locale } = useI18n();
-  const options: Array<{ value: RuntimeBudgetChoice; label: string }> = [
-    { value: "low", label: locale === "zh" ? "\u4f4e" : "Low" },
-    { value: "medium", label: locale === "zh" ? "\u4e2d" : "Med" },
-    { value: "high", label: locale === "zh" ? "\u9ad8" : "High" }
-  ];
-  const label = locale === "zh" ? "\u8fd0\u884c\u6863\u4f4d" : "Run budget";
-  return (
-    <div className="runtime-budget-control" aria-label={label}>
-      {options.map((option) => (
-        <button
-          aria-pressed={value === option.value}
-          className={value === option.value ? "is-active" : ""}
-          key={option.value}
-          onClick={() => onChange(option.value)}
-          title={label}
-          type="button"
-        >
-          {option.label}
-        </button>
-      ))}
     </div>
   );
 }
@@ -2130,93 +1815,3 @@ function thinkingOverridesFromChoice(choice: ThinkingChoice): GenerateRequest["m
   return { thinkingMode: "enabled", reasoningEffort: choice };
 }
 
-function ToolUseIconBar({ allowedTools, toolState, onToolStateChange }: Pick<AICollaborationDrawerProps, "allowedTools" | "toolState" | "onToolStateChange">) {
-  const { locale, t } = useI18n();
-  const visibleTools = visibleComposerTools(allowedTools);
-  const toggle = (tool: string) => {
-    const key = tool as ToolKey;
-    onToolStateChange({ ...toolState, [key]: !toolState?.[key] });
-  };
-
-  return (
-    <div className="composer-tool-icons" aria-label={t("workspace.toolUseCommandBar")}>
-      {visibleTools.map((tool) => {
-        const active = Boolean(toolState?.[tool as ToolKey]);
-        const meta = toolMeta[tool] ?? { en: tool, zh: tool, hint: tool };
-        const label = locale === "zh" ? meta.zh : meta.en;
-        return (
-          <button
-            aria-label={label}
-            aria-pressed={active}
-            className={active ? "tool-icon-button is-active" : "tool-icon-button"}
-            key={tool}
-            onClick={() => toggle(tool)}
-            title={`${label}: ${meta.hint}`}
-            type="button"
-          >
-            <ToolIcon tool={tool} />
-            {active ? <i aria-hidden="true" /> : null}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function ToolIcon({ tool }: { tool: string }) {
-  if (tool === "web_search") return <SearchIcon aria-hidden="true" size={16} />;
-  if (tool === "knowledge_base") return <KnowledgeIcon aria-hidden="true" size={16} />;
-  return null;
-}
-
-function modelGroups(locale: "en" | "zh") {
-  return [
-    { id: "reasoning", label: locale === "zh" ? "推理模型" : "Reasoning models" },
-    { id: "chat", label: locale === "zh" ? "对话模型" : "Chat models" },
-    { id: "other-chat", label: locale === "zh" ? "其他聊天模型" : "Other chat models" }
-  ] as const;
-}
-
-function findSkill(skills: SkillCatalogItem[], skillRef: string): SkillCatalogItem {
-  return skills.find((skill) => skill.id === skillRef || skill.name === skillRef || skill.relativePath === skillRef) ?? {
-    id: skillRef,
-    name: skillRef,
-    description: "",
-    allowedTools: [],
-    requiresEnv: [],
-    runtimeTools: [],
-    originalAllowedTools: [],
-    executionMode: "instruction",
-    riskLevel: "low",
-    folderId: "default",
-    folderName: "Default skills",
-    folderPath: "default",
-    relativePath: skillRef,
-    source: "project",
-    manageable: true,
-    status: "available"
-  };
-}
-
-function skillText(locale: "en" | "zh", key: "disabledSkill" | "loadingSkills" | "noSkills" | "removeSkill" | "restoreSkill" | "selectedSkills" | "skillLoadFailed" | "skills", value?: string) {
-  if (key === "removeSkill") return locale === "zh" ? `\u79fb\u9664\u6280\u80fd ${value ?? ""}` : `Remove skill ${value ?? ""}`;
-  if (key === "restoreSkill") return locale === "zh" ? `\u6062\u590d\u6280\u80fd ${value ?? ""}` : `Restore skill ${value ?? ""}`;
-  if (key === "disabledSkill") return locale === "zh" ? `\u5df2\u7981\u7528 ${value ?? ""}` : `Disabled ${value ?? ""}`;
-  const copy = {
-    en: {
-      skills: "Skills",
-      loadingSkills: "Loading skills...",
-      skillLoadFailed: "Unable to load skills",
-      noSkills: "No public skills available",
-      selectedSkills: "Selected skills"
-    },
-    zh: {
-      skills: "\u6280\u80fd",
-      loadingSkills: "\u6b63\u5728\u52a0\u8f7d\u6280\u80fd...",
-      skillLoadFailed: "\u65e0\u6cd5\u52a0\u8f7d\u6280\u80fd\u5217\u8868",
-      noSkills: "\u6682\u65e0\u53ef\u7528\u6280\u80fd",
-      selectedSkills: "\u5df2\u9009\u6280\u80fd"
-    }
-  } as const;
-  return copy[locale][key];
-}

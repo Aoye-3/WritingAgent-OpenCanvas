@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-09: Skill Selection Uses A Shared Dialog Layer
+
+Decision: Render Home and Canvas Skill selection through a shared `SkillPickerDialog` portal mounted to `document.body`, with fixed modal-layer positioning and `z-index: var(--z-modal)`. `AIComposer` and `WorkspaceUtilityBar` open this dialog and pass existing Skill catalog/toggle props; `SkillFolderPicker` remains the behavior owner.
+
+Reason: The old local absolute menus were clipped by composer cards, drawers, Canvas containers, and ancestor overflow/stacking contexts. Increasing local `z-index` could not reliably escape those layout boundaries.
+
+Impact: New Skill picker entry points must use `SkillPickerDialog` instead of reintroducing `.composer-skill-menu` or `.board-skill-menu`. Tests should guard the shared dialog wiring, old menu class removal, Escape/close dismissal, and scrollable dialog body. Detailed ADR: `docs/decisions/ADR-2026-07-09-skill-picker-dialog-layer.md`.
+
 ## 2026-07-09: Progressive CanvasWrite Keeps Scope And Skips Untargeted Updates
 
 Decision: Keep progressive long-task `canvas_write` inside the `short_progress_nodes` scope even when a structured `canvasAction.requiresTool` forces the tool to be available. Tool Runtime must reject a forced `replace` or `delete` before storage when no target node is resolved from `canvasAction.targetNodeId`, tool args, or the selected Canvas node. The diagnostic is `canvas_mutation_failed` with `reason:"missing_target_node"` and should be treated as recoverable noise in live/timeline UI.
