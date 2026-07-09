@@ -178,11 +178,12 @@ export function AIComposer({
   return (
     <form className={`drawer-chat-composer ai-composer ${className}`.trim()} onSubmit={submit}>
       <div className="composer-control-row" data-testid="composer-control-row">
-        <div className="composer-agent-section">
+        <div className={locale === "en" ? "composer-agent-section is-icon-only" : "composer-agent-section"}>
           <AgentIcon aria-hidden="true" size={16} />
           <select
             aria-label={t("workspace.agentForMessage")}
             className="composer-agent-select"
+            title={activeAgent.title[locale]}
             value={activeAgent.id}
             onChange={(event) => onSelectAgent(event.target.value)}
           >

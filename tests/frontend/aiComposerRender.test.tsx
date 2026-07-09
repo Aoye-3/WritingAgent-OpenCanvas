@@ -108,6 +108,14 @@ test("AIComposer renders the thinking button for detected reasoning models", () 
   assert.doesNotMatch(markup, /composer-skill-menu/);
 });
 
+test("AIComposer uses icon-only agent selector in English mode", () => {
+  const markup = renderComposer(reasoningModel);
+
+  assert.match(markup, /class="composer-agent-section is-icon-only"/);
+  assert.match(markup, /aria-label="Agent for this message"/);
+  assert.match(markup, /title="ChatAgent"/);
+});
+
 test("AIComposer does not render thinking controls for non-thinking chat models", () => {
   const markup = renderComposer(chatModel);
 
