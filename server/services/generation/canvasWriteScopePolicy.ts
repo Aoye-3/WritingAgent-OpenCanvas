@@ -36,7 +36,7 @@ export type ShortProgressCanvasWriteValidationInput = {
 };
 
 export function canvasWriteScopeForRun(input: CanvasWriteExposureInput) {
-  if (input.skillScopeGuard || input.canvasActionRequiresTool) return undefined;
+  if (input.skillScopeGuard) return undefined;
   return input.progressiveCanvasDeliveryEnabled ? SHORT_PROGRESS_CANVAS_WRITE_SCOPE : undefined;
 }
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   createLiveToolEventState,
+  isRecoverableCanvasWriteGuard,
   readLiveCanvasNodeSnapshot,
   reduceLiveToolEvent,
   shouldRefreshThreadStateForToolEvent,
@@ -52,6 +53,7 @@ test("Canvas and artifact lifecycle events request live thread-state refresh", (
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_artifact_committed", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_canvas_write_pending_approval", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_canvas_mutation_failed", payload: {} }), true);
+  assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_canvas_mutation_failed", payload: { reason: "missing_target_node" } }), false);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_research_committed", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_outline_started", payload: {} }), false);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_body_started", payload: {} }), false);
@@ -61,6 +63,19 @@ test("Canvas and artifact lifecycle events request live thread-state refresh", (
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "canvas_delivery_failed_summary_committed", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_plan_waiting_for_user", payload: {} }), true);
   assert.equal(shouldRefreshThreadStateForToolEvent({ eventType: "agent_backend_tool_completed", payload: { toolName: "web_search" } }), false);
+});
+
+test("recoverable Canvas write guard events stay out of the live activity stream", () => {
+  const event = {
+    eventType: "agent_backend_canvas_mutation_failed",
+    payload: { reason: "missing_target_node", toolName: "canvas_write" }
+  };
+  const result = reduceLiveToolEvent(createLiveToolEventState(), event, "en");
+
+  assert.equal(isRecoverableCanvasWriteGuard(event), true);
+  assert.equal(result.statusLabel, undefined);
+  assert.equal(result.chatActivityText, undefined);
+  assert.equal(threadStateRefreshModeForToolEvent(event), "none");
 });
 
 test("Canvas delivery committed events classify strong and deferred refreshes", () => {

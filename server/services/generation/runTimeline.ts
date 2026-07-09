@@ -111,6 +111,9 @@ export function toolEventToTimelineEvent(builder: RunTimelineBuilder, event: Too
     return builder.event("tool_completed", "failed", label, builder.locale === "zh" ? `${label}失败` : `${label} failed`, { ...payload, toolName });
   }
   if (/(?:^|_)tool_failed$/.test(event.eventType) || /(?:^|_)canvas_mutation_failed$/.test(event.eventType)) {
+    if (isRecoverableCanvasWriteGuard(payload)) {
+      return builder.event("tool_completed", "completed", label, "Canvas update skipped because no target node was selected.", { ...payload, toolName });
+    }
     return builder.event("tool_completed", "failed", label, failureSummary(label, payload, builder.locale), { ...payload, toolName });
   }
   if (/(?:^|_)tool_completed$/.test(event.eventType)) {
@@ -178,6 +181,10 @@ function failureSummary(label: string, payload: Record<string, unknown>, locale:
   const detail = string(payload.reason) || string(payload.error) || string(payload.message) || string(payload.summary);
   if (!detail) return base;
   return `${base}: ${detail.replace(/\s+/g, " ").slice(0, 180)}`;
+}
+
+function isRecoverableCanvasWriteGuard(payload: Record<string, unknown>) {
+  return string(payload.reason) === "missing_target_node";
 }
 
 function clarificationOptions(value: unknown) {

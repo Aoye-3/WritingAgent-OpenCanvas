@@ -45,6 +45,8 @@ export function reduceLiveToolEvent(
     };
   }
 
+  if (isRecoverableCanvasWriteGuard(event)) return { state };
+
   const activityText = canvasDeliveryProgressText(event, locale) ?? lifecycleActivityText(event.eventType, locale);
   return {
     state,
@@ -61,6 +63,7 @@ export function threadStateRefreshModeForToolEvent(event: LiveToolEvent): LiveTh
   if (event.eventType === "canvas_delivery_research_committed" || event.eventType === "canvas_delivery_body_checkpoint_committed") {
     return "deferred";
   }
+  if (isRecoverableCanvasWriteGuard(event)) return "none";
   return /(?:^|_)(?:canvas_mutation_committed|canvas_write_pending_approval|canvas_mutation_failed|artifact_committed|artifact_staged)$/.test(event.eventType)
     || /^canvas_delivery_.*_committed$/.test(event.eventType)
     || /(?:^|_)plan_waiting_for_user$/.test(event.eventType)
@@ -187,6 +190,11 @@ function lifecycleActivityText(eventType: string, locale: Locale) {
     return locale === "zh" ? "Canvas 写入失败" : "Canvas write failed";
   }
   return undefined;
+}
+
+export function isRecoverableCanvasWriteGuard(event: LiveToolEvent) {
+  return /(?:^|_)canvas_mutation_failed$/.test(event.eventType)
+    && event.payload?.reason === "missing_target_node";
 }
 
 function canvasDeliveryProgressText(event: LiveToolEvent, locale: Locale) {

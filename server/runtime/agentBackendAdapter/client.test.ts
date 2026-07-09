@@ -365,6 +365,8 @@ test("builds clarification resume request with delivery tools after user answer"
   assert.equal(request.context.facetwrite_model_call_limit, 18);
   assert.equal(request.context.facetwrite_evidence_tool_limit, 8);
   assert.equal(request.context.facetwrite_markdown_file_delivery_required, true);
+  assert.equal(request.context.facetwrite_canvas_write_scope, "short_progress_nodes");
+  assert.ok(request.context.facetwrite_canvas_write_policy);
   assert.deepEqual(request.context.facetwrite_canvas_action, { id: "canvas_action_1", operation: "create", risk: "low", requiresTool: true });
   assert.equal(request.context.facetwrite_allowed_tool_refs.includes("canvas_write"), true);
   assert.equal((request.context.facetwrite_tool_state as Record<string, unknown>).canvas_write, true);

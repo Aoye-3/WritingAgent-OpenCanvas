@@ -321,9 +321,7 @@ export function buildRunRequest(input: AgentBackendRunInput, config: AgentBacken
       instruction: input.chatInstruction,
       selectedCanvasNodeId: input.selectedCanvasNodeId
     });
-  const effectiveRuntimeContext = canvasAction?.requiresTool
-    ? { ...runtimeContext, facetwrite_canvas_write_scope: undefined, facetwrite_canvas_write_policy: undefined }
-    : runtimeContext;
+  const effectiveRuntimeContext = runtimeContext;
   const baseAllowedToolRefs = skillScopeGuard
     ? [...SKILL_SCOPE_GUARD_TOOL_REFS]
     : agentIntake

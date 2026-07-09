@@ -222,6 +222,19 @@ export async function executeToolCall(call: ChatToolCall, context: ToolExecution
       };
     }
     const canvasWriteScope = readString(context.contextValues?.facetwrite_canvas_write_scope);
+    if ((operation === "replace" || operation === "delete") && !targetNodeId) {
+      return {
+        ok: false,
+        content: "Canvas write request skipped: a target node is required before updating or deleting Canvas content.",
+        payload: {
+          tool: name,
+          eventType: "canvas_mutation_failed",
+          operation,
+          reason: "missing_target_node",
+          canvasWriteScope
+        }
+      };
+    }
     const shortProgressValidation = validateShortProgressCanvasWrite({
       scope: canvasWriteScope,
       operation,

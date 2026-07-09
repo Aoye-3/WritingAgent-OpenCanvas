@@ -129,6 +129,22 @@ test("run timeline includes Plan tool failure reason in the summary", () => {
   assert.equal(event.summary, "Plan Clarification Submit failed: invalid_clarification");
 });
 
+test("run timeline treats missing-target Canvas write guard as recoverable", () => {
+  const builder = createRunTimelineBuilder({ threadId: "thread_1", runId: "pending", locale: "en" });
+  const event = toolEventToTimelineEvent(builder, {
+    eventType: "agent_backend_canvas_mutation_failed",
+    payload: {
+      toolName: "canvas_write",
+      reason: "missing_target_node"
+    }
+  });
+
+  assert.equal(event.eventType, "tool_completed");
+  assert.equal(event.status, "completed");
+  assert.equal(event.title, "Canvas write");
+  assert.equal(event.summary, "Canvas update skipped because no target node was selected.");
+});
+
 test("run timeline maps AgentBackend runtime failures to run_failed", () => {
   const builder = createRunTimelineBuilder({ threadId: "thread_1", runId: "pending", locale: "en" });
   const event = toolEventToTimelineEvent(builder, {

@@ -14,6 +14,7 @@ import {
 } from "./streamingTypewriter";
 import {
   createLiveToolEventState,
+  isRecoverableCanvasWriteGuard,
   readLiveCanvasNodeSnapshot,
   reduceLiveToolEvent,
   threadStateRefreshModeForToolEvent
@@ -275,7 +276,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
     const activeMessageId = activeChatMessageIdRef.current;
     if (activeMessageId && reduction.statusLabel) {
       updateStreamingMessage(activeMessageId, {
-        status: eventStatusPhase(eventType),
+        status: eventStatusPhase(liveEvent),
         statusLabel: reduction.statusLabel
       });
     } else {
@@ -877,7 +878,9 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-function eventStatusPhase(eventType: string): CollaborationMessage["status"] {
+function eventStatusPhase(event: { eventType: string; payload?: Record<string, unknown> }): CollaborationMessage["status"] {
+  const eventType = event.eventType;
+  if (isRecoverableCanvasWriteGuard(event)) return "writing";
   if (/(?:^|_)tool_failed$/.test(eventType) || /(?:^|_)canvas_mutation_failed$/.test(eventType)) return "error";
   if (eventType === "canvas_delivery_synthesis_started" || eventType === "canvas_delivery_body_final_committed") return "finalizing";
   if (/(?:^|_)tool_(?:started|completed)$/.test(eventType)) return "searching";

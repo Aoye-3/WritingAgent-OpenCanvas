@@ -355,6 +355,66 @@ test("canvas_write rejects file_document node kind in progressive short scope", 
   assert.equal(result.payload.reason, "short_progress_node_kind_not_allowed");
 });
 
+test("canvas_write guards progressive required replace without a target node", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_missing_target_replace",
+      type: "function",
+      function: {
+        name: "canvas_write",
+        arguments: JSON.stringify({
+          operation: "create",
+          nodeKind: "document",
+          title: "Overview",
+          content: "Replacement content"
+        })
+      }
+    },
+    {
+      canvasAction: { operation: "replace" },
+      contextValues: { facetwrite_canvas_write_scope: "short_progress_nodes" },
+      createCanvasWriteRequest() {
+        throw new Error("missing target must not reach canvas write request storage");
+      },
+      commitCanvasWrite() {
+        throw new Error("missing target replace must not commit directly");
+      }
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.payload.eventType, "canvas_mutation_failed");
+  assert.equal(result.payload.reason, "missing_target_node");
+  assert.equal(result.payload.operation, "replace");
+  assert.equal(result.payload.canvasWriteScope, "short_progress_nodes");
+  assert.match(result.content, /target node is required/i);
+  assert.doesNotMatch(result.content, /A valid target node is required/);
+});
+
+test("canvas_write still allows required replace with an explicit target node", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_targeted_replace",
+      type: "function",
+      function: { name: "canvas_write", arguments: JSON.stringify({ operation: "create", content: "Replacement content" }) }
+    },
+    {
+      canvasAction: { operation: "replace", targetNodeId: "node_1" },
+      createCanvasWriteRequest(input) {
+        assert.equal(input.operation, "replace");
+        assert.equal(input.targetNodeId, "node_1");
+        return { id: "write_replace", operation: "replace", targetNodeId: "node_1", nodeKind: "document", title: "", status: "pending" };
+      },
+      commitCanvasWrite() {
+        throw new Error("targeted replace must wait for approval");
+      }
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.eventType, "canvas_write_pending_approval");
+});
+
 test("canvas_write committed payload includes sources extracted from content", async () => {
   const result = await executeToolCall(
     {
@@ -416,6 +476,39 @@ test("canvas_write creates a new node when append has no target", async () => {
   assert.equal(result.payload.operation, "create");
   assert.equal(result.payload.requestedOperation, "append");
   assert.equal(result.payload.status, "committed");
+});
+
+test("canvas_write allows progressive append when a target node is available", async () => {
+  const result = await executeToolCall(
+    {
+      id: "call_progress_append",
+      type: "function",
+      function: {
+        name: "canvas_write",
+        arguments: JSON.stringify({
+          operation: "append",
+          targetNodeId: "node_progress",
+          title: "Progress note",
+          content: "Additional progress note."
+        })
+      }
+    },
+    {
+      contextValues: { facetwrite_canvas_write_scope: "short_progress_nodes" },
+      commitCanvasWrite(input) {
+        assert.equal(input.operation, "append");
+        assert.equal(input.targetNodeId, "node_progress");
+        return { id: "node_progress", projectId: "project_1", kind: "document", title: input.title ?? "Progress note" };
+      },
+      createCanvasWriteRequest() {
+        throw new Error("progressive append must not create a proposal");
+      }
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.payload.eventType, "canvas_mutation_committed");
+  assert.equal(result.payload.operation, "append");
 });
 
 test("canvas_write uses the server-recognized operation instead of the model-selected operation", async () => {
