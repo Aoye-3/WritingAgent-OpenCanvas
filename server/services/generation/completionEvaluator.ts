@@ -18,6 +18,12 @@ export function evaluateRunCompletion(input: {
     return verdict("failed", [`Runtime failed: ${input.errorMessage}`], ["Recover or retry the failed run."]);
   }
 
+  if (input.finishReason === "clarification_required" && hasClarificationRequest(events)) {
+    reasons.push("The run is waiting for user clarification.");
+    missingRequirements.push("Answer the pending clarification before completion.");
+    return verdict("waiting", reasons, missingRequirements);
+  }
+
   if (hasPendingClarification(events)) {
     reasons.push("The run is waiting for user clarification.");
     missingRequirements.push("Answer the pending clarification before completion.");
@@ -108,6 +114,10 @@ function hasPendingClarification(events: ToolEventRecord[]) {
     }
   }
   return pending;
+}
+
+function hasClarificationRequest(events: ToolEventRecord[]) {
+  return events.some(isExplicitClarificationRequest);
 }
 
 function isExplicitClarificationRequest(event: ToolEventRecord) {

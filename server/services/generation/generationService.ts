@@ -775,6 +775,7 @@ export function createGenerationService(
         } else {
           textGate.flush();
         }
+        const emitFinalizingStatus = () => {
           callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
           stageProgress.emit(
             "run:finalizing",
@@ -782,91 +783,91 @@ export function createGenerationService(
             payload.locale === "zh" ? "下一步会给出最终答复和可查看的交付物。" : "Next, the final answer and deliverables will be ready.",
             { phase: "finalizing", title: payload.locale === "zh" ? "最终整理" : "Final review" }
           );
-          if (shouldRepairAgentClarification(baseEvents, visibleText, agentBackendRun.finishReason)) {
-            callbacks.onStatus?.({ phase: "thinking", label: payload.locale === "zh" ? "正在重新生成澄清选项..." : "Regenerating clarification choices..." });
-            const repairPayload = withAgentClarificationRepairPolicy(payload, latestInvalidAgentClarificationEvent(baseEvents));
-            const repairRun = await runAgentRuntimeGeneration({
-              payload: repairPayload,
-              threadId,
-              projectId: selection.projectId,
-              configuredModelApiId: context.modelSettings.configuredModelApiId!,
-              modelSettings: context.modelSettings,
-              runtimeConfig: context.runtimeConfig,
-              messages: context.messages,
-              prompt: context.prompt,
-              onToolEvent: (event) => observeToolEventForPayload(event, repairPayload),
-              onReasoningToken: callbacks.onReasoningToken,
-              onStatus: callbacks.onStatus,
-              onRuntimeSignal: observeRuntimeSignal
-            }, executionRuntime);
-            if (repairRun) {
-              const repairNormalized = normalizeAgentRunOutput({
-                text: repairRun.text,
-                locale: payload.locale,
-                source: "agent-backend",
-                events: repairRun.events
-              });
-              const repairedBaseEvents = dedupeToolEvents([
-                ...runtimeEvents.filter((event) => !isInvalidAgentClarificationEvent(event)),
-                ...(repairNormalized.events ?? []).map((event) => withAgentPlanEventContext(withAgentClarificationResumeContext(event, repairPayload, deliveryId), repairPayload))
-              ]);
-              if (hasAgentClarificationEvent(repairedBaseEvents) && isBlockingAgentClarificationRun(repairedBaseEvents, repairNormalized.text, repairRun.finishReason)) {
-                textGate.flush();
-                callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
-                const events = [...repairedBaseEvents, ...timelineEvents.map(timelineEventToToolEvent)];
-                agentPlanOrchestrator.complete(threadId, payload, events);
-                return recordGenerationRun({
-                  storage,
-                  payload,
-                  threadId,
-                  agentCardId: agentCard.id,
-                  agentTitle: agentCard.title[payload.locale],
-                  configuredModelApiId: context.modelSettings.configuredModelApiId,
-                  modelId: context.modelSettings.model,
-                  mode: context.mode,
-                  prompt: context.prompt,
-                  text: "",
-                  provider: "agent-backend",
-                  usedMock: false,
-                  toolState: context.effectiveToolState,
-                  events,
-                  finishReason: "clarification_required",
-                  runtimeRunId: repairRun.runtimeRunId ?? agentBackendRun.runtimeRunId,
-                  runtimeThreadId: repairRun.runtimeThreadId ?? agentBackendRun.runtimeThreadId,
-                  usage: repairRun.usage ?? agentBackendRun.usage
-                });
-              }
-            }
-            emitSuppressedInvalidClarifications();
-          }
-          if (isBlockingAgentClarificationRun(baseEvents, visibleText, agentBackendRun.finishReason)) {
-            textGate.flush();
-            callbacks.onStatus?.({ phase: "finalizing", label: streamLabels.finalizing });
-            const events = [...baseEvents, ...timelineEvents.map(timelineEventToToolEvent)];
-            markPlanWaitingForAgentClarification(storage, threadId, payload, events);
-            agentPlanOrchestrator.complete(threadId, payload, events);
-            return recordGenerationRun({
-              storage,
-              payload,
-              threadId,
-              agentCardId: agentCard.id,
-              agentTitle: agentCard.title[payload.locale],
-              configuredModelApiId: context.modelSettings.configuredModelApiId,
-              modelId: context.modelSettings.model,
-              mode: context.mode,
-              prompt: context.prompt,
-              text: "",
-              provider: "agent-backend",
-              usedMock: false,
-              toolState: context.effectiveToolState,
-              events,
-              finishReason: "clarification_required",
-              runtimeRunId: agentBackendRun.runtimeRunId,
-              runtimeThreadId: agentBackendRun.runtimeThreadId,
-              usage: agentBackendRun.usage
+        };
+        if (shouldRepairAgentClarification(baseEvents, visibleText, agentBackendRun.finishReason)) {
+          callbacks.onStatus?.({ phase: "thinking", label: payload.locale === "zh" ? "正在重新生成澄清选项..." : "Regenerating clarification choices..." });
+          const repairPayload = withAgentClarificationRepairPolicy(payload, latestInvalidAgentClarificationEvent(baseEvents));
+          const repairRun = await runAgentRuntimeGeneration({
+            payload: repairPayload,
+            threadId,
+            projectId: selection.projectId,
+            configuredModelApiId: context.modelSettings.configuredModelApiId!,
+            modelSettings: context.modelSettings,
+            runtimeConfig: context.runtimeConfig,
+            messages: context.messages,
+            prompt: context.prompt,
+            onToolEvent: (event) => observeToolEventForPayload(event, repairPayload),
+            onReasoningToken: callbacks.onReasoningToken,
+            onStatus: callbacks.onStatus,
+            onRuntimeSignal: observeRuntimeSignal
+          }, executionRuntime);
+          if (repairRun) {
+            const repairNormalized = normalizeAgentRunOutput({
+              text: repairRun.text,
+              locale: payload.locale,
+              source: "agent-backend",
+              events: repairRun.events
             });
+            const repairedBaseEvents = dedupeToolEvents([
+              ...runtimeEvents.filter((event) => !isInvalidAgentClarificationEvent(event)),
+              ...(repairNormalized.events ?? []).map((event) => withAgentPlanEventContext(withAgentClarificationResumeContext(event, repairPayload, deliveryId), repairPayload))
+            ]);
+            if (hasAgentClarificationEvent(repairedBaseEvents) && isBlockingAgentClarificationRun(repairedBaseEvents, repairNormalized.text, repairRun.finishReason)) {
+              textGate.flush();
+              const events = [...repairedBaseEvents, ...timelineEvents.map(timelineEventToToolEvent)];
+              agentPlanOrchestrator.complete(threadId, payload, events);
+              return recordGenerationRun({
+                storage,
+                payload,
+                threadId,
+                agentCardId: agentCard.id,
+                agentTitle: agentCard.title[payload.locale],
+                configuredModelApiId: context.modelSettings.configuredModelApiId,
+                modelId: context.modelSettings.model,
+                mode: context.mode,
+                prompt: context.prompt,
+                text: "",
+                provider: "agent-backend",
+                usedMock: false,
+                toolState: context.effectiveToolState,
+                events,
+                finishReason: "clarification_required",
+                runtimeRunId: repairRun.runtimeRunId ?? agentBackendRun.runtimeRunId,
+                runtimeThreadId: repairRun.runtimeThreadId ?? agentBackendRun.runtimeThreadId,
+                usage: repairRun.usage ?? agentBackendRun.usage
+              });
+            }
           }
-          if (isFinalSupplementReintake(payload) && hasAgentIntakeCompleteEvent(baseEvents)) {
+          emitSuppressedInvalidClarifications();
+        }
+        if (isBlockingAgentClarificationRun(baseEvents, visibleText, agentBackendRun.finishReason)) {
+          textGate.flush();
+          const events = [...baseEvents, ...timelineEvents.map(timelineEventToToolEvent)];
+          markPlanWaitingForAgentClarification(storage, threadId, payload, events);
+          agentPlanOrchestrator.complete(threadId, payload, events);
+          return recordGenerationRun({
+            storage,
+            payload,
+            threadId,
+            agentCardId: agentCard.id,
+            agentTitle: agentCard.title[payload.locale],
+            configuredModelApiId: context.modelSettings.configuredModelApiId,
+            modelId: context.modelSettings.model,
+            mode: context.mode,
+            prompt: context.prompt,
+            text: "",
+            provider: "agent-backend",
+            usedMock: false,
+            toolState: context.effectiveToolState,
+            events,
+            finishReason: "clarification_required",
+            runtimeRunId: agentBackendRun.runtimeRunId,
+            runtimeThreadId: agentBackendRun.runtimeThreadId,
+            usage: agentBackendRun.usage
+          });
+        }
+        emitFinalizingStatus();
+        if (isFinalSupplementReintake(payload) && hasAgentIntakeCompleteEvent(baseEvents)) {
             textGate.flush();
             callbacks.onStatus?.({
               phase: "finalizing",
@@ -1287,8 +1288,9 @@ function recordMockFallback(input: {
   });
 }
 
-function withCanvasAction(payload: GenerateRequest, threadId: string, storage: SQLiteStorageRepository): GenerateRequest {
+export function withCanvasAction(payload: GenerateRequest, threadId: string, storage: SQLiteStorageRepository): GenerateRequest {
   if (payload.canvasAction || !payload.chatInstruction) return payload;
+  if (readCurrentAgentClarificationAnswer(payload)) return payload;
   const canvasAction = resolveCanvasAction({
     threadId,
     instruction: payload.chatInstruction,
@@ -1828,6 +1830,7 @@ const MIN_ORDINARY_CLARIFICATION_ROUNDS_AFTER_FIRST_ASK = 2;
 
 export function withOrdinaryClarificationIntake(payload: GenerateRequest, threadId: string, storage: SQLiteStorageRepository): GenerateRequest {
   if (isSkillClarificationGuarded(payload)) return payload;
+  if (isSkillScopeIntakeResume(payload)) return payload;
   if (readPlanExecutionContext(payload.contextValues?.planExecution) || payload.planPhase || payload.planGeneration) return payload;
   const existingIntake = record(payload.contextValues?.ordinaryClarificationIntake);
   if (existingIntake.state === "completed") return payload;
@@ -1864,6 +1867,16 @@ function currentOrdinaryClarificationOriginalInstruction(payload: GenerateReques
   const clarification = record(payload.contextValues?.agentClarification);
   const resumeContext = record(clarification.resumeContext);
   return readString(resumeContext.originalInstruction);
+}
+
+function isSkillScopeIntakeResume(payload: GenerateRequest) {
+  if (!readCurrentAgentClarificationAnswer(payload)) return false;
+  const resumeContext = record(record(payload.contextValues?.agentClarification).resumeContext);
+  return Boolean(
+    readString(resumeContext.intakeState)
+    || readPositiveInteger(resumeContext.intakeRound)
+    || readPositiveInteger(resumeContext.maxIntakeRounds)
+  );
 }
 
 function isOrdinaryAgentClarification(clarification: ReturnType<SQLiteStorageRepository["listAgentClarifications"]>[number]) {

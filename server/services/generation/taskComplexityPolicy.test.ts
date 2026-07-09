@@ -23,6 +23,18 @@ test("forces slash plan requests into complex AgentPlan flow", () => {
   assert.equal(decision.recommendedStepCount, 3);
 });
 
+test("classifies any skill-assisted run as complex", () => {
+  const decision = resolveTaskComplexity({
+    payload: { mode: "chat", locale: "en", chatInstruction: "Go." },
+    transientSkillCount: 1
+  });
+
+  assert.equal(decision.complexity, "complex");
+  assert.equal(decision.requiresAgentPlan, true);
+  assert.equal(decision.signals.includes("skill_assisted_task"), true);
+  assert.equal(decision.recommendedStepCount, 3);
+});
+
 test("classifies full-chain architecture rewrites as complex", () => {
   const decision = resolveTaskComplexity({
     payload: {

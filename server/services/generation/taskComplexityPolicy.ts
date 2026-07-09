@@ -51,7 +51,7 @@ export function resolveTaskComplexity(input: {
   if (hasBudgetIntent(instruction) || input.thinkingMode === "enabled") {
     signals.add("budget_or_reasoning_risk");
   }
-  if ((input.transientSkillCount ?? 0) > 0 && instruction.length > 20) {
+  if ((input.transientSkillCount ?? 0) > 0) {
     signals.add("skill_assisted_task");
   }
   if (isDirectCanvasDeliveryIntent(instruction)) {
@@ -60,7 +60,7 @@ export function resolveTaskComplexity(input: {
 
   const signalList = [...signals];
   const explicitPlan = signals.has("explicit_plan") || signals.has("plan_context") || signals.has("persisted_plan_context");
-  const complex = explicitPlan || signalList.length >= 2;
+  const complex = explicitPlan || signals.has("skill_assisted_task") || signalList.length >= 2;
   if (complex) {
     return {
       complexity: "complex",

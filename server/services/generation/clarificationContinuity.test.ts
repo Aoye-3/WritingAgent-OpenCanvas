@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { stableCanvasDeliveryId, withAgentClarificationResumeContext, withOrdinaryClarificationIntake } from "./generationService.js";
+import { stableCanvasDeliveryId, withAgentClarificationResumeContext, withCanvasAction, withOrdinaryClarificationIntake } from "./generationService.js";
 
 function answeredClarification(
   id: string,
@@ -228,4 +228,77 @@ test("ordinary clarification intake does not replace skill intake guard policy",
   ]));
 
   assert.equal(result, payload);
+});
+
+test("skill-scope clarification resume does not start ordinary intake", () => {
+  const payload = {
+    mode: "chat",
+    locale: "zh",
+    chatInstruction: "请围绕 Agent 使用 LLM 写 literature review\n\nSelected clarification: 正文中文 + 参考文献英文",
+    transientSkillRefs: ["database-lookup", "literature-review"],
+    contextValues: {
+      agentClarification: {
+        clarificationId: "agent_clarification_1",
+        selectedOptionId: "zh_body_en_ref",
+        answer: "正文中文 + 参考文献英文",
+        resumeContext: {
+          originalInstruction: "请围绕 Agent 使用 LLM 写 literature review",
+          intakeState: "intake_collecting",
+          intakeRound: 2,
+          maxIntakeRounds: 3,
+          answeredSummary: "全面概览"
+        }
+      }
+    }
+  } as const;
+
+  const result = withOrdinaryClarificationIntake(payload as never, "thread_1", storageWithClarifications([
+    answeredClarification("clarification_1", "Which scope?", "全面概览", { originalInstruction: "请围绕 Agent 使用 LLM 写 literature review" })
+  ]));
+
+  assert.equal(result, payload);
+});
+
+test("answered clarification resumes do not inject Canvas replace actions from option text", () => {
+  const result = withCanvasAction({
+    mode: "chat",
+    locale: "zh",
+    chatInstruction: "请围绕 Agent 使用 LLM 写 literature review\n\nSelected clarification: 全面概览 - 覆盖 Agent 使用 LLM 的多个核心方向",
+    selectedCanvasNodeId: "node_delivery_thread_1_1_direct_1",
+    contextValues: {
+      agentClarification: {
+        clarificationId: "agent_clarification_1",
+        selectedOptionId: "broad_overview",
+        answer: "全面概览",
+        option: {
+          id: "broad_overview",
+          label: "全面概览",
+          detail: "覆盖 Agent 使用 LLM 的多个核心方向"
+        }
+      }
+    }
+  } as never, "thread_1", {
+    listMessages() {
+      throw new Error("listMessages should not run for answered clarification resumes");
+    }
+  } as never);
+
+  assert.equal(result.canvasAction, undefined);
+  assert.equal((result.contextValues as { canvasAction?: unknown }).canvasAction, undefined);
+});
+
+test("ordinary Canvas edit instructions still inject Canvas actions", () => {
+  const result = withCanvasAction({
+    mode: "chat",
+    locale: "zh",
+    chatInstruction: "覆盖画布里的节点",
+    selectedCanvasNodeId: "node_1"
+  } as never, "thread_1", {
+    listMessages() {
+      return [{}, {}];
+    }
+  } as never);
+
+  assert.equal(result.canvasAction?.operation, "replace");
+  assert.equal(result.canvasAction?.requiresTool, true);
 });

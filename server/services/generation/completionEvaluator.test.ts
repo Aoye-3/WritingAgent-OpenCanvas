@@ -94,10 +94,44 @@ test("completion evaluator clears clarification waiting after later delivery pro
     payload: basePayload,
     text: "Final answer after clarification.",
     events,
-    finishReason: "clarification_required"
+    finishReason: "agent_backend_completed"
   });
 
   assert.equal(verdict.status, "completed");
+});
+
+test("completion evaluator keeps clarification_required runs waiting despite later Canvas timeline progress", () => {
+  const events: ToolEventRecord[] = [
+    {
+      eventType: "agent_backend_agent_clarification_requested",
+      payload: {
+        type: "agent_clarification_requested",
+        question: "Which language?",
+        options: [
+          { id: "zh", label: "Chinese", detail: "Use Chinese body text." },
+          { id: "en", label: "English", detail: "Use English body text." }
+        ]
+      }
+    },
+    {
+      eventType: "run_timeline_canvas_node_committed",
+      payload: {
+        eventType: "canvas_node_committed",
+        status: "completed",
+        title: "Overview"
+      }
+    }
+  ];
+
+  const verdict = evaluateRunCompletion({
+    payload: basePayload,
+    text: "",
+    events,
+    finishReason: "clarification_required"
+  });
+
+  assert.equal(verdict.status, "waiting");
+  assert.match(verdict.missingRequirements[0] ?? "", /clarification/);
 });
 
 test("completion evaluator continues when a tool action has no observation", () => {
