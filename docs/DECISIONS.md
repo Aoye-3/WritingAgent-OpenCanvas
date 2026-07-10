@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-10: Cloudflare Tunnel Is A Temporary Remote Test Path
+
+Decision: Use Cloudflare Tunnel as a temporary remote testing bridge for the local Windows App Shell instead of moving storage, Express, or the Python Agent Runtime onto Cloudflare in this stage.
+
+Reason: The current goal is remote smoke validation and demos while preserving the local-first data model and avoiding an expensive AgentRuntime rewrite. Cloudflare can provide a public HTTPS entry, but the reliable execution path remains the project-managed local Node API and Python Gateway.
+
+Impact: `npm run cloudflare:app-shell` starts the local App Shell and prints a temporary `trycloudflare.com` URL. The machine must stay online. `.facetwrite/**`, SQLite, uploads, outputs, Knowledge, Memory, provider keys, and Agent Runtime ports remain local. Production Cloudflare storage, named tunnels, Containers, D1, R2, and Vectorize are deferred decisions.
+
 ## 2026-07-09: Skill Selection Uses A Shared Dialog Layer
 
 Decision: Render Home and Canvas Skill selection through a shared `SkillPickerDialog` portal mounted to `document.body`, with fixed modal-layer positioning and `z-index: var(--z-modal)`. `AIComposer` and `WorkspaceUtilityBar` open this dialog and pass existing Skill catalog/toggle props; `SkillFolderPicker` remains the behavior owner.

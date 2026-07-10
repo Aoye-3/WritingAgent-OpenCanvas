@@ -2,8 +2,10 @@ node_modules/
 .codegraph/
 dist/
 .vite/
+.wrangler/
 .env
 .env.*
+.dev.vars*
 !.env.example
 !.env.local.example
 !**/.env.example
@@ -14,6 +16,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 *.log
+logs/*.pid
 test-results/
 *-qa.png
 .devserver.pid
@@ -21,6 +24,7 @@ test-results/
 .facetwrite/
 .facetwrite-test/
 .docker-codex/
+.cloudflare-tools/
 reference/
 AgentBackend/
 modules/agent-runtime/backend/.venv/

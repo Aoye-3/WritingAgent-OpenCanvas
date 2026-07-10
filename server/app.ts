@@ -27,6 +27,8 @@ import { PlanExecutor } from "./services/planExecutor.js";
 import { syncConfiguredModelsToAgentBackend } from "./runtime/agentBackendAdapter/modelSync.js";
 import { readMarkdownOutputPreview } from "./services/threadOutputPreview.js";
 
+const defaultCorsOrigins = ["http://127.0.0.1:5173", "http://localhost:5173"];
+
 export async function createApp() {
   const app = express();
   const storage = await createStorage();
@@ -44,7 +46,7 @@ export async function createApp() {
     console.error("AgentBackend model sync failed during startup", error);
   });
 
-  app.use(cors({ origin: ["http://127.0.0.1:5173", "http://localhost:5173"] }));
+  app.use(cors({ origin: resolveCorsOrigins() }));
   app.use(express.json({ limit: "25mb" }));
 
   registerHealthRoutes(app);
@@ -64,4 +66,12 @@ export async function createApp() {
   storage.listRunnablePlanExecutions().forEach(({ threadId, planId }) => planExecutor.wake(threadId, planId));
 
   return app;
+}
+
+function resolveCorsOrigins() {
+  const configured = (process.env.FACETWRITE_CORS_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  return [...new Set([...defaultCorsOrigins, ...configured])];
 }

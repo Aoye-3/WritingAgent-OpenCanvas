@@ -10,6 +10,7 @@
     "dev:client": "vite --host 127.0.0.1",
     "dev:server": "tsx server/index.ts",
     "shell:dev": "electron app-shell/main.mjs",
+    "cloudflare:app-shell": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-cloudflare-tunnel-appshell.ps1",
     "shell:test": "node --test app-shell/*.test.mjs",
     "acceptance:local-runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/local-runtime-acceptance.ps1",
     "agent-runtime:up": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/agent-runtime-local.ps1 up",
@@ -66,7 +67,8 @@
     "electron": "41.2.1",
     "tsx": "^4.20.6",
     "typescript": "~5.9.3",
-    "vite": "^7.1.12"
+    "vite": "^7.1.12",
+    "wrangler": "^4.110.0"
   },
   "overrides": {
     "fast-xml-parser": "^5.7.0",

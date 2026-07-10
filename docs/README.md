@@ -12,6 +12,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 - `API.md`: HTTP API contracts, runtime environment variables, and response shape.
 - `AGENT_RUNTIME_RUNBOOK.md`: project-managed local Agent Runtime Gateway, explicit Docker mode, dependencies, dynamic ports, env, smoke checks, LangGraph clarification resume, and troubleshooting.
 - `APP_SHELL_RUNBOOK.md`: Windows Electron development shell startup, ports, ownership, source updates, shutdown, HMR, and troubleshooting.
+- `plans/CLOUDFLARE_TUNNEL_REMOTE_TEST_PLAN.md`: temporary Cloudflare Tunnel remote-test architecture, startup flow, Worker proxy fallback, validation, security boundary, and rollback notes.
 - `DATABASE.md`: SQLite location, tables, Canvas write semantics, and migration notes.
 - `DATA_STORAGE_SYSTEM.md`: user/runtime storage, development/sample data, configuration storage, and Harness source-update data boundaries.
 - `SECURITY.md`: local secret handling, tool permissions, Agent Runtime auth, source update boundary, and runtime redaction rules.
@@ -33,6 +34,7 @@ This directory contains the maintained technical memory for FacetWrite. Treat th
 - Security, auth, secret, approval, or side-effect changes update `SECURITY.md`.
 - Important design tradeoffs update `DECISIONS.md`.
 - Application-shell lifecycle or update-entry UI changes update `APP_SHELL_RUNBOOK.md`.
+- Cloudflare Tunnel remote-test changes update `APP_SHELL_RUNBOOK.md`, `plans/CLOUDFLARE_TUNNEL_REMOTE_TEST_PLAN.md`, and this index.
 - Every review or refactor updates `REFACTOR_LOG.md`.
 
 ## Current Runtime Position

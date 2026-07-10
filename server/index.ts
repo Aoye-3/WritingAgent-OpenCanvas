@@ -5,10 +5,11 @@ dotenv.config({ path: ".env.local" });
 dotenv.config();
 
 const port = Number(process.env.PORT ?? 8837);
+const host = process.env.FACETWRITE_API_HOST?.trim() || process.env.HOST?.trim() || "127.0.0.1";
 const app = await createApp();
 
-const server = app.listen(port, "127.0.0.1", () => {
-  console.log(`FacetWrite API listening at http://127.0.0.1:${port}`);
+const server = app.listen(port, host, () => {
+  console.log(`FacetWrite API listening at http://${host}:${port}`);
 });
 
 server.on("error", (error) => {

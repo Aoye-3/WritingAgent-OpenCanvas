@@ -3,6 +3,10 @@ import { defineConfig } from "vite";
 
 const apiPort = process.env.PORT ?? "8837";
 const clientPort = Number(process.env.VITE_PORT ?? "3000");
+const allowedHosts = [
+  ".trycloudflare.com",
+  ...readCsvEnv("VITE_ALLOWED_HOSTS")
+];
 
 export default defineConfig({
   plugins: [react()],
@@ -16,6 +20,7 @@ export default defineConfig({
   server: {
     port: clientPort,
     strictPort: true,
+    allowedHosts,
     watch: {
       ignored: [
         "**/.git/**",
@@ -32,3 +37,10 @@ export default defineConfig({
     }
   }
 });
+
+function readCsvEnv(name: string) {
+  return (process.env[name] ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}

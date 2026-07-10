@@ -37,6 +37,16 @@ The double-click VBS entry always forces local Runtime mode and lets the shell c
 
 Source-checkout updates are available from the left navigation `App Updates` page when running inside the desktop Shell. Browser-only sessions show that Shell source updates are unavailable.
 
+### Cloudflare Tunnel Remote Test
+
+For temporary remote testing from the Windows App Shell path, run:
+
+```powershell
+npm.cmd run cloudflare:app-shell
+```
+
+Or double-click `OnlineTest.bat` from the repository root. Both entries start the local App Shell, wait for the shell-managed frontend on `127.0.0.1:17776` and API on `127.0.0.1:17777`, then open a quick `trycloudflare.com` Tunnel to the local frontend. The printed remote URL is temporary and depends on this machine staying online. Python Agent Runtime, SQLite, uploads, outputs, Knowledge, Memory, and `.facetwrite/**` remain local. See [Cloudflare Tunnel Remote Test Plan](docs/plans/CLOUDFLARE_TUNNEL_REMOTE_TEST_PLAN.md).
+
 ### Recommended: OpenCanvas + Agent Runtime
 
 Use this path for local development. OpenCanvas runs the frontend/backend, while the project-managed Python Gateway runs the Agent Runtime directly. The Gateway exposes the LangGraph-compatible runs API, with `lead_agent` registered from `modules/agent-runtime/backend/langgraph.json` and implemented by `deerflow.agents:make_lead_agent`. Docker Compose remains an explicit isolation and deployment mode. The Agent Runtime Next.js frontend and nginx are not part of the default application path.
@@ -94,6 +104,7 @@ npm run agent-runtime:docker:down
 |---------|-------------|
 | `npm run dev` | Start the managed local development stack through `start-facetwrite.ps1`. |
 | `npm run shell:dev` | Open the Electron development shell. |
+| `npm run cloudflare:app-shell` | Start the App Shell and print a temporary Cloudflare Tunnel URL for remote testing. |
 | `npm run dev:services` | Start only Vite and the Express API for narrow debugging. |
 | `npm run agent-runtime:up` | Start or refresh the project-managed local Agent Runtime Gateway. |
 | `npm run agent-runtime:status` | Read local Runtime ownership/status metadata. |
