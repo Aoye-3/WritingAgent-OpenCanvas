@@ -67,6 +67,16 @@ export function withServerDurableContinuationContext(
   });
 }
 
+export function isServerDurableContinuationContext(
+  payload: GenerateRequest,
+  key: DurableServerContextKey,
+  value: unknown
+) {
+  const current = metadata(payload);
+  return current.serverSafeContext?.[key] === value
+    || current.descriptor?.safeContext?.[key] === value;
+}
+
 export function durableContinuationDeliveryId(payload: GenerateRequest) {
   return metadata(payload).descriptor?.deliveryId ?? metadata(payload).deliveryId;
 }

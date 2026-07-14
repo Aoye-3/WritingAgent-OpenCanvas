@@ -58,6 +58,7 @@ import { createThreadDirectoryManager, resolveFacetWritePaths } from "../../stor
 import {
   durableContinuationClaim,
   durableContinuationDeliveryId,
+  isServerDurableContinuationContext,
   resolveDurableContinuationRequest,
   withDurableContinuationDelivery,
   withServerDurableContinuationContext
@@ -1990,6 +1991,14 @@ const MAX_ORDINARY_CLARIFICATION_ROUNDS = 3;
 const MIN_ORDINARY_CLARIFICATION_ROUNDS_AFTER_FIRST_ASK = 2;
 
 export function withOrdinaryClarificationIntake(payload: GenerateRequest, threadId: string, storage: SQLiteStorageRepository): GenerateRequest {
+  const inputOrdinaryClarificationIntake = payload.contextValues?.ordinaryClarificationIntake;
+  if (inputOrdinaryClarificationIntake !== undefined
+    && !isServerDurableContinuationContext(payload, "ordinaryClarificationIntake", inputOrdinaryClarificationIntake)) {
+    payload = {
+      ...payload,
+      contextValues: omitRecordKey(payload.contextValues, "ordinaryClarificationIntake")
+    };
+  }
   if (isSkillClarificationGuarded(payload)) return payload;
   if (isSkillScopeIntakeResume(payload)) return payload;
   if (readPlanExecutionContext(payload.contextValues?.planExecution) || payload.planPhase || payload.planGeneration) return payload;

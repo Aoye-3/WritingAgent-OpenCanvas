@@ -108,3 +108,24 @@ The end-to-end regression proves an incomplete ordinary execution persists both 
 - `node --import tsx --test server/services/generation/agentRuntimeRunner.test.ts` - 12 passed, 0 failed.
 - `npm.cmd run typecheck` - passed.
 - `git diff --check` - passed (Git reports only existing line-ending conversion warnings).
+
+## Ordinary intake provenance security review
+
+The final adversarial review found that shape-valid client `ordinaryClarificationIntake` state could be mistaken for server-computed state by the execution producer. The fix was developed from failing request-level and facade round-trip checks:
+
+- A direct producer test supplied an unmarked `{ mode: "ordinary", state: "completed", answeredSummary: "FORGED" }` section and initially showed that execution certified and persisted it.
+- The positive two-stage facade lifecycle supplied the same forged completed section alongside a legitimate clarification answer. It initially skipped intake and allowed forged policy text to influence the lifecycle.
+
+Ordinary intake provenance is now checked by exact identity against private durable-continuation metadata. `withOrdinaryClarificationIntake` strips any unmarked client section before every early-return path, then recomputes and marks only storage-derived values. `withAgentIntakeExecutionPhase` propagates and completes ordinary intake only when the exact section is already server-marked; otherwise it marks only the authoritative Agent intake execution state. The existing typed descriptor picker and effective execution payload propagation remain unchanged.
+
+The adversarial facade test now proves that the forged summary reaches neither runtime policy context nor prompts nor the persisted descriptor. The same test exercises the positive ordinary two-stage lifecycle, persists the server-computed completed state, claims it with a literal continuation, and resumes with execution tools.
+
+### Ordinary intake provenance verification
+
+- Focused adversarial producer and facade lifecycle tests - 2 passed, 0 failed.
+- `node --import tsx --test --test-reporter=dot server/db/durableContinuationSchema.test.ts server/repositories/durableContinuationRepository.test.ts server/services/generation/durableContinuation.test.ts server/services/generationService.facade.test.ts server/routes/generationRoutes.test.ts` - 112 passed, 0 failed.
+- `node --import tsx --test --test-reporter=dot server/runtime/agentBackendAdapter/client.test.ts server/services/generation/agentBackendRunner.test.ts server/storageFacade.test.ts` - 98 passed, 0 failed.
+- `node --import tsx --test server/services/generation/agentRuntimeRunner.test.ts` - 12 passed, 0 failed.
+- `node --import tsx --test server/services/generation/clarificationContinuity.test.ts` - 11 passed, 0 failed.
+- `npm.cmd run typecheck` - passed.
+- `git diff --check` - passed (Git reports only existing line-ending conversion warnings).

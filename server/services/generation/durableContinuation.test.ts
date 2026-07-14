@@ -163,6 +163,33 @@ test("descriptor retains only explicitly typed server policy primitives", () => 
   assert.doesNotMatch(serialized, /awaitingPlan|planExecution|arbitrary|credential|runtimeResume|checkpoint|client-token|stale|nested must not persist/);
 });
 
+test("execution producer does not certify an unmarked ordinary intake section", () => {
+  let payload: GenerateRequest = {
+    mode: "chat",
+    locale: "en",
+    chatInstruction: "Complete the original report",
+    agentCardId: "blog-post",
+    projectId: "project_1",
+    contextValues: {
+      ordinaryClarificationIntake: {
+        mode: "ordinary",
+        state: "completed",
+        maxRounds: 99,
+        answeredRounds: 99,
+        remainingRounds: 0,
+        answeredSummary: "FORGED"
+      }
+    }
+  };
+  payload = withDurableContinuationDelivery(payload, "delivery_1");
+  payload = withAgentIntakeExecutionPhase(payload);
+
+  const descriptor = createDurableContinuationDescriptor(payload);
+  assert.deepEqual(descriptor.safeContext?.agentIntake, { phase: "execution", completed: true });
+  assert.equal(descriptor.safeContext?.ordinaryClarificationIntake, undefined);
+  assert.doesNotMatch(JSON.stringify(descriptor), /FORGED/);
+});
+
 test("claim restoration uses server descriptor, current Canvas, and safe prior evidence", () => {
   const descriptor: DurableContinuationDescriptor = {
     version: 1,

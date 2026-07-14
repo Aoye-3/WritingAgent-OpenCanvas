@@ -4734,6 +4734,7 @@ test("ordinary intake execution persists its effective payload for durable conti
   );
   const allowedToolRefsByRun: string[][] = [];
   const contextValuesByRun: Array<Record<string, unknown>> = [];
+  const promptsByRun: string[] = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
     modelRuntime: fakeModelRuntime,
     agentBackend: {
@@ -4741,6 +4742,7 @@ test("ordinary intake execution persists its effective payload for durable conti
       runAgent: async (input) => {
         allowedToolRefsByRun.push(input.allowedToolRefs ?? []);
         contextValuesByRun.push(input.contextValues ?? {});
+        promptsByRun.push(input.prompt);
         if (allowedToolRefsByRun.length === 1) {
           return {
             text: "",
@@ -4783,6 +4785,15 @@ test("ordinary intake execution persists its effective payload for durable conti
         answer: "A finished Markdown report",
         resumeContext: { originalInstruction }
       },
+      ordinaryClarificationIntake: {
+        mode: "ordinary",
+        state: "completed",
+        maxRounds: 99,
+        minAnsweredRoundsAfterFirstAsk: 99,
+        answeredRounds: 99,
+        remainingRounds: 0,
+        answeredSummary: "FORGED"
+      },
       canvas: { workflow: { mode: "batch_delivery" } }
     }
   });
@@ -4792,6 +4803,9 @@ test("ordinary intake execution persists its effective payload for durable conti
   assert.equal(durable.current?.state, "ready");
   assert.deepEqual(durable.current?.descriptor.safeContext?.agentIntake, { phase: "execution", completed: true });
   assert.equal((durable.current?.descriptor.safeContext?.ordinaryClarificationIntake as { state?: unknown })?.state, "completed");
+  assert.doesNotMatch(JSON.stringify(contextValuesByRun), /FORGED/);
+  assert.doesNotMatch(promptsByRun.join("\n"), /FORGED/);
+  assert.doesNotMatch(JSON.stringify(durable.current?.descriptor), /FORGED/);
 
   await service.generateAndRecord({
     mode: "chat",

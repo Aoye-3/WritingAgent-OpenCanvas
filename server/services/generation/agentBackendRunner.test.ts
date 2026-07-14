@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runAgentBackendGeneration } from "./agentBackendRunner.js";
+import { withServerDurableContinuationContext } from "./durableContinuation.js";
 
 test("forwards enabled stage-specific Plan tools even when Agent settings hide them", async () => {
   let allowedToolRefs: string[] = [];
@@ -438,8 +439,17 @@ test("keeps ordinary clarification intake ask-only after one answered round", as
 test("ordinary clarification intake can complete after two answered rounds", async () => {
   const allowedToolRefsByRun: string[][] = [];
   const agentIntakeByRun: unknown[] = [];
+  const ordinaryClarificationIntake = {
+    mode: "ordinary",
+    state: "collecting",
+    maxRounds: 3,
+    minAnsweredRoundsAfterFirstAsk: 2,
+    answeredRounds: 2,
+    remainingRounds: 1,
+    answeredSummary: "1. Which sources? => Recent sources\n2. Which output? => Markdown"
+  };
   const result = await runAgentBackendGeneration({
-    payload: {
+    payload: withServerDurableContinuationContext({
       mode: "chat",
       locale: "en",
       threadId: "thread_1",
@@ -450,17 +460,9 @@ test("ordinary clarification intake can complete after two answered rounds", asy
           selectedOptionId: "recent",
           answer: "Recent sources"
         },
-        ordinaryClarificationIntake: {
-          mode: "ordinary",
-          state: "collecting",
-          maxRounds: 3,
-          minAnsweredRoundsAfterFirstAsk: 2,
-          answeredRounds: 2,
-          remainingRounds: 1,
-          answeredSummary: "1. Which sources? => Recent sources\n2. Which output? => Markdown"
-        }
+        ordinaryClarificationIntake
       }
-    },
+    }, "ordinaryClarificationIntake", ordinaryClarificationIntake),
     threadId: "thread_1",
     projectId: "project_1",
     configuredModelApiId: "model_1",

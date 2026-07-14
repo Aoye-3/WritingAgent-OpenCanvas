@@ -1,6 +1,6 @@
 import type { GenerateRequest } from "../../contracts/generation.js";
 import { sanitizeCanvasForAgentIntake } from "../../../shared/agentIntakeCanvas.js";
-import { withServerDurableContinuationContext } from "./durableContinuation.js";
+import { isServerDurableContinuationContext, withServerDurableContinuationContext } from "./durableContinuation.js";
 
 export const AGENT_INTAKE_TOOL_REFS = ["ask_clarification", "agent_intake_complete"] as const;
 export const SKILL_SCOPE_GUARD_TOOL_REFS = ["ask_clarification"] as const;
@@ -19,6 +19,9 @@ export function isAgentIntakePhase(payload: GenerateRequest) {
 }
 
 export function withAgentIntakeExecutionPhase(payload: GenerateRequest): GenerateRequest {
+  const ordinaryClarificationIntake = payload.contextValues?.ordinaryClarificationIntake;
+  const hasTrustedOrdinaryIntake = isOrdinaryClarificationIntake(payload.contextValues)
+    && isServerDurableContinuationContext(payload, "ordinaryClarificationIntake", ordinaryClarificationIntake);
   const executionPayload: GenerateRequest = {
     ...payload,
     contextValues: {
@@ -28,7 +31,7 @@ export function withAgentIntakeExecutionPhase(payload: GenerateRequest): Generat
         phase: "execution",
         completed: true
       },
-      ...(isOrdinaryClarificationIntake(payload.contextValues)
+      ...(hasTrustedOrdinaryIntake
         ? {
           ordinaryClarificationIntake: {
             ...readRecord(payload.contextValues?.ordinaryClarificationIntake),
@@ -44,7 +47,7 @@ export function withAgentIntakeExecutionPhase(payload: GenerateRequest): Generat
     "agentIntake",
     executionPayload.contextValues?.agentIntake
   );
-  return isOrdinaryClarificationIntake(payload.contextValues)
+  return hasTrustedOrdinaryIntake
     ? withServerDurableContinuationContext(
       markedExecutionPayload,
       "ordinaryClarificationIntake",
