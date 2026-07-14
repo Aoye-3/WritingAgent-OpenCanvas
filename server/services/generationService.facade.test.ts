@@ -4711,6 +4711,101 @@ test("incomplete generation persists a server-whitelisted durable descriptor", a
   assert.notDeepEqual(allowedToolRefsByRun[1], ["ask_clarification", "agent_intake_complete"]);
 });
 
+test("ordinary intake execution persists its effective payload for durable continuation", async () => {
+  const { storage, durable, records, agentClarifications } = fakeStorage();
+  const originalInstruction = "Research the evidence and deliver the finished report";
+  agentClarifications.push(
+    {
+      id: "ordinary_answer_1",
+      status: "answered",
+      question: "Which sources should I prioritize?",
+      answer: "Recent primary sources",
+      updatedAt: "2026-07-14T10:00:00.000Z",
+      resumeContext: { originalInstruction }
+    },
+    {
+      id: "ordinary_answer_2",
+      status: "answered",
+      question: "Which format should I deliver?",
+      answer: "A finished Markdown report",
+      updatedAt: "2026-07-14T10:01:00.000Z",
+      resumeContext: { originalInstruction }
+    }
+  );
+  const allowedToolRefsByRun: string[][] = [];
+  const contextValuesByRun: Array<Record<string, unknown>> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        allowedToolRefsByRun.push(input.allowedToolRefs ?? []);
+        contextValuesByRun.push(input.contextValues ?? {});
+        if (allowedToolRefsByRun.length === 1) {
+          return {
+            text: "",
+            finishReason: "agent_backend_completed",
+            events: [{ eventType: "agent_backend_agent_intake_complete", payload: { summary: "Ready" } }]
+          };
+        }
+        if (allowedToolRefsByRun.length === 2) {
+          return {
+            text: "I'll continue with the research and delivery.",
+            finishReason: "agent_backend_completed",
+            events: []
+          };
+        }
+        return {
+          text: "The finished report is delivered.",
+          finishReason: "stop",
+          events: [{
+            eventType: "canvas_delivery_body_committed",
+            payload: { deliveryId: durable.current?.descriptor.deliveryId, nodeId: "node_ordinary_finished", title: "Finished report" }
+          }]
+        };
+      }
+    }
+  });
+
+  await service.generateAndRecord({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    projectId: "project_test",
+    agentCardId: "blog-post",
+    chatInstruction: `${originalInstruction}\n\nSelected clarification: A finished Markdown report`,
+    transientSkillRefs: ["writing"],
+    contextValues: {
+      autoPreflightPlan: { enabled: false },
+      agentClarification: {
+        clarificationId: "ordinary_current",
+        selectedOptionId: "markdown",
+        answer: "A finished Markdown report",
+        resumeContext: { originalInstruction }
+      },
+      canvas: { workflow: { mode: "batch_delivery" } }
+    }
+  });
+
+  assert.deepEqual(allowedToolRefsByRun[0], ["ask_clarification", "agent_intake_complete"]);
+  assert.equal(allowedToolRefsByRun[1]?.includes("write_file"), true);
+  assert.equal(durable.current?.state, "ready");
+  assert.deepEqual(durable.current?.descriptor.safeContext?.agentIntake, { phase: "execution", completed: true });
+  assert.equal((durable.current?.descriptor.safeContext?.ordinaryClarificationIntake as { state?: unknown })?.state, "completed");
+
+  await service.generateAndRecord({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    chatInstruction: "continue"
+  });
+
+  assert.equal(isAgentIntakeExecution(contextValuesByRun[2]), true);
+  assert.equal(allowedToolRefsByRun[2]?.includes("write_file"), true);
+  assert.notDeepEqual(allowedToolRefsByRun[2], ["ask_clarification", "agent_intake_complete"]);
+  assert.equal((records.at(-1) as { userMessage?: string }).userMessage, "continue");
+});
+
 test("concurrent manual continuations invoke Runtime once and preserve literal continuation history", async () => {
   const { storage, durable, records } = fakeStorage();
   durable.current = {

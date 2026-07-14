@@ -7,15 +7,16 @@ export async function runAgentRuntimeGeneration(input: AgentRuntimeRunnerInput, 
   if (!runtime) return undefined;
   const run = await runtime.run(input);
   if (!run) return undefined;
-  const phase = resolvePlanRequestPolicy(input.payload).phase;
-  const canvasActionRequired = input.payload.canvasAction?.requiresTool === true;
+  const effectivePayload = run.effectivePayload ?? input.payload;
+  const phase = resolvePlanRequestPolicy(effectivePayload).phase;
+  const canvasActionRequired = effectivePayload.canvasAction?.requiresTool === true;
   if (phase === "chat" && canvasActionRequired && !hasCanvasActionDeliveryResult(run.events)) {
     throw new Error("Canvas action completed without a committed node or pending approval request.");
   }
   if (phase === "chat" && !run.text && !hasStructuredLifecycleEvent(run.events)) {
     throw new Error("Agent Runtime completed with no visible assistant text or structured lifecycle events");
   }
-  return run;
+  return { ...run, effectivePayload };
 }
 
 function hasCanvasActionDeliveryResult(events: AgentRuntimeRunResult["events"]) {

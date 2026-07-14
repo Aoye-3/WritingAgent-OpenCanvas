@@ -39,11 +39,18 @@ export function withAgentIntakeExecutionPhase(payload: GenerateRequest): Generat
         : {})
     }
   };
-  return withServerDurableContinuationContext(
+  const markedExecutionPayload = withServerDurableContinuationContext(
     executionPayload,
     "agentIntake",
     executionPayload.contextValues?.agentIntake
   );
+  return isOrdinaryClarificationIntake(payload.contextValues)
+    ? withServerDurableContinuationContext(
+      markedExecutionPayload,
+      "ordinaryClarificationIntake",
+      executionPayload.contextValues?.ordinaryClarificationIntake
+    )
+    : markedExecutionPayload;
 }
 
 export function withSanitizedAgentIntakeCanvas(payload: GenerateRequest): GenerateRequest {

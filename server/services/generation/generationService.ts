@@ -324,6 +324,7 @@ export function createGenerationService(
       }, executionRuntime);
 
       if (agentBackendRun) {
+        payload = agentBackendRun.effectivePayload;
         const normalized = normalizeAgentRunOutput({
           text: agentBackendRun.text,
           locale: payload.locale,
@@ -856,6 +857,7 @@ export function createGenerationService(
       }, executionRuntime);
 
       if (agentBackendRun) {
+        payload = agentBackendRun.effectivePayload;
         const normalized = normalizeAgentRunOutput({
           text: agentBackendRun.text,
           locale: payload.locale,

@@ -138,7 +138,7 @@ test("descriptor retains only explicitly typed server policy primitives", () => 
     },
     ordinaryClarificationIntake: {
       mode: "ordinary",
-      state: "collecting",
+      state: "completed",
       maxRounds: 3,
       minAnsweredRoundsAfterFirstAsk: 2,
       answeredRounds: 1,

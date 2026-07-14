@@ -438,7 +438,7 @@ test("keeps ordinary clarification intake ask-only after one answered round", as
 test("ordinary clarification intake can complete after two answered rounds", async () => {
   const allowedToolRefsByRun: string[][] = [];
   const agentIntakeByRun: unknown[] = [];
-  await runAgentBackendGeneration({
+  const result = await runAgentBackendGeneration({
     payload: {
       mode: "chat",
       locale: "en",
@@ -504,6 +504,8 @@ test("ordinary clarification intake can complete after two answered rounds", asy
   assert.equal(allowedToolRefsByRun[1]?.includes("ask_clarification"), false);
   assert.equal(allowedToolRefsByRun[1]?.includes("web_search"), true);
   assert.deepEqual(agentIntakeByRun[1], { phase: "execution", completed: true });
+  assert.deepEqual(result?.effectivePayload.contextValues?.agentIntake, { phase: "execution", completed: true });
+  assert.equal((result?.effectivePayload.contextValues?.ordinaryClarificationIntake as { state?: unknown })?.state, "completed");
 });
 
 test("ordinary clarification intake round limit starts execution without ask_clarification", async () => {

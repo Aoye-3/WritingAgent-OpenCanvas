@@ -22,6 +22,7 @@ test("accepts a successful Plan phase with structured events and no assistant te
     })
   });
   assert.equal(result?.text, "");
+  assert.equal(result?.effectivePayload, input.payload);
 });
 
 test("reports a diagnostic when a successful runtime has neither text nor state events", async () => {

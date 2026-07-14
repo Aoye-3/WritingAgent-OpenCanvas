@@ -89,3 +89,22 @@ The final lifecycle review found that a durable continuation lost the server-pro
 - `node --import tsx --test server/runtime/agentBackendAdapter/client.test.ts server/services/generation/agentBackendRunner.test.ts server/storageFacade.test.ts` - 98 passed, 0 failed.
 - `npm.cmd run typecheck` - passed.
 - `git diff --check` - passed (Git reports only existing line-ending conversion warnings).
+
+## Effective execution payload review
+
+The remaining ordinary-intake lifecycle gap was reproduced before implementation at two levels:
+
+- The AgentBackend runner's two-stage ordinary intake test reached execution with the correct in-memory marker, but its returned result exposed no effective payload and therefore could not communicate the execution transition to its caller.
+- An end-to-end ordinary-intake test emitted `agent_intake_complete`, ran an incomplete execution stage, and showed that the persisted descriptor still reflected the outer collecting payload and lacked trusted `agentIntake` execution state.
+
+Runtime results now propagate the payload actually used by the backend. The ordinary two-stage path returns its `executionPayload`; single-stage backend results return their input payload; and the generic runtime runner supplies its input payload for compatible runtime ports that do not provide one. Both synchronous and streaming generation replace their outer payload with this normalized effective payload before readiness checks, Canvas finalization, completion recording, and durable descriptor construction. When the execution producer completes an ordinary intake, it also refreshes the trusted ordinary-intake continuation marker to `state: "completed"`.
+
+The end-to-end regression proves an incomplete ordinary execution persists both `{ agentIntake: { phase: "execution", completed: true } }` and a non-collecting ordinary intake state. A literal `continue` claims that descriptor, preserves the literal user message in history, and reaches the backend with execution tools instead of the intake-only tool pair.
+
+### Effective execution payload verification
+
+- `node --import tsx --test server/db/durableContinuationSchema.test.ts server/repositories/durableContinuationRepository.test.ts server/services/generation/durableContinuation.test.ts server/services/generationService.facade.test.ts server/routes/generationRoutes.test.ts` - 111 passed, 0 failed.
+- `node --import tsx --test server/runtime/agentBackendAdapter/client.test.ts server/services/generation/agentBackendRunner.test.ts server/storageFacade.test.ts` - 98 passed, 0 failed.
+- `node --import tsx --test server/services/generation/agentRuntimeRunner.test.ts` - 12 passed, 0 failed.
+- `npm.cmd run typecheck` - passed.
+- `git diff --check` - passed (Git reports only existing line-ending conversion warnings).

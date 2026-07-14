@@ -27,6 +27,7 @@ export type AgentRuntimeRunInput = {
 export type AgentRuntimeRunResult = {
   text: string;
   finishReason: string;
+  effectivePayload?: GenerateRequest;
   runtimeRunId?: string;
   runtimeThreadId?: string;
   usage?: unknown;

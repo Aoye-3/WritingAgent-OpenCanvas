@@ -90,6 +90,7 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     const executionRun = await (deps.runAgent ?? runAgentBackendAgent)(executionInput);
     return {
       ...executionRun,
+      effectivePayload: executionPayload,
       events: [...run.events, ...executionRun.events]
     };
   }
@@ -100,7 +101,7 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     }
   }
 
-  return run;
+  return { ...run, effectivePayload: input.payload };
 }
 
 async function resumeAgentBackendWithSafeRetry(
