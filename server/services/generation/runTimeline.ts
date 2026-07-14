@@ -10,6 +10,7 @@ export type RunTimelineEventType =
   | "canvas_node_committed"
   | "artifact_committed"
   | "run_completed"
+  | "run_incomplete"
   | "run_failed";
 
 export type RunTimelineEvent = {

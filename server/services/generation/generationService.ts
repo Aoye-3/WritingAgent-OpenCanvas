@@ -18,6 +18,7 @@ import { buildGenerationRunContext } from "./promptRunBuilder.js";
 import { createProgressiveTextGate } from "./progressiveTextGate.js";
 import type { ProviderRunnerDeps } from "./providerRunner.js";
 import { recordGenerationRun } from "./runRecorder.js";
+import { evaluateRunCompletion } from "./completionEvaluator.js";
 import { resolveConfiguredModelApi, type ConfiguredModelApi } from "../../domains/model-config/index.js";
 import { isConfiguredModelRuntimeReady } from "../../runtime/agentBackendAdapter/modelSync.js";
 import { AgentPlanOrchestrator } from "../agentPlanOrchestrator.js";
@@ -338,6 +339,43 @@ export function createGenerationService(
             usage: agentBackendRun.usage
           });
         }
+        const readiness = evaluateRunCompletion({
+          payload,
+          text: visibleText,
+          events: baseEvents,
+          finishReason: agentBackendRun.finishReason
+        });
+        if (readiness.status === "continue") {
+          emitTimeline(timeline.event(
+            "run_incomplete",
+            "waiting",
+            payload.locale === "zh" ? "运行未完成" : "Run incomplete",
+            payload.locale === "zh" ? "当前回复已保留，任务仍需继续。" : "The current reply was preserved and the task still needs to continue.",
+            { completionStatus: readiness.status, missingRequirements: readiness.missingRequirements }
+          ));
+          const events = [...baseEvents, ...timelineEvents.map(timelineEventToToolEvent)];
+          return recordGenerationRun({
+            storage,
+            payload,
+            threadId,
+            agentCardId: agentCard.id,
+            agentTitle: agentCard.title[payload.locale],
+            configuredModelApiId: context.modelSettings.configuredModelApiId,
+            modelId: context.modelSettings.model,
+            mode: context.mode,
+            prompt: context.prompt,
+            text: visibleText,
+            provider: "agent-backend",
+            usedMock: false,
+            toolState: context.effectiveToolState,
+            events,
+            finishReason: agentBackendRun.finishReason,
+            runtimeRunId: agentBackendRun.runtimeRunId,
+            runtimeThreadId: agentBackendRun.runtimeThreadId,
+            usage: agentBackendRun.usage,
+            completion: readiness
+          });
+        }
         if (isFinalSupplementReintake(payload) && hasAgentIntakeCompleteEvent(baseEvents)) {
           agentPlanOrchestrator.complete(threadId, payload, baseEvents);
           return recordFinalSupplementRequest({
@@ -376,12 +414,23 @@ export function createGenerationService(
         for (const finalEvent of progressiveFinalized.events) {
           emitRuntimeToolEvent(finalEvent);
         }
-        const completed = timeline.event("run_completed", "completed", payload.locale === "zh" ? "运行完成" : "Run completed", payload.locale === "zh" ? "最终内容已生成。" : "Final content is ready.");
-        emitTimeline(completed);
+        const preTerminalEvents = [...baseEvents, ...progressiveFinalized.events, ...timelineEvents.map(timelineEventToToolEvent)];
+        const finishReason = finalFinishReason(agentBackendRun.finishReason, preTerminalEvents);
+        const completion = evaluateRunCompletion({
+          payload,
+          text: progressiveFinalized.text || finalized.text,
+          events: preTerminalEvents,
+          finishReason
+        });
+        emitTimeline(completion.status === "completed"
+          ? timeline.event("run_completed", "completed", payload.locale === "zh" ? "运行完成" : "Run completed", payload.locale === "zh" ? "最终内容已生成。" : "Final content is ready.")
+          : timeline.event("run_incomplete", "waiting", payload.locale === "zh" ? "运行未完成" : "Run incomplete", payload.locale === "zh" ? "当前输出尚未满足完成条件。" : "The current output does not yet satisfy completion requirements.", {
+            completionStatus: completion.status,
+            missingRequirements: completion.missingRequirements
+          }));
         const events = [...baseEvents, ...progressiveFinalized.events, ...timelineEvents.map(timelineEventToToolEvent)];
-        agentPlanOrchestrator.assertPostcondition(threadId, payload, events);
-        agentPlanOrchestrator.complete(threadId, payload, events);
-        const finishReason = finalFinishReason(agentBackendRun.finishReason, events);
+        if (completion.status !== "continue") agentPlanOrchestrator.assertPostcondition(threadId, payload, events);
+        if (completion.status === "completed") agentPlanOrchestrator.complete(threadId, payload, events);
         const recorded = recordGenerationRun({
           storage,
           payload,
@@ -400,7 +449,8 @@ export function createGenerationService(
           finishReason,
           runtimeRunId: agentBackendRun.runtimeRunId,
           runtimeThreadId: agentBackendRun.runtimeThreadId,
-          usage: agentBackendRun.usage
+          usage: agentBackendRun.usage,
+          completion
         });
         return recorded;
       } else {
@@ -871,6 +921,43 @@ export function createGenerationService(
             usage: agentBackendRun.usage
           });
         }
+        const readiness = evaluateRunCompletion({
+          payload,
+          text: visibleText,
+          events: baseEvents,
+          finishReason: agentBackendRun.finishReason
+        });
+        if (readiness.status === "continue") {
+          emitTimeline(timeline.event(
+            "run_incomplete",
+            "waiting",
+            payload.locale === "zh" ? "运行未完成" : "Run incomplete",
+            payload.locale === "zh" ? "当前回复已保留，任务仍需继续。" : "The current reply was preserved and the task still needs to continue.",
+            { completionStatus: readiness.status, missingRequirements: readiness.missingRequirements }
+          ));
+          const events = [...baseEvents, ...timelineEvents.map(timelineEventToToolEvent)];
+          return recordGenerationRun({
+            storage,
+            payload,
+            threadId,
+            agentCardId: agentCard.id,
+            agentTitle: agentCard.title[payload.locale],
+            configuredModelApiId: context.modelSettings.configuredModelApiId,
+            modelId: context.modelSettings.model,
+            mode: context.mode,
+            prompt: context.prompt,
+            text: visibleText,
+            provider: "agent-backend",
+            usedMock: false,
+            toolState: context.effectiveToolState,
+            events,
+            finishReason: agentBackendRun.finishReason,
+            runtimeRunId: agentBackendRun.runtimeRunId,
+            runtimeThreadId: agentBackendRun.runtimeThreadId,
+            usage: agentBackendRun.usage,
+            completion: readiness
+          });
+        }
         emitFinalizingStatus();
         if (isFinalSupplementReintake(payload) && hasAgentIntakeCompleteEvent(baseEvents)) {
             textGate.flush();
@@ -915,12 +1002,23 @@ export function createGenerationService(
           for (const finalEvent of progressiveFinalized.events) {
             emitRuntimeToolEvent(finalEvent);
           }
-          const completed = timeline.event("run_completed", "completed", payload.locale === "zh" ? "运行完成" : "Run completed", payload.locale === "zh" ? "最终内容已生成。" : "Final content is ready.");
-          emitTimeline(completed);
+          const preTerminalEvents = [...baseEvents, ...progressiveFinalized.events, ...timelineEvents.map(timelineEventToToolEvent)];
+          const finishReason = finalFinishReason(agentBackendRun.finishReason, preTerminalEvents);
+          const completion = evaluateRunCompletion({
+            payload,
+            text: progressiveFinalized.text || finalized.text,
+            events: preTerminalEvents,
+            finishReason
+          });
+          emitTimeline(completion.status === "completed"
+            ? timeline.event("run_completed", "completed", payload.locale === "zh" ? "运行完成" : "Run completed", payload.locale === "zh" ? "最终内容已生成。" : "Final content is ready.")
+            : timeline.event("run_incomplete", "waiting", payload.locale === "zh" ? "运行未完成" : "Run incomplete", payload.locale === "zh" ? "当前输出尚未满足完成条件。" : "The current output does not yet satisfy completion requirements.", {
+              completionStatus: completion.status,
+              missingRequirements: completion.missingRequirements
+            }));
           const events = [...baseEvents, ...progressiveFinalized.events, ...timelineEvents.map(timelineEventToToolEvent)];
-          agentPlanOrchestrator.assertPostcondition(threadId, payload, events);
-          agentPlanOrchestrator.complete(threadId, payload, events);
-          const finishReason = finalFinishReason(agentBackendRun.finishReason, events);
+          if (completion.status !== "continue") agentPlanOrchestrator.assertPostcondition(threadId, payload, events);
+          if (completion.status === "completed") agentPlanOrchestrator.complete(threadId, payload, events);
           const recorded = recordGenerationRun({
             storage,
             payload,
@@ -939,7 +1037,8 @@ export function createGenerationService(
             finishReason,
             runtimeRunId: agentBackendRun.runtimeRunId,
             runtimeThreadId: agentBackendRun.runtimeThreadId,
-            usage: agentBackendRun.usage
+            usage: agentBackendRun.usage,
+            completion
           });
           return recorded;
       } else {
@@ -2478,6 +2577,7 @@ async function finalizeProgressiveCanvasDelivery(input: {
     events: input.events,
     existingFileMarkdown: existingFileMarkdown.map((entry) => entry.markdown).filter((markdown): markdown is string => Boolean(markdown))
   });
+  const sources = mergeSourceLinks(content.sources, finalBodyMarkdown ? extractSourceLinks({ text: finalBodyMarkdown, limit: 40 }) : []);
   const processClarificationText = isProcessClarificationText(assistantText);
   const requiresFileDelivery = requiresMarkdownFileDelivery({
     payload: input.payload,
@@ -2492,6 +2592,36 @@ async function finalizeProgressiveCanvasDelivery(input: {
     ? writeFallbackMarkdownDeliverable(input.threadId, input.deliveryId, fallbackMarkdown)
     : undefined;
   const deliveryFilePaths = fallbackFilePath ? [fallbackFilePath] : existingFileMarkdown.map((entry) => entry.filePath);
+  const reusableExistingBodyMarkdown = usableExistingBodyMarkdown(existingBodyMarkdown ?? "");
+  if (!finalBodyMarkdown && !reusableExistingBodyMarkdown && deliveryFilePaths.length === 0) {
+    if (processClarificationText && !hasAgentClarificationEvent(input.events)) {
+      const recovery = processClarificationRecoveryNode(input.payload.locale, input.deliveryId, sources.length);
+      const committed = commitCanvasDelivery(input.storage, input.projectId, {
+        required: true,
+        moduleId: "document_batch",
+        nodes: [recovery],
+        edges: []
+      });
+      for (const item of committed) {
+        emit(timeline.event(
+          "canvas_node_committed",
+          "waiting",
+          item.title,
+          input.payload.locale === "zh" ? `已保留可恢复节点：${item.title}` : `Preserved recoverable node: ${item.title}`,
+          { nodeId: item.nodeId, title: item.title, deliveryId: input.deliveryId, recoverable: true }
+        ));
+      }
+      const recoveryItem = committed[0];
+      if (recoveryItem) {
+        events.push(canvasDeliveryEvent("canvas_delivery_clarification_committed", input.deliveryId, input.payload.locale, recoveryItem, {
+          displayTitle: recoveryItem.title,
+          recoverable: true
+        }));
+      }
+      return { text: processClarificationAssistantText(input.payload.locale), events };
+    }
+    return { text: input.text, events };
+  }
   const availableFilePaths = new Set(deliveryFilePaths);
   let finalFileDocumentSequence = 100;
   if (fallbackFilePath) {
@@ -2592,9 +2722,8 @@ async function finalizeProgressiveCanvasDelivery(input: {
   const overviewTitle = input.payload.locale === "zh" ? "整体概述" : "Overview";
   const bodyTitle = input.payload.locale === "zh" ? "正文" : "Body";
   const referenceTitle = input.payload.locale === "zh" ? "参考文献" : "References";
-  const sources = mergeSourceLinks(content.sources, finalBodyMarkdown ? extractSourceLinks({ text: finalBodyMarkdown, limit: 40 }) : []);
   const bodyMarkdownForCanvas = finalBodyMarkdown
-    || usableExistingBodyMarkdown(existingBodyMarkdown ?? "")
+    || reusableExistingBodyMarkdown
     || unavailableFinalBodySummary(input.payload.locale, sources.length);
   const overviewMarkdownForCanvas = finalBodyMarkdown && content.outlineMarkdown
     ? content.outlineMarkdown
@@ -2900,6 +3029,7 @@ function isProcessOrDeliveryChatter(value: string) {
   if (/need to execute .{0,80}workflow/i.test(text) && /clarify|confirm|question/i.test(text)) return true;
   if (/^(?:document ready|文档已生成|完整 Markdown 已保存|The full Markdown has been saved)\b/i.test(text)) return true;
   if (/^#\s*(?:Document ready|文档已生成)\b/i.test(text)) return true;
+  if (/did not return complete deliverable body content|没有返回可作为最终正文的完整综述内容/i.test(text)) return true;
   return false;
 }
 

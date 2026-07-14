@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { evaluateRunCompletion } from "./completionEvaluator.js";
 import type { GenerateRequest } from "../../contracts/generation.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
@@ -9,6 +10,10 @@ const basePayload: GenerateRequest = {
   locale: "en",
   agentCardId: "chat-agent"
 };
+
+const durableTaskGuardCases = JSON.parse(
+  readFileSync(new URL("../../runtime/agentBackendAdapter/fixtures/durable-task-guard-cases.json", import.meta.url), "utf8")
+) as Array<{ id: string; text: string; hasEvidence: boolean; expectContinuation: boolean }>;
 
 test("completion evaluator completes only when final text exists and blockers are absent", () => {
   const verdict = evaluateRunCompletion({
@@ -20,6 +25,56 @@ test("completion evaluator completes only when final text exists and blockers ar
 
   assert.equal(verdict.status, "completed");
   assert.match(verdict.reasons[0] ?? "", /Final answer exists/);
+});
+
+test("completion evaluator continues AgentBackend runs explicitly marked incomplete", () => {
+  const verdict = evaluateRunCompletion({
+    payload: basePayload,
+    text: "A visible process update.",
+    events: [],
+    finishReason: "agent_backend_incomplete"
+  });
+
+  assert.equal(verdict.status, "continue");
+  assert.match(verdict.missingRequirements.join(" "), /continue/i);
+});
+
+test("completion evaluator applies the shared action-promise fixture only to unevidenced durable tasks", () => {
+  const durablePayload: GenerateRequest = {
+    ...basePayload,
+    chatInstruction: "Research the database and write a verified report",
+    transientSkillRefs: ["database-lookup"],
+    contextValues: {
+      taskHandlingPolicy: { kind: "long_task", canvasDeliveryMode: "progressive", allowPlan: false },
+      progressiveCanvasDelivery: { enabled: true }
+    }
+  };
+
+  for (const fixture of durableTaskGuardCases) {
+    const verdict = evaluateRunCompletion({
+      payload: durablePayload,
+      text: fixture.text,
+      events: fixture.hasEvidence
+        ? [{ eventType: "agent_backend_tool_completed", payload: { toolName: "web_search", toolCallId: fixture.id } }]
+        : [],
+      finishReason: "agent_backend_completed"
+    });
+    assert.equal(verdict.status === "continue", fixture.expectContinuation, fixture.id);
+  }
+});
+
+test("completion evaluator keeps the screenshot action promise ready for simple chat", () => {
+  const screenshotCase = durableTaskGuardCases.find((entry) => entry.id === "zh_screenshot_action_promise");
+  assert.ok(screenshotCase);
+
+  const verdict = evaluateRunCompletion({
+    payload: basePayload,
+    text: screenshotCase.text,
+    events: [],
+    finishReason: "agent_backend_completed"
+  });
+
+  assert.equal(verdict.status, "completed");
 });
 
 test("completion evaluator waits for pending clarification", () => {

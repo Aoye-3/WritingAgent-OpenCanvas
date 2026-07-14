@@ -1,6 +1,7 @@
 import type { GenerateRequest, RunCompletionVerdict } from "../../contracts/generation.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import { containsInternalRuntimeProtocol } from "../../../shared/internalRuntimeProtocol.js";
+import { isProcessClarificationText, resolveTaskHandlingPolicy } from "./taskHandlingPolicy.js";
 
 export function evaluateRunCompletion(input: {
   payload: GenerateRequest;
@@ -30,6 +31,12 @@ export function evaluateRunCompletion(input: {
     return verdict("waiting", reasons, missingRequirements);
   }
 
+  if (input.finishReason === "agent_backend_incomplete") {
+    reasons.push("AgentBackend reported that durable work is incomplete.");
+    missingRequirements.push("Continue the run with the next concrete action or completed deliverable.");
+    return verdict("continue", reasons, missingRequirements);
+  }
+
   if (hasBudgetFinalizationRetryExhausted(events)) {
     reasons.push("The runtime reached a budget gate and could not complete finalization after repeated prompts.");
     missingRequirements.push("Continue finalization from gathered evidence.");
@@ -46,6 +53,18 @@ export function evaluateRunCompletion(input: {
     reasons.push("The final text contains internal runtime protocol.");
     missingRequirements.push("Regenerate a clean user-facing answer.");
     return verdict("failed", reasons, missingRequirements);
+  }
+
+  if (isDurableTask(input.payload) && isNonTerminalProcessReply(text)) {
+    reasons.push("The durable run ended on a process reply instead of a completed deliverable.");
+    missingRequirements.push("Continue the run with substantive work or a structured clarification request.");
+    return verdict("partial", reasons, missingRequirements);
+  }
+
+  if (isDurableTask(input.payload) && !hasRunEvidence(events) && isPureActionPromise(text)) {
+    reasons.push("The durable run ended on an action promise without tool or delivery evidence.");
+    missingRequirements.push("Continue the promised action or provide the substantive completed deliverable.");
+    return verdict("continue", reasons, missingRequirements);
   }
 
   const durableDelivery = hasTerminalDelivery(events);
@@ -184,6 +203,62 @@ function isTerminalDeliveryEvent(eventType: string) {
     || eventType === "canvas_delivery_file_document_committed"
     || /(?:^|_)canvas_(?:mutation|node)_committed$/.test(eventType)
     || /(?:^|_)artifact_committed$/.test(eventType);
+}
+
+function isNonTerminalProcessReply(value: string) {
+  return isProcessClarificationText(value)
+    || /clarification prompt instead of a final body|Agent 返回了需要补充信息的过程话术/i.test(value);
+}
+
+function isDurableTask(payload: GenerateRequest) {
+  if (payload.canvasAction?.requiresTool === true) return true;
+  if (payload.planPhase === "execution" || payload.planGeneration?.phase === "execution") return true;
+  if (payload.orchestrationPolicy?.deliveryPolicy === "canvas_required") return true;
+  const policy = resolveTaskHandlingPolicy({
+    payload,
+    transientSkillCount: payload.transientSkillRefs?.length ?? 0,
+    thinkingMode: payload.modelOverrides?.thinkingMode
+  });
+  return policy.kind === "long_task" || policy.kind === "plan_execution" || policy.kind === "explicit_canvas";
+}
+
+function hasRunEvidence(events: ToolEventRecord[]) {
+  return events.some((event) => {
+    const payload = record(event.payload);
+    const eventType = string(payload.eventType) || string(payload.type) || event.eventType;
+    return /(?:^|_)tool_(?:completed|failed)$/.test(event.eventType)
+      || /(?:^|_)canvas_(?:mutation|node)_committed$/.test(eventType)
+      || /^canvas_delivery_(?:research|body_checkpoint|body_final|file_document)_committed$/.test(eventType)
+      || /(?:^|_)artifact_(?:staged|committed)$/.test(eventType);
+  });
+}
+
+function isPureActionPromise(value: string) {
+  const sentences = visibleSentences(value);
+  while (sentences.length && isAcknowledgementOnly(sentences[0]!)) sentences.shift();
+  return sentences.length > 0 && sentences.every(isPureActionClause);
+}
+
+function visibleSentences(value: string) {
+  return value
+    .split(/\r?\n/)
+    .flatMap((line) => line.match(/[^.!?。！？]+(?:[.!?。！？]+|$)/g) ?? [])
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+}
+
+function isAcknowledgementOnly(value: string) {
+  const text = value.replace(/[\s,.!?，。！？]+$/g, "").trim();
+  return Boolean(text) && /^(?:(?:okay|ok|understood|got it|sure|all right|好的?|明白了?|收到|可以)\s*(?:[,，、]\s*)?)+$/i.test(text);
+}
+
+function isPureActionClause(value: string) {
+  const text = value.replace(/\s+/g, " ").trim();
+  const actionPrefix = /^(?:(?:let me|i(?:['’]ll| will)|we(?:['’]ll| will)|next|then)\b|(?:让我|我将|我会|我来|接下来|下一步))/i;
+  const actionVerb = /(?:\b(?:start|begin|load|search|check|fetch|query|research|retrieve|inspect|read|write|create|generate|run|analy[sz]e|synthesize|compile|proceed|continue|implement|do)\b|(?:开始|加载|检索|搜索|查询|查找|读取|分析|生成|编写|创建|执行|整理|汇总|综合|继续|推进|实施|实现|处理|做))/i;
+  const resultStructure = /[:：]|(?:^|\s)(?:[-*•]|\d+[.)、])\s+/;
+  const conclusion = /(?:\b(?:because|therefore|thus|hence|consequently)\b|\bas a result\b|(?:^|[,;])\s*so\b|\b(?:i|we)\s+recommend\b|\b(?:the|my|our)\s+(?:answer|result|conclusion|recommendation|correct fix)\s+is\b|因为|因此|所以|因而|结论|结果是|答案是|我建议)/i;
+  return actionPrefix.test(text) && actionVerb.test(text) && !resultStructure.test(text) && !conclusion.test(text);
 }
 
 function hasTodoCompletionReminderCap(events: ToolEventRecord[]) {

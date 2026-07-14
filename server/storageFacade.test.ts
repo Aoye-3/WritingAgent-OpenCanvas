@@ -54,6 +54,39 @@ test("storage facade records thread runs, messages, versions, events, projects, 
   assert.equal(await storage.hardDeleteThread(threadId), true);
 });
 
+test("storage facade persists run status from the decided completion verdict", async () => {
+  const storage = await createStorage();
+  const threadId = `thread_completion_status_${Date.now()}`;
+  const agentCard = agentCards[0];
+  await storage.ensureThread(threadId, agentCard.id);
+
+  const saved = storage.recordRun({
+    threadId,
+    agentCardId: agentCard.id,
+    mode: "chat",
+    prompt: "Continue durable work",
+    output: "I will continue working now.",
+    provider: "agent-backend",
+    usedMock: false,
+    finishReason: "agent_backend_completed",
+    completion: {
+      status: "continue",
+      reasons: ["The durable run ended on an action promise."],
+      missingRequirements: ["Continue with concrete work."],
+      evaluatedAt: new Date().toISOString()
+    }
+  });
+
+  const db = (storage as unknown as {
+    db: { prepare: (sql: string) => { get: (...params: unknown[]) => unknown } };
+  }).db;
+  const row = db.prepare("SELECT status FROM runs WHERE id = ?").get(saved.runId) as { status: string };
+  assert.equal(row.status, "incomplete");
+  assert.ok(storage.listToolEvents(threadId).some((event) => event.eventType === "run_incomplete"));
+  assert.equal(storage.moveThreadToTrash(threadId), true);
+  assert.equal(await storage.hardDeleteThread(threadId), true);
+});
+
 test("storage facade stores runtime resume context when clarification events duplicate", async () => {
   const storage = await createStorage();
   const threadId = `thread_runtime_resume_${Date.now()}`;

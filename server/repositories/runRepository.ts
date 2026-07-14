@@ -22,8 +22,14 @@ export class RunRepository {
     const promptVersionId = randomId("prompt");
     const outputVersionId = randomId("output");
     const now = nowIso();
-    const status = input.finishReason === "clarification_required" ? "waiting" : input.errorMessage ? "failed" : "completed";
-    const lifecycleEventType = status === "waiting" ? "run_waiting" : status === "failed" ? "run_failed" : "run_completed";
+    const status = persistedRunStatus(input);
+    const lifecycleEventType = status === "waiting"
+      ? "run_waiting"
+      : status === "failed"
+        ? "run_failed"
+        : status === "completed"
+          ? "run_completed"
+          : "run_incomplete";
     const events = dedupeToolEvents(input.events ?? []);
 
     this.deps.withTransaction(() => {
@@ -55,7 +61,8 @@ export class RunRepository {
         finishReason: input.finishReason,
         runtimeRunId: input.runtimeRunId,
         runtimeThreadId: input.runtimeThreadId,
-        usage: input.usage
+        usage: input.usage,
+        completion: input.completion
       }, now);
       this.recordToolEvent(input.threadId, runId, "prompt_built", { promptVersionId }, now);
       this.recordToolEvent(input.threadId, runId, "output_version_created", { outputVersionId }, now);
@@ -347,6 +354,17 @@ export class RunRepository {
       )
       .run(id, threadId, runId, question, JSON.stringify(options), JSON.stringify(resumeContext), resumeState, existingCreatedAt?.createdAt ?? createdAt, createdAt);
   }
+}
+
+function persistedRunStatus(input: RunRecordInput) {
+  if (!input.completion) {
+    return input.finishReason === "clarification_required" ? "waiting" : input.errorMessage ? "failed" : "completed";
+  }
+  if (input.completion.status === "completed") return "completed";
+  if (input.completion.status === "waiting") return "waiting";
+  if (input.completion.status === "partial") return "partial";
+  if (input.completion.status === "failed") return "failed";
+  return "incomplete";
 }
 
 function dedupeToolEvents(events: Array<{ eventType: string; payload: unknown }>) {

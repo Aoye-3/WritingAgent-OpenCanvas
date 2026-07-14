@@ -1,4 +1,4 @@
-import type { GenerateRequest, GenerateResponse } from "../../contracts/generation.js";
+import type { GenerateRequest, GenerateResponse, RunCompletionVerdict } from "../../contracts/generation.js";
 import type { SQLiteStorageRepository } from "../../storage.js";
 import type { Provider } from "../../types.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
@@ -27,10 +27,11 @@ export type RecordRunInput = {
   runtimeThreadId?: string;
   usage?: unknown;
   errorMessage?: string;
+  completion?: RunCompletionVerdict;
 };
 
 export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
-  const completion = evaluateRunCompletion({
+  const completion = input.completion ?? evaluateRunCompletion({
     payload: input.payload,
     text: input.text,
     events: input.events,
@@ -57,7 +58,8 @@ export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
     runtimeRunId: input.runtimeRunId,
     runtimeThreadId: input.runtimeThreadId,
     resumedClarificationId: resumedClarificationId(input.payload),
-    usage: input.usage
+    usage: input.usage,
+    completion
   });
   const policy = input.payload.orchestrationPolicy;
   if (!input.usedMock && policy?.trigger === "ordinary" && policy.mode !== "managed_plan" && !input.payload.canvasAction) {

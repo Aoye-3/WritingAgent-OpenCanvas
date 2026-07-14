@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { agentCards, defaultAgentSettings } from "../agentCards.js";
@@ -11,6 +12,10 @@ import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
 import type { KnowledgeSearchInput } from "../knowledge/service.js";
 import type { ToolEventRecord } from "../toolRuntime.js";
 import type { AgentRuntimePort } from "../runtime/agentRuntimePort.js";
+
+const durableTaskGuardCases = JSON.parse(
+  readFileSync(new URL("../runtime/agentBackendAdapter/fixtures/durable-task-guard-cases.json", import.meta.url), "utf8")
+) as Array<{ id: string; text: string; hasEvidence: boolean; expectContinuation: boolean }>;
 
 function runtimeConfig(): AgentRuntimeConfig {
   const agentCard = agentCards[0];
@@ -679,6 +684,120 @@ test("non-stream Plan execution commits progressive Canvas delivery before compl
   assert.equal(researchEvent.payload.bodyDraftWriteLimit, 2);
   assert.equal(researchEvent.payload.evidenceToolLimit, 8);
   assert.equal(researchEvent.payload.nextPhaseHint, "body_checkpoint");
+});
+
+test("non-stream incomplete AgentBackend output remains visible without terminal side effects", async () => {
+  const screenshotCase = durableTaskGuardCases.find((entry) => entry.id === "zh_screenshot_action_promise");
+  assert.ok(screenshotCase);
+  const { storage, planState, canvasNodes, records } = fakeStorage();
+  Object.assign(planState, {
+    projectId: "project_test",
+    threadId: "thread_test",
+    status: "running",
+    approval: "approved",
+    currentStepId: "step_1",
+    executionVersion: 1,
+    steps: [{ id: "step_1", title: "Deliver research", status: "pending", attempt: 0 }],
+    artifacts: []
+  });
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: screenshotCase.text,
+        finishReason: "agent_backend_incomplete",
+        events: []
+      })
+    }
+  });
+
+  const result = await service.generateAndRecord({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "chat-agent",
+    chatInstruction: "Continue approved plan plan_intake_test. Execute only step step_1.",
+    planPhase: "execution",
+    planId: "plan_intake_test",
+    stepId: "step_1",
+    planGeneration: { phase: "execution", planId: "plan_intake_test", stepId: "step_1", phaseAttemptId: "exec_incomplete" },
+    contextValues: {
+      planExecution: { planId: "plan_intake_test", stepId: "step_1" },
+      canvas: { workflow: { mode: "batch_delivery" } }
+    }
+  });
+
+  const record = records[0] as { output: string; completion?: { status?: string }; events?: ToolEventRecord[] };
+  assert.equal(result.text, screenshotCase.text);
+  assert.equal(result.completion?.status, "continue");
+  assert.equal(record.output, screenshotCase.text);
+  assert.equal(record.completion?.status, "continue");
+  assert.notEqual((planState.steps as Array<{ status: string }>)[0]?.status, "completed");
+  assert.notEqual(planState.status, "completed");
+  assert.equal(canvasNodes.some((node) => (node.metadata as { status?: string } | undefined)?.status === "final"), false);
+  assert.equal(record.events?.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
+  assert.equal(record.events?.some((event) => event.eventType === "run_timeline_run_completed"), false);
+  assert.ok(record.events?.some((event) => event.eventType === "run_timeline_run_incomplete"));
+});
+
+test("streaming incomplete AgentBackend output skips Canvas finalization and run completion", async () => {
+  const screenshotCase = durableTaskGuardCases.find((entry) => entry.id === "zh_screenshot_action_promise");
+  assert.ok(screenshotCase);
+  const { storage, planState, canvasNodes, records } = fakeStorage();
+  Object.assign(planState, {
+    projectId: "project_test",
+    threadId: "thread_test",
+    status: "running",
+    approval: "approved",
+    currentStepId: "step_1",
+    executionVersion: 1,
+    steps: [{ id: "step_1", title: "Deliver research", status: "pending", attempt: 0 }],
+    artifacts: []
+  });
+  const timelineEvents: Array<{ eventType: string }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToken?.(screenshotCase.text);
+        return {
+          text: screenshotCase.text,
+          finishReason: "agent_backend_incomplete",
+          events: []
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    agentCardId: "chat-agent",
+    chatInstruction: "Continue approved plan plan_intake_test. Execute only step step_1.",
+    planPhase: "execution",
+    planId: "plan_intake_test",
+    stepId: "step_1",
+    planGeneration: { phase: "execution", planId: "plan_intake_test", stepId: "step_1", phaseAttemptId: "exec_stream_incomplete" },
+    contextValues: {
+      planExecution: { planId: "plan_intake_test", stepId: "step_1" },
+      canvas: { workflow: { mode: "batch_delivery" } }
+    }
+  }, {
+    onTimelineEvent: (event) => timelineEvents.push(event)
+  });
+
+  const record = records[0] as { output: string; completion?: { status?: string }; events?: ToolEventRecord[] };
+  assert.equal(result.text, screenshotCase.text);
+  assert.equal(result.completion?.status, "continue");
+  assert.equal(record.output, screenshotCase.text);
+  assert.equal(record.completion?.status, "continue");
+  assert.notEqual((planState.steps as Array<{ status: string }>)[0]?.status, "completed");
+  assert.notEqual(planState.status, "completed");
+  assert.equal(canvasNodes.some((node) => (node.metadata as { status?: string } | undefined)?.status === "final"), false);
+  assert.equal(timelineEvents.some((event) => event.eventType === "run_completed"), false);
+  assert.ok(timelineEvents.some((event) => event.eventType === "run_incomplete"));
+  assert.equal(record.events?.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
 });
 
 test("direct Canvas delivery treats process clarification text as recoverable output", async () => {
@@ -3498,7 +3617,7 @@ test("progressive Canvas filters raw tool output from progress and final body no
   }
 });
 
-test("progressive Canvas treats process clarification text as recoverable output, not failure", async () => {
+test("progressive Canvas keeps process clarification text non-terminal", async () => {
   const { storage, canvasNodes, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
@@ -3535,15 +3654,11 @@ test("progressive Canvas treats process clarification text as recoverable output
   });
 
   assert.equal(records.length, 1);
-  assert.equal(result.text.includes("clarify"), false);
-  const body = canvasNodes.find((node) => node.title === "Body");
-  assert.ok(body);
-  assert.equal(String(body.content).includes("clarify"), false);
-  assert.ok(String(body.content).includes("did not return complete deliverable body content"));
-  const recovery = canvasNodes.find((node) => node.title === "Clarification needed");
-  assert.ok(recovery);
-  assert.equal(String(recovery.content).includes("clarify"), false);
-  assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_final_committed"));
+  assert.equal(result.completion?.status, "partial");
+  assert.equal(canvasNodes.some((node) => (node.metadata as { status?: string } | undefined)?.status === "final"), false);
+  assert.equal(events.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
+  const record = records[0] as { events?: ToolEventRecord[] };
+  assert.ok(record.events?.some((event) => event.eventType === "run_timeline_run_incomplete"));
   assert.equal(events.some((event) => event.eventType === "canvas_delivery_failed_summary_committed"), false);
 });
 

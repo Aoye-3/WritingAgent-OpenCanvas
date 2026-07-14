@@ -2,6 +2,7 @@ import type { CanvasWorkflowMode, CanvasWorkflowRole, CanvasWorkflowStage, Canva
 import type { ClaimCandidate, ClaimSourceAnchor, ClaimStatus, CreateClaimFromSelectionInput, ExtractClaimsInput, UpdateClaimInput } from "../shared/claimReview.js";
 import type { Provider } from "./types.js";
 import type { ToolEventRecord } from "./toolRuntime.js";
+import type { RunCompletionVerdict } from "./contracts/generation.js";
 
 export type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
@@ -25,6 +26,7 @@ export type RunRecordInput = {
   runtimeThreadId?: string;
   resumedClarificationId?: string;
   usage?: unknown;
+  completion?: RunCompletionVerdict;
 };
 
 export type StoredMessage = {
