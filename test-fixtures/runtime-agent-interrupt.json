@@ -1,0 +1,30 @@
+{
+  "event": "interrupt",
+  "data": {
+    "type": "agent_interrupt",
+    "run_id": "runtime_run_1",
+    "thread_id": "thread_1",
+    "checkpoint_id": "checkpoint_1",
+    "interrupts": [
+      {
+        "id": "interrupt_1",
+        "value": {
+          "type": "agent_clarification_requested",
+          "question": "Which scope?",
+          "options": [
+            {
+              "id": "recent",
+              "label": "Recent",
+              "detail": "Focus on recent papers"
+            },
+            {
+              "id": "broad",
+              "label": "Broad",
+              "detail": "Scan the full field"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

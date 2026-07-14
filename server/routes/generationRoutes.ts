@@ -217,7 +217,7 @@ function wakePlanExecutionIfReady(
 }
 
 function generationErrorStatus(code: GenerationError["code"]) {
-  if (code === "model_required" || code === "model_not_ready") return 409;
+  if (code === "model_required" || code === "model_not_ready" || code.startsWith("clarification_")) return 409;
   if (code === "runtime_auth_failed") return 401;
   return 503;
 }

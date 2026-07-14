@@ -6,6 +6,7 @@ import {
   agentClarificationFromRecord,
   buildAgentClarificationSubmission,
   hasUnresolvedAgentClarificationTrace,
+  latestActiveAgentClarificationResume,
   latestPendingAgentClarification,
   mergeAgentClarificationDisplayRecords,
   removeOptimisticAgentClarification,
@@ -156,6 +157,102 @@ test("failed Agent clarification send removes submitted keys and optimistic reco
 
   assert.deepEqual([...removeSubmittedAgentClarificationKeys(keys, ["id:agent_clarification_scope", "question:which agent scope?"])].sort(), ["keep"]);
   assert.deepEqual(removeOptimisticAgentClarification([optimistic, other], optimistic), [other]);
+});
+
+test("persisted failed resume reuses the saved answer without reopening choices", async () => {
+  const drawerModule = await import("../../src/features/workspace/components/AICollaborationDrawer");
+  const buildRetry = (drawerModule as Record<string, unknown>).buildAgentClarificationRetrySubmission;
+  assert.equal(typeof buildRetry, "function");
+
+  const clarification = {
+    id: "agent_clarification_time",
+    threadId: "thread_1",
+    runId: "run_1",
+    status: "answered",
+    resumeState: "failed",
+    resumeAttempts: 1,
+    resumeError: "runtime_unavailable",
+    question: "Which time range?",
+    options: [
+      { id: "recent_3", label: "Recent 3 years", detail: "2023-2026", recommended: true },
+      { id: "recent_5", label: "Recent 5 years", detail: "2021-2026", recommended: false }
+    ],
+    resumeContext: {
+      originalInstruction: "Review Agent literature.",
+      transientSkillRefs: ["literature-review"],
+      disabledSkillRefs: [],
+      runtimeResume: {
+        runtimeThreadId: "runtime_thread_1",
+        runtimeRunId: "runtime_run_1",
+        interruptId: "interrupt_1",
+        checkpointId: "checkpoint_1"
+      },
+      canvas: {}
+    },
+    selectedOptionId: "recent_3",
+    selectedOptionLabel: "Recent 3 years",
+    answer: "Recent 3 years",
+    createdAt: "2026-06-24T00:00:00.000Z",
+    updatedAt: "2026-06-24T00:00:02.000Z"
+  } as AgentClarification;
+
+  const submission = (buildRetry as (input: Record<string, unknown>) => ReturnType<typeof buildAgentClarificationSubmission>)({
+    clarification,
+    currentThreadId: "thread_1",
+    enabledSkillRefs: [],
+    disabledSkillRefs: [],
+    runtimeBudgetProfile: "medium"
+  });
+
+  assert.equal(submission?.optimisticClarification.answer, "Recent 3 years");
+  assert.equal(submission?.requestContext.agentClarification.clarificationId, "agent_clarification_time");
+  assert.equal(submission?.requestContext.agentClarification.requiresRuntimeResume, true);
+  assert.equal(submission?.requestContext.agentClarification.resumeContext.runtimeResume.checkpointId, "checkpoint_1");
+});
+
+test("active generation hides a transitional clarification resume card", () => {
+  const clarification = {
+    id: "agent_clarification_structure",
+    threadId: "thread_1",
+    runId: "run_1",
+    status: "answered",
+    resumeState: "resuming",
+    resumeAttempts: 1,
+    question: "Which output structure?",
+    options: [],
+    answer: "Structured literature list",
+    createdAt: "2026-06-24T00:00:00.000Z",
+    updatedAt: "2026-06-24T00:00:02.000Z"
+  } as AgentClarification;
+  const visibleResume = latestActiveAgentClarificationResume as (
+    clarifications: AgentClarification[],
+    isSending: boolean
+  ) => AgentClarification | undefined;
+
+  assert.equal(visibleResume([clarification], true), undefined);
+  assert.equal(visibleResume([clarification], false)?.id, clarification.id);
+});
+
+test("active generation keeps a failed clarification resume actionable", () => {
+  const clarification = {
+    id: "agent_clarification_structure",
+    threadId: "thread_1",
+    runId: "run_1",
+    status: "answered",
+    resumeState: "failed",
+    resumeAttempts: 1,
+    question: "Which output structure?",
+    options: [],
+    answer: "Structured literature list",
+    createdAt: "2026-06-24T00:00:00.000Z",
+    updatedAt: "2026-06-24T00:00:02.000Z"
+  } as AgentClarification;
+  const visibleResume = latestActiveAgentClarificationResume as (
+    clarifications: AgentClarification[],
+    isSending: boolean
+  ) => AgentClarification | undefined;
+
+  assert.equal(visibleResume([clarification], true)?.id, clarification.id);
 });
 
 test("answering one Agent clarification does not suppress a later different clarification", () => {

@@ -4,12 +4,12 @@ import { DatabaseSync } from "node:sqlite";
 import { migrateStorageSchema } from "./db/schema.js";
 import { createStorage } from "./storage.js";
 
-test("schema v16 uses independent Project data domains plus Claim candidates, AgentPlan metadata, and run idempotency", () => {
+test("schema v18 uses independent Project data domains plus durable clarification resume state", () => {
   const db = new DatabaseSync(":memory:");
   migrateStorageSchema(db);
 
   const version = db.prepare(`SELECT MAX(version) as version FROM schema_version`).get() as { version: number };
-  assert.equal(version.version, 16);
+  assert.equal(version.version, 18);
   assert.equal(tableExists(db, "plan_runs"), true);
   assert.equal(tableExists(db, "plan_executions"), true);
   assert.equal(tableExists(db, "run_activities"), true);
@@ -39,6 +39,10 @@ test("schema v16 uses independent Project data domains plus Claim candidates, Ag
   assert.equal(columnNames(db, "claim_candidates").includes("canvas_node_id"), true);
   assert.equal(columnNames(db, "agent_clarifications").includes("resume_context_json"), true);
   assert.equal(columnNames(db, "agent_clarifications").includes("status"), true);
+  assert.equal(columnNames(db, "agent_clarifications").includes("resume_state"), true);
+  assert.equal(columnNames(db, "agent_clarifications").includes("resume_attempts"), true);
+  assert.equal(columnNames(db, "agent_clarifications").includes("last_resume_error"), true);
+  assert.equal(columnNames(db, "agent_clarifications").includes("resumed_runtime_run_id"), true);
   assert.equal(columnNames(db, "threads").includes("agent_card_id"), false);
   assert.equal(columnNames(db, "threads").includes("context_reset_at"), true);
   for (const table of ["canvas_nodes", "canvas_edges", "canvas_objects", "canvas_workflows", "canvas_workflow_suggestions", "canvas_write_requests"]) {

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from langgraph.types import Interrupt
+
 
 def serialize_lc_object(obj: Any) -> Any:
     """Recursively serialize a LangChain object to a JSON-serialisable dict."""
@@ -23,6 +25,11 @@ def serialize_lc_object(obj: Any) -> Any:
         return {k: serialize_lc_object(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [serialize_lc_object(item) for item in obj]
+    if isinstance(obj, Interrupt):
+        return {
+            "id": obj.id,
+            "value": serialize_lc_object(obj.value),
+        }
     # Pydantic v2
     if hasattr(obj, "model_dump"):
         try:

@@ -321,6 +321,54 @@ test("forwards ask_clarification for transient skill runs", async () => {
   assert.ok(allowedToolRefs.includes("ask_clarification"));
 });
 
+test("removes ask_clarification after transient skill intake enters execution", async () => {
+  let allowedToolRefs: string[] = [];
+  await runAgentBackendGeneration({
+    payload: {
+      mode: "chat",
+      locale: "en",
+      threadId: "thread_1",
+      chatInstruction: "Review recent agent literature",
+      transientSkillRefs: ["literature-review"],
+      contextValues: {
+        agentIntake: { phase: "execution", completed: true }
+      }
+    },
+    threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "model_1",
+    modelSettings: {
+      configuredModelApiId: "model_1",
+      providerId: "deepseek",
+      model: "deepseek-chat",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: true,
+      toolCallMode: "auto",
+      maxToolCalls: 20
+    },
+    runtimeConfig: { enabledTools: ["web_search"], agentCard: {}, settings: {} } as never,
+    messages: [],
+    prompt: "prompt"
+  }, {
+    getRuntimeConfig: () => ({ enabled: true } as never),
+    runAgent: async (input) => {
+      allowedToolRefs = input.allowedToolRefs ?? [];
+      return {
+        text: "Done",
+        finishReason: "agent_backend_completed",
+        events: []
+      };
+    }
+  });
+
+  assert.equal(allowedToolRefs.includes("ask_clarification"), false);
+  assert.equal(allowedToolRefs.includes("web_search"), true);
+});
+
 test("keeps ordinary clarification intake ask-only after one answered round", async () => {
   let allowedToolRefs: string[] = [];
   let agentIntake: unknown;
@@ -746,6 +794,68 @@ test("resumes AgentBackend run when answering a runtime-backed agent clarificati
     option: { id: "recent", label: "Use recent sources", detail: "Prefer last 12 months" }
   });
   assert.equal(result?.text, "Resumed");
+});
+
+test("retries a checkpoint resume once only when the failure occurred before streaming", async () => {
+  let resumeCalls = 0;
+  let freshRunCalled = false;
+  const result = await runAgentBackendGeneration({
+    payload: {
+      mode: "chat",
+      locale: "en",
+      threadId: "facet_thread_1",
+      contextValues: {
+        agentClarification: {
+          requiresRuntimeResume: true,
+          clarificationId: "clarification_1",
+          answer: "Recent sources",
+          resumeContext: {
+            runtimeResume: {
+              runtimeThreadId: "runtime_thread_1",
+              runtimeRunId: "runtime_run_1",
+              interruptId: "interrupt_1"
+            }
+          }
+        }
+      }
+    },
+    threadId: "facet_thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "model_1",
+    modelSettings: {
+      configuredModelApiId: "model_1",
+      providerId: "deepseek",
+      model: "deepseek-chat",
+      temperature: 0.7,
+      topP: 1,
+      contextCount: 5,
+      maxTokens: 2000,
+      maxTokensEnabled: false,
+      streaming: true,
+      toolCallMode: "auto",
+      maxToolCalls: 20
+    },
+    runtimeConfig: { enabledTools: [], agentCard: {}, settings: {} } as never,
+    messages: [],
+    prompt: "prompt"
+  }, {
+    getRuntimeConfig: () => ({ enabled: true } as never),
+    runAgent: async () => {
+      freshRunCalled = true;
+      return { text: "wrong", finishReason: "agent_backend_completed", events: [] };
+    },
+    resumeRun: async () => {
+      resumeCalls += 1;
+      if (resumeCalls === 1) {
+        throw Object.assign(new Error("runtime returned 503 before stream"), { retryableBeforeStream: true });
+      }
+      return { text: "Resumed after retry", finishReason: "agent_backend_completed", events: [] };
+    }
+  });
+
+  assert.equal(resumeCalls, 2);
+  assert.equal(freshRunCalled, false);
+  assert.equal(result?.text, "Resumed after retry");
 });
 
 test("rejects explicit runtime resume clarification answers that lack metadata", async () => {

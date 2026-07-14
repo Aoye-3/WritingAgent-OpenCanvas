@@ -697,6 +697,23 @@ export function migrateStorageSchema(db: DatabaseSync) {
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_thread_client_request ON runs(thread_id, client_request_id) WHERE client_request_id IS NOT NULL`);
     db.exec(`INSERT INTO schema_version (version, applied_at) VALUES (16, datetime('now'))`);
   }
+
+  const version18 = db.prepare(`SELECT version FROM schema_version WHERE version = 18`).get();
+  if (!version18) {
+    if (!columnExists(db, "agent_clarifications", "resume_state")) {
+      db.exec(`ALTER TABLE agent_clarifications ADD COLUMN resume_state TEXT NOT NULL DEFAULT 'not_resumable'`);
+    }
+    if (!columnExists(db, "agent_clarifications", "resume_attempts")) {
+      db.exec(`ALTER TABLE agent_clarifications ADD COLUMN resume_attempts INTEGER NOT NULL DEFAULT 0`);
+    }
+    if (!columnExists(db, "agent_clarifications", "last_resume_error")) {
+      db.exec(`ALTER TABLE agent_clarifications ADD COLUMN last_resume_error TEXT`);
+    }
+    if (!columnExists(db, "agent_clarifications", "resumed_runtime_run_id")) {
+      db.exec(`ALTER TABLE agent_clarifications ADD COLUMN resumed_runtime_run_id TEXT`);
+    }
+    db.exec(`INSERT INTO schema_version (version, applied_at) VALUES (18, datetime('now'))`);
+  }
 }
 
 function columnExists(db: DatabaseSync, table: string, column: string) {

@@ -8,7 +8,10 @@ export type ApiErrorCode =
   | "model_required"
   | "model_not_ready"
   | "runtime_unavailable"
-  | "runtime_auth_failed";
+  | "runtime_auth_failed"
+  | "clarification_answer_conflict"
+  | "clarification_resume_metadata_missing"
+  | "clarification_resume_in_progress";
 
 export function sendOk<T>(response: Response, payload: T) {
   response.json(payload);

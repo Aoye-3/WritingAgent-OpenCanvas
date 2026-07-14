@@ -33,7 +33,9 @@ test("pending Plan clarification is rendered in a floating composer-adjacent pan
   assert.match(source, /planPanelCollapsed/);
   assert.match(source, /setPlanPanelCollapsed/);
   assert.match(source, /variant="composer"/);
-  assert.match(source, /pendingClarificationPlan \|\| pendingAgentClarification \|\| pendingFinalSupplement \? null : \(/);
+  assert.match(source, /pendingClarificationPlan \|\| pendingAgentClarification \|\| activeAgentClarificationResume \|\| pendingFinalSupplement \? null : \(/);
+  assert.match(source, /agent-clarification-resume-card/);
+  assert.match(source, /Retry resume/);
   assert.match(source, /<AIComposer/);
 });
 

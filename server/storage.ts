@@ -744,6 +744,18 @@ export class SQLiteStorageRepository {
     return this.runs.answerAgentClarification(threadId, clarificationId, input);
   }
 
+  queueAgentClarificationAnswer(threadId: string, clarificationId: string, input: { selectedOptionId?: string; selectedOptionLabel?: string; answer?: string }) {
+    return this.runs.queueAgentClarificationAnswer(threadId, clarificationId, input);
+  }
+
+  claimAgentClarificationResume(threadId: string, clarificationId: string) {
+    return this.runs.claimAgentClarificationResume(threadId, clarificationId);
+  }
+
+  failAgentClarificationResume(threadId: string, clarificationId: string, error: string) {
+    return this.runs.failAgentClarificationResume(threadId, clarificationId, error);
+  }
+
   recordToolEvent(threadId: string, runId: string, eventType: string, payload: JsonValue, createdAt = nowIso()) {
     this.runs.recordToolEvent(threadId, runId, eventType, payload, createdAt);
   }

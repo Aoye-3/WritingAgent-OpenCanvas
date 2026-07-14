@@ -204,6 +204,40 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
         Object.assign(clarification, input, { status: "answered" });
         return true;
       },
+      queueAgentClarificationAnswer: (_threadId: string, clarificationId: string, input: Record<string, unknown>) => {
+        const clarification = agentClarifications.find((item) => item.id === clarificationId);
+        if (!clarification) return { outcome: "not_found" };
+        if (clarification.status === "answered") {
+          const same = clarification.selectedOptionId === input.selectedOptionId
+            && clarification.selectedOptionLabel === input.selectedOptionLabel
+            && clarification.answer === input.answer;
+          if (!same) return { outcome: "conflict", clarification };
+          if (clarification.resumeState !== "failed") return { outcome: "idempotent", clarification };
+        }
+        const resumeContext = clarification.resumeContext as Record<string, unknown> | undefined;
+        const runtimeResume = resumeContext?.runtimeResume as Record<string, unknown> | undefined;
+        const resumable = Boolean(runtimeResume?.runtimeThreadId && runtimeResume.runtimeRunId && runtimeResume.interruptId);
+        Object.assign(clarification, input, {
+          status: "answered",
+          resumeState: resumable ? "queued" : "not_resumable",
+          resumeError: undefined
+        });
+        return { outcome: resumable ? "queued" : "not_resumable", clarification };
+      },
+      claimAgentClarificationResume: (_threadId: string, clarificationId: string) => {
+        const clarification = agentClarifications.find((item) => item.id === clarificationId);
+        if (!clarification || clarification.resumeState !== "queued") return false;
+        clarification.resumeState = "resuming";
+        clarification.resumeAttempts = Number(clarification.resumeAttempts ?? 0) + 1;
+        return true;
+      },
+      failAgentClarificationResume: (_threadId: string, clarificationId: string, error: string) => {
+        const clarification = agentClarifications.find((item) => item.id === clarificationId);
+        if (!clarification || clarification.resumeState !== "resuming") return false;
+        clarification.resumeState = "failed";
+        clarification.resumeError = error;
+        return true;
+      },
       listCanvasNodes: () => canvasNodes,
       listCanvasEdges: () => canvasEdges,
       createCanvasNode: (_projectId: string, input: Record<string, unknown>) => {
@@ -225,6 +259,15 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
       recordRun: (input: unknown) => {
         records.push(input);
         const record = input as { events?: Array<{ eventType: string; payload: Record<string, unknown> }> };
+        const resumedClarificationId = (input as { resumedClarificationId?: string }).resumedClarificationId;
+        if (resumedClarificationId) {
+          const clarification = agentClarifications.find((item) => item.id === resumedClarificationId);
+          if (clarification?.resumeState === "resuming") {
+            clarification.resumeState = (input as { errorMessage?: string }).errorMessage ? "failed" : "succeeded";
+            clarification.resumeError = (input as { errorMessage?: string }).errorMessage;
+            clarification.resumedRuntimeRunId = (input as { runtimeRunId?: string }).runtimeRunId;
+          }
+        }
         for (const event of record.events ?? []) {
           const payload = event.payload ?? {};
           if (event.eventType !== "agent_backend_agent_clarification_requested" && payload.type !== "agent_clarification_requested") continue;
@@ -233,7 +276,9 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
             status: "pending",
             question: payload.question,
             options: payload.options,
-            resumeContext: payload.resumeContext ?? {}
+            resumeContext: payload.resumeContext ?? {},
+            resumeState: (payload.resumeContext as Record<string, unknown> | undefined)?.runtimeResume ? "awaiting_answer" : "not_resumable",
+            resumeAttempts: 0
           });
         }
         return { runId: `run_${records.length}`, promptVersionId: "prompt_1", outputVersionId: "output_1" };
@@ -1191,6 +1236,144 @@ test("clarification dedupe preserves runtime resume metadata for storage", async
   });
 });
 
+test("persisted clarification metadata resumes the checkpoint and retains the answer on failure", async () => {
+  const { storage, agentClarifications } = fakeStorage();
+  agentClarifications.push({
+    id: "clarification_1",
+    threadId: "thread_test",
+    runId: "run_waiting",
+    status: "pending",
+    question: "Which scope should I use?",
+    options: [
+      { id: "recent", label: "Recent sources", detail: "Use the last 12 months", recommended: true },
+      { id: "broad", label: "Broad scan", detail: "Cover the full field" }
+    ],
+    resumeContext: {
+      originalInstruction: "Review agent literature",
+      transientSkillRefs: [],
+      disabledSkillRefs: [],
+      canvas: {},
+      runtimeResume: {
+        runtimeThreadId: "runtime_thread_1",
+        runtimeRunId: "runtime_run_1",
+        interruptId: "interrupt_1",
+        checkpointId: "checkpoint_1"
+      }
+    },
+    resumeState: "awaiting_answer",
+    resumeAttempts: 0
+  });
+  let freshRunCalled = false;
+  let resumeRunCalled = false;
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => {
+        freshRunCalled = true;
+        throw new Error("fresh run must not be used for a persisted clarification answer");
+      },
+      resumeRun: async (input) => {
+        resumeRunCalled = true;
+        assert.equal(input.threadId, "runtime_thread_1");
+        assert.equal(input.resumeOfRunId, "runtime_run_1");
+        assert.equal(input.interruptId, "interrupt_1");
+        assert.equal(input.checkpointId, "checkpoint_1");
+        throw new Error("runtime unavailable");
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "Review agent literature\n\nSelected clarification: Recent sources",
+    contextValues: {
+      agentClarification: {
+        clarificationId: "clarification_1",
+        question: "Which scope should I use?",
+        selectedOptionId: "recent",
+        answer: "Recent sources",
+        option: { id: "recent", label: "Recent sources", detail: "Use the last 12 months" }
+      }
+    }
+  });
+
+  assert.equal(result.finishReason, "runtime_failed");
+  assert.equal(freshRunCalled, false);
+  assert.equal(resumeRunCalled, true);
+  assert.equal(agentClarifications[0]?.status, "answered");
+  assert.equal(agentClarifications[0]?.answer, "Recent sources");
+  assert.equal(agentClarifications[0]?.resumeState, "failed");
+  assert.equal(agentClarifications[0]?.resumeAttempts, 1);
+});
+
+test("checkpoint resume takes precedence over final supplement intake", async () => {
+  const { storage, agentClarifications } = fakeStorage();
+  agentClarifications.push({
+    id: "clarification_resume_before_supplement",
+    threadId: "thread_test",
+    runId: "run_waiting",
+    status: "pending",
+    question: "Which time range should the review cover?",
+    options: [
+      { id: "recent", label: "Recent sources", detail: "Use the last two years", recommended: true },
+      { id: "broad", label: "Broad scan", detail: "Cover the full field" }
+    ],
+    resumeContext: {
+      runtimeResume: {
+        runtimeThreadId: "runtime_thread_1",
+        runtimeRunId: "runtime_run_1",
+        interruptId: "interrupt_1",
+        checkpointId: "checkpoint_1"
+      }
+    },
+    resumeState: "awaiting_answer",
+    resumeAttempts: 0
+  });
+  let freshRunCalled = false;
+  let resumeRunCalled = false;
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => {
+        freshRunCalled = true;
+        throw new Error("fresh run must not be used for a persisted clarification answer");
+      },
+      resumeRun: async () => {
+        resumeRunCalled = true;
+        return { text: "Continuing from the saved checkpoint.", finishReason: "agent_backend_completed", events: [] };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "Continue the literature review",
+    contextValues: {
+      agentClarification: {
+        clarificationId: "clarification_resume_before_supplement",
+        question: "Which time range should the review cover?",
+        selectedOptionId: "recent",
+        answer: "Recent sources",
+        option: { id: "recent", label: "Recent sources", detail: "Use the last two years" }
+      },
+      agentIntake: { phase: "execution", completed: true }
+    }
+  });
+
+  assert.equal(freshRunCalled, false);
+  assert.equal(resumeRunCalled, true);
+  assert.equal(result.finishReason, "agent_backend_completed");
+  assert.equal(agentClarifications[0]?.resumeState, "succeeded");
+});
+
 test("invalid Agent clarification options are repaired by retrying ask_clarification", async () => {
   const { storage, records } = fakeStorage();
   const events: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
@@ -1378,7 +1561,10 @@ test("answered intake clarification keeps research skills in clarification guard
   assert.equal(policy.mode, "skill_scope_guard");
   assert.equal(policy.intakeState, "intake_collecting");
   assert.equal(policy.intakeRound, 2);
+  assert.equal(policy.maxIntakeRounds, 5);
   assert.match(String(policy.answeredSummary), /Multi-agent systems/);
+  assert.equal((policy.missingSlots as string[]).includes("citation format"), true);
+  assert.equal((policy.missingSlots as string[]).includes("output structure"), true);
   assert.match(String(policy.instruction), /Question quality strategy/);
   assert.match(String(policy.instruction), /Socratic clarification/);
   assert.match(String(policy.instruction), /highest-impact missing slot/);
@@ -1547,7 +1733,15 @@ test("agent intake suppresses equivalent answered clarification without runtime 
       options: [
         { id: "apa", label: "APA 7", detail: "Use APA 7th edition.", recommended: true },
         { id: "ieee", label: "IEEE", detail: "Use IEEE numeric citations." }
-      ]
+      ],
+      resumeContext: {
+        runtimeResume: {
+          runtimeThreadId: "runtime_thread_intake",
+          runtimeRunId: "runtime_run_intake",
+          interruptId: "interrupt_citation",
+          checkpointId: "checkpoint_citation"
+        }
+      }
     }
   };
   const repeatedClarification: ToolEventRecord = {
@@ -1569,12 +1763,21 @@ test("agent intake suppresses equivalent answered clarification without runtime 
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async (input) => {
         calls += 1;
-        const event = calls === 1 ? firstClarification : repeatedClarification;
+        const event = firstClarification;
         input.onToolEvent?.(event);
         return {
           text: "",
           finishReason: "clarification_required",
           events: [event]
+        };
+      },
+      resumeRun: async (input) => {
+        calls += 1;
+        input.onToolEvent?.(repeatedClarification);
+        return {
+          text: "",
+          finishReason: "clarification_required",
+          events: [repeatedClarification]
         };
       }
     }
@@ -1693,6 +1896,45 @@ test("research skill answered clarification resumes execution with low delivery 
   assert.equal(delivery.forceSynthesisAfterEvidence, true);
 });
 
+test("research skill recognizes timeline grouping from the selected option detail", async () => {
+  const { storage } = fakeStorage();
+  let allowedToolRefs: string[] = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        allowedToolRefs = input.allowedToolRefs ?? [];
+        return { text: "开始检索。", finishReason: "agent_backend_completed", events: [] };
+      }
+    }
+  });
+
+  await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "zh",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "帮我查找与 Agent 相关的文献",
+    transientSkillRefs: ["literature-review"],
+    contextValues: {
+      agentClarification: {
+        clarificationId: "clarification_output_structure",
+        selectedOptionId: "timeline",
+        answer: "方案一",
+        option: { id: "timeline", label: "方案一", detail: "按时间线分组" },
+        resumeContext: {
+          intakeRound: 2,
+          answeredSummary: "AI Agent；不限时间；精选核心文献列表；APA 格式"
+        }
+      }
+    },
+    toolState: { web_search: true, knowledge_base: true }
+  });
+
+  assert.equal(allowedToolRefs.includes("ask_clarification"), false, JSON.stringify(allowedToolRefs));
+});
+
 test("clarification process narration with appended sources is not recorded as assistant body text", async () => {
   const { storage, records } = fakeStorage();
   const clarificationEvent: ToolEventRecord = {
@@ -1757,13 +1999,25 @@ test("answered Agent clarification falls back to matching pending question when 
       { id: "recent_3", label: "Recent 3 years", detail: "2023-2026", recommended: true },
       { id: "recent_5", label: "Recent 5 years", detail: "2021-2026", recommended: false }
     ],
-    resumeContext: {}
+    resumeContext: {
+      runtimeResume: {
+        runtimeThreadId: "runtime_thread_1",
+        runtimeRunId: "runtime_run_1",
+        interruptId: "interrupt_1",
+        checkpointId: "checkpoint_1"
+      }
+    },
+    resumeState: "awaiting_answer",
+    resumeAttempts: 0
   });
   const service = createGenerationService(storage, fakeAgentRuntime(), {
     modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
-      runAgent: async () => ({
+      runAgent: async () => {
+        throw new Error("fresh run must not be used for a persisted clarification answer");
+      },
+      resumeRun: async () => ({
         text: "Continuing with the selected scope.",
         finishReason: "agent_backend_completed",
         events: []

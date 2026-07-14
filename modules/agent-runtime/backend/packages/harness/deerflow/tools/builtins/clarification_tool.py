@@ -46,7 +46,7 @@ class AskClarificationArgs(BaseModel):
     "ask_clarification",
     args_schema=AskClarificationArgs,
     description="Ask the user one structured clarification at a time with a question and two or three choices.",
-    return_direct=True,
+    return_direct=False,
 )
 def ask_clarification_tool(
     question: str,

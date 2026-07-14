@@ -146,6 +146,10 @@ class TestAskClarificationToolSchema:
         assert "fields" not in schema.model_fields
         assert "at a time" in ask_clarification_tool.description
 
+    def test_answered_clarification_returns_to_the_model(self):
+        """A resumed answer must continue the agent loop instead of ending the run."""
+        assert ask_clarification_tool.return_direct is False
+
     def test_requires_two_structured_options(self):
         schema = ask_clarification_tool.args_schema
         assert schema is not None

@@ -75,6 +75,24 @@ export class RunRepository {
         this.recordAgentClarificationFromEvent(input.threadId, runId, event, now);
       }
 
+      if (input.resumedClarificationId) {
+        this.db.prepare(
+          `UPDATE agent_clarifications
+           SET resume_state = ?,
+               last_resume_error = ?,
+               resumed_runtime_run_id = ?,
+               updated_at = ?
+           WHERE thread_id = ? AND id = ? AND resume_state = 'resuming'`
+        ).run(
+          input.errorMessage ? "failed" : "succeeded",
+          input.errorMessage ?? null,
+          input.errorMessage ? null : input.runtimeRunId ?? null,
+          now,
+          input.threadId,
+          input.resumedClarificationId
+        );
+      }
+
       this.deps.touchThread(input.threadId, now);
     });
 
@@ -189,6 +207,10 @@ export class RunRepository {
                 selected_option_id as selectedOptionId,
                 selected_option_label as selectedOptionLabel,
                 answer,
+                resume_state as resumeState,
+                resume_attempts as resumeAttempts,
+                last_resume_error as resumeError,
+                resumed_runtime_run_id as resumedRuntimeRunId,
                 created_at as createdAt,
                 updated_at as updatedAt
          FROM agent_clarifications
@@ -208,24 +230,71 @@ export class RunRepository {
       ...(row.selectedOptionId ? { selectedOptionId: row.selectedOptionId } : {}),
       ...(row.selectedOptionLabel ? { selectedOptionLabel: row.selectedOptionLabel } : {}),
       ...(row.answer ? { answer: row.answer } : {}),
+      resumeState: row.resumeState,
+      resumeAttempts: row.resumeAttempts,
+      ...(row.resumeError ? { resumeError: row.resumeError } : {}),
+      ...(row.resumedRuntimeRunId ? { resumedRuntimeRunId: row.resumedRuntimeRunId } : {}),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt
     }));
   }
 
   answerAgentClarification(threadId: string, clarificationId: string, input: { selectedOptionId?: string; selectedOptionLabel?: string; answer?: string }) {
+    return this.queueAgentClarificationAnswer(threadId, clarificationId, input).outcome !== "not_found";
+  }
+
+  queueAgentClarificationAnswer(threadId: string, clarificationId: string, input: { selectedOptionId?: string; selectedOptionLabel?: string; answer?: string }) {
+    const existing = this.listAgentClarifications(threadId).find((item) => item.id === clarificationId);
+    if (!existing) return { outcome: "not_found" as const };
+    const selectedOptionId = input.selectedOptionId ?? undefined;
+    const selectedOptionLabel = input.selectedOptionLabel ?? undefined;
+    const answer = input.answer ?? selectedOptionLabel;
+    if (existing.status === "answered") {
+      const sameAnswer = (existing.selectedOptionId ?? undefined) === selectedOptionId
+        && (existing.selectedOptionLabel ?? undefined) === selectedOptionLabel
+        && (existing.answer ?? undefined) === answer;
+      if (!sameAnswer) return { outcome: "conflict" as const, clarification: existing };
+      if (existing.resumeState !== "failed") return { outcome: "idempotent" as const, clarification: existing };
+    }
+
+    const resumable = Boolean(readRuntimeResume(readRecord(existing.resumeContext).runtimeResume));
     const now = nowIso();
-    const result = this.db
-      .prepare(
+    this.deps.withTransaction(() => {
+      this.db.prepare(
         `UPDATE agent_clarifications
          SET status = 'answered',
              selected_option_id = ?,
              selected_option_label = ?,
              answer = ?,
+             resume_state = ?,
+             last_resume_error = NULL,
              updated_at = ?
          WHERE thread_id = ? AND id = ?`
-      )
-      .run(input.selectedOptionId ?? null, input.selectedOptionLabel ?? null, input.answer ?? input.selectedOptionLabel ?? null, now, threadId, clarificationId);
+      ).run(selectedOptionId ?? null, selectedOptionLabel ?? null, answer ?? null, resumable ? "queued" : "not_resumable", now, threadId, clarificationId);
+      this.deps.touchThread(threadId, now);
+    });
+    const clarification = this.listAgentClarifications(threadId).find((item) => item.id === clarificationId);
+    return { outcome: resumable ? "queued" as const : "not_resumable" as const, clarification };
+  }
+
+  claimAgentClarificationResume(threadId: string, clarificationId: string) {
+    const now = nowIso();
+    const result = this.db.prepare(
+      `UPDATE agent_clarifications
+       SET resume_state = 'resuming', resume_attempts = resume_attempts + 1, last_resume_error = NULL, updated_at = ?
+       WHERE thread_id = ? AND id = ? AND status = 'answered' AND resume_state = 'queued'`
+    ).run(now, threadId, clarificationId);
+    if (result.changes > 0) this.deps.touchThread(threadId, now);
+    return result.changes > 0;
+  }
+
+  failAgentClarificationResume(threadId: string, clarificationId: string, error: string) {
+    const now = nowIso();
+    const result = this.db.prepare(
+      `UPDATE agent_clarifications
+       SET resume_state = 'failed', last_resume_error = ?, updated_at = ?
+       WHERE thread_id = ? AND id = ? AND resume_state = 'resuming'`
+    ).run(error, now, threadId, clarificationId);
     if (result.changes > 0) this.deps.touchThread(threadId, now);
     return result.changes > 0;
   }
@@ -266,15 +335,17 @@ export class RunRepository {
     const existing = this.db.prepare(`SELECT status FROM agent_clarifications WHERE id = ?`).get(id) as { status?: string } | undefined;
     if (existing?.status === "answered") return;
     const resumeContext = readRecord(payload.resumeContext);
+    const resumeState = readRuntimeResume(resumeContext.runtimeResume) ? "awaiting_answer" : "not_resumable";
     const existingCreatedAt = this.db.prepare(`SELECT created_at as createdAt FROM agent_clarifications WHERE id = ?`).get(id) as { createdAt?: string } | undefined;
     this.db
       .prepare(
         `INSERT OR REPLACE INTO agent_clarifications (
            id, thread_id, run_id, status, question, options_json, resume_context_json,
-           selected_option_id, selected_option_label, answer, created_at, updated_at
-         ) VALUES (?, ?, ?, 'pending', ?, ?, ?, NULL, NULL, NULL, ?, ?)`
+           selected_option_id, selected_option_label, answer, resume_state, resume_attempts,
+           last_resume_error, resumed_runtime_run_id, created_at, updated_at
+         ) VALUES (?, ?, ?, 'pending', ?, ?, ?, NULL, NULL, NULL, ?, 0, NULL, NULL, ?, ?)`
       )
-      .run(id, threadId, runId, question, JSON.stringify(options), JSON.stringify(resumeContext), existingCreatedAt?.createdAt ?? createdAt, createdAt);
+      .run(id, threadId, runId, question, JSON.stringify(options), JSON.stringify(resumeContext), resumeState, existingCreatedAt?.createdAt ?? createdAt, createdAt);
   }
 }
 

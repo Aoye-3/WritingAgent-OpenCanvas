@@ -56,6 +56,7 @@ export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
     finishReason: input.finishReason,
     runtimeRunId: input.runtimeRunId,
     runtimeThreadId: input.runtimeThreadId,
+    resumedClarificationId: resumedClarificationId(input.payload),
     usage: input.usage
   });
   const policy = input.payload.orchestrationPolicy;
@@ -79,6 +80,15 @@ export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
     completion,
     usage: input.usage
   };
+}
+
+function resumedClarificationId(payload: GenerateRequest) {
+  const clarification = payload.contextValues?.agentClarification;
+  if (!clarification || typeof clarification !== "object" || Array.isArray(clarification)) return undefined;
+  const record = clarification as Record<string, unknown>;
+  return record.resumeClaimed === true && typeof record.clarificationId === "string"
+    ? record.clarificationId
+    : undefined;
 }
 
 function appendCompletionEvent(events: ToolEventRecord[] | undefined, completionEvent: ToolEventRecord) {

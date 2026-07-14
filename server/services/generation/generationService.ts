@@ -114,7 +114,7 @@ export type GenerationServiceDeps = {
   mockFallbackEnabled?: boolean;
 };
 
-export type GenerationErrorCode = "model_required" | "model_not_ready" | "runtime_unavailable" | "runtime_auth_failed";
+export type GenerationErrorCode = "model_required" | "model_not_ready" | "runtime_unavailable" | "runtime_auth_failed" | "clarification_answer_conflict" | "clarification_resume_metadata_missing" | "clarification_resume_in_progress";
 
 export class GenerationError extends Error {
   constructor(public code: GenerationErrorCode, message: string) {
@@ -147,7 +147,7 @@ export function createGenerationService(
 
   async function generateAndRecord(payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
-    markAnsweredAgentClarification(storage, threadId, payload);
+    payload = persistAnsweredAgentClarification(storage, threadId, payload);
     const finalSupplementAction = readFinalSupplementAction(payload.contextValues);
     const finalSupplementAnswer = finalSupplementAnswerEvent(payload);
     payload = withFinalSupplementAnswerApplied(payload);
@@ -287,7 +287,9 @@ export function createGenerationService(
     }
     const directCanvasIntent = isDirectCanvasDeliveryIntent(payload.chatInstruction ?? payload.freeTextPrompt ?? "");
     if (!directCanvasIntent && !isSkillClarificationGuarded(payload) && shouldStartProgressiveCanvasDeliveryImmediately(payload, context)) ensureProgressiveDeliveryStarted();
+    let claimedClarificationId: string | undefined;
     try {
+      ({ payload, clarificationId: claimedClarificationId } = claimAgentClarificationResume(storage, threadId, payload));
       agentPlanOrchestrator.prepare(threadId, payload);
       const agentBackendRun = await runAgentRuntimeGeneration({
         payload: { ...payload, toolState: context.effectiveToolState },
@@ -407,6 +409,7 @@ export function createGenerationService(
         observeToolEvent(event);
       }
     } catch (error) {
+      if (claimedClarificationId) storage.failAgentClarificationResume(threadId, claimedClarificationId, clarificationResumeFailureCode(error));
       agentPlanOrchestrator.fail(threadId, payload, error);
       if (!directCanvasIntent && isProgressiveCanvasDeliveryEnabled(payload)) {
         ensureProgressiveDeliveryStarted();
@@ -455,7 +458,7 @@ export function createGenerationService(
     } = {}
   ): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
-    markAnsweredAgentClarification(storage, threadId, payload);
+    payload = persistAnsweredAgentClarification(storage, threadId, payload);
     const finalSupplementAction = readFinalSupplementAction(payload.contextValues);
     const finalSupplementAnswer = finalSupplementAnswerEvent(payload);
     payload = withFinalSupplementAnswerApplied(payload);
@@ -739,7 +742,9 @@ export function createGenerationService(
     }
     if (!isSkillClarificationGuarded(payload) && shouldStartProgressiveCanvasDeliveryImmediately(payload, context)) ensureProgressiveDeliveryStarted();
 
+    let claimedClarificationId: string | undefined;
     try {
+      ({ payload, clarificationId: claimedClarificationId } = claimAgentClarificationResume(storage, threadId, payload));
       agentPlanOrchestrator.prepare(threadId, payload);
       const agentBackendRun = await runAgentRuntimeGeneration({
         payload: { ...payload, toolState: context.effectiveToolState },
@@ -945,6 +950,7 @@ export function createGenerationService(
         emitRunFailedTimeline(runtimeFailureError);
       }
     } catch (error) {
+      if (claimedClarificationId) storage.failAgentClarificationResume(threadId, claimedClarificationId, clarificationResumeFailureCode(error));
       runtimeFailureError = error;
       agentPlanOrchestrator.fail(threadId, payload, error);
       if (isProgressiveCanvasDeliveryEnabled(payload)) {
@@ -1657,6 +1663,7 @@ type FinalSupplementAction = "execute" | "supplement";
 
 function shouldRequestFinalSupplement(payload: GenerateRequest, action?: FinalSupplementAction) {
   if (action === "execute" || action === "supplement") return false;
+  if (record(payload.contextValues?.agentClarification).requiresRuntimeResume === true) return false;
   if (!readCurrentAgentClarificationAnswer(payload)) return false;
   const intake = record(payload.contextValues?.agentIntake);
   return intake.phase === "execution" || intake.completed === true;
@@ -1905,7 +1912,7 @@ function needsSkillScopeClarification(payload: GenerateRequest) {
   return skillScopeIntake(payload).needsClarification;
 }
 
-const MAX_SKILL_INTAKE_ROUNDS = 3;
+const MAX_SKILL_INTAKE_ROUNDS = 5;
 
 function skillScopeIntake(payload: GenerateRequest) {
   const skillRefs = (payload.transientSkillRefs ?? []).map((skillRef) => skillRef.toLowerCase());
@@ -1920,9 +1927,8 @@ function skillScopeIntake(payload: GenerateRequest) {
   const priorRound = readPositiveInteger(resumeContext.intakeRound) ?? 0;
   const nextRound = Math.min(MAX_SKILL_INTAKE_ROUNDS, priorRound + (currentAnswer ? 1 : 0) + (priorRound ? 0 : 1));
   const answeredSummary = mergeIntakeAnsweredSummary(readString(resumeContext.answeredSummary), currentAnswer);
-  const assessmentText = [instruction, answeredSummary].filter(Boolean).join("\n");
   const answeredSlots = intakeSlotIds(answeredSummary);
-  const missingSlots = missingIntakeSlots(assessmentText, new Set(answeredSlots));
+  const missingSlots = missingIntakeSlots(answeredSummary, new Set(answeredSlots));
   const allowEvidenceTools = Boolean(currentAnswer) && (
     priorRound >= MAX_SKILL_INTAKE_ROUNDS
     || missingSlots.length === 0
@@ -1959,11 +1965,11 @@ function isClarificationSensitiveSkill(skillRef: string) {
 function readCurrentAgentClarificationAnswer(payload: GenerateRequest) {
   const clarification = record(payload.contextValues?.agentClarification);
   const option = record(clarification.option);
+  const answer = readString(clarification.answer);
   const label = readString(option.label);
   const detail = readString(option.detail) || readString(option.description);
-  return readString(clarification.answer)
-    || [label, detail].filter(Boolean).join(" - ")
-    || readString(clarification.selectedOptionId);
+  const selectedOptionId = readString(clarification.selectedOptionId);
+  return [...new Set([answer, label, detail, selectedOptionId].filter(Boolean))].join(" - ");
 }
 
 function mergeIntakeAnsweredSummary(existing: string, current: string) {
@@ -1977,10 +1983,10 @@ function mergeIntakeAnsweredSummary(existing: string, current: string) {
 
 const INTAKE_SLOT_DEFINITIONS = [
   { id: "topic_subdomain", label: "topic/subdomain", pattern: /agent|multi-agent|mas|llm|workflow|framework|autonomous|协作|智能体|多智能体|代理/ },
-  { id: "time_range", label: "time range", pattern: /\b20\d{2}\b|\brecent\b|last\s+\d+\s+years|近|最近|年/ },
+  { id: "time_range", label: "time range", pattern: /\b20\d{2}\b|\brecent\b|last\s+\d+\s+years|all\s+years|no\s+time\s+limit|近|最近|年|不限时间|不限年份|全部年份/ },
   { id: "paper_count_depth", label: "paper count/depth", pattern: /\b\d+\s*(?:papers?|sources?|studies?)\b|focused|broad|comprehensive|survey|review|篇|论文|文献|综述/ },
   { id: "citation_format", label: "citation format", pattern: /\bapa\b|\bieee\b|\bmla\b|\bnature\b|citation|format|style|参考文献|引用|格式/ },
-  { id: "output_structure", label: "output structure", pattern: /systematic|literature review|review|survey|table|section|structure|synthesis|综述|结构|表格|章节|输出/ }
+  { id: "output_structure", label: "output structure", pattern: /systematic|literature review|review|survey|table|section|structure|synthesis|timeline|chronological|group(?:ed|ing)?\s+by|综述|结构|表格|章节|输出|时间线|年代|阶段|主题|分组/ }
 ] as const;
 
 function intakeSlotIds(value: string) {
@@ -2007,26 +2013,76 @@ function readPositiveInteger(value: unknown) {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
-function markAnsweredAgentClarification(storage: SQLiteStorageRepository, threadId: string, payload: GenerateRequest) {
+function persistAnsweredAgentClarification(storage: SQLiteStorageRepository, threadId: string, payload: GenerateRequest) {
   const clarification = record(payload.contextValues?.agentClarification);
   const clarificationId = readString(clarification.clarificationId);
-  if (!clarificationId) return;
+  if (!clarificationId) return payload;
   const option = record(clarification.option);
   const answer = {
     selectedOptionId: readString(clarification.selectedOptionId) || readString(option.id),
     selectedOptionLabel: readString(option.label) || readString(clarification.answer),
     answer: readString(clarification.answer) || readString(option.label)
   };
-  if (storage.answerAgentClarification(threadId, clarificationId, answer)) {
-    resumePlanExecutionForAgentClarificationAnswer(storage, threadId, payload, answer);
-    return;
+  let result = storage.queueAgentClarificationAnswer(threadId, clarificationId, answer);
+  let persistedClarificationId = clarificationId;
+  if (result.outcome === "not_found") {
+    const question = readString(clarification.question);
+    const matchingPending = question
+      ? storage.listAgentClarifications(threadId).find((item) => item.status === "pending" && item.question === question)
+      : undefined;
+    if (matchingPending) {
+      persistedClarificationId = matchingPending.id;
+      result = storage.queueAgentClarificationAnswer(threadId, matchingPending.id, answer);
+    }
   }
-  const question = readString(clarification.question);
-  if (!question) return;
-  const matchingPending = storage.listAgentClarifications(threadId).find((item) => item.status === "pending" && item.question === question);
-  if (matchingPending && storage.answerAgentClarification(threadId, matchingPending.id, answer)) {
-    resumePlanExecutionForAgentClarificationAnswer(storage, threadId, payload, answer);
+  if (result.outcome === "not_found") return payload;
+  if (result.outcome === "conflict") {
+    throw new GenerationError("clarification_answer_conflict", "This clarification was already answered differently. Refresh the thread before continuing.");
   }
+  const stored = result.clarification ?? storage.listAgentClarifications(threadId).find((item) => item.id === persistedClarificationId);
+  resumePlanExecutionForAgentClarificationAnswer(storage, threadId, payload, answer);
+  const storedResumeContext = record(stored?.resumeContext);
+  const runtimeResume = record(storedResumeContext.runtimeResume);
+  if (!readString(runtimeResume.runtimeThreadId) || !readString(runtimeResume.runtimeRunId) || !readString(runtimeResume.interruptId)) {
+    throw new GenerationError("clarification_resume_metadata_missing", "The saved clarification does not contain complete runtime resume metadata.");
+  }
+  return {
+    ...payload,
+    contextValues: {
+      ...(payload.contextValues ?? {}),
+      agentClarification: {
+        ...clarification,
+        clarificationId: persistedClarificationId,
+        requiresRuntimeResume: true,
+        resumeContext: storedResumeContext
+      }
+    }
+  };
+}
+
+function claimAgentClarificationResume(storage: SQLiteStorageRepository, threadId: string, payload: GenerateRequest) {
+  const clarification = record(payload.contextValues?.agentClarification);
+  if (clarification.requiresRuntimeResume !== true) return { payload, clarificationId: undefined };
+  const clarificationId = readString(clarification.clarificationId);
+  if (!clarificationId) throw new GenerationError("clarification_resume_metadata_missing", "The clarification resume id is missing.");
+  if (!storage.claimAgentClarificationResume(threadId, clarificationId)) {
+    throw new GenerationError("clarification_resume_in_progress", "This clarification answer is already resuming or has completed.");
+  }
+  return {
+    clarificationId,
+    payload: {
+      ...payload,
+      contextValues: {
+        ...(payload.contextValues ?? {}),
+        agentClarification: { ...clarification, resumeClaimed: true }
+      }
+    }
+  };
+}
+
+function clarificationResumeFailureCode(error: unknown) {
+  if (error instanceof GenerationError) return error.code;
+  return error instanceof Error && /unavailable/i.test(error.message) ? "runtime_unavailable" : "runtime_resume_failed";
 }
 
 function markPlanWaitingForAgentClarification(storage: SQLiteStorageRepository, threadId: string, payload: GenerateRequest, events: ToolEventRecord[]) {

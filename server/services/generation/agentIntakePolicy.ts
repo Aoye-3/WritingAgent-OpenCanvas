@@ -89,7 +89,7 @@ export function isProgressiveCanvasDelivery(payload: GenerateRequest) {
   return delivery.enabled === true;
 }
 
-function isAgentIntakeExecution(contextValues: GenerateRequest["contextValues"]) {
+export function isAgentIntakeExecution(contextValues: GenerateRequest["contextValues"]) {
   const intake = readRecord(contextValues?.agentIntake);
   return intake.phase === "execution" || intake.completed === true;
 }

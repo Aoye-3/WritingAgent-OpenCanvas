@@ -65,7 +65,26 @@ test("builds LangGraph-compatible AgentBackend run request", () => {
   assert.equal(request.multitask_strategy, "interrupt");
 });
 
-test("ordinary clarification policy allows one-at-a-time follow-up rounds", () => {
+test("ordinary clarification policy is inactive without explicit ordinary intake context", () => {
+  const card = getAgentCard("summary");
+  const request = buildRunRequest({
+    threadId: "thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings: defaultAgentSettings(card),
+    messages: [{ role: "user", content: "Review recent papers" }],
+    prompt: "Review recent papers"
+  }, {
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8000",
+    assistantId: "lead_agent"
+  });
+
+  assert.doesNotMatch(String(request.context.facetwrite_clarification_policy), /Ordinary intake is active/i);
+});
+
+test("explicit ordinary clarification policy allows one-at-a-time follow-up rounds", () => {
   const card = getAgentCard("summary");
   const settings = defaultAgentSettings(card);
   const request = buildRunRequest({
@@ -75,7 +94,18 @@ test("ordinary clarification policy allows one-at-a-time follow-up rounds", () =
     agentCard: card,
     settings,
     messages: [{ role: "user", content: "Review recent papers" }],
-    prompt: "Review recent papers"
+    prompt: "Review recent papers",
+    contextValues: {
+      ordinaryClarificationIntake: {
+        mode: "ordinary",
+        state: "collecting",
+        maxRounds: 3,
+        minAnsweredRoundsAfterFirstAsk: 2,
+        answeredRounds: 0,
+        remainingRounds: 3,
+        answeredSummary: ""
+      }
+    }
   }, {
     enabled: true,
     baseUrl: "http://127.0.0.1:8000",
@@ -428,6 +458,86 @@ test("posts AgentBackend resume run through authenticated runtime API", async ()
   assert.equal("input" in (posted ?? {}), false);
 });
 
+test("resume stream ignores the replayed clarification tool call unless a new native interrupt follows", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_original","name":"ask_clarification","args":{"question":"Which scope?","options":[{"id":"recent","label":"Recent"},{"id":"broad","label":"Broad"}]}}]}]\n\n',
+    'event: end\ndata: null\n\n'
+  ].join("");
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+      controller.close();
+    }
+  });
+  const fetchImpl = async (url: string | URL | Request) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) return Response.json({ needs_setup: false });
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, { headers });
+    }
+    return new Response(stream, { status: 200 }) as Response;
+  };
+
+  const result = await resumeAgentBackendRun({
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    config: {
+      enabled: true,
+      baseUrl: "http://AgentBackend.local",
+      assistantId: "lead_agent",
+      auth: { email: "admin@example.com", password: "strong-password", autoSetup: false, timeoutMs: 5000 }
+    },
+    threadId: "runtime_thread_1",
+    agentCard: getAgentCard("summary"),
+    messages: [{ role: "user", content: "Resume" }],
+    prompt: "Resume",
+    resume: { answer: "Recent" },
+    interruptId: "interrupt_1",
+    fetchImpl
+  });
+
+  assert.equal(result.finishReason, "agent_backend_completed");
+  assert.deepEqual(result.events, []);
+});
+
+test("marks an explicit pre-stream runtime rejection as safely retryable", async () => {
+  const fetchImpl = async (url: string | URL | Request) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) return Response.json({ needs_setup: false });
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, { headers });
+    }
+    return new Response("runtime unavailable", { status: 503 });
+  };
+
+  await assert.rejects(
+    () => resumeAgentBackendRun({
+      projectId: "project_1",
+      configuredModelApiId: "deepseek--configured",
+      config: {
+        enabled: true,
+        baseUrl: "http://AgentBackend.local",
+        assistantId: "lead_agent",
+        auth: { email: "admin@example.com", password: "strong-password", autoSetup: false, timeoutMs: 5000 }
+      },
+      threadId: "runtime_thread_1",
+      agentCard: getAgentCard("summary"),
+      messages: [{ role: "user", content: "Resume" }],
+      prompt: "Resume",
+      resume: { answer: "Recent sources" },
+      fetchImpl
+    }),
+    (error: unknown) => error instanceof Error
+      && (error as Error & { retryableBeforeStream?: boolean }).retryableBeforeStream === true
+  );
+});
+
 test("requests AgentBackend run intervention through authenticated runtime API", async () => {
   let interventionUrl = "";
   let interventionBody: unknown;
@@ -547,9 +657,10 @@ test("does not expose AgentBackend reasoning kwargs as assistant stream text", a
 });
 
 test("maps native runtime interrupt to agent clarification event with resume metadata", async () => {
+  const fixture = JSON.parse(readFileSync(new URL("../../../test-fixtures/runtime-agent-interrupt.json", import.meta.url), "utf8")) as { event: string; data: Record<string, unknown> };
   const body = [
     'event: metadata\ndata: {"run_id":"runtime_run_1","thread_id":"thread_1"}\n\n',
-    'event: interrupt\ndata: {"type":"agent_interrupt","run_id":"runtime_run_1","thread_id":"thread_1","checkpoint_id":"checkpoint_1","interrupts":[{"id":"interrupt_1","value":{"type":"agent_clarification_requested","question":"Which scope?","options":[{"id":"recent","label":"Recent","detail":"Focus on recent papers"},{"id":"broad","label":"Broad","detail":"Scan the full field"}]}}]}\n\n',
+    `event: ${fixture.event}\ndata: ${JSON.stringify(fixture.data)}\n\n`,
     'event: end\ndata: null\n\n'
   ].join("");
   const stream = new ReadableStream<Uint8Array>({
@@ -606,6 +717,18 @@ test("maps native runtime interrupt to agent clarification event with resume met
       checkpointId: "checkpoint_1"
     }
   });
+});
+
+test("rejects malformed native interrupt instead of returning an unactionable waiting run", async () => {
+  const body = [
+    'event: interrupt\ndata: {"type":"agent_interrupt","run_id":"runtime_run_1","thread_id":"thread_1","checkpoint_id":"checkpoint_1","interrupts":[{"value":"Interrupt(value={...}, id=\\"interrupt_1\\")"}]}\n\n',
+    'event: end\ndata: null\n\n'
+  ].join("");
+
+  await assert.rejects(
+    () => runWithBody(body),
+    /runtime interrupt did not contain a structured clarification/i
+  );
 });
 
 test("prefers native runtime interrupt clarification over ask_clarification tool call", async () => {

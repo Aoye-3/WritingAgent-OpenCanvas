@@ -4,6 +4,8 @@ import pytest
 from _router_auth_helpers import make_authed_test_app
 from fastapi.testclient import TestClient
 from langchain_core.messages import ToolMessage
+from langgraph.errors import GraphInterrupt
+from langgraph.types import Interrupt
 
 from deerflow.agents.middlewares import progress_reporting_middleware as progress_middleware
 from deerflow.agents.middlewares.progress_reporting_middleware import ProgressReportingMiddleware
@@ -104,6 +106,22 @@ def test_progress_middleware_keeps_tool_lifecycle_out_of_stage_progress(monkeypa
     assert not any(event.get("type") == "agent_progress_reported" and event.get("phase") == "tool" for event in emitted)
     assert any(event.get("type") == "agent_intervention_checkpoint" and event.get("visibility") == "raw" for event in emitted)
     assert all("args" not in event and "arguments" not in event and "query" not in str(event) for event in emitted)
+
+
+def test_progress_middleware_does_not_report_interrupt_as_tool_recovery(monkeypatch):
+    emitted: list[dict[str, str]] = []
+    monkeypatch.setattr(progress_middleware, "emit_public_progress", lambda payload: emitted.append(payload) or True)
+    middleware = ProgressReportingMiddleware()
+    runtime = SimpleNamespace(context={"run_id": "run_1", "thread_id": "thread_1"})
+    request = SimpleNamespace(tool_call={"name": "ask_clarification", "id": "call_1"}, runtime=runtime)
+
+    def interrupt_handler(_request):
+        raise GraphInterrupt((Interrupt(value={"type": "agent_clarification_requested"}, id="interrupt-1"),))
+
+    with pytest.raises(GraphInterrupt):
+        middleware.wrap_tool_call(request, interrupt_handler)  # type: ignore[arg-type]
+
+    assert not any(event.get("title") == "Tool recovery" for event in emitted)
 
 
 def test_public_progress_payload_builds_checkpoint_event():

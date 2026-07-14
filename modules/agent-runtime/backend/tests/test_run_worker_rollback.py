@@ -1,14 +1,20 @@
 import asyncio
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, call
 
 import pytest
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Interrupt
 
 from deerflow.runtime.runs.manager import RunManager
 from deerflow.runtime.runs.schemas import RunStatus
-from deerflow.runtime.runs.worker import RunContext, _agent_factory_supports_app_config, _build_runtime_context, _install_runtime_context, _rollback_to_pre_run_checkpoint, run_agent
+from deerflow.runtime.runs.worker import RunContext, _agent_factory_supports_app_config, _build_runtime_context, _install_runtime_context, _interrupt_payload_from_chunk, _publish_interrupt_event, _rollback_to_pre_run_checkpoint, run_agent
+
+
+INTERRUPT_FIXTURE = json.loads((Path(__file__).resolve().parents[4] / "test-fixtures" / "runtime-agent-interrupt.json").read_text(encoding="utf-8"))
 
 
 class FakeCheckpointer:
@@ -16,6 +22,39 @@ class FakeCheckpointer:
         self.adelete_thread = AsyncMock()
         self.aput = AsyncMock(return_value=put_result)
         self.aput_writes = AsyncMock()
+
+
+def test_interrupt_payload_preserves_langgraph_interrupt_id_and_value():
+    expected = INTERRUPT_FIXTURE["data"]["interrupts"][0]
+    payload = _interrupt_payload_from_chunk({
+        "__interrupt__": (
+            Interrupt(
+                id=expected["id"],
+                value=expected["value"],
+            ),
+        )
+    })
+
+    assert payload == INTERRUPT_FIXTURE["data"]["interrupts"]
+
+
+@pytest.mark.anyio
+async def test_worker_interrupt_event_matches_shared_cross_layer_fixture():
+    fixture = INTERRUPT_FIXTURE["data"]
+    bridge = SimpleNamespace(publish=AsyncMock())
+    checkpointer = SimpleNamespace(aget_tuple=AsyncMock(return_value=SimpleNamespace(
+        config={"configurable": {"checkpoint_id": fixture["checkpoint_id"]}},
+    )))
+
+    await _publish_interrupt_event(
+        bridge,
+        run_id=fixture["run_id"],
+        thread_id=fixture["thread_id"],
+        checkpointer=checkpointer,
+        interrupts=fixture["interrupts"],
+    )
+
+    bridge.publish.assert_awaited_once_with(fixture["run_id"], INTERRUPT_FIXTURE["event"], fixture)
 
 
 def _make_checkpoint(checkpoint_id: str, messages: list[str], version: int):

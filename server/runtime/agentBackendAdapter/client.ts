@@ -193,7 +193,9 @@ export async function resumeAgentBackendRun(input: AgentBackendResumeRunInput): 
   });
 
   if (!response.ok) {
-    throw new Error(await formatRuntimeHttpError(response));
+    throw Object.assign(new Error(await formatRuntimeHttpError(response)), {
+      retryableBeforeStream: [429, 502, 503, 504].includes(response.status)
+    });
   }
   if (!response.body) {
     throw new Error("AgentBackend runtime returned an empty stream");
@@ -205,7 +207,8 @@ export async function resumeAgentBackendRun(input: AgentBackendResumeRunInput): 
     onToken: input.onToken,
     onReasoningToken: input.onReasoningToken,
     onStatus: input.onStatus,
-    onRuntimeSignal: input.onRuntimeSignal
+    onRuntimeSignal: input.onRuntimeSignal,
+    requireNativeClarificationInterrupt: true
   });
 }
 
@@ -514,7 +517,7 @@ function buildAgentBackendRunContext(input: Pick<AgentBackendRunInput, "threadId
     ? "For medium or long text deliverables, especially if you perform two or more web_search calls or use a complex writing/research skill, first draft the complete user deliverable, then write that full Markdown report to /mnt/user-data/outputs/*.md with write_file and call present_files. When calling write_file, pass all required arguments in the same tool call: description, path, and content; use path, not file_path, and put the complete Markdown report in content. The file content must contain the actual report, summary tables, findings, and references when applicable. Hard requirement: every final Markdown deliverable must include a concise `## Summary`, `## Executive Summary`, or `## 摘要` section near the top, immediately after the title and before any outline/table of contents, because FacetWrite uses that section for the Canvas body summary. This section must be a real 3-6 sentence or bullet summary of the document's thesis, scope, key findings, and conclusion; do not use an outline, table of contents, file-save note, or progress note as the summary. Do not call present_files until the Markdown file contains this summary section. Never write a delivery note, skill-loading note, clarification question, or file-save status as the Markdown file content. Use canvas_write only for short progressive nodes such as summaries, overviews, progress/reference notes, and references; never use canvas_write for the body, final body, full report, or full document. After present_files succeeds, produce the final chat response without further tool calls unless a blocking error remains. Keep the final chat response concise only after the full file is saved and presented; the Canvas body should contain a readable summary, while the full document lives in the Markdown file."
     : undefined;
   const ordinaryClarificationIntake = readOrdinaryClarificationIntake(input.contextValues?.ordinaryClarificationIntake);
-  const ordinaryClarificationPolicy = ordinaryClarificationPolicyText(ordinaryClarificationIntake);
+  const ordinaryClarificationPolicy = ordinaryClarificationIntake ? ordinaryClarificationPolicyText(ordinaryClarificationIntake) : "";
   const taskCompletionPolicy = planPolicy.phase === "chat"
     ? `Complete the user's task directly when reasonable defaults are enough. ${ordinaryClarificationPolicy} Do not ask open-ended questions, and do not write clarification text into final deliverables or Markdown files. After canvas_write commits successfully or present_files succeeds, produce a concise final response and stop calling tools unless a blocking error or missing requirement remains.`
     : undefined;
@@ -617,8 +620,9 @@ type OrdinaryClarificationIntakePolicy = {
   answeredSummary: string;
 };
 
-function readOrdinaryClarificationIntake(value: unknown): OrdinaryClarificationIntakePolicy {
+function readOrdinaryClarificationIntake(value: unknown): OrdinaryClarificationIntakePolicy | undefined {
   const record = isRecord(value) ? value : {};
+  if (record.mode !== "ordinary") return undefined;
   const state = record.state === "completed" ? "completed" : "collecting";
   const maxRounds = readPositiveInteger(record.maxRounds) ?? 3;
   const minAnsweredRoundsAfterFirstAsk = readPositiveInteger(record.minAnsweredRoundsAfterFirstAsk) ?? 2;
@@ -673,6 +677,7 @@ async function readAgentBackendStream(
     onReasoningToken?: (token: string) => void;
     onStatus?: (status: StreamStatus) => void;
     onRuntimeSignal?: (signal: AgentBackendRuntimeSignal) => void;
+    requireNativeClarificationInterrupt?: boolean;
   } = {}
 ): Promise<AgentBackendRunResult> {
   const reader = body.getReader();
@@ -747,6 +752,10 @@ async function readAgentBackendStream(
         sawRuntimeEnd = true;
         continue;
       }
+      if (isMalformedRuntimeInterrupt(parsed.event, parsed.data)) {
+        trace("invalid_interrupt", runtimeInterruptDiagnostics(parsed.data));
+        throw new Error("Agent runtime interrupt did not contain a structured clarification payload");
+      }
       const runtimeSignal = runtimeSignalFromSseEvent(parsed.event, parsed.data);
       if (runtimeSignal) {
         trace("runtime_signal", {
@@ -805,6 +814,12 @@ async function readAgentBackendStream(
             finalValuesText = nextFinalText;
           }
         }
+      }
+
+      if (callbacks.requireNativeClarificationInterrupt) {
+        const before = toolEvents.length;
+        toolEvents = toolEvents.filter((event) => !isAgentClarificationToolEvent(event) || hasCompleteRuntimeResume(event));
+        if (toolEvents.length !== before) trace("clarification_replay_ignored", { event: parsed.event, ignoredCount: before - toolEvents.length });
       }
 
       for (const event of toolEvents) {
@@ -874,10 +889,11 @@ function runtimeSignalFromSseEvent(event: string, data: unknown): AgentBackendRu
     return undefined;
   }
   if (event === "interrupt" || event === "waiting_for_user") {
+    const diagnostics = runtimeInterruptDiagnostics(data);
     return {
       type: "waiting_for_user",
       label: "Waiting for your clarification choice.",
-      payload: sanitizeRuntimeSignalPayload(isRecord(data) ? data : { event })
+      payload: sanitizeRuntimeSignalPayload({ ...(isRecord(data) ? data : { event }), ...diagnostics })
     };
   }
   if (event === "values") return waitingForUserSignalFromValues(data);
@@ -977,8 +993,33 @@ function secondsFromMs(value: unknown) {
 }
 
 function sanitizeRuntimeSignalPayload(data: Record<string, unknown>) {
-  const allowed = ["type", "event", "phase", "budget_phase", "budgetPhase", "planId", "stepId", "agentPlanId", "agentPlanStepId", "attempt", "max_attempts", "maxAttempts", "elapsed_ms", "elapsedMs", "delay_seconds", "delaySeconds", "retry_after", "retryAfter", "wait_ms", "waitMs", "reason", "error_type", "errorType", "status_code", "statusCode", "status", "state", "next", "interrupt", "model", "provider_class", "providerClass", "base_url_host", "baseUrlHost", "timeout_s", "timeoutS", "stream_chunk_timeout_s", "streamChunkTimeoutS", "max_retries", "maxRetries", "tool_choice", "toolChoice", "completed_evidence_tools", "completedEvidenceTools", "evidence_limit", "evidenceLimit", "model_limit", "modelLimit", "model_calls", "modelCalls", "recursion_limit", "recursionLimit", "estimated_steps_used", "estimatedStepsUsed", "file_delivery_required", "fileDeliveryRequired", "second_handler", "secondHandler", "entered_second_handler", "enteredSecondHandler", "continued_after_notice", "continuedAfterNotice", "allowed", "blocked_tool_calls", "blockedToolCalls", "contains_tool_call", "containsToolCall", "contains_internal_runtime_protocol", "containsInternalRuntimeProtocol"];
+  const allowed = ["type", "event", "phase", "budget_phase", "budgetPhase", "planId", "stepId", "agentPlanId", "agentPlanStepId", "attempt", "max_attempts", "maxAttempts", "elapsed_ms", "elapsedMs", "delay_seconds", "delaySeconds", "retry_after", "retryAfter", "wait_ms", "waitMs", "reason", "error_type", "errorType", "status_code", "statusCode", "status", "state", "next", "interrupt", "interruptCount", "interruptValueType", "hasCheckpointId", "model", "provider_class", "providerClass", "base_url_host", "baseUrlHost", "timeout_s", "timeoutS", "stream_chunk_timeout_s", "streamChunkTimeoutS", "max_retries", "maxRetries", "tool_choice", "toolChoice", "completed_evidence_tools", "completedEvidenceTools", "evidence_limit", "evidenceLimit", "model_limit", "modelLimit", "model_calls", "modelCalls", "recursion_limit", "recursionLimit", "estimated_steps_used", "estimatedStepsUsed", "file_delivery_required", "fileDeliveryRequired", "second_handler", "secondHandler", "entered_second_handler", "enteredSecondHandler", "continued_after_notice", "continuedAfterNotice", "allowed", "blocked_tool_calls", "blockedToolCalls", "contains_tool_call", "containsToolCall", "contains_internal_runtime_protocol", "containsInternalRuntimeProtocol"];
   return Object.fromEntries(allowed.filter((key) => key in data).map((key) => [key, data[key]]));
+}
+
+function isMalformedRuntimeInterrupt(event: string, data: unknown) {
+  if (event !== "interrupt" || !isRecord(data)) return false;
+  const type = readSourceString(data.type) || readSourceString(data.event);
+  if (type !== "agent_interrupt") return false;
+  const interrupts = Array.isArray(data.interrupts) ? data.interrupts : data.value !== undefined ? [data] : [];
+  if (interrupts.length === 0) return true;
+  return !interrupts.some((item) => {
+    if (!isRecord(item)) return false;
+    const value = isRecord(item.value) ? item.value : item;
+    return readSourceString(item.id) !== "" && readSourceString(value.type) === "agent_clarification_requested";
+  });
+}
+
+function runtimeInterruptDiagnostics(data: unknown) {
+  const source = isRecord(data) ? data : {};
+  const interrupts = Array.isArray(source.interrupts) ? source.interrupts : source.value !== undefined ? [source] : [];
+  const first = interrupts[0];
+  const value = isRecord(first) && "value" in first ? first.value : first;
+  return {
+    interruptCount: interrupts.length,
+    interruptValueType: Array.isArray(value) ? "array" : value === null ? "null" : typeof value,
+    hasCheckpointId: Boolean(readSourceString(source.checkpoint_id) || readSourceString(source.checkpointId))
+  };
 }
 
 function sanitizeAgentProgressPayload(data: Record<string, unknown>) {

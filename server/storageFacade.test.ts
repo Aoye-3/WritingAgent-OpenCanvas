@@ -114,6 +114,89 @@ test("storage facade stores runtime resume context when clarification events dup
     interruptId: "interrupt_1",
     checkpointId: "checkpoint_1"
   });
+  assert.equal(clarifications[0]?.resumeState, "awaiting_answer");
+  assert.equal(clarifications[0]?.resumeAttempts, 0);
+
+  const queued = storage.queueAgentClarificationAnswer(threadId, clarifications[0]!.id, {
+    selectedOptionId: "recent_5",
+    selectedOptionLabel: "Recent 5 years",
+    answer: "Recent 5 years"
+  });
+  assert.equal(queued.outcome, "queued");
+  const duplicate = storage.queueAgentClarificationAnswer(threadId, clarifications[0]!.id, {
+    selectedOptionId: "recent_5",
+    selectedOptionLabel: "Recent 5 years",
+    answer: "Recent 5 years"
+  });
+  assert.equal(duplicate.outcome, "idempotent");
+  assert.equal(storage.claimAgentClarificationResume(threadId, clarifications[0]!.id), true);
+  assert.equal(storage.claimAgentClarificationResume(threadId, clarifications[0]!.id), false);
+  storage.failAgentClarificationResume(threadId, clarifications[0]!.id, "runtime_unavailable");
+
+  const failed = storage.listAgentClarifications(threadId)[0]!;
+  assert.equal(failed.status, "answered");
+  assert.equal(failed.answer, "Recent 5 years");
+  assert.equal(failed.resumeState, "failed");
+  assert.equal(failed.resumeAttempts, 1);
+  assert.equal(failed.resumeError, "runtime_unavailable");
+
+  const conflict = storage.queueAgentClarificationAnswer(threadId, failed.id, {
+    selectedOptionId: "recent_10",
+    selectedOptionLabel: "Recent 10 years",
+    answer: "Recent 10 years"
+  });
+  assert.equal(conflict.outcome, "conflict");
+
+  const retry = storage.queueAgentClarificationAnswer(threadId, failed.id, {
+    selectedOptionId: "recent_5",
+    selectedOptionLabel: "Recent 5 years",
+    answer: "Recent 5 years"
+  });
+  assert.equal(retry.outcome, "queued");
+  assert.equal(storage.claimAgentClarificationResume(threadId, failed.id), true);
+  storage.recordRun({
+    threadId,
+    agentCardId: agentCard.id,
+    mode: "chat",
+    prompt: "Resume prompt",
+    output: "Resumed output",
+    provider: "agent-backend",
+    usedMock: false,
+    finishReason: "agent_backend_completed",
+    runtimeRunId: "runtime_run_2",
+    resumedClarificationId: failed.id,
+    events: [{
+      eventType: "agent_backend_agent_clarification_requested",
+      payload: {
+        type: "agent_clarification_requested",
+        source: "runtime_interrupt",
+        clarificationId: "interrupt_2",
+        question: "Which output structure should I use?",
+        options: [
+          { id: "timeline", label: "Timeline", detail: "Group by period", recommended: true },
+          { id: "themes", label: "Themes", detail: "Group by topic" }
+        ],
+        resumeContext: {
+          runtimeResume: {
+            runtimeThreadId: "runtime_thread_1",
+            runtimeRunId: "runtime_run_2",
+            interruptId: "interrupt_2",
+            checkpointId: "checkpoint_2"
+          }
+        }
+      }
+    }]
+  });
+
+  const persisted = storage.listAgentClarifications(threadId);
+  const succeeded = persisted.find((item) => item.id === failed.id)!;
+  const next = persisted.find((item) => item.question === "Which output structure should I use?")!;
+  assert.equal(succeeded.resumeState, "succeeded");
+  assert.equal(succeeded.resumeAttempts, 2);
+  assert.equal(succeeded.resumeError, undefined);
+  assert.equal(succeeded.resumedRuntimeRunId, "runtime_run_2");
+  assert.equal(next.status, "pending");
+  assert.equal(next.resumeState, "awaiting_answer");
 
   assert.equal(storage.moveThreadToTrash(threadId), true);
   assert.equal(await storage.hardDeleteThread(threadId), true);

@@ -11,6 +11,7 @@ import { applyCanvasWriteToolExposure } from "./canvasWriteScopePolicy.js";
 import {
   agentIntakeToolRefsForPayload,
   hasAnsweredAgentClarification,
+  isAgentIntakeExecution,
   isAgentIntakePhase,
   isOrdinaryClarificationIntakeCollecting,
   isProgressiveCanvasDelivery,
@@ -62,7 +63,7 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
   const baseRunInput = buildBaseRunInput(input, config);
 
   const run = runtimeResume
-    ? await (deps.resumeRun ?? resumeAgentBackendRun)({
+    ? await resumeAgentBackendWithSafeRetry(deps.resumeRun ?? resumeAgentBackendRun, {
       ...baseRunInput,
       threadId: runtimeResume.runtimeThreadId || input.threadId,
       resume: buildClarificationResumePayload(agentClarification),
@@ -94,6 +95,22 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
   }
 
   return run;
+}
+
+async function resumeAgentBackendWithSafeRetry(
+  resumeRun: typeof resumeAgentBackendRun,
+  input: Parameters<typeof resumeAgentBackendRun>[0]
+) {
+  try {
+    return await resumeRun(input);
+  } catch (error) {
+    if (!isRetryableBeforeStream(error)) throw error;
+    return resumeRun(input);
+  }
+}
+
+function isRetryableBeforeStream(error: unknown) {
+  return Boolean(error && typeof error === "object" && "retryableBeforeStream" in error && error.retryableBeforeStream === true);
 }
 
 function buildBaseRunInput(input: AgentBackendRunnerInput, config: AgentBackendRuntimeConfig) {
@@ -155,6 +172,7 @@ function isProgressiveMarkdownFileDelivery(payload: GenerateRequest) {
 }
 
 function shouldAllowAgentClarification(payload: GenerateRequest) {
+  if (isAgentIntakeExecution(payload.contextValues)) return false;
   if ((payload.transientSkillRefs ?? []).length > 0) return true;
   if (isProgressiveMarkdownFileDelivery(payload)) return true;
   return Boolean(payload.contextValues?.facetwrite_clarification_policy);

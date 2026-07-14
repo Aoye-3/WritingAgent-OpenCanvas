@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from langgraph.types import Interrupt
+
 
 class _FakePydanticV2:
     """Object with model_dump (Pydantic v2)."""
@@ -74,6 +76,28 @@ def test_serialize_pydantic_v1():
     from deerflow.runtime.serialization import serialize_lc_object
 
     assert serialize_lc_object(_FakePydanticV1()) == {"key": "v1"}
+
+
+def test_serialize_langgraph_interrupt_preserves_resume_payload():
+    from deerflow.runtime.serialization import serialize_lc_object
+
+    result = serialize_lc_object(
+        Interrupt(
+            id="interrupt-1",
+            value={
+                "type": "agent_clarification_requested",
+                "question": "Which format?",
+            },
+        )
+    )
+
+    assert result == {
+        "id": "interrupt-1",
+        "value": {
+            "type": "agent_clarification_requested",
+            "question": "Which format?",
+        },
+    }
 
 
 def test_serialize_fallback_str():

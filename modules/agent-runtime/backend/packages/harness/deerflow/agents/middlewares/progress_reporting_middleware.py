@@ -11,6 +11,7 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
+from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command
 
 from deerflow.runtime.progress import emit_public_progress, public_progress_payload
@@ -188,6 +189,8 @@ class ProgressReportingMiddleware(AgentMiddleware[AgentState]):
                 visibility="raw",
             )
             result = handler(request)
+        except GraphBubbleUp:
+            raise
         except Exception:
             self._emit(request.runtime, phase="recovery", status="failed", title="Tool recovery", step_kind="observe", summary="A tool step failed; the agent is recovering with available context.", next="The raw log has the diagnostic detail.")
             raise
@@ -231,6 +234,8 @@ class ProgressReportingMiddleware(AgentMiddleware[AgentState]):
                 visibility="raw",
             )
             result = await handler(request)
+        except GraphBubbleUp:
+            raise
         except Exception:
             self._emit(request.runtime, phase="recovery", status="failed", title="Tool recovery", step_kind="observe", summary="A tool step failed; the agent is recovering with available context.", next="The raw log has the diagnostic detail.")
             raise

@@ -10,7 +10,7 @@ Accepted
 
 ## Context
 
-Ordinary Agent clarification already has a durable product path: Runtime emits `agent_clarification_requested`, FacetWrite stores one pending row in `agent_clarifications`, the composer renders the existing choice card, and answering the card resumes the Runtime checkpoint or starts the compatible fallback continuation.
+Ordinary Agent clarification already has a durable product path: Runtime emits `agent_clarification_requested`, FacetWrite stores one pending row in `agent_clarifications`, the composer renders the existing choice card, and answering the card persists the answer before resuming the same Runtime checkpoint. Missing resume metadata is a protocol failure and does not start a compatible fresh-run continuation.
 
 The product goal is to let ordinary Agent tasks ask multiple clarifying questions when the request is under-scoped, without replacing the existing single-question UI and storage contract. Earlier prompt-only and execution-whitelist attempts were not reliable enough. After the first answer, the model often moved into execution because evidence, Canvas, file, and delivery tools were visible again; at that point another `ask_clarification` competed with doing the work.
 
@@ -73,3 +73,4 @@ Rejected. Skill scope guard has domain-specific missing-slot logic for research/
 - Skill scope guard remains slot-based and independent from Ordinary Intake.
 - Runtime diagnostics should inspect `ordinaryClarificationIntake`, `facetwrite_intake_phase`, and `facetwrite_allowed_tool_refs` before debugging frontend rendering.
 - Tests must cover dynamic intake tools, answered-summary injection, no automatic execution after one ordinary answer, execution restoration after `agent_intake_complete`, and the three-round stop condition.
+- Checkpoint persistence and answer-resume semantics are defined separately by [`ADR-2026-07-14-durable-agent-clarification-checkpoint-resume.md`](ADR-2026-07-14-durable-agent-clarification-checkpoint-resume.md); Ordinary Intake controls when clarification is allowed, not how an answer is resumed.

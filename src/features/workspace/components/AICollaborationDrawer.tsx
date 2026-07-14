@@ -199,6 +199,10 @@ export function AICollaborationDrawer({
     () => agentClarificationFromRecord(agentClarifications.find((clarification) => clarification.status === "pending" && !isAgentClarificationRecordAnswered(clarification, answeredAgentClarificationKeys)), answeredAgentClarificationKeys) ?? latestPendingAgentClarification(messages, answeredAgentClarificationKeys),
     [agentClarifications, answeredAgentClarificationKeys, messages]
   );
+  const activeAgentClarificationResume = useMemo(
+    () => latestActiveAgentClarificationResume(agentClarifications, isSending),
+    [agentClarifications, isSending]
+  );
   const pendingFinalSupplement = pendingClarificationPlan || pendingAgentClarification ? undefined : pendingFinalSupplementForDisplay(finalSupplement, submittedFinalSupplementIds);
   const missingAgentClarificationPayload = useMemo(
     () => !pendingAgentClarification && hasUnresolvedAgentClarificationTrace(messages, answeredAgentClarificationKeys),
@@ -210,7 +214,7 @@ export function AICollaborationDrawer({
     [plans]
   );
   const floatingPlan = pendingClarificationPlan ?? floatingBoardPlan;
-  const floatingPlanPanelStyle = { "--plan-panel-bottom": `${pendingClarificationPlan || pendingAgentClarification || pendingFinalSupplement ? 142 : composerHeight + 142}px` } as CSSProperties;
+  const floatingPlanPanelStyle = { "--plan-panel-bottom": `${pendingClarificationPlan || pendingAgentClarification || activeAgentClarificationResume || pendingFinalSupplement ? 142 : composerHeight + 142}px` } as CSSProperties;
 
   useEffect(() => {
     setThinkingChoice(modelSettingsToThinkingChoice(modelSettings));
@@ -240,7 +244,7 @@ export function AICollaborationDrawer({
   }, [currentThreadId]);
   useEffect(() => {
     setPlanPanelCollapsed(false);
-  }, [floatingPlan?.id, floatingPlan?.status, pendingAgentClarification?.clarificationId, pendingFinalSupplement?.id]);
+  }, [floatingPlan?.id, floatingPlan?.status, pendingAgentClarification?.clarificationId, activeAgentClarificationResume?.id, activeAgentClarificationResume?.resumeState, pendingFinalSupplement?.id]);
 
   const resetWriteDraft = () => {
     setAnnotations([]);
@@ -290,7 +294,7 @@ export function AICollaborationDrawer({
   const submitComposerPayload = async (payload: AIComposerSubmitPayload) => {
     const text = payload.text.trim();
     if (!text) return;
-    if (pendingAgentClarification || pendingFinalSupplement) return;
+    if (pendingAgentClarification || activeAgentClarificationResume || pendingFinalSupplement) return;
     setInput("");
     const runtimeBudgetOverride = payload.runtimeBudgetProfile === (runtimeBudgetProfile ?? "low")
       ? undefined
@@ -438,6 +442,24 @@ export function AICollaborationDrawer({
       setSubmittedAgentClarificationKeys((current) => removeSubmittedAgentClarificationKeys(current, submission.submittedKeys));
       setOptimisticAgentClarifications((current) => removeOptimisticAgentClarification(current, submission.optimisticClarification));
       throw error;
+    } finally {
+      setClarificationBusy(false);
+    }
+  };
+
+  const retryAgentClarificationResume = async (clarification: AgentClarification) => {
+    const submission = buildAgentClarificationRetrySubmission({
+      clarification,
+      currentThreadId,
+      enabledSkillRefs,
+      disabledSkillRefs,
+      runtimeBudgetChoice,
+      runtimeBudgetProfile
+    });
+    if (!submission) return;
+    setClarificationBusy(true);
+    try {
+      await onSend(submission.instructionText, undefined, submission.requestContext);
     } finally {
       setClarificationBusy(false);
     }
@@ -689,7 +711,7 @@ export function AICollaborationDrawer({
         </button>
       ) : null}
 
-      {floatingPlan || pendingAgentClarification || pendingFinalSupplement ? (
+      {floatingPlan || pendingAgentClarification || activeAgentClarificationResume || pendingFinalSupplement ? (
         <section
           className={planPanelCollapsed ? "floating-plan-panel is-collapsed" : "floating-plan-panel"}
           style={floatingPlanPanelStyle}
@@ -728,6 +750,21 @@ export function AICollaborationDrawer({
               variant="composer"
               onAnswer={(answer) => answerAgentClarification(pendingAgentClarification, answer)}
             />
+          ) : null}
+          {!planPanelCollapsed && activeAgentClarificationResume ? (
+            <div className="budget-continuation-chip" data-testid="agent-clarification-resume-card">
+              <span>
+                {activeAgentClarificationResume.resumeState === "failed"
+                  ? locale === "zh" ? "答案已保存，但恢复运行失败。" : "Your answer was saved, but resume failed."
+                  : locale === "zh" ? "答案已保存，正在恢复原运行…" : "Your answer was saved. Resuming the original run…"}
+                {activeAgentClarificationResume.answer ? ` ${activeAgentClarificationResume.answer}` : ""}
+              </span>
+              {activeAgentClarificationResume.resumeState === "failed" ? (
+                <button disabled={clarificationBusy} type="button" onClick={() => retryAgentClarificationResume(activeAgentClarificationResume)}>
+                  {locale === "zh" ? "重试恢复" : "Retry resume"}
+                </button>
+              ) : null}
+            </div>
           ) : null}
           {!planPanelCollapsed && pendingFinalSupplement ? (
             <FinalSupplementCard
@@ -773,7 +810,7 @@ export function AICollaborationDrawer({
           </div>
         ) : null}
       </div>
-      {pendingClarificationPlan || pendingAgentClarification || pendingFinalSupplement ? null : (
+      {pendingClarificationPlan || pendingAgentClarification || activeAgentClarificationResume || pendingFinalSupplement ? null : (
         <AIComposer
           activeAgent={activeAgent}
           agentCards={agentCards}
@@ -1068,6 +1105,27 @@ export function buildAgentClarificationSubmission(input: AgentClarificationSubmi
       }
     }
   };
+}
+
+export function buildAgentClarificationRetrySubmission(input: Omit<AgentClarificationSubmissionInput, "clarification" | "optionId" | "answerText"> & { clarification: AgentClarification }) {
+  const clarification = input.clarification;
+  if (clarification.status !== "answered" || clarification.resumeState !== "failed" || !clarification.answer) return undefined;
+  const resumeContext = readAgentClarificationResumeContext(clarification.resumeContext);
+  if (!resumeContext?.runtimeResume) return undefined;
+  const prompt: AgentClarificationPrompt = {
+    clarificationId: clarification.id,
+    question: clarification.question,
+    options: clarification.options,
+    resumeContext
+  };
+  const selectedOptionId = clarification.selectedOptionId && clarification.options.some((option) => option.id === clarification.selectedOptionId)
+    ? clarification.selectedOptionId
+    : undefined;
+  return buildAgentClarificationSubmission({
+    ...input,
+    clarification: prompt,
+    ...(selectedOptionId ? { optionId: selectedOptionId } : { answerText: clarification.answer })
+  });
 }
 
 type PlanTimelineEntry =
@@ -1545,6 +1603,14 @@ export function agentClarificationFromRecord(clarification?: AgentClarification,
     options: clarification.options,
     ...(resumeContext ? { resumeContext } : {})
   };
+}
+
+export function latestActiveAgentClarificationResume(clarifications: AgentClarification[], isSending = false) {
+  const clarification = [...clarifications]
+    .reverse()
+    .find((clarification) => clarification.status === "answered"
+      && (clarification.resumeState === "queued" || clarification.resumeState === "resuming" || clarification.resumeState === "failed"));
+  return isSending && clarification?.resumeState !== "failed" ? undefined : clarification;
 }
 
 export function latestPendingAgentClarification(messages: CollaborationMessage[], answeredKeys: ReadonlySet<string> = new Set()): AgentClarificationPrompt | undefined {

@@ -23,6 +23,7 @@ export type RunRecordInput = {
   finishReason?: string;
   runtimeRunId?: string;
   runtimeThreadId?: string;
+  resumedClarificationId?: string;
   usage?: unknown;
 };
 
@@ -250,6 +251,7 @@ export type StoredToolEvent = {
 
 export type AgentClarificationOption = { id: string; label: string; detail: string; recommended: boolean };
 export type AgentClarificationStatus = "pending" | "answered";
+export type AgentClarificationResumeState = "not_resumable" | "awaiting_answer" | "queued" | "resuming" | "succeeded" | "failed";
 export type StoredAgentClarification = {
   id: string;
   threadId: string;
@@ -261,6 +263,10 @@ export type StoredAgentClarification = {
   selectedOptionId?: string;
   selectedOptionLabel?: string;
   answer?: string;
+  resumeState: AgentClarificationResumeState;
+  resumeAttempts: number;
+  resumeError?: string;
+  resumedRuntimeRunId?: string;
   createdAt: string;
   updatedAt: string;
 };

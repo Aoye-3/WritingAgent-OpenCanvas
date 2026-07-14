@@ -241,6 +241,7 @@ export type StoredToolEvent = {
 };
 
 export type AgentClarificationOption = { id: string; label: string; detail: string; recommended: boolean };
+export type AgentClarificationResumeState = "not_resumable" | "awaiting_answer" | "queued" | "resuming" | "succeeded" | "failed";
 export type AgentClarification = {
   id: string;
   threadId: string;
@@ -252,6 +253,10 @@ export type AgentClarification = {
   selectedOptionId?: string;
   selectedOptionLabel?: string;
   answer?: string;
+  resumeState?: AgentClarificationResumeState;
+  resumeAttempts?: number;
+  resumeError?: string;
+  resumedRuntimeRunId?: string;
   createdAt: string;
   updatedAt: string;
 };
