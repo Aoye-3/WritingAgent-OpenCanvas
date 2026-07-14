@@ -185,7 +185,7 @@ export function createGenerationService(
         onToolEvent
       });
     }
-    payload = withSanitizedAgentIntakeCanvas(payload);
+    if (!durableContinuationClaim(payload)) payload = withSanitizedAgentIntakeCanvas(payload);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
     payload = { ...payload, projectId: selection.projectId, agentCardId: context.runtimeConfig.agentCard.id };
     payload = withTaskHandlingPolicy(payload, context);
@@ -1641,6 +1641,7 @@ function withRuntimeContext(payload: GenerateRequest, canvasDeliveryContract?: C
 function withProgressiveCanvasDeliveryContext(payload: GenerateRequest, context: Awaited<ReturnType<typeof buildGenerationRunContext>>, projectSettings: ProjectRuntimeSettings): GenerateRequest {
   if (readCanvasWorkflowMode(payload.contextValues) !== "batch_delivery") return payload;
   if (!isCanvasEligibleTaskPolicy(payload.contextValues?.taskHandlingPolicy)) return payload;
+  if (durableContinuationClaim(payload) && record(payload.contextValues?.progressiveCanvasDelivery).enabled === true) return payload;
   const budget = resolveRuntimeBudget(payload.runtimeBudgetProfile, projectSettings);
   return {
     ...payload,

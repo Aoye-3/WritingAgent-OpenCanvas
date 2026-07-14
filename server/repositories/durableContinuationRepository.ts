@@ -30,7 +30,7 @@ export class DurableContinuationRepository {
 
   upsertReady(threadId: string, sourceRunId: string, descriptor: DurableContinuationDescriptor) {
     const now = nowIso();
-    this.db.prepare(
+    const result = this.db.prepare(
       `INSERT INTO durable_task_continuations (
          thread_id, source_run_id, state, descriptor_json, attempts,
          claim_token, claimed_at, last_error, created_at, updated_at
@@ -43,8 +43,12 @@ export class DurableContinuationRepository {
          claim_token = NULL,
          claimed_at = NULL,
          last_error = NULL,
-         updated_at = excluded.updated_at`
+         updated_at = excluded.updated_at
+       WHERE durable_task_continuations.state <> 'claimed'`
     ).run(threadId, sourceRunId, JSON.stringify(descriptor), now, now);
+    if (result.changes === 0 && this.read(threadId)?.state === "claimed") {
+      throw new DurableContinuationError("durable_continuation_in_progress");
+    }
     return this.read(threadId)!;
   }
 

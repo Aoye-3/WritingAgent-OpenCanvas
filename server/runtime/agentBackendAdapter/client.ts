@@ -43,6 +43,7 @@ export type AgentBackendRunInput = {
   planGeneration?: GenerateRequest["planGeneration"];
   contextValues?: Record<string, unknown>;
   chatInstruction?: string;
+  serverAuthoritativeCanvas?: boolean;
   facetwriteMemoryContent?: string;
   fetchImpl?: typeof fetch;
   config?: AgentBackendRuntimeConfig;
@@ -282,19 +283,21 @@ async function formatRuntimeHttpError(response: Response) {
 }
 
 export function buildRunRequest(input: AgentBackendRunInput, config: AgentBackendRuntimeConfig) {
-  const sanitizedContextValues = withSanitizedAgentIntakeCanvas({
-    mode: "chat",
-    locale: "en",
-    contextValues: input.contextValues,
-    chatInstruction: input.chatInstruction,
-    toolState: input.toolState,
-    transientSkillRefs: [],
-    disabledSkillRefs: [],
-    planPhase: input.planPhase,
-    planId: input.planId,
-    stepId: input.stepId,
-    planGeneration: input.planGeneration
-  }).contextValues;
+  const sanitizedContextValues = input.serverAuthoritativeCanvas
+    ? input.contextValues
+    : withSanitizedAgentIntakeCanvas({
+      mode: "chat",
+      locale: "en",
+      contextValues: input.contextValues,
+      chatInstruction: input.chatInstruction,
+      toolState: input.toolState,
+      transientSkillRefs: [],
+      disabledSkillRefs: [],
+      planPhase: input.planPhase,
+      planId: input.planId,
+      stepId: input.stepId,
+      planGeneration: input.planGeneration
+    }).contextValues;
   input = { ...input, contextValues: sanitizedContextValues };
   const baseRuntimeContext = buildAgentBackendRunContext(input);
   const skillScopeGuardPolicy = skillScopeGuardPolicyFromContext(input.contextValues);

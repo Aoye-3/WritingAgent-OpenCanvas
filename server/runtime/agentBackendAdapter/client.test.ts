@@ -344,6 +344,42 @@ test("builds AgentBackend resume run request with Command resume payload", () =>
   assert.equal(request.checkpoint_id, "checkpoint_1");
 });
 
+test("manual continuation uses ordinary input while clarification uses Command resume", () => {
+  const card = getAgentCard("summary");
+  const settings = defaultAgentSettings(card);
+  const config = {
+    enabled: true,
+    baseUrl: "http://127.0.0.1:8000",
+    assistantId: "lead_agent"
+  };
+  const base = {
+    threadId: "runtime_thread_1",
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    agentCard: card,
+    settings,
+    messages: [{ role: "user" as const, content: "continue" }],
+    prompt: "Finish the original report",
+    chatInstruction: "Finish the original report"
+  };
+
+  const manual = buildRunRequest(base, config);
+  const clarification = buildResumeRunRequest({
+    ...base,
+    resume: { type: "agent_clarification_answer", answer: "Use recent sources" },
+    resumeOfRunId: "runtime_run_1",
+    interruptId: "interrupt_1"
+  }, config);
+
+  assert.deepEqual(manual.input, { messages: [{ role: "user", content: "continue" }] });
+  assert.equal("command" in manual, false);
+  assert.equal(manual.context.facetwrite_chat_instruction, "Finish the original report");
+  assert.equal(clarification.input, undefined);
+  assert.deepEqual(clarification.command, {
+    resume: { type: "agent_clarification_answer", answer: "Use recent sources" }
+  });
+});
+
 test("builds clarification resume request with delivery tools after user answer", () => {
   const card = getAgentCard("summary");
   const settings = defaultAgentSettings(card);

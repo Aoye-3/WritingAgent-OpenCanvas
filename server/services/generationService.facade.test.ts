@@ -99,6 +99,14 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
   const canvasWriteRequests: unknown[] = [];
   const canvasNodes: Array<Record<string, unknown>> = [];
   const canvasEdges: Array<Record<string, unknown>> = [];
+  const projectRuntimeSettings = {
+    runtimeBudgetProfile: "low" as const,
+    evidenceToolLimit: 8,
+    bodyDraftWriteLimit: 2,
+    modelCallLimit: 18,
+    recursionLimit: 80,
+    synthesisReserveSteps: 16
+  };
   const planState: Record<string, unknown> = {
     id: "plan_intake_test",
     status: "draft",
@@ -122,20 +130,14 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
     canvasWriteRequests,
     canvasNodes,
     canvasEdges,
+    projectRuntimeSettings,
     planState,
     durable,
     storage: {
       ensureThread: async () => undefined,
       getThread: () => ({ id: "thread_test", projectId: "project_test", title: "Test", configuredModelApiId: "configured-test", contextResetAt, updatedAt: "" }),
       getProject: () => ({ id: "project_test", title: "Test", summary: "", updatedAt: "" }),
-      getProjectRuntimeSettings: () => ({
-        runtimeBudgetProfile: "low",
-        evidenceToolLimit: 8,
-        bodyDraftWriteLimit: 2,
-        modelCallLimit: 18,
-        recursionLimit: 80,
-        synthesisReserveSteps: 16
-      }),
+      getProjectRuntimeSettings: () => ({ ...projectRuntimeSettings }),
       getProjectModelBindings: () => ["configured-test"],
       getProjectSharedContext: () => undefined,
       getProjectBrief: () => ({ brief: {}, revision: 0 }),
@@ -282,6 +284,12 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
         durable.current = { ...durable.current, state: "failed", claimToken: undefined, lastError: error };
         return true;
       },
+      readDurableContinuationCanvas: () => ({
+        nodes: canvasNodes,
+        edges: canvasEdges,
+        objects: [],
+        workflow: { mode: "batch_delivery", stage: "draft" }
+      }),
       listDurableContinuationEvidence: () => [],
       listCanvasNodes: () => canvasNodes,
       listCanvasEdges: () => canvasEdges,
@@ -4692,6 +4700,56 @@ test("concurrent manual continuations invoke Runtime once and preserve literal c
   assert.equal(durable.current?.state, "completed");
 });
 
+test("substantive request cannot steal a claimed continuation before Runtime", async () => {
+  const { storage, durable } = fakeStorage();
+  durable.current = {
+    state: "ready",
+    attempts: 0,
+    sourceRunId: "run_source",
+    descriptor: {
+      version: 1,
+      resolvedInstruction: "Finish the original report",
+      agentCardId: "blog-post",
+      projectId: "project_test",
+      deliveryId: "delivery_original",
+      workflowMode: "batch_delivery"
+    }
+  };
+  let runtimeCalls = 0;
+  let release!: () => void;
+  let signalStarted!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => {
+        runtimeCalls += 1;
+        signalStarted();
+        await blocked;
+        return { text: "The original report is complete.", finishReason: "stop", events: [] };
+      }
+    }
+  });
+
+  const claimant = service.generateAndRecord({
+    mode: "chat", locale: "en", threadId: "thread_test", chatInstruction: "continue"
+  });
+  await started;
+  const substantive = service.generateAndRecord({
+    mode: "chat", locale: "en", threadId: "thread_test", chatInstruction: "Start a different report"
+  });
+  await assert.rejects(substantive, (error: unknown) => error instanceof Error
+    && "code" in error
+    && error.code === "durable_continuation_in_progress");
+  assert.equal(runtimeCalls, 1);
+
+  release();
+  await claimant;
+  assert.equal(durable.current?.state, "completed");
+});
+
 test("failed continuation preserves its descriptor and retries with an incremented attempt", async () => {
   const { storage, durable } = fakeStorage();
   durable.current = {
@@ -4729,6 +4787,129 @@ test("failed continuation preserves its descriptor and retries with an increment
   await service.generateAndRecord({ mode: "chat", locale: "en", threadId: "thread_test", chatInstruction: "continue" });
   assert.equal(durable.current?.state, "completed");
   assert.equal(durable.current?.attempts, 2);
+});
+
+test("continuation preserves the resolved progressive budget after project settings change", async () => {
+  const { storage, durable, projectRuntimeSettings } = fakeStorage();
+  Object.assign(projectRuntimeSettings, {
+    runtimeBudgetProfile: "low",
+    evidenceToolLimit: 2,
+    bodyDraftWriteLimit: 1,
+    modelCallLimit: 6,
+    recursionLimit: 20,
+    synthesisReserveSteps: 3
+  });
+  const resolvedBudget = {
+    enabled: true,
+    runtimeBudgetProfile: "high",
+    recursionLimit: 137,
+    modelCallLimit: 41,
+    evidenceToolLimit: 17,
+    bodyDraftWriteLimit: 6,
+    synthesisReserveSteps: 13,
+    forceSynthesisAfterEvidence: true,
+    evidenceTools: ["web_search", "write_file"],
+    trigger: "skill_long_task"
+  };
+  durable.current = {
+    state: "ready",
+    attempts: 0,
+    sourceRunId: "run_source",
+    descriptor: {
+      version: 1,
+      resolvedInstruction: "Finish the budgeted research report",
+      agentCardId: "blog-post",
+      projectId: "project_test",
+      transientSkillRefs: ["research"],
+      runtimeBudgetProfile: "high",
+      deliveryId: "delivery_budget",
+      workflowMode: "batch_delivery",
+      safeContext: {
+        autoPreflightPlan: { enabled: false },
+        taskHandlingPolicy: { canvasDeliveryMode: "progressive" },
+        progressiveCanvasDelivery: resolvedBudget,
+        runtimeBudgetProfile: "high"
+      }
+    }
+  };
+  let observedBudget: unknown;
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        observedBudget = input.contextValues?.progressiveCanvasDelivery;
+        return { text: "The budgeted report is complete.", finishReason: "stop", events: [] };
+      }
+    }
+  });
+
+  await service.generateAndRecord({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    chatInstruction: "continue"
+  });
+
+  assert.deepEqual(observedBudget, resolvedBudget);
+});
+
+test("continuation Runtime receives authoritative Canvas content and stored delivery identity", async () => {
+  const { storage, durable, canvasNodes } = fakeStorage();
+  canvasNodes.push({
+    id: "node_live",
+    kind: "document",
+    title: "Live report",
+    content: "Authoritative current report body",
+    x: 10,
+    y: 20,
+    width: 300,
+    height: 200,
+    metadata: {},
+    includeInProjectContext: true
+  });
+  durable.current = {
+    state: "ready",
+    attempts: 0,
+    sourceRunId: "run_source",
+    descriptor: {
+      version: 1,
+      resolvedInstruction: "Finish the live report",
+      agentCardId: "blog-post",
+      projectId: "project_test",
+      deliveryId: "delivery_authoritative",
+      workflowMode: "batch_delivery",
+      selectedCanvasNodeId: "node_live"
+    }
+  };
+  let runtimeCanvas: unknown;
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        runtimeCanvas = input.contextValues?.canvas;
+        return { text: "The live report is complete.", finishReason: "stop", events: [] };
+      }
+    }
+  });
+
+  await service.generateAndRecord({
+    mode: "chat", locale: "en", threadId: "thread_test", chatInstruction: "continue",
+    contextValues: { canvas: { nodes: [{ id: "client", content: "stale client body" }] } }
+  });
+
+  const canvas = runtimeCanvas as {
+    deliveryId: string;
+    selectedCanvasNodeId: string;
+    nodes: Array<{ id: string; content: string }>;
+  };
+  assert.equal(canvas.deliveryId, "delivery_authoritative");
+  assert.equal(canvas.selectedCanvasNodeId, "node_live");
+  assert.deepEqual(canvas.nodes.map((node) => ({ id: node.id, content: node.content })), [
+    { id: "node_live", content: "Authoritative current report body" }
+  ]);
+  assert.doesNotMatch(JSON.stringify(canvas), /stale client body/);
 });
 
 test("streaming continuation restores the task and closes its claim", async () => {

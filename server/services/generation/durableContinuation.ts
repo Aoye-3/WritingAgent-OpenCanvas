@@ -1,7 +1,6 @@
 import type { GenerateRequest } from "../../contracts/generation.js";
 import type { DurableContinuationDescriptor, StoredDurableContinuation } from "../../storageTypes.js";
 import { isCanvasWorkflowMode } from "../../../shared/canvasWorkflow.js";
-import { sanitizeCanvasForAgentIntake } from "../../../shared/agentIntakeCanvas.js";
 
 const durableContinuationMetadata = Symbol("durableContinuationMetadata");
 
@@ -20,6 +19,8 @@ type DurableContinuationStorage = {
   readDurableContinuation: (threadId: string) => Pick<StoredDurableContinuation, "state" | "descriptor" | "sourceRunId"> | undefined;
   claimDurableContinuation: (threadId: string) => Pick<StoredDurableContinuation, "state" | "descriptor" | "sourceRunId" | "claimToken" | "attempts">;
   supersedeDurableContinuation: (threadId: string) => boolean;
+  failDurableContinuation: (threadId: string, claimToken: string, error: string) => boolean;
+  readDurableContinuationCanvas: (projectId: string) => Record<string, unknown>;
   listDurableContinuationEvidence?: (threadId: string, sourceRunId: string | undefined, deliveryId: string) => unknown[];
 };
 
@@ -139,67 +140,79 @@ export function resolveDurableContinuationRequest(
   const sanitizedInput = withoutClientDurableContinuation(input);
   if (isProtectedContinuationRequest(sanitizedInput)) return { payload: sanitizedInput, claimed: false };
 
+  const active = storage.readDurableContinuation(threadId);
+  if (active?.state === "claimed") storage.claimDurableContinuation(threadId);
+
   if (!isStandaloneDurableContinuationIntent(literalInstruction)) {
     if (literalInstruction.trim()) storage.supersedeDurableContinuation(threadId);
     return { payload: sanitizedInput, claimed: false };
   }
 
-  const active = storage.readDurableContinuation(threadId);
-  if (active?.state === "claimed") storage.claimDurableContinuation(threadId);
   if (!active || (active.state !== "ready" && active.state !== "failed")) {
     return { payload: sanitizedInput, claimed: false };
   }
   const claim = storage.claimDurableContinuation(threadId);
   if (!claim.claimToken) throw new Error("durable_continuation_claim_token_missing");
-  const descriptor = claim.descriptor;
-  const currentCanvas = sanitizeCanvasForAgentIntake(readRecord(sanitizedInput.contextValues).canvas);
-  const currentWorkflow = readRecord(currentCanvas.workflow);
-  const canvas = {
-    ...currentCanvas,
-    workflow: { ...currentWorkflow, mode: descriptor.workflowMode }
-  };
-  const evidence = storage.listDurableContinuationEvidence?.(threadId, claim.sourceRunId, descriptor.deliveryId) ?? [];
-  const contextValues = {
-    ...(descriptor.safeContext ?? {}),
-    ...(Object.keys(canvas).length ? { canvas } : {}),
-    ...(evidence.length ? { durableContinuationEvidence: evidence } : {})
-  };
-  const planGeneration = descriptor.plan?.phaseAttemptId ? {
-    phase: descriptor.plan.phase,
-    planId: descriptor.plan.planId,
-    ...(descriptor.plan.stepId ? { stepId: descriptor.plan.stepId } : {}),
-    phaseAttemptId: descriptor.plan.phaseAttemptId,
-    ...(descriptor.plan.executionVersion !== undefined ? { executionVersion: descriptor.plan.executionVersion } : {})
-  } : undefined;
-  const restored: GenerateRequest = {
-    mode: "chat",
-    locale: sanitizedInput.locale,
-    threadId,
-    chatInstruction: descriptor.resolvedInstruction,
-    agentCardId: descriptor.agentCardId,
-    projectId: descriptor.projectId,
-    contextValues,
-    ...(descriptor.transientSkillRefs ? { transientSkillRefs: [...descriptor.transientSkillRefs] } : {}),
-    ...(descriptor.disabledSkillRefs ? { disabledSkillRefs: [...descriptor.disabledSkillRefs] } : {}),
-    ...(descriptor.runtimeBudgetProfile ? { runtimeBudgetProfile: descriptor.runtimeBudgetProfile } : {}),
-    ...(descriptor.modelOverrides ? { modelOverrides: { ...descriptor.modelOverrides } } : {}),
-    ...(descriptor.selectedCanvasNodeId ? { selectedCanvasNodeId: descriptor.selectedCanvasNodeId } : {}),
-    ...(descriptor.plan ? {
-      planPhase: descriptor.plan.phase,
-      planId: descriptor.plan.planId,
-      ...(descriptor.plan.stepId ? { stepId: descriptor.plan.stepId } : {})
-    } : {}),
-    ...(planGeneration ? { planGeneration } : {})
-  };
-  return {
-    payload: withMetadata(restored, {
+  try {
+    const descriptor = claim.descriptor;
+    const currentCanvas = storage.readDurableContinuationCanvas(descriptor.projectId);
+    const currentWorkflow = readRecord(currentCanvas.workflow);
+    const canvas = {
+      ...currentCanvas,
       deliveryId: descriptor.deliveryId,
-      claimToken: claim.claimToken,
-      visibleUserMessage: literalInstruction,
-      descriptor
-    }),
-    claimed: true
-  };
+      ...(descriptor.selectedCanvasNodeId ? { selectedCanvasNodeId: descriptor.selectedCanvasNodeId } : {}),
+      workflow: { ...currentWorkflow, mode: descriptor.workflowMode }
+    };
+    const evidence = storage.listDurableContinuationEvidence?.(threadId, claim.sourceRunId, descriptor.deliveryId) ?? [];
+    const contextValues = {
+      ...(descriptor.safeContext ?? {}),
+      canvas,
+      ...(evidence.length ? { durableContinuationEvidence: evidence } : {})
+    };
+    const planGeneration = descriptor.plan?.phaseAttemptId ? {
+      phase: descriptor.plan.phase,
+      planId: descriptor.plan.planId,
+      ...(descriptor.plan.stepId ? { stepId: descriptor.plan.stepId } : {}),
+      phaseAttemptId: descriptor.plan.phaseAttemptId,
+      ...(descriptor.plan.executionVersion !== undefined ? { executionVersion: descriptor.plan.executionVersion } : {})
+    } : undefined;
+    const restored: GenerateRequest = {
+      mode: "chat",
+      locale: sanitizedInput.locale,
+      threadId,
+      chatInstruction: descriptor.resolvedInstruction,
+      agentCardId: descriptor.agentCardId,
+      projectId: descriptor.projectId,
+      contextValues,
+      ...(descriptor.transientSkillRefs ? { transientSkillRefs: [...descriptor.transientSkillRefs] } : {}),
+      ...(descriptor.disabledSkillRefs ? { disabledSkillRefs: [...descriptor.disabledSkillRefs] } : {}),
+      ...(descriptor.runtimeBudgetProfile ? { runtimeBudgetProfile: descriptor.runtimeBudgetProfile } : {}),
+      ...(descriptor.modelOverrides ? { modelOverrides: { ...descriptor.modelOverrides } } : {}),
+      ...(descriptor.selectedCanvasNodeId ? { selectedCanvasNodeId: descriptor.selectedCanvasNodeId } : {}),
+      ...(descriptor.plan ? {
+        planPhase: descriptor.plan.phase,
+        planId: descriptor.plan.planId,
+        ...(descriptor.plan.stepId ? { stepId: descriptor.plan.stepId } : {})
+      } : {}),
+      ...(planGeneration ? { planGeneration } : {})
+    };
+    return {
+      payload: withMetadata(restored, {
+        deliveryId: descriptor.deliveryId,
+        claimToken: claim.claimToken,
+        visibleUserMessage: literalInstruction,
+        descriptor
+      }),
+      claimed: true
+    };
+  } catch (error) {
+    storage.failDurableContinuation(
+      threadId,
+      claim.claimToken,
+      error instanceof Error ? error.message : "durable_continuation_restore_failed"
+    );
+    throw error;
+  }
 }
 
 function withoutClientDurableContinuation(payload: GenerateRequest): GenerateRequest {

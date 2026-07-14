@@ -40,3 +40,21 @@ Implemented server-side durable continuation persistence and restoration for inc
 - Trust boundary: client-supplied durable continuation metadata is stripped; descriptors are built and restored from server-owned fields.
 - Evidence boundary: only sanitized delivery/tool/file evidence is restored; lifecycle and error payloads are not reused as prompt context.
 - No unresolved correctness or concurrency concern was found in the scoped implementation. Node emits its expected experimental SQLite warning during tests.
+
+## Review-fix pass
+
+The follow-up review identified six ownership and restoration gaps. Each behavior change was reproduced with a failing test before the production fix:
+
+- Claimed ownership: repository and resolver tests failed because an unconditional upsert erased a claim and substantive requests could pass a claimed row. `upsertReady` now conditionally rejects claimed rows, all claimed requests fail before Runtime, and incomplete owned work requeues only through the matching claim token. A transaction test proves generic recording cannot replace the claim, while the owner can requeue; a facade race proves a substantive request cannot steal a blocked claimant and the original claimant still completes.
+- Authoritative Canvas: the resolver test first returned the client snapshot, and a facade-level test then showed server node `content` was stripped before Runtime. Continuation restoration now builds a narrow nodes/edges/objects/workflow snapshot from storage, explicitly restores the stored delivery ID and selected target, and uses a server-only internal flag to preserve that authoritative content through AgentBackend request construction. Client Canvas fields are never merged.
+- Delivery-scoped evidence: conflicting tool, file, and output events initially leaked into restored evidence. Any safe event carrying a nonempty delivery ID that differs from the descriptor is now rejected; Canvas delivery events still require an exact target delivery ID.
+- Exact resolved budget: after disabling auto-preflight in the test to exercise progressive delivery, the stored custom limits were replaced by the current profile defaults. Symbol-backed claimed payloads now retain the exact persisted progressive profile, limits, evidence tools, and trigger instead of recomputing them from changed project settings.
+- Post-claim restoration failure: an injected authoritative Canvas read failure initially left the claim owned. Restoration now catches every exception after claim, token-fails the row immediately, and rethrows.
+- Protected/request contracts: explicit tests verify agent clarification, Plan clarification/intake, Plan revision, and queued intervention never activate durable continuation. An adapter-level test verifies manual continuation uses ordinary `input` with no `command`, while runtime-backed clarification uses `command.resume` with no ordinary input.
+
+### Review-fix verification
+
+- `node --import tsx --test server/db/durableContinuationSchema.test.ts server/repositories/durableContinuationRepository.test.ts server/services/generation/durableContinuation.test.ts server/services/generationService.facade.test.ts server/routes/generationRoutes.test.ts` — 109 passed, 0 failed.
+- `node --import tsx --test server/runtime/agentBackendAdapter/client.test.ts server/services/generation/agentBackendRunner.test.ts server/storageFacade.test.ts` — 98 passed, 0 failed.
+- `npm.cmd run typecheck` — passed.
+- The first combined verification encountered one unrelated WHATWG `bad port` local-fetch flake in `generationRoutes.test.ts`; the route suite passed 3/3 immediately when rerun, and the final combined suite passed 109/109.

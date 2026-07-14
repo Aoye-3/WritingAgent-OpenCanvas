@@ -281,7 +281,9 @@ export class RunRepository {
     return rows.flatMap((row) => {
       if (!isSafeDurableEvidenceEvent(row.eventType)) return [];
       const payload = parseJson(row.payloadJson);
-      if (row.eventType.startsWith("canvas_delivery_") && readDeliveryId(payload) !== deliveryId) return [];
+      const eventDeliveryId = readDeliveryId(payload);
+      if (eventDeliveryId && eventDeliveryId !== deliveryId) return [];
+      if (row.eventType.startsWith("canvas_delivery_") && eventDeliveryId !== deliveryId) return [];
       return [{ eventType: row.eventType, payload }];
     });
   }

@@ -260,6 +260,36 @@ export class SQLiteStorageRepository {
   failDurableContinuation(threadId: string, claimToken: string, error: string) { return this.runs.failDurableContinuation(threadId, claimToken, error); }
   supersedeDurableContinuation(threadId: string) { return this.runs.supersedeDurableContinuation(threadId); }
 
+  readDurableContinuationCanvas(projectId: string) {
+    return {
+      nodes: this.canvas.listCanvasNodes(projectId).map((node) => ({
+        id: node.id,
+        kind: node.kind,
+        title: node.title,
+        content: node.content,
+        x: node.x,
+        y: node.y,
+        width: node.width,
+        height: node.height,
+        metadata: node.metadata,
+        includeInProjectContext: node.includeInProjectContext
+      })),
+      edges: this.canvas.listCanvasEdges(projectId).map((edge) => ({
+        id: edge.id,
+        sourceNodeId: edge.sourceNodeId,
+        targetNodeId: edge.targetNodeId,
+        label: edge.label
+      })),
+      objects: this.canvas.listCanvasObjects(projectId).map((object) => ({
+        id: object.id,
+        kind: object.kind,
+        geometry: object.geometry,
+        data: object.data
+      })),
+      workflow: this.canvas.getCanvasWorkflow(projectId)
+    };
+  }
+
   listMessages(threadId: string) {
     return this.runs.listMessages(threadId);
   }

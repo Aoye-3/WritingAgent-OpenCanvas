@@ -8,6 +8,7 @@ import type { ChatMessage } from "../../providerRuntime.js";
 import type { ToolEventRecord } from "../../toolRuntime.js";
 import type { StreamStatus } from "../../agentRunLoop.js";
 import { applyCanvasWriteToolExposure } from "./canvasWriteScopePolicy.js";
+import { durableContinuationClaim } from "./durableContinuation.js";
 import {
   agentIntakeToolRefsForPayload,
   hasAnsweredAgentClarification,
@@ -52,7 +53,12 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     && !isOrdinaryClarificationIntakeCollecting(input.payload.contextValues)
     ? withAgentIntakeExecutionPhase(input.payload)
     : input.payload;
-  input = { ...input, payload: withSanitizedAgentIntakeCanvas(preparedPayload) };
+  input = {
+    ...input,
+    payload: durableContinuationClaim(preparedPayload)
+      ? preparedPayload
+      : withSanitizedAgentIntakeCanvas(preparedPayload)
+  };
 
   const agentClarification = readRecord(input.payload.contextValues?.agentClarification);
   const runtimeResume = readRuntimeResumeMetadata(readRecord(agentClarification.resumeContext)?.runtimeResume);
@@ -134,6 +140,7 @@ function buildBaseRunInput(input: AgentBackendRunnerInput, config: AgentBackendR
     planGeneration: input.payload.planGeneration,
     contextValues: { ...input.payload.contextValues, ...(input.payload.canvasAction ? { canvasAction: input.payload.canvasAction } : {}), ...(input.payload.planGeneration ? { planGeneration: input.payload.planGeneration } : {}) },
     chatInstruction: input.payload.chatInstruction ?? input.payload.freeTextPrompt,
+    serverAuthoritativeCanvas: Boolean(durableContinuationClaim(input.payload)),
     onToolEvent: input.onToolEvent,
     onToken: input.onToken,
     onReasoningToken: input.onReasoningToken,
