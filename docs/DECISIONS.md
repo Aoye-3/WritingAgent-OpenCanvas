@@ -1,5 +1,13 @@
 # FacetWrite Technical Decisions
 
+## 2026-07-14: Durable Tasks Use Guarded Completion And Persisted Continuation
+
+Decision: Keep a useful process reply visible without treating it as task completion. Durable Runtime runs may auto-continue a pure action promise twice inside the same LangGraph graph. FacetWrite then evaluates completion before Canvas finalization or Plan completion. If work is still incomplete, it atomically records the nonterminal run and a server-owned continuation descriptor. A later standalone `continue` claims that descriptor and starts normal input on the same Runtime thread; it does not fabricate clarification `command.resume` metadata.
+
+Reason: A model can say that it will start searching or synthesize results and then naturally exit. Treating that text as final can commit placeholder prose to Canvas, lose Skills/budgets/Plan position, or make a later `continue` start an unrelated task. Browser-only state cannot survive refresh, stream failure, concurrent requests, or service restart.
+
+Impact: `durable_task_continuations` owns the `ready | claimed | completed | failed | superseded` lifecycle. Claims are atomic, retries are idempotent by `clientRequestId`, and requeued attempts preserve a delivery-scoped chain of safe evidence. Public APIs expose only `state`, `canContinue`, `attempts`, and an optional allowlisted `lastError`. Checkpoint-backed Agent clarification remains a separate persisted protocol using `command.resume`. Detailed ADR: `docs/decisions/ADR-2026-07-14-durable-task-premature-exit-continuation.md`.
+
 ## 2026-07-10: Cloudflare Tunnel Is A Temporary Remote Test Path
 
 Decision: Use Cloudflare Tunnel as a temporary remote testing bridge for the local Windows App Shell instead of moving storage, Express, or the Python Agent Runtime onto Cloudflare in this stage.

@@ -66,7 +66,11 @@ Knowledge Base vector stores and uploads are created under:
 - `tool_events`
   - Tool and run events stored as JSON payloads. `web_search` events may include sanitized `sources` arrays with title and URL only; raw search result payloads and secrets must not be persisted.
 - `agent_clarifications`
-  - Durable Agent Runtime clarification state per Thread/run/question. Pending rows drive the composer choice card; answered rows preserve selected option metadata so follow-up runs can mark the question resolved and retain resume context.
+  - Durable Agent Runtime clarification state per Thread/run/question. Pending rows drive the composer choice card; answers are persisted before Runtime I/O. `resume_state`, `resume_attempts`, `last_resume_error`, and `resumed_runtime_run_id` track `command.resume` recovery. A row can take ownership from a durable task only when it is pending, `awaiting_answer`, and carries valid persisted `runtimeResume` handles.
+- `durable_task_continuations`
+  - One mutable recovery owner per Thread for incomplete durable work. Stores `source_run_id`, state (`ready`, `claimed`, `completed`, `failed`, or `superseded`), a versioned server-whitelisted descriptor, attempts, claim token/time, safe last error, and timestamps.
+  - Descriptor JSON may contain the resolved instruction, Agent/Skill refs, exact runtime budget, Plan refs, stable `deliveryId`, workflow/selection state, trusted intake markers, and delivery-scoped `evidenceRunIds`. It must not contain arbitrary client `contextValues`, Runtime resume credentials, claim tokens, provider secrets, or raw tool output.
+  - Incomplete run persistence and descriptor creation/requeue share the Run repository transaction. Claim uses a conditional `ready|failed -> claimed` update; terminal and requeue transitions require the matching claim token. Startup changes abandoned `claimed` rows to retryable `failed`.
 - `claim_candidates`
   - Persisted Markdown preview Claim candidates keyed by Project, Thread, source node, and source document path. Rows keep `claim_text`, `evidence_text`, source anchor JSON, citation URLs, review status, created-by origin, optional extraction run id, and optional created Canvas node id.
 - `settings`
@@ -135,6 +139,8 @@ Home project thumbnails are derived from existing `canvas_nodes` and `canvas_obj
 
 ## Migration Notes
 Schema creation and migration live in `server/db/schema.ts`. Schema version 3 completed the Project-owned Canvas migration. Schema version 4 adds `threads.context_reset_at` without deleting conversation history. Model Config, Agent definitions, and Knowledge data are retained.
+
+Schema version 19 adds `durable_task_continuations` without backfilling historical runs. Only new incomplete durable runs receive a resumable descriptor. Existing sessions that lack continuation metadata remain unchanged. The migration is idempotent and does not rewrite messages, runs, Canvas nodes, Agent clarifications, or Thread files.
 
 `server/storage.ts` remains the public storage facade. `server/db/sqlite.ts` owns SQLite initialization, `server/storageTypes.ts` owns shared record shapes, `server/storagePaths.ts` owns app-root/thread-directory resolution, and repository classes under `server/repositories/` handle focused persistence areas behind the facade without changing table names or local paths.
 
