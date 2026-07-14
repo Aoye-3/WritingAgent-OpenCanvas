@@ -5,6 +5,7 @@ import { isCanvasWorkflowMode } from "../../../shared/canvasWorkflow.js";
 const durableContinuationMetadata = Symbol("durableContinuationMetadata");
 
 type DurableServerContextKey =
+  | "agentIntake"
   | "taskHandlingPolicy"
   | "progressiveCanvasDelivery"
   | "ordinaryClarificationIntake"
@@ -238,15 +239,24 @@ function withMetadata(payload: GenerateRequest, value: DurableContinuationMetada
 
 function pickDurableSafeContext(context: Record<string, unknown>) {
   const safe: Record<string, Record<string, unknown>> = {};
+  const agentIntake = pickAgentIntake(context.agentIntake);
   const taskHandlingPolicy = pickTaskHandlingPolicy(context.taskHandlingPolicy);
   const progressiveCanvasDelivery = pickProgressiveCanvasDelivery(context.progressiveCanvasDelivery);
   const ordinaryClarificationIntake = pickOrdinaryClarificationIntake(context.ordinaryClarificationIntake);
   const skillClarificationPolicy = pickSkillClarificationPolicy(context.facetwrite_clarification_policy);
+  if (agentIntake) safe.agentIntake = agentIntake;
   if (taskHandlingPolicy) safe.taskHandlingPolicy = taskHandlingPolicy;
   if (progressiveCanvasDelivery) safe.progressiveCanvasDelivery = progressiveCanvasDelivery;
   if (ordinaryClarificationIntake) safe.ordinaryClarificationIntake = ordinaryClarificationIntake;
   if (skillClarificationPolicy) safe.facetwrite_clarification_policy = skillClarificationPolicy;
   return safe;
+}
+
+function pickAgentIntake(value: unknown) {
+  const source = readRecord(value);
+  return source.phase === "execution" && source.completed === true
+    ? { phase: "execution", completed: true }
+    : undefined;
 }
 
 function pickTaskHandlingPolicy(value: unknown) {

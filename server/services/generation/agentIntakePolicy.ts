@@ -1,5 +1,6 @@
 import type { GenerateRequest } from "../../contracts/generation.js";
 import { sanitizeCanvasForAgentIntake } from "../../../shared/agentIntakeCanvas.js";
+import { withServerDurableContinuationContext } from "./durableContinuation.js";
 
 export const AGENT_INTAKE_TOOL_REFS = ["ask_clarification", "agent_intake_complete"] as const;
 export const SKILL_SCOPE_GUARD_TOOL_REFS = ["ask_clarification"] as const;
@@ -18,7 +19,7 @@ export function isAgentIntakePhase(payload: GenerateRequest) {
 }
 
 export function withAgentIntakeExecutionPhase(payload: GenerateRequest): GenerateRequest {
-  return {
+  const executionPayload: GenerateRequest = {
     ...payload,
     contextValues: {
       ...payload.contextValues,
@@ -38,6 +39,11 @@ export function withAgentIntakeExecutionPhase(payload: GenerateRequest): Generat
         : {})
     }
   };
+  return withServerDurableContinuationContext(
+    executionPayload,
+    "agentIntake",
+    executionPayload.contextValues?.agentIntake
+  );
 }
 
 export function withSanitizedAgentIntakeCanvas(payload: GenerateRequest): GenerateRequest {

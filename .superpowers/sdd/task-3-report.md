@@ -73,3 +73,19 @@ The final review findings were addressed through three additional RED-to-GREEN c
 - `node --import tsx --test server/runtime/agentBackendAdapter/client.test.ts server/services/generation/agentBackendRunner.test.ts server/storageFacade.test.ts` - 98 passed, 0 failed.
 - `npm.cmd run typecheck` - passed.
 - `git diff --check` - passed (Git reports only existing line-ending conversion warnings).
+
+## Agent intake lifecycle review
+
+The final lifecycle review found that a durable continuation lost the server-produced Agent intake execution marker and could therefore re-enter intake-only backend tool selection. The fix was developed with two failing assertions before production changes:
+
+- A descriptor test proved that forged client `agentIntake` remained untrusted, then showed that the same payload still lacked `agentIntake` after the authoritative `withAgentIntakeExecutionPhase` producer ran.
+- A facade continuation round-trip showed the persisted descriptor lacked the execution marker. After restoration, the backend could no longer prove it was in execution mode.
+
+`withAgentIntakeExecutionPhase` now records a server-only continuation marker. The descriptor picker accepts that marker only when both fields exactly identify execution, and emits only `{ phase: "execution", completed: true }`; all pre-existing client keys are discarded. The round-trip test verifies `isAgentIntakeExecution` remains true and that the backend receives `write_file` and `present_files` rather than the intake-only tool pair.
+
+### Agent intake lifecycle verification
+
+- `node --import tsx --test server/db/durableContinuationSchema.test.ts server/repositories/durableContinuationRepository.test.ts server/services/generation/durableContinuation.test.ts server/services/generationService.facade.test.ts server/routes/generationRoutes.test.ts` - 110 passed, 0 failed.
+- `node --import tsx --test server/runtime/agentBackendAdapter/client.test.ts server/services/generation/agentBackendRunner.test.ts server/storageFacade.test.ts` - 98 passed, 0 failed.
+- `npm.cmd run typecheck` - passed.
+- `git diff --check` - passed (Git reports only existing line-ending conversion warnings).

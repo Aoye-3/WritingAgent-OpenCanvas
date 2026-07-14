@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { GenerateRequest } from "../../contracts/generation.js";
 import type { DurableContinuationDescriptor } from "../../storageTypes.js";
+import { withAgentIntakeExecutionPhase } from "./agentIntakePolicy.js";
 import {
   createDurableContinuationDescriptor,
   durableContinuationClaim,
@@ -105,10 +106,19 @@ test("descriptor retains only explicitly typed server policy primitives", () => 
   payload = withServerDurableContinuationContext(payload, "facetwrite_clarification_policy", payload.contextValues?.facetwrite_clarification_policy);
   payload = withDurableContinuationDelivery(payload, "delivery_1");
 
+  const untrustedDescriptor = createDurableContinuationDescriptor(payload);
+  assert.equal(untrustedDescriptor.safeContext?.agentIntake, undefined);
+
+  payload = withAgentIntakeExecutionPhase(payload);
+
   const descriptor = createDurableContinuationDescriptor(payload);
   assert.equal(descriptor.deliveryId, "delivery_1");
   assert.equal(descriptor.workflowMode, "mind_map");
   assert.deepEqual(descriptor.safeContext, {
+    agentIntake: {
+      phase: "execution",
+      completed: true
+    },
     taskHandlingPolicy: {
       kind: "long_task",
       canvasDeliveryMode: "progressive",
@@ -150,7 +160,7 @@ test("descriptor retains only explicitly typed server policy primitives", () => 
     }
   });
   const serialized = JSON.stringify(descriptor);
-  assert.doesNotMatch(serialized, /agentIntake|awaitingPlan|planExecution|arbitrary|credential|runtimeResume|checkpoint|client-token|stale|nested must not persist/);
+  assert.doesNotMatch(serialized, /awaitingPlan|planExecution|arbitrary|credential|runtimeResume|checkpoint|client-token|stale|nested must not persist/);
 });
 
 test("claim restoration uses server descriptor, current Canvas, and safe prior evidence", () => {

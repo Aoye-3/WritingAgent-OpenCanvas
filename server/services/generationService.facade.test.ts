@@ -13,6 +13,7 @@ import type { KnowledgeSearchInput } from "../knowledge/service.js";
 import type { ToolEventRecord } from "../toolRuntime.js";
 import type { AgentRuntimePort } from "../runtime/agentRuntimePort.js";
 import type { DurableContinuationDescriptor } from "../storageTypes.js";
+import { isAgentIntakeExecution } from "./generation/agentIntakePolicy.js";
 
 const durableTaskGuardCases = JSON.parse(
   readFileSync(new URL("../runtime/agentBackendAdapter/fixtures/durable-task-guard-cases.json", import.meta.url), "utf8")
@@ -4604,15 +4605,30 @@ test("generation facade excludes messages before the persisted context reset bou
 
 test("incomplete generation persists a server-whitelisted durable descriptor", async () => {
   const { storage, durable, records } = fakeStorage();
+  const allowedToolRefsByRun: string[][] = [];
+  const contextValuesByRun: Array<Record<string, unknown>> = [];
   const service = createGenerationService(storage, fakeAgentRuntime(), {
     modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
-      runAgent: async () => ({
-        text: "I'll proceed with the implementation now.",
-        finishReason: "agent_backend_completed",
-        events: []
-      })
+      runAgent: async (input) => {
+        allowedToolRefsByRun.push(input.allowedToolRefs ?? []);
+        contextValuesByRun.push(input.contextValues ?? {});
+        return allowedToolRefsByRun.length === 1
+          ? {
+            text: "I'll proceed with the implementation now.",
+            finishReason: "agent_backend_completed",
+            events: []
+          }
+          : {
+            text: "The finished report is delivered.",
+            finishReason: "stop",
+            events: [{
+              eventType: "canvas_delivery_body_committed",
+              payload: { deliveryId: durable.current?.descriptor.deliveryId, nodeId: "node_finished", title: "Finished report" }
+            }]
+          };
+      }
     }
   });
 
@@ -4630,7 +4646,19 @@ test("incomplete generation persists a server-whitelisted durable descriptor", a
       runtimeResume: { checkpointId: "secret" },
       durableContinuation: { claimToken: "client-token" },
       autoPreflightPlan: { enabled: false },
-      agentClarification: answeredAgentClarification(),
+      agentClarification: {
+        ...answeredAgentClarification(),
+        resumeContext: {
+          runtimeBudgetProfile: "high",
+          canvas: { workflow: { mode: "batch_delivery" } },
+          intakeRound: 3,
+          answeredSummary: "Scope: recent; Time range: 2023-2026; Format: finished report"
+        }
+      },
+      finalSupplement: {
+        finalSupplementId: "final_supplement_continue",
+        action: "execute"
+      },
       agentIntake: { executionPhase: "execute" },
       taskHandlingPolicy: {
         kind: "simple_chat",
@@ -4666,7 +4694,21 @@ test("incomplete generation persists a server-whitelisted durable descriptor", a
     allowPlan: false
   });
   assert.equal((durable.current?.descriptor.safeContext?.progressiveCanvasDelivery as { recursionLimit?: number })?.recursionLimit, 140);
-  assert.doesNotMatch(JSON.stringify(durable.current?.descriptor), /arbitraryClientValue|runtimeResume|secret|client-token|forged|agentIntake/);
+  assert.deepEqual(durable.current?.descriptor.safeContext?.agentIntake, { phase: "execution", completed: true });
+  assert.doesNotMatch(JSON.stringify(durable.current?.descriptor), /arbitraryClientValue|runtimeResume|secret|client-token|forged|executionPhase/);
+
+  await service.generateAndRecord({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    chatInstruction: "continue"
+  });
+
+  assert.equal(isAgentIntakeExecution(contextValuesByRun[1]), true);
+  assert.deepEqual(contextValuesByRun[1]?.agentIntake, { phase: "execution", completed: true });
+  assert.equal(allowedToolRefsByRun[1]?.includes("write_file"), true);
+  assert.equal(allowedToolRefsByRun[1]?.includes("present_files"), true);
+  assert.notDeepEqual(allowedToolRefsByRun[1], ["ask_clarification", "agent_intake_complete"]);
 });
 
 test("concurrent manual continuations invoke Runtime once and preserve literal continuation history", async () => {
