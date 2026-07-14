@@ -25,6 +25,10 @@ _ACTION_PROMISE_PATTERNS = (
         r"(?:开始|加载|检索|搜索|查询|查找|读取|分析|生成|编写|创建|执行|整理|汇总|综合)"
     ),
 )
+_SUBSTANTIVE_ANSWER_PATTERNS = (
+    re.compile(r"\b(?:i|we)\s+recommend\b", re.IGNORECASE),
+    re.compile(r"\b(?:my|our)\s+(?:answer|recommendation|conclusion)\b", re.IGNORECASE),
+)
 
 
 class DurableTaskGuardState(AgentState):
@@ -61,13 +65,10 @@ class DurableTaskGuardMiddleware(AgentMiddleware[DurableTaskGuardState]):
         if isinstance(canvas_action, dict) and canvas_action.get("requiresTool") is True:
             return True
         contract = context.get("facetwrite_canvas_delivery_contract")
-        if isinstance(contract, str):
-            return contract.strip().lower() in {"required", "required_delivery"}
-        if not isinstance(contract, dict):
-            return False
-        return any(
-            contract.get(key) is True
-            for key in ("required", "deliveryRequired", "requiresDelivery", "requiredDelivery")
+        return (
+            isinstance(contract, dict)
+            and contract.get("id") == "facetwrite_canvas_delivery_v1"
+            and contract.get("format") == "facetwrite_canvas_delivery"
         )
 
     @staticmethod
@@ -89,7 +90,11 @@ class DurableTaskGuardMiddleware(AgentMiddleware[DurableTaskGuardState]):
     @staticmethod
     def _is_action_promise(message: AIMessage) -> bool:
         text = re.sub(r"\s+", " ", DurableTaskGuardMiddleware._message_text(message)).strip()
-        return bool(text) and any(pattern.search(text) for pattern in _ACTION_PROMISE_PATTERNS)
+        return (
+            bool(text)
+            and not any(pattern.search(text) for pattern in _SUBSTANTIVE_ANSWER_PATTERNS)
+            and any(pattern.search(text) for pattern in _ACTION_PROMISE_PATTERNS)
+        )
 
     @staticmethod
     def _has_run_evidence(state: DurableTaskGuardState) -> bool:

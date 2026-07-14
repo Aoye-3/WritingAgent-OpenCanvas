@@ -64,9 +64,17 @@ def test_continuation_keeps_public_ai_message_and_adds_hidden_tagged_instruction
     [
         {"facetwrite_progressive_canvas_delivery_enabled": True},
         {"facetwrite_plan_phase": "execution"},
-        {"facetwrite_canvas_delivery_contract": {"required": True}},
+        {
+            "facetwrite_canvas_delivery_contract": {
+                "id": "facetwrite_canvas_delivery_v1",
+                "format": "facetwrite_canvas_delivery",
+                "diagramFormat": "facetwrite_diagram_delivery",
+                "preferredMode": "batch_delivery",
+                "locale": "en",
+            }
+        },
     ],
-    ids=["progressive_canvas", "plan_execution", "required_delivery_contract"],
+    ids=["progressive_canvas", "plan_execution", "canvas_delivery_contract"],
 )
 def test_guard_is_active_for_each_durable_task_contract(context):
     middleware = DurableTaskGuardMiddleware()

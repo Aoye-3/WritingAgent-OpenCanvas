@@ -316,6 +316,13 @@ def test_merge_run_context_overrides_preserves_facetwrite_runtime_contract():
         "facetwrite_plan_step_id": "step_1",
         "facetwrite_plan_phase_attempt_id": "intake_attempt_1",
         "facetwrite_progressive_canvas_delivery_enabled": True,
+        "facetwrite_canvas_delivery_contract": {
+            "id": "facetwrite_canvas_delivery_v1",
+            "format": "facetwrite_canvas_delivery",
+            "diagramFormat": "facetwrite_diagram_delivery",
+            "preferredMode": "batch_delivery",
+            "locale": "en",
+        },
         "facetwrite_runtime_budget_profile": "medium",
         "facetwrite_recursion_limit": 80,
         "facetwrite_model_call_limit": 20,

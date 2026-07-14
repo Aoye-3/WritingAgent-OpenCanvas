@@ -148,6 +148,7 @@ _CONTEXT_CONFIGURABLE_KEYS: frozenset[str] = frozenset(
         "facetwrite_plan_step_id",
         "facetwrite_plan_phase_attempt_id",
         "facetwrite_progressive_canvas_delivery_enabled",
+        "facetwrite_canvas_delivery_contract",
         "facetwrite_runtime_budget_profile",
         "facetwrite_recursion_limit",
         "facetwrite_model_call_limit",

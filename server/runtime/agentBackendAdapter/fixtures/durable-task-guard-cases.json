@@ -22,5 +22,11 @@
     "text": "I will now synthesize the database results into the requested recommendation.",
     "hasEvidence": true,
     "expectContinuation": false
+  },
+  {
+    "id": "substantive_response_leading_answer",
+    "text": "I will analyze the options here: A saves 20%, while B is slower. I recommend A.",
+    "hasEvidence": false,
+    "expectContinuation": false
   }
 ]
