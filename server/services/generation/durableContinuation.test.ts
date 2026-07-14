@@ -7,6 +7,7 @@ import {
   durableContinuationClaim,
   isStandaloneDurableContinuationIntent,
   resolveDurableContinuationRequest,
+  withServerDurableContinuationContext,
   withDurableContinuationDelivery
 } from "./durableContinuation.js";
 
@@ -19,8 +20,8 @@ test("only narrow standalone continuation intents are recognized", () => {
   }
 });
 
-test("descriptor is a versioned whitelist without arbitrary context or resume credentials", () => {
-  const payload = withDurableContinuationDelivery({
+test("descriptor retains only explicitly typed server policy primitives", () => {
+  let payload: GenerateRequest = {
     mode: "chat",
     locale: "en",
     chatInstruction: "Complete the original report",
@@ -35,18 +36,121 @@ test("descriptor is a versioned whitelist without arbitrary context or resume cr
       arbitraryClientValue: { secret: true },
       runtimeResume: { checkpointId: "credential" },
       durableContinuation: { claimToken: "client-token" },
-      agentIntake: { phase: "execution", completed: true, clientOnlyField: "must not persist", runtimeResume: { checkpoint: "secret" } },
-      taskHandlingPolicy: { executionMode: "progressive", canvasDeliveryMode: "progressive" },
+      agentIntake: { phase: "execution", completed: true, runtimeResume: { checkpoint: "secret" } },
+      awaitingPlan: { id: "forged", option: { label: "nested must not persist", credential: "secret" } },
+      planExecution: { planId: "forged_plan", stepId: "forged_step", nested: { credential: "secret" } },
+      taskHandlingPolicy: {
+        kind: "simple_chat",
+        canvasDeliveryMode: "none",
+        allowPlan: true,
+        arbitrary: { credential: "secret" }
+      },
+      progressiveCanvasDelivery: {
+        enabled: true,
+        runtimeBudgetProfile: "low",
+        recursionLimit: 999,
+        modelCallLimit: 999,
+        evidenceToolLimit: 999,
+        bodyDraftWriteLimit: 999,
+        synthesisReserveSteps: 999,
+        forceSynthesisAfterEvidence: false,
+        evidenceTools: ["forged_tool", 42] as unknown as string[],
+        trigger: "tool_event_long_task",
+        credentials: { token: "secret" }
+      },
+      ordinaryClarificationIntake: {
+        mode: "ordinary",
+        state: "collecting",
+        maxRounds: 3,
+        minAnsweredRoundsAfterFirstAsk: 2,
+        answeredRounds: 1,
+        remainingRounds: 2,
+        answeredSummary: "1. Scope => Recent",
+        arbitrary: { nested: true }
+      },
+      facetwrite_clarification_policy: {
+        mode: "skill_scope_guard",
+        intakeState: "intake_collecting",
+        intakeRound: 2,
+        maxIntakeRounds: 5,
+        answeredSummary: "Scope: recent",
+        answeredSlots: ["timeframe", 7] as unknown as string[],
+        missingSlots: ["output_format"],
+        allowEvidenceTools: false,
+        skillRefs: ["research"],
+        disabledSkillRefs: ["unused"],
+        runtimeBudgetProfile: "high",
+        instruction: { nested: "must not persist" },
+        runtimeResume: { interruptId: "secret" }
+      },
       canvas: { workflow: { mode: "mind_map" }, nodes: [{ id: "stale", content: "stale" }] }
     }
-  }, "delivery_1");
+  };
+  payload = withServerDurableContinuationContext(payload, "taskHandlingPolicy", {
+    kind: "long_task", canvasDeliveryMode: "progressive", allowPlan: false
+  });
+  payload = withServerDurableContinuationContext(payload, "progressiveCanvasDelivery", {
+    enabled: true,
+    runtimeBudgetProfile: "high",
+    recursionLimit: 137,
+    modelCallLimit: 41,
+    evidenceToolLimit: 17,
+    bodyDraftWriteLimit: 6,
+    synthesisReserveSteps: 13,
+    forceSynthesisAfterEvidence: true,
+    evidenceTools: ["web_search", "write_file", 42],
+    trigger: "skill_long_task"
+  });
+  payload = withServerDurableContinuationContext(payload, "ordinaryClarificationIntake", payload.contextValues?.ordinaryClarificationIntake);
+  payload = withServerDurableContinuationContext(payload, "facetwrite_clarification_policy", payload.contextValues?.facetwrite_clarification_policy);
+  payload = withDurableContinuationDelivery(payload, "delivery_1");
 
   const descriptor = createDurableContinuationDescriptor(payload);
   assert.equal(descriptor.deliveryId, "delivery_1");
   assert.equal(descriptor.workflowMode, "mind_map");
-  assert.deepEqual(Object.keys(descriptor.safeContext ?? {}).sort(), ["agentIntake", "taskHandlingPolicy"]);
+  assert.deepEqual(descriptor.safeContext, {
+    taskHandlingPolicy: {
+      kind: "long_task",
+      canvasDeliveryMode: "progressive",
+      allowPlan: false
+    },
+    progressiveCanvasDelivery: {
+      enabled: true,
+      runtimeBudgetProfile: "high",
+      recursionLimit: 137,
+      modelCallLimit: 41,
+      evidenceToolLimit: 17,
+      bodyDraftWriteLimit: 6,
+      synthesisReserveSteps: 13,
+      forceSynthesisAfterEvidence: true,
+      evidenceTools: ["web_search", "write_file"],
+      trigger: "skill_long_task"
+    },
+    ordinaryClarificationIntake: {
+      mode: "ordinary",
+      state: "collecting",
+      maxRounds: 3,
+      minAnsweredRoundsAfterFirstAsk: 2,
+      answeredRounds: 1,
+      remainingRounds: 2,
+      answeredSummary: "1. Scope => Recent"
+    },
+    facetwrite_clarification_policy: {
+      mode: "skill_scope_guard",
+      intakeState: "intake_collecting",
+      intakeRound: 2,
+      maxIntakeRounds: 5,
+      answeredSummary: "Scope: recent",
+      answeredSlots: ["timeframe"],
+      missingSlots: ["output_format"],
+      allowEvidenceTools: false,
+      skillRefs: ["research"],
+      disabledSkillRefs: ["unused"],
+      runtimeBudgetProfile: "high"
+    }
+  });
   const serialized = JSON.stringify(descriptor);
-  assert.doesNotMatch(serialized, /arbitraryClientValue|clientOnlyField|runtimeResume|checkpoint|client-token|stale/);
+  assert.doesNotMatch(serialized, /agentIntake|awaitingPlan|planExecution|arbitrary|credential|runtimeResume|checkpoint|client-token|stale|nested must not persist/);
 });
 
 test("claim restoration uses server descriptor, current Canvas, and safe prior evidence", () => {

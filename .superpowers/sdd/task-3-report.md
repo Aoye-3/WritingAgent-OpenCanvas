@@ -58,3 +58,18 @@ The follow-up review identified six ownership and restoration gaps. Each behavio
 - `node --import tsx --test server/runtime/agentBackendAdapter/client.test.ts server/services/generation/agentBackendRunner.test.ts server/storageFacade.test.ts` — 98 passed, 0 failed.
 - `npm.cmd run typecheck` — passed.
 - The first combined verification encountered one unrelated WHATWG `bad port` local-fetch flake in `generationRoutes.test.ts`; the route suite passed 3/3 immediately when rerun, and the final combined suite passed 109/109.
+
+## Final review pass
+
+The final review findings were addressed through three additional RED-to-GREEN checks:
+
+- Typed safe context: an adversarial descriptor test first retained forged `agentIntake`, nested Plan option data, arbitrary object keys, and client-shaped policy values. Descriptor creation now uses explicit per-section typed pickers for only the required task policy, progressive delivery, ordinary clarification, and skill clarification primitives. Invalid types and enums are dropped; Plan state remains in the descriptor's typed top-level Plan reference.
+- Server provenance: a valid-looking forged task/progressive policy initially survived the typed picker. Server policy producers now mark their computed values in symbol-backed metadata, and descriptor creation reads safe context only from that metadata or an already claimed server descriptor. Raw client context cannot become persisted continuation policy.
+- Plan execution eligibility: a standalone typed Plan execution continuation initially bypassed durable claim and reached Runtime with the literal `continue` request and regenerated Plan attempt data. Execution-phase requests with typed Plan references can now claim ready/failed work and restore the descriptor's exact Plan ID, step ID, attempt ID, and execution version. Clarification, intake, revision, and queued-intervention flows remain protected.
+
+### Final review verification
+
+- `node --import tsx --test server/db/durableContinuationSchema.test.ts server/repositories/durableContinuationRepository.test.ts server/services/generation/durableContinuation.test.ts server/services/generationService.facade.test.ts server/routes/generationRoutes.test.ts` - 110 passed, 0 failed.
+- `node --import tsx --test server/runtime/agentBackendAdapter/client.test.ts server/services/generation/agentBackendRunner.test.ts server/storageFacade.test.ts` - 98 passed, 0 failed.
+- `npm.cmd run typecheck` - passed.
+- `git diff --check` - passed (Git reports only existing line-ending conversion warnings).

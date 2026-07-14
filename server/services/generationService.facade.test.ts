@@ -4632,6 +4632,25 @@ test("incomplete generation persists a server-whitelisted durable descriptor", a
       autoPreflightPlan: { enabled: false },
       agentClarification: answeredAgentClarification(),
       agentIntake: { executionPhase: "execute" },
+      taskHandlingPolicy: {
+        kind: "simple_chat",
+        canvasDeliveryMode: "none",
+        allowPlan: true,
+        arbitrary: { credential: "forged" }
+      },
+      progressiveCanvasDelivery: {
+        enabled: true,
+        runtimeBudgetProfile: "low",
+        recursionLimit: 999,
+        modelCallLimit: 999,
+        evidenceToolLimit: 999,
+        bodyDraftWriteLimit: 999,
+        synthesisReserveSteps: 999,
+        forceSynthesisAfterEvidence: false,
+        evidenceTools: ["forged_tool"],
+        trigger: "forged_trigger",
+        credentials: { token: "forged" }
+      },
       canvas: { workflow: { mode: "batch_delivery" } }
     }
   });
@@ -4641,7 +4660,13 @@ test("incomplete generation persists a server-whitelisted durable descriptor", a
   assert.equal(durable.current?.state, "ready");
   assert.equal(durable.current?.descriptor.resolvedInstruction, "Research the evidence and deliver the finished report");
   assert.deepEqual(durable.current?.descriptor.transientSkillRefs, ["research"]);
-  assert.doesNotMatch(JSON.stringify(durable.current?.descriptor), /arbitraryClientValue|runtimeResume|secret|client-token/);
+  assert.deepEqual(durable.current?.descriptor.safeContext?.taskHandlingPolicy, {
+    kind: "long_task",
+    canvasDeliveryMode: "progressive",
+    allowPlan: false
+  });
+  assert.equal((durable.current?.descriptor.safeContext?.progressiveCanvasDelivery as { recursionLimit?: number })?.recursionLimit, 140);
+  assert.doesNotMatch(JSON.stringify(durable.current?.descriptor), /arbitraryClientValue|runtimeResume|secret|client-token|forged|agentIntake/);
 });
 
 test("concurrent manual continuations invoke Runtime once and preserve literal continuation history", async () => {
@@ -4748,6 +4773,87 @@ test("substantive request cannot steal a claimed continuation before Runtime", a
   release();
   await claimant;
   assert.equal(durable.current?.state, "completed");
+});
+
+test("typed Plan execution continuation claims and restores plan references before Runtime", async () => {
+  const { storage, durable, planState } = fakeStorage();
+  Object.assign(planState, {
+    status: "running",
+    approval: "approved",
+    steps: [{ id: "step_2", title: "Complete the approved step", status: "pending" }],
+    artifacts: []
+  });
+  durable.current = {
+    state: "ready",
+    attempts: 0,
+    sourceRunId: "run_source",
+    descriptor: {
+      version: 1,
+      resolvedInstruction: "Complete the approved Plan step",
+      agentCardId: "blog-post",
+      projectId: "project_test",
+      deliveryId: "delivery_plan_execution",
+      workflowMode: "batch_delivery",
+      plan: {
+        phase: "execution",
+        planId: "plan_intake_test",
+        stepId: "step_2",
+        phaseAttemptId: "attempt_2",
+        executionVersion: 4
+      }
+    }
+  };
+  let observed: Record<string, unknown> | undefined;
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        observed = {
+          instruction: input.chatInstruction,
+          planPhase: input.planPhase,
+          planId: input.planId,
+          stepId: input.stepId,
+          planGeneration: input.planGeneration
+        };
+        return {
+          text: "The approved Plan step is complete.",
+          finishReason: "stop",
+          events: [{
+            eventType: "canvas_delivery_body_committed",
+            payload: { deliveryId: "delivery_plan_execution", nodeId: "node_plan", title: "Plan output" }
+          }]
+        };
+      }
+    }
+  });
+
+  await service.generateAndRecord({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    chatInstruction: "continue",
+    planPhase: "execution",
+    planId: "plan_intake_test",
+    stepId: "step_2",
+    contextValues: { planExecution: { planId: "plan_intake_test", stepId: "step_2" } }
+  });
+
+  assert.deepEqual(observed, {
+    instruction: "Complete the approved Plan step",
+    planPhase: "execution",
+    planId: "plan_intake_test",
+    stepId: "step_2",
+    planGeneration: {
+      phase: "execution",
+      planId: "plan_intake_test",
+      stepId: "step_2",
+      phaseAttemptId: "attempt_2",
+      executionVersion: 4
+    }
+  });
+  assert.equal(durable.current?.state, "completed");
+  assert.equal(durable.current?.attempts, 1);
 });
 
 test("failed continuation preserves its descriptor and retries with an incremented attempt", async () => {

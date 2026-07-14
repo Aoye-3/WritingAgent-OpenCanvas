@@ -4,11 +4,18 @@ import { isCanvasWorkflowMode } from "../../../shared/canvasWorkflow.js";
 
 const durableContinuationMetadata = Symbol("durableContinuationMetadata");
 
+type DurableServerContextKey =
+  | "taskHandlingPolicy"
+  | "progressiveCanvasDelivery"
+  | "ordinaryClarificationIntake"
+  | "facetwrite_clarification_policy";
+
 type DurableContinuationMetadata = {
   deliveryId?: string;
   claimToken?: string;
   visibleUserMessage?: string;
   descriptor?: DurableContinuationDescriptor;
+  serverSafeContext?: Partial<Record<DurableServerContextKey, unknown>>;
 };
 
 type InternalGenerateRequest = GenerateRequest & {
@@ -24,36 +31,10 @@ type DurableContinuationStorage = {
   listDurableContinuationEvidence?: (threadId: string, sourceRunId: string | undefined, deliveryId: string) => unknown[];
 };
 
-const safeContextKeys = [
-  "agentIntake",
-  "ordinaryClarificationIntake",
-  "facetwrite_clarification_policy",
-  "taskHandlingPolicy",
-  "taskComplexity",
-  "progressiveCanvasDelivery",
-  "orchestrationPolicy",
-  "agentPlan",
-  "awaitingPlan",
-  "planExecution",
-  "runtimeBudgetProfile",
-  "autoPreflightPlan"
-] as const;
-
-const safeContextFields: Partial<Record<(typeof safeContextKeys)[number], ReadonlySet<string>>> = {
-  agentIntake: new Set(["phase", "completed"]),
-  ordinaryClarificationIntake: new Set(["mode", "state", "maxRounds", "minAnsweredRoundsAfterFirstAsk", "answeredRounds", "remainingRounds", "answeredSummary"]),
-  facetwrite_clarification_policy: new Set(["mode", "skillName", "skillRefs", "disabledSkillRefs", "answeredSlots", "answeredSummary", "intakeState", "intakeRound"]),
-  taskHandlingPolicy: new Set(["kind", "canvasDeliveryMode", "allowPlan"]),
-  taskComplexity: new Set(["requiresAgentPlan", "score", "reasons"]),
-  progressiveCanvasDelivery: new Set(["enabled", "runtimeBudgetProfile", "recursionLimit", "modelCallLimit", "evidenceToolLimit", "bodyDraftWriteLimit", "synthesisReserveSteps", "forceSynthesisAfterEvidence", "evidenceTools", "trigger"]),
-  orchestrationPolicy: new Set(["mode", "trigger", "clarificationPolicy", "deliveryPolicy"]),
-  agentPlan: new Set(["id", "stepId", "origin", "phase", "stepBudget"]),
-  awaitingPlan: new Set(["id", "selectedOptionId", "answer", "option"]),
-  planExecution: new Set(["planId", "stepId"]),
-  autoPreflightPlan: new Set(["enabled"])
-};
-
-const unsafeKey = /(?:durableContinuation|runtimeResume|checkpoint|claimToken|credential|interrupt)/i;
+const taskHandlingKinds = ["simple_chat", "plan_intake", "long_task", "explicit_canvas", "plan_execution"] as const;
+const canvasDeliveryModes = ["none", "progressive", "explicit"] as const;
+const runtimeBudgetProfiles = ["low", "medium", "high"] as const;
+const progressiveTriggers = ["direct_canvas_intent", "skill_long_task", "thinking_long_task", "orchestration_canvas_required", "tool_event_long_task"] as const;
 
 export function isStandaloneDurableContinuationIntent(value: unknown) {
   if (typeof value !== "string") return false;
@@ -68,6 +49,21 @@ export function isStandaloneDurableContinuationIntent(value: unknown) {
 
 export function withDurableContinuationDelivery(payload: GenerateRequest, deliveryId: string): GenerateRequest {
   return withMetadata(payload, { ...metadata(payload), deliveryId });
+}
+
+export function withServerDurableContinuationContext(
+  payload: GenerateRequest,
+  key: DurableServerContextKey,
+  value: unknown
+): GenerateRequest {
+  const current = metadata(payload);
+  return withMetadata(payload, {
+    ...current,
+    serverSafeContext: {
+      ...current.serverSafeContext,
+      [key]: value
+    }
+  });
 }
 
 export function durableContinuationDeliveryId(payload: GenerateRequest) {
@@ -90,10 +86,11 @@ export function createDurableContinuationDescriptor(payload: GenerateRequest): D
   if (!instruction || !payload.agentCardId || !payload.projectId || !deliveryId) {
     throw new Error("durable_continuation_descriptor_incomplete");
   }
-  const safeContext = Object.fromEntries(safeContextKeys.flatMap((key) => {
-    const sanitized = sanitizeSafeContextField(key, contextValues[key]);
-    return sanitized === undefined ? [] : [[key, sanitized]];
-  }));
+  const currentMetadata = metadata(payload);
+  const safeContext = pickDurableSafeContext({
+    ...currentMetadata.descriptor?.safeContext,
+    ...currentMetadata.serverSafeContext
+  });
   const phase = payload.planGeneration?.phase ?? payload.planPhase;
   const planId = payload.planGeneration?.planId ?? payload.planId;
   const stepId = payload.planGeneration?.stepId ?? payload.stepId;
@@ -120,15 +117,6 @@ export function createDurableContinuationDescriptor(payload: GenerateRequest): D
     ...(payload.selectedCanvasNodeId ? { selectedCanvasNodeId: payload.selectedCanvasNodeId } : {}),
     ...(Object.keys(safeContext).length ? { safeContext } : {})
   };
-}
-
-function sanitizeSafeContextField(key: (typeof safeContextKeys)[number], value: unknown) {
-  if (key === "runtimeBudgetProfile") return value === "low" || value === "medium" || value === "high" ? value : undefined;
-  if (!isRecord(value)) return undefined;
-  const allowed = safeContextFields[key];
-  if (!allowed) return undefined;
-  const selected = Object.fromEntries(Object.entries(value).filter(([field]) => allowed.has(field)));
-  return Object.keys(selected).length ? sanitizeSafeValue(selected, 0) : undefined;
 }
 
 export function resolveDurableContinuationRequest(
@@ -223,10 +211,13 @@ function withoutClientDurableContinuation(payload: GenerateRequest): GenerateReq
 
 function isProtectedContinuationRequest(payload: GenerateRequest) {
   const context = readRecord(payload.contextValues);
+  const planExecution = readRecord(context.planExecution);
+  const typedPlanExecution = Boolean(readNonemptyString(planExecution.planId) && readNonemptyString(planExecution.stepId));
+  const executionContinuation = payload.planPhase === "execution" || typedPlanExecution;
   return Boolean(
     isRecord(context.agentClarification)
     || isRecord(context.awaitingPlan)
-    || isRecord(context.planExecution)
+    || (isRecord(context.planExecution) && !executionContinuation)
     || isRecord(context.queuedIntervention)
     || isRecord(context.finalSupplementFeedback)
     || payload.planPhase === "intake"
@@ -245,18 +236,106 @@ function withMetadata(payload: GenerateRequest, value: DurableContinuationMetada
   return restored;
 }
 
-function sanitizeSafeValue(value: unknown, depth: number): unknown {
-  if (depth > 8) return undefined;
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
-  if (Array.isArray(value)) {
-    return value.map((entry) => sanitizeSafeValue(entry, depth + 1)).filter((entry) => entry !== undefined);
-  }
-  if (!value || typeof value !== "object") return undefined;
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).flatMap(([key, entry]) => {
-    if (unsafeKey.test(key)) return [];
-    const sanitized = sanitizeSafeValue(entry, depth + 1);
-    return sanitized === undefined ? [] : [[key, sanitized]];
-  }));
+function pickDurableSafeContext(context: Record<string, unknown>) {
+  const safe: Record<string, Record<string, unknown>> = {};
+  const taskHandlingPolicy = pickTaskHandlingPolicy(context.taskHandlingPolicy);
+  const progressiveCanvasDelivery = pickProgressiveCanvasDelivery(context.progressiveCanvasDelivery);
+  const ordinaryClarificationIntake = pickOrdinaryClarificationIntake(context.ordinaryClarificationIntake);
+  const skillClarificationPolicy = pickSkillClarificationPolicy(context.facetwrite_clarification_policy);
+  if (taskHandlingPolicy) safe.taskHandlingPolicy = taskHandlingPolicy;
+  if (progressiveCanvasDelivery) safe.progressiveCanvasDelivery = progressiveCanvasDelivery;
+  if (ordinaryClarificationIntake) safe.ordinaryClarificationIntake = ordinaryClarificationIntake;
+  if (skillClarificationPolicy) safe.facetwrite_clarification_policy = skillClarificationPolicy;
+  return safe;
+}
+
+function pickTaskHandlingPolicy(value: unknown) {
+  const source = readRecord(value);
+  const kind = readEnum(source.kind, taskHandlingKinds);
+  const canvasDeliveryMode = readEnum(source.canvasDeliveryMode, canvasDeliveryModes);
+  const allowPlan = readBoolean(source.allowPlan);
+  return compactRecord({ kind, canvasDeliveryMode, allowPlan });
+}
+
+function pickProgressiveCanvasDelivery(value: unknown) {
+  const source = readRecord(value);
+  return compactRecord({
+    enabled: readBoolean(source.enabled),
+    runtimeBudgetProfile: readEnum(source.runtimeBudgetProfile, runtimeBudgetProfiles),
+    recursionLimit: readPositiveInteger(source.recursionLimit),
+    modelCallLimit: readPositiveInteger(source.modelCallLimit),
+    evidenceToolLimit: readPositiveInteger(source.evidenceToolLimit),
+    bodyDraftWriteLimit: readPositiveInteger(source.bodyDraftWriteLimit),
+    synthesisReserveSteps: readPositiveInteger(source.synthesisReserveSteps),
+    forceSynthesisAfterEvidence: readBoolean(source.forceSynthesisAfterEvidence),
+    evidenceTools: readStringArray(source.evidenceTools),
+    trigger: readEnum(source.trigger, progressiveTriggers)
+  });
+}
+
+function pickOrdinaryClarificationIntake(value: unknown) {
+  const source = readRecord(value);
+  return compactRecord({
+    mode: readEnum(source.mode, ["ordinary"] as const),
+    state: readEnum(source.state, ["collecting", "completed"] as const),
+    maxRounds: readNonnegativeInteger(source.maxRounds),
+    minAnsweredRoundsAfterFirstAsk: readNonnegativeInteger(source.minAnsweredRoundsAfterFirstAsk),
+    answeredRounds: readNonnegativeInteger(source.answeredRounds),
+    remainingRounds: readNonnegativeInteger(source.remainingRounds),
+    answeredSummary: readString(source.answeredSummary)
+  });
+}
+
+function pickSkillClarificationPolicy(value: unknown) {
+  const source = readRecord(value);
+  return compactRecord({
+    mode: readEnum(source.mode, ["skill_scope_guard"] as const),
+    intakeState: readEnum(source.intakeState, ["intake_collecting"] as const),
+    intakeRound: readPositiveInteger(source.intakeRound),
+    maxIntakeRounds: readPositiveInteger(source.maxIntakeRounds),
+    answeredSummary: readString(source.answeredSummary),
+    answeredSlots: readStringArray(source.answeredSlots),
+    missingSlots: readStringArray(source.missingSlots),
+    allowEvidenceTools: readBoolean(source.allowEvidenceTools),
+    skillRefs: readStringArray(source.skillRefs),
+    disabledSkillRefs: readStringArray(source.disabledSkillRefs),
+    runtimeBudgetProfile: readEnum(source.runtimeBudgetProfile, runtimeBudgetProfiles)
+  });
+}
+
+function compactRecord(value: Record<string, unknown>) {
+  const entries = Object.entries(value).filter(([, entry]) => entry !== undefined);
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function readEnum<const T extends readonly string[]>(value: unknown, allowed: T): T[number] | undefined {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value) ? value as T[number] : undefined;
+}
+
+function readBoolean(value: unknown) {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function readPositiveInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+function readNonnegativeInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value : undefined;
+}
+
+function readNonemptyString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readStringArray(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  const strings = value.filter((entry): entry is string => typeof entry === "string");
+  return strings.length ? strings : undefined;
 }
 
 function readRecord(value: unknown): Record<string, unknown> {

@@ -59,7 +59,8 @@ import {
   durableContinuationClaim,
   durableContinuationDeliveryId,
   resolveDurableContinuationRequest,
-  withDurableContinuationDelivery
+  withDurableContinuationDelivery,
+  withServerDurableContinuationContext
 } from "./durableContinuation.js";
 
 export type GenerationService = {
@@ -1618,13 +1619,13 @@ function withTaskHandlingPolicy(payload: GenerateRequest, context: Awaited<Retur
     transientSkillCount: context.transientSkillNames.length,
     thinkingMode: context.modelSettings.thinkingMode
   });
-  return {
+  return withServerDurableContinuationContext({
     ...payload,
     contextValues: {
       ...payload.contextValues,
       taskHandlingPolicy
     }
-  };
+  }, "taskHandlingPolicy", taskHandlingPolicy);
 }
 
 function withRuntimeContext(payload: GenerateRequest, canvasDeliveryContract?: CanvasDeliveryContract): GenerateRequest {
@@ -1643,25 +1644,26 @@ function withProgressiveCanvasDeliveryContext(payload: GenerateRequest, context:
   if (!isCanvasEligibleTaskPolicy(payload.contextValues?.taskHandlingPolicy)) return payload;
   if (durableContinuationClaim(payload) && record(payload.contextValues?.progressiveCanvasDelivery).enabled === true) return payload;
   const budget = resolveRuntimeBudget(payload.runtimeBudgetProfile, projectSettings);
-  return {
+  const progressiveCanvasDelivery = {
+    enabled: true,
+    runtimeBudgetProfile: budget.runtimeBudgetProfile,
+    recursionLimit: budget.recursionLimit,
+    modelCallLimit: budget.modelCallLimit,
+    evidenceToolLimit: budget.evidenceToolLimit,
+    bodyDraftWriteLimit: budget.bodyDraftWriteLimit,
+    synthesisReserveSteps: budget.synthesisReserveSteps,
+    forceSynthesisAfterEvidence: true,
+    evidenceTools: [...progressiveEvidenceTools],
+    trigger: progressiveCanvasDeliveryTrigger(payload, context)
+  };
+  return withServerDurableContinuationContext({
     ...payload,
     contextValues: {
       ...payload.contextValues,
       runtimeBudgetProfile: budget.runtimeBudgetProfile,
-      progressiveCanvasDelivery: {
-        enabled: true,
-        runtimeBudgetProfile: budget.runtimeBudgetProfile,
-        recursionLimit: budget.recursionLimit,
-        modelCallLimit: budget.modelCallLimit,
-        evidenceToolLimit: budget.evidenceToolLimit,
-        bodyDraftWriteLimit: budget.bodyDraftWriteLimit,
-        synthesisReserveSteps: budget.synthesisReserveSteps,
-        forceSynthesisAfterEvidence: true,
-        evidenceTools: [...progressiveEvidenceTools],
-        trigger: progressiveCanvasDeliveryTrigger(payload, context)
-      }
+      progressiveCanvasDelivery
     }
-  };
+  }, "progressiveCanvasDelivery", progressiveCanvasDelivery);
 }
 
 function resolveRuntimeBudget(profileOverride: GenerateRequest["runtimeBudgetProfile"], projectSettings: ProjectRuntimeSettings): ProjectRuntimeSettings {
@@ -1743,7 +1745,7 @@ function withSkillClarificationGuard(payload: GenerateRequest, threadId: string,
   const missingSlots = intake.missingSlots.length ? intake.missingSlots.join(", ") : "none";
   const answeredSlots = intake.answeredSlots.length ? intake.answeredSlots.map(intakeSlotLabel).join(", ") : "none";
   const answeredSummary = intake.answeredSummary || "No intake answers yet.";
-  return {
+  const guardedPayload: GenerateRequest = {
     ...payload,
     contextValues: {
       ...payload.contextValues,
@@ -1769,6 +1771,11 @@ function withSkillClarificationGuard(payload: GenerateRequest, threadId: string,
       }
     }
   };
+  return withServerDurableContinuationContext(
+    guardedPayload,
+    "facetwrite_clarification_policy",
+    guardedPayload.contextValues?.facetwrite_clarification_policy
+  );
 }
 
 function withAnsweredAgentClarificationExecutionContext(payload: GenerateRequest): GenerateRequest {
@@ -1998,21 +2005,22 @@ export function withOrdinaryClarificationIntake(payload: GenerateRequest, thread
   const remainingRounds = Math.max(0, MAX_ORDINARY_CLARIFICATION_ROUNDS - answeredRounds);
   const answeredSummary = ordinaryClarificationAnsweredSummary(answered.slice(-MAX_ORDINARY_CLARIFICATION_ROUNDS));
   const state = answeredRounds >= MAX_ORDINARY_CLARIFICATION_ROUNDS ? "completed" : "collecting";
-  return {
+  const ordinaryClarificationIntake = {
+    mode: "ordinary",
+    state,
+    maxRounds: MAX_ORDINARY_CLARIFICATION_ROUNDS,
+    minAnsweredRoundsAfterFirstAsk: MIN_ORDINARY_CLARIFICATION_ROUNDS_AFTER_FIRST_ASK,
+    answeredRounds,
+    remainingRounds,
+    answeredSummary
+  };
+  return withServerDurableContinuationContext({
     ...payload,
     contextValues: {
       ...payload.contextValues,
-      ordinaryClarificationIntake: {
-        mode: "ordinary",
-        state,
-        maxRounds: MAX_ORDINARY_CLARIFICATION_ROUNDS,
-        minAnsweredRoundsAfterFirstAsk: MIN_ORDINARY_CLARIFICATION_ROUNDS_AFTER_FIRST_ASK,
-        answeredRounds,
-        remainingRounds,
-        answeredSummary
-      }
+      ordinaryClarificationIntake
     }
-  };
+  }, "ordinaryClarificationIntake", ordinaryClarificationIntake);
 }
 
 function currentOrdinaryClarificationOriginalInstruction(payload: GenerateRequest) {
