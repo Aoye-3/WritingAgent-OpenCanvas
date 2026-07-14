@@ -18,7 +18,7 @@ import { buildGenerationRunContext } from "./promptRunBuilder.js";
 import { createProgressiveTextGate } from "./progressiveTextGate.js";
 import type { ProviderRunnerDeps } from "./providerRunner.js";
 import { recordGenerationRun } from "./runRecorder.js";
-import { evaluateRunCompletion } from "./completionEvaluator.js";
+import { evaluateRunCompletion, isPureActionPromise } from "./completionEvaluator.js";
 import { resolveConfiguredModelApi, type ConfiguredModelApi } from "../../domains/model-config/index.js";
 import { isConfiguredModelRuntimeReady } from "../../runtime/agentBackendAdapter/modelSync.js";
 import { AgentPlanOrchestrator } from "../agentPlanOrchestrator.js";
@@ -2524,7 +2524,12 @@ function finalizeCanvasDelivery(input: {
       : "Detected an explicit Canvas delivery request and committed outline, body, and sources nodes."));
   const committed = commitCanvasDelivery(input.storage, input.projectId, delivery);
   for (const item of committed) {
-    emit(timeline.event("canvas_node_committed", "completed", item.title, input.payload.locale === "zh" ? `已创建或更新节点：${item.title}` : `Created or updated node: ${item.title}`, { nodeId: item.nodeId, title: item.title }));
+    emit(timeline.event("canvas_node_committed", "completed", item.title, input.payload.locale === "zh" ? `已创建或更新节点：${item.title}` : `Created or updated node: ${item.title}`, {
+      nodeId: item.nodeId,
+      title: item.title,
+      status: "final",
+      phase: "explicit_canvas_delivery"
+    }));
   }
   return { text: content.assistantText || input.text, timelineEvents: localTimelineEvents };
 }
@@ -2998,6 +3003,7 @@ function isLikelyDeliverableMarkdown(value: string) {
   const text = value.trim();
   if (!text || isProcessClarificationText(text) || isProcessOrDeliveryChatter(text)) return false;
   if (containsInternalRuntimeProtocol(text)) return false;
+  if (isPureActionPromise(text)) return false;
   const plainLength = text.replace(/\s+/g, " ").length;
   const headingCount = (text.match(/^#{1,3}\s+\S/gm) ?? []).length;
   const listCount = (text.match(/^(?:[-*+]\s+|\d+[.)]\s+)\S/gm) ?? []).length;
@@ -3014,6 +3020,7 @@ function isUsableFinalBodyMarkdown(value: string) {
   const text = value.trim();
   if (!text || isProcessClarificationText(text) || isProcessOrDeliveryChatter(text)) return false;
   if (containsInternalRuntimeProtocol(text)) return false;
+  if (isPureActionPromise(text)) return false;
   const plainLength = text.replace(/\s+/g, " ").length;
   const hasHeading = /^#{1,3}\s+\S/m.test(text);
   const hasList = /^(?:[-*+]\s+|\d+[.)]\s+)\S/m.test(text);

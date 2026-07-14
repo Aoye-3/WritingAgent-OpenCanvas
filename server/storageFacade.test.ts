@@ -82,6 +82,24 @@ test("storage facade persists run status from the decided completion verdict", a
   }).db;
   const row = db.prepare("SELECT status FROM runs WHERE id = ?").get(saved.runId) as { status: string };
   assert.equal(row.status, "incomplete");
+
+  const partial = storage.recordRun({
+    threadId,
+    agentCardId: agentCard.id,
+    mode: "chat",
+    prompt: "Continue finalization",
+    output: "Progress checkpoint saved.",
+    provider: "agent-backend",
+    usedMock: false,
+    completion: {
+      status: "partial",
+      reasons: ["Only draft Canvas evidence exists."],
+      missingRequirements: ["Commit a final body or file delivery."],
+      evaluatedAt: new Date().toISOString()
+    }
+  });
+  const partialRow = db.prepare("SELECT status FROM runs WHERE id = ?").get(partial.runId) as { status: string };
+  assert.equal(partialRow.status, "partial");
   assert.ok(storage.listToolEvents(threadId).some((event) => event.eventType === "run_incomplete"));
   assert.equal(storage.moveThreadToTrash(threadId), true);
   assert.equal(await storage.hardDeleteThread(threadId), true);

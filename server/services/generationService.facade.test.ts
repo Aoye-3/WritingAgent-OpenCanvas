@@ -606,6 +606,7 @@ test("direct Canvas delivery is committed by the server planner without copying 
   });
 
   assert.equal(result.provider, "agent-backend");
+  assert.equal(result.completion?.status, "completed");
   assert.equal(canvasWriteRequests.length, 0);
   assert.deepEqual(canvasNodes.map((node) => node.title), ["整体概述", "正文", "来源"]);
   assert.equal(String(canvasNodes[1]?.content).includes("新闻搜索和总结已经完成"), false);
@@ -798,6 +799,181 @@ test("streaming incomplete AgentBackend output skips Canvas finalization and run
   assert.equal(timelineEvents.some((event) => event.eventType === "run_completed"), false);
   assert.ok(timelineEvents.some((event) => event.eventType === "run_incomplete"));
   assert.equal(record.events?.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
+});
+
+test("non-stream completed AgentBackend promise is continued before terminal side effects", async () => {
+  const promiseCase = durableTaskGuardCases.find((entry) => entry.id === "english_proceed_promise");
+  assert.ok(promiseCase);
+  const { storage, canvasNodes, planState, records } = fakeStorage();
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: promiseCase.text,
+        finishReason: "agent_backend_completed",
+        events: []
+      })
+    }
+  });
+
+  const result = await service.generateAndRecord({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Research database records and write a verified report",
+    transientSkillRefs: ["database-lookup"],
+    contextValues: {
+      autoPreflightPlan: { enabled: false },
+      agentClarification: answeredAgentClarification(),
+      canvas: { workflow: { mode: "batch_delivery" } }
+    }
+  });
+
+  const record = records[0] as { completion?: { status?: string }; events?: ToolEventRecord[] };
+  assert.equal(result.text, promiseCase.text);
+  assert.equal(result.completion?.status, "continue");
+  assert.equal(record.completion?.status, "continue");
+  assert.equal(canvasNodes.some((node) => (node.metadata as { status?: string } | undefined)?.status === "final"), false);
+  assert.equal(record.events?.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
+  assert.equal(record.events?.some((event) => event.eventType === "run_timeline_run_completed"), false);
+  assert.notEqual(planState.status, "completed");
+});
+
+test("streaming completed AgentBackend promise is continued before terminal side effects", async () => {
+  const promiseCase = durableTaskGuardCases.find((entry) => entry.id === "english_continue_promise");
+  assert.ok(promiseCase);
+  const { storage, canvasNodes, planState, records } = fakeStorage();
+  const timelineEvents: Array<{ eventType: string }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToken?.(promiseCase.text);
+        return {
+          text: promiseCase.text,
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Research database records and write a verified report",
+    transientSkillRefs: ["database-lookup"],
+    contextValues: {
+      autoPreflightPlan: { enabled: false },
+      agentClarification: answeredAgentClarification(),
+      canvas: { workflow: { mode: "batch_delivery" } }
+    }
+  }, {
+    onTimelineEvent: (event) => timelineEvents.push(event)
+  });
+
+  const record = records[0] as { completion?: { status?: string }; events?: ToolEventRecord[] };
+  assert.equal(result.text, promiseCase.text);
+  assert.equal(result.completion?.status, "continue");
+  assert.equal(record.completion?.status, "continue");
+  assert.equal(canvasNodes.some((node) => (node.metadata as { status?: string } | undefined)?.status === "final"), false);
+  assert.equal(timelineEvents.some((event) => event.eventType === "run_completed"), false);
+  assert.equal(record.events?.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
+  assert.notEqual(planState.status, "completed");
+});
+
+test("streaming post-evidence promise cannot become final Canvas Markdown", async () => {
+  const promiseCase = durableTaskGuardCases.find((entry) => entry.id === "post_evidence_synthesis");
+  assert.ok(promiseCase);
+  const { storage, canvasNodes, planState, records } = fakeStorage();
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "web_search",
+            toolCallId: "search_before_promise",
+            sources: [{ title: "Evidence", url: "https://example.com/evidence" }]
+          }
+        });
+        return {
+          text: promiseCase.text,
+          finishReason: "agent_backend_completed",
+          events: []
+        };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Research database records and write a verified report",
+    transientSkillRefs: ["database-lookup"],
+    contextValues: {
+      autoPreflightPlan: { enabled: false },
+      agentClarification: answeredAgentClarification(),
+      canvas: { workflow: { mode: "batch_delivery" } }
+    }
+  });
+
+  const record = records[0] as { completion?: { status?: string }; events?: ToolEventRecord[] };
+  assert.equal(result.completion?.status, "partial");
+  assert.equal(record.completion?.status, "partial");
+  assert.equal(canvasNodes.some((node) => (node.metadata as { status?: string } | undefined)?.status === "final"), false);
+  assert.equal(record.events?.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
+  assert.equal(record.events?.some((event) => event.eventType === "run_timeline_run_completed"), false);
+  assert.notEqual(planState.status, "completed");
+});
+
+test("non-stream checkpoint-only Canvas evidence remains non-completed", async () => {
+  const { storage, canvasNodes, planState, records } = fakeStorage();
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: {
+            toolName: "web_search",
+            toolCallId: "search_checkpoint_only",
+            sources: [{ title: "Draft evidence", url: "https://example.com/draft" }]
+          }
+        });
+        return { text: "Progress checkpoint saved.", finishReason: "agent_backend_completed", events: [] };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecord({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Research database records and write a verified report",
+    transientSkillRefs: ["database-lookup"],
+    contextValues: {
+      autoPreflightPlan: { enabled: false },
+      agentClarification: answeredAgentClarification(),
+      canvas: { workflow: { mode: "batch_delivery" } }
+    }
+  });
+
+  const record = records[0] as { completion?: { status?: string }; events?: ToolEventRecord[] };
+  assert.equal(result.completion?.status, "partial");
+  assert.equal(record.completion?.status, "partial");
+  assert.ok(record.events?.some((event) => event.eventType === "canvas_delivery_body_checkpoint_committed"));
+  assert.equal(canvasNodes.some((node) => (node.metadata as { status?: string } | undefined)?.status === "final"), false);
+  assert.equal(record.events?.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
+  assert.equal(record.events?.some((event) => event.eventType === "run_timeline_run_completed"), false);
+  assert.notEqual(planState.status, "completed");
 });
 
 test("direct Canvas delivery treats process clarification text as recoverable output", async () => {

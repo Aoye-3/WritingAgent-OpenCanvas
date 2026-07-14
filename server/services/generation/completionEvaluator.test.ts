@@ -267,6 +267,59 @@ test("completion evaluator keeps checkpoint-only Canvas delivery partial", () =>
   assert.match(verdict.missingRequirements[0] ?? "", /final answer|clarification/);
 });
 
+test("completion evaluator does not treat generic draft Canvas commits as terminal delivery", () => {
+  const draftEvents: ToolEventRecord[][] = [
+    [{
+      eventType: "agent_backend_canvas_mutation_committed",
+      payload: { eventType: "canvas_mutation_committed", status: "committed", phase: "research" }
+    }],
+    [{
+      eventType: "run_timeline_canvas_node_committed",
+      payload: {
+        eventType: "canvas_node_committed",
+        status: "completed",
+        payload: { status: "draft", phase: "body_checkpoint" }
+      }
+    }],
+    [{
+      eventType: "run_timeline_canvas_node_committed",
+      payload: {
+        eventType: "canvas_node_committed",
+        status: "completed",
+        payload: { node: { metadata: { status: "recoverable", phase: "process_clarification" } } }
+      }
+    }]
+  ];
+
+  for (const events of draftEvents) {
+    const verdict = evaluateRunCompletion({
+      payload: basePayload,
+      text: "",
+      events,
+      finishReason: "agent_backend_completed"
+    });
+    assert.equal(verdict.status, "partial");
+  }
+});
+
+test("completion evaluator accepts a generic Canvas commit only with final terminal metadata", () => {
+  const verdict = evaluateRunCompletion({
+    payload: basePayload,
+    text: "",
+    events: [{
+      eventType: "run_timeline_canvas_node_committed",
+      payload: {
+        eventType: "canvas_node_committed",
+        status: "completed",
+        payload: { status: "final", phase: "explicit_canvas_delivery" }
+      }
+    }],
+    finishReason: "agent_backend_completed"
+  });
+
+  assert.equal(verdict.status, "completed");
+});
+
 test("completion evaluator keeps budget-gated checkpoint-only Canvas delivery partial", () => {
   const verdict = evaluateRunCompletion({
     payload: basePayload,

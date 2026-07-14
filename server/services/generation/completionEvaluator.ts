@@ -187,22 +187,49 @@ function hasUnfinishedToolCall(events: ToolEventRecord[]) {
 
 function requiresDurableCanvasCommit(payload: GenerateRequest) {
   return payload.canvasAction?.requiresTool === true
-    || payload.orchestrationPolicy?.deliveryPolicy === "canvas_required";
+    || payload.orchestrationPolicy?.deliveryPolicy === "canvas_required"
+    || (record(payload.contextValues?.progressiveCanvasDelivery).enabled === true
+      && /^(?:progressive|explicit)$/.test(string(record(payload.contextValues?.taskHandlingPolicy).canvasDeliveryMode)));
 }
 
 function hasTerminalDelivery(events: ToolEventRecord[]) {
   return events.some((event) => {
     const payload = record(event.payload);
     const payloadEventType = string(payload.eventType) || string(payload.type);
-    return isTerminalDeliveryEvent(event.eventType) || isTerminalDeliveryEvent(payloadEventType);
+    if (isExplicitTerminalDeliveryEvent(event.eventType) || isExplicitTerminalDeliveryEvent(payloadEventType)) return true;
+    if (!isGenericCanvasCommit(event.eventType) && !isGenericCanvasCommit(payloadEventType)) return false;
+    return hasFinalTerminalCanvasMetadata(payload);
   });
 }
 
-function isTerminalDeliveryEvent(eventType: string) {
+function isExplicitTerminalDeliveryEvent(eventType: string) {
   return eventType === "canvas_delivery_body_final_committed"
     || eventType === "canvas_delivery_file_document_committed"
-    || /(?:^|_)canvas_(?:mutation|node)_committed$/.test(eventType)
     || /(?:^|_)artifact_committed$/.test(eventType);
+}
+
+function isGenericCanvasCommit(eventType: string) {
+  return /(?:^|_)canvas_(?:mutation|node)_committed$/.test(eventType);
+}
+
+function hasFinalTerminalCanvasMetadata(payload: Record<string, unknown>) {
+  const timelinePayload = record(payload.payload);
+  const node = record(payload.node);
+  const timelineNode = record(timelinePayload.node);
+  return [
+    payload,
+    record(payload.metadata),
+    node,
+    record(node.metadata),
+    timelinePayload,
+    record(timelinePayload.metadata),
+    timelineNode,
+    record(timelineNode.metadata)
+  ].some((candidate) => {
+    const status = string(candidate.deliveryStatus) || string(candidate.status);
+    const phase = string(candidate.deliveryPhase) || string(candidate.phase);
+    return status === "final" && /^(?:body|body_final|final_body|file_document|artifact|explicit_canvas_delivery)$/.test(phase);
+  });
 }
 
 function isNonTerminalProcessReply(value: string) {
@@ -233,7 +260,7 @@ function hasRunEvidence(events: ToolEventRecord[]) {
   });
 }
 
-function isPureActionPromise(value: string) {
+export function isPureActionPromise(value: string) {
   const sentences = visibleSentences(value);
   while (sentences.length && isAcknowledgementOnly(sentences[0]!)) sentences.shift();
   return sentences.length > 0 && sentences.every(isPureActionClause);
