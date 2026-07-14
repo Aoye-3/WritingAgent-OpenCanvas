@@ -46,5 +46,23 @@
     "text": "我来分析这些选项：A 可节省 20%，而 B 更慢。因此 A 明显更好。",
     "hasEvidence": false,
     "expectContinuation": false
+  },
+  {
+    "id": "english_proceed_promise",
+    "text": "I'll proceed with the implementation now.",
+    "hasEvidence": false,
+    "expectContinuation": true
+  },
+  {
+    "id": "english_continue_promise",
+    "text": "I'll continue working on this now.",
+    "hasEvidence": false,
+    "expectContinuation": true
+  },
+  {
+    "id": "english_mixed_promise_and_result",
+    "text": "I will analyze the code now. The null check is missing, so the correct fix is to validate input before dereferencing it.",
+    "hasEvidence": false,
+    "expectContinuation": false
   }
 ]

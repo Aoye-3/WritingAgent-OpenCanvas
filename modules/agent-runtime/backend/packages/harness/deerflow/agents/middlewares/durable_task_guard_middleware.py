@@ -11,27 +11,26 @@ from langgraph.runtime import Runtime
 
 _MAX_CONTINUATIONS = 2
 _INCOMPLETE_REASON = "action_promise_without_required_evidence"
-_ACTION_PROMISE_PATTERNS = (
-    re.compile(
-        r"^\s*(?:(?:okay|ok|understood|got it|sure|all right)\s*[,!.:;-]\s*)*"
-        r"(?:let me|i(?:'ll| will| am going to)|we(?:'ll| will))\b.{0,160}"
-        r"\b(?:start|begin|load|search|check|fetch|query|research|retrieve|inspect|read|write|create|"
-        r"generate|run|analy[sz]e|synthesize|compile)\b",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"^\s*(?:(?:好的?|明白了?|收到|可以)\s*[，。！、,:;；]?\s*)*"
-        r"(?:让我|我(?:将|会|先|来)|接下来|下一步).{0,120}"
-        r"(?:开始|加载|检索|搜索|查询|查找|读取|分析|生成|编写|创建|执行|整理|汇总|综合)"
-    ),
-)
-_DELIVERABLE_OUTCOME_SEPARATOR = re.compile(r"[:：]")
-_DELIVERABLE_EVIDENCE_PATTERN = re.compile(
-    r"(?:\d+(?:\.\d+)?\s*%|\b(?:saves?|faster|slower|better|worse|more|less)\b|节省|更快|更慢|更好|更差)",
+_SENTENCE_PATTERN = re.compile(r"[^.!?。！？]+(?:[.!?。！？]+|$)")
+_ACKNOWLEDGEMENT_ONLY_PATTERN = re.compile(
+    r"^(?:(?:okay|ok|understood|got it|sure|all right|好的?|明白了?|收到|可以)\s*(?:[,，、]\s*)?)+$",
     re.IGNORECASE,
 )
-_DELIVERABLE_CONCLUSION_PATTERN = re.compile(
-    r"(?:\b(?:therefore|thus|clearly)\b|\b(?:i|we)\s+recommend\b|因此|所以|明显)",
+_ACTION_CLAUSE_PREFIX_PATTERN = re.compile(
+    r"^(?:(?:let me|i(?:'ll| will)|we(?:'ll| will)|next|then)\b|(?:让我|我将|我会|我来|接下来|下一步))",
+    re.IGNORECASE,
+)
+_ACTION_VERB_PATTERN = re.compile(
+    r"(?:\b(?:start|begin|load|search|check|fetch|query|research|retrieve|inspect|read|write|create|"
+    r"generate|run|analy[sz]e|synthesize|compile|proceed|continue|implement|do)\b|"
+    r"(?:开始|加载|检索|搜索|查询|查找|读取|分析|生成|编写|创建|执行|整理|汇总|综合|继续|推进|实施|实现|处理|做))",
+    re.IGNORECASE,
+)
+_RESULT_STRUCTURE_PATTERN = re.compile(r"[:：;；]|(?:^|\s)(?:[-*•]|\d+[.)、])\s+")
+_CAUSAL_OR_CONCLUSION_PATTERN = re.compile(
+    r"(?:\b(?:because|therefore|thus|hence|consequently)\b|\bas a result\b|(?:^|[,;])\s*so\b|"
+    r"\b(?:i|we)\s+recommend\b|\b(?:the|my|our)\s+(?:answer|result|conclusion|recommendation|correct fix)\s+is\b|"
+    r"因为|因此|所以|因而|结论|结果是|答案是|我建议)",
     re.IGNORECASE,
 )
 
@@ -93,25 +92,38 @@ class DurableTaskGuardMiddleware(AgentMiddleware[DurableTaskGuardState]):
         return " ".join(parts)
 
     @staticmethod
-    def _has_structural_deliverable(text: str) -> bool:
-        """Recognize a concrete outcome after a response-leading promise clause."""
-        separator = _DELIVERABLE_OUTCOME_SEPARATOR.search(text)
-        if separator is None:
-            return False
-        outcome = text[separator.end() :].strip()
+    def _visible_sentences(text: str) -> list[str]:
+        return [
+            match.group().strip()
+            for line in text.splitlines()
+            for match in _SENTENCE_PATTERN.finditer(line)
+            if match.group().strip()
+        ]
+
+    @staticmethod
+    def _is_acknowledgement_only(sentence: str) -> bool:
+        text = sentence.rstrip(" \t.!?。！？")
+        return bool(text) and _ACKNOWLEDGEMENT_ONLY_PATTERN.fullmatch(text) is not None
+
+    @staticmethod
+    def _is_pure_action_clause(sentence: str) -> bool:
+        text = re.sub(r"\s+", " ", sentence).strip()
         return bool(
-            outcome
-            and _DELIVERABLE_EVIDENCE_PATTERN.search(outcome)
-            and _DELIVERABLE_CONCLUSION_PATTERN.search(outcome)
+            _ACTION_CLAUSE_PREFIX_PATTERN.search(text)
+            and _ACTION_VERB_PATTERN.search(text)
+            and not _RESULT_STRUCTURE_PATTERN.search(text)
+            and not _CAUSAL_OR_CONCLUSION_PATTERN.search(text)
         )
 
     @staticmethod
     def _is_action_promise(message: AIMessage) -> bool:
-        text = re.sub(r"\s+", " ", DurableTaskGuardMiddleware._message_text(message)).strip()
-        return (
-            bool(text)
-            and not DurableTaskGuardMiddleware._has_structural_deliverable(text)
-            and any(pattern.search(text) for pattern in _ACTION_PROMISE_PATTERNS)
+        sentences = DurableTaskGuardMiddleware._visible_sentences(
+            DurableTaskGuardMiddleware._message_text(message)
+        )
+        while sentences and DurableTaskGuardMiddleware._is_acknowledgement_only(sentences[0]):
+            sentences.pop(0)
+        return bool(sentences) and all(
+            DurableTaskGuardMiddleware._is_pure_action_clause(sentence) for sentence in sentences
         )
 
     @staticmethod
