@@ -1,16 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import {
+  attachRunStateToLatestAssistant,
+  isAssistantRunCompleted
+} from "../../src/app/hooks/useGenerationRun";
+import { reconcileCollaborationMessages } from "../../src/app/hooks/streamingTypewriter";
+import { durableContinuationPresentation } from "../../src/features/workspace/components/AICollaborationDrawer";
 import type { CollaborationMessage } from "../../src/features/generation/types";
 
-test("live continue completion preserves process text and remains unfinished", async () => {
-  const module = await import("../../src/app/hooks/useGenerationRun");
-  const attach = (module as Record<string, unknown>).attachRunStateToLatestAssistant;
-  const isCompleted = (module as Record<string, unknown>).isAssistantRunCompleted;
-  assert.equal(typeof attach, "function");
-  assert.equal(typeof isCompleted, "function");
-
-  const messages = (attach as Function)([{
+test("live continue completion preserves process text and remains unfinished", () => {
+  const messages = attachRunStateToLatestAssistant([{
     id: "assistant_1",
     role: "assistant",
     text: "I collected the evidence and will continue the delivery."
@@ -23,40 +22,80 @@ test("live continue completion preserves process text and remains unfinished", a
     state: "ready",
     canContinue: true,
     attempts: 0
-  }) as CollaborationMessage[];
+  });
 
   assert.equal(messages[0]?.text, "I collected the evidence and will continue the delivery.");
   assert.equal(messages[0]?.completion?.status, "continue");
   assert.equal(messages[0]?.durableContinuation?.state, "ready");
-  assert.equal((isCompleted as Function)(messages[0]), false);
+  assert.equal(isAssistantRunCompleted(messages[0] as CollaborationMessage), false);
 });
 
-test("continuation presentation renders recoverable states and hides terminal states", async () => {
-  const module = await import("../../src/features/workspace/components/AICollaborationDrawer");
-  const present = (module as Record<string, unknown>).durableContinuationPresentation;
-  assert.equal(typeof present, "function");
-
-  assert.deepEqual((present as Function)({ state: "ready", canContinue: true, attempts: 0 }, "zh"), {
+test("continuation presentation renders recoverable states and hides terminal states", () => {
+  assert.deepEqual(durableContinuationPresentation({ state: "ready", canContinue: true, attempts: 0 }, "zh"), {
     label: "任务尚未完成，可发送“继续”恢复执行。"
   });
-  assert.deepEqual((present as Function)({ state: "claimed", canContinue: false, attempts: 1 }, "en"), {
+  assert.deepEqual(durableContinuationPresentation({ state: "claimed", canContinue: false, attempts: 1 }, "en"), {
     label: "Restoring the original task…"
   });
-  assert.deepEqual((present as Function)({ state: "failed", canContinue: true, attempts: 2, lastError: "runtime unavailable" }, "zh"), {
+  assert.deepEqual(durableContinuationPresentation({ state: "failed", canContinue: true, attempts: 2, lastError: "The runtime is unavailable." }, "zh"), {
     label: "答案和任务上下文已保存，可发送“继续”重试恢复。",
-    lastError: "runtime unavailable"
+    lastError: "The runtime is unavailable."
   });
-  assert.equal((present as Function)({ state: "completed", canContinue: false, attempts: 1 }, "en"), undefined);
-  assert.equal((present as Function)({ state: "superseded", canContinue: false, attempts: 0 }, "en"), undefined);
+  assert.equal(durableContinuationPresentation({ state: "completed", canContinue: false, attempts: 1 }, "en"), undefined);
+  assert.equal(durableContinuationPresentation({ state: "superseded", canContinue: false, attempts: 0 }, "en"), undefined);
 });
 
-test("stream failure refreshes persisted thread state before local error fallback", () => {
-  const source = readFileSync("src/app/hooks/useGenerationRun.ts", "utf8");
-  const catchStart = source.indexOf("} catch (error) {", source.indexOf("const handleChatSend"));
-  const catchEnd = source.indexOf("} finally {", catchStart);
-  const catchBody = source.slice(catchStart, catchEnd);
+test("matching persisted text replaces live run metadata for every recoverable continuation state", () => {
+  for (const state of ["ready", "failed", "claimed"] as const) {
+    const timeline = [{
+      id: `timeline_${state}`,
+      sequence: 1,
+      eventType: "decision" as const,
+      status: "waiting" as const,
+      title: "Run incomplete",
+      summary: "Continue from persisted state.",
+      createdAt: "2026-07-14T12:00:00.000Z"
+    }];
+    const persisted = attachRunStateToLatestAssistant([{
+      id: `stored_${state}`,
+      role: "assistant" as const,
+      text: "Process reply preserved",
+      usedMock: false,
+      createdAt: "2026-07-14T12:00:00.000Z"
+    }], timeline, {
+      status: "continue",
+      reasons: ["Task remains incomplete."],
+      missingRequirements: ["Continue delivery."],
+      evaluatedAt: "2026-07-14T12:00:00.000Z"
+    }, {
+      state,
+      canContinue: state !== "claimed",
+      attempts: 1,
+      ...(state === "failed" ? { lastError: "The runtime is unavailable." } : {})
+    });
+    const current: CollaborationMessage[] = [{
+      id: `live_${state}`,
+      role: "assistant",
+      text: "Process reply preserved",
+      usedMock: false,
+      isStreaming: true,
+      status: "writing",
+      completion: {
+        status: "completed",
+        reasons: ["Stale live completion."],
+        missingRequirements: [],
+        evaluatedAt: "2026-07-14T11:59:59.000Z"
+      }
+    }];
 
-  assert.ok(catchBody.indexOf("await options.onFetchAndApplyThreadState(threadId)") >= 0);
-  assert.ok(catchBody.indexOf("await options.onFetchAndApplyThreadState(threadId)") < catchBody.indexOf("Request failed:"));
-  assert.match(catchBody, /durableContinuation/);
+    const reconciled = reconcileCollaborationMessages(current, persisted) as CollaborationMessage[];
+
+    assert.equal(reconciled[0]?.id, `live_${state}`);
+    assert.equal(reconciled[0]?.completion?.status, "continue");
+    assert.equal(reconciled[0]?.durableContinuation?.state, state);
+    assert.deepEqual(reconciled[0]?.timeline, timeline);
+    assert.equal(reconciled[0]?.isStreaming, false);
+    assert.equal(isAssistantRunCompleted(reconciled[0] as CollaborationMessage), false);
+    assert.ok(durableContinuationPresentation(reconciled[0]?.durableContinuation, "en"));
+  }
 });

@@ -80,8 +80,10 @@ export function reconcileCollaborationMessages(
 ): CollaborationMessageLike[] {
   const persisted = storedMessagesToCollaborationMessages(persistedMessages);
   if (!sameVisibleMessages(current, persisted)) return persisted;
-  return current.map((message) => ({
+  return current.map((message, index) => ({
     ...message,
+    ...persisted[index],
+    id: message.id,
     isStreaming: false,
     status: undefined,
     statusLabel: undefined

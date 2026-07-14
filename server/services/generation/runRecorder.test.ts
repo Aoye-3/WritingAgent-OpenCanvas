@@ -62,7 +62,7 @@ test("recorded generation returns only the persisted durable continuation summar
     state: "failed",
     canContinue: true,
     attempts: 2,
-    lastError: "runtime unavailable"
+    lastError: "The runtime is unavailable."
   });
   assert.deepEqual(Object.keys(response.durableContinuation ?? {}).sort(), ["attempts", "canContinue", "lastError", "state"]);
   assert.doesNotMatch(JSON.stringify(response), /secret instruction|secret-skill|secret-delivery|secret-claim-token|run_source/);
@@ -84,6 +84,30 @@ test("durable continuation summary replaces a sensitive persisted error", () => 
 
   assert.equal(summary?.lastError, "Continuation failed. Retry is available.");
   assert.doesNotMatch(JSON.stringify(summary), /secret-token|contextValues|deliveryId/);
+});
+
+test("durable continuation summary never exposes unknown credential or internal error text", () => {
+  const unsafeErrors = [
+    "Provider rejected credential sk-live-123456789",
+    "Fetch failed for https://runtime-user:runtime-pass@internal.example/private",
+    "credential=private-value",
+    "facetwrite_internal_continuation orchestrationPolicy.serverReadinessGate"
+  ];
+
+  for (const lastError of unsafeErrors) {
+    const summary = durableContinuationSummary({ ...storedContinuation("failed"), lastError });
+    assert.equal(summary?.lastError, "Continuation failed. Retry is available.");
+    assert.equal(JSON.stringify(summary).includes(lastError), false);
+  }
+});
+
+test("durable continuation summary maps an explicitly allowed stable error code to safe copy", () => {
+  const summary = durableContinuationSummary({
+    ...storedContinuation("failed"),
+    lastError: "durable_continuation_recovered_after_restart"
+  });
+
+  assert.equal(summary?.lastError, "Continuation was interrupted by a server restart.");
 });
 
 function storedContinuation(state: StoredDurableContinuation["state"]): StoredDurableContinuation {

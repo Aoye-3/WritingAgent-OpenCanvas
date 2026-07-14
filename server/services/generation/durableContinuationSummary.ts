@@ -1,7 +1,12 @@
 import type { DurableContinuationSummary } from "../../../shared/durableContinuation.js";
 import type { StoredDurableContinuation } from "../../storageTypes.js";
 
-const sensitiveErrorPattern = /authorization|bearer|cookie|password|secret|api.?key|token|claim|descriptor|contextvalues|deliveryid|sourcerunid/i;
+const safeLastErrors = new Map<string, string>([
+  ["runtime unavailable", "The runtime is unavailable."],
+  ["runtime_unavailable", "The runtime is unavailable."],
+  ["durable_continuation_recovered_after_restart", "Continuation was interrupted by a server restart."]
+]);
+const unknownLastError = "Continuation failed. Retry is available.";
 
 export function durableContinuationSummary(
   continuation: StoredDurableContinuation | undefined
@@ -19,6 +24,5 @@ export function durableContinuationSummary(
 function safeLastError(value: string | undefined) {
   const normalized = value?.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
   if (!normalized) return undefined;
-  if (sensitiveErrorPattern.test(normalized)) return "Continuation failed. Retry is available.";
-  return normalized.slice(0, 240);
+  return safeLastErrors.get(normalized.toLowerCase()) ?? unknownLastError;
 }
