@@ -25,9 +25,14 @@ _ACTION_PROMISE_PATTERNS = (
         r"(?:开始|加载|检索|搜索|查询|查找|读取|分析|生成|编写|创建|执行|整理|汇总|综合)"
     ),
 )
-_SUBSTANTIVE_ANSWER_PATTERNS = (
-    re.compile(r"\b(?:i|we)\s+recommend\b", re.IGNORECASE),
-    re.compile(r"\b(?:my|our)\s+(?:answer|recommendation|conclusion)\b", re.IGNORECASE),
+_DELIVERABLE_OUTCOME_SEPARATOR = re.compile(r"[:：]")
+_DELIVERABLE_EVIDENCE_PATTERN = re.compile(
+    r"(?:\d+(?:\.\d+)?\s*%|\b(?:saves?|faster|slower|better|worse|more|less)\b|节省|更快|更慢|更好|更差)",
+    re.IGNORECASE,
+)
+_DELIVERABLE_CONCLUSION_PATTERN = re.compile(
+    r"(?:\b(?:therefore|thus|clearly)\b|\b(?:i|we)\s+recommend\b|因此|所以|明显)",
+    re.IGNORECASE,
 )
 
 
@@ -88,11 +93,24 @@ class DurableTaskGuardMiddleware(AgentMiddleware[DurableTaskGuardState]):
         return " ".join(parts)
 
     @staticmethod
+    def _has_structural_deliverable(text: str) -> bool:
+        """Recognize a concrete outcome after a response-leading promise clause."""
+        separator = _DELIVERABLE_OUTCOME_SEPARATOR.search(text)
+        if separator is None:
+            return False
+        outcome = text[separator.end() :].strip()
+        return bool(
+            outcome
+            and _DELIVERABLE_EVIDENCE_PATTERN.search(outcome)
+            and _DELIVERABLE_CONCLUSION_PATTERN.search(outcome)
+        )
+
+    @staticmethod
     def _is_action_promise(message: AIMessage) -> bool:
         text = re.sub(r"\s+", " ", DurableTaskGuardMiddleware._message_text(message)).strip()
         return (
             bool(text)
-            and not any(pattern.search(text) for pattern in _SUBSTANTIVE_ANSWER_PATTERNS)
+            and not DurableTaskGuardMiddleware._has_structural_deliverable(text)
             and any(pattern.search(text) for pattern in _ACTION_PROMISE_PATTERNS)
         )
 

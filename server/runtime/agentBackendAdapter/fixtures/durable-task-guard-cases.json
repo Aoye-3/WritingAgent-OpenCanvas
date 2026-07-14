@@ -28,5 +28,23 @@
     "text": "I will analyze the options here: A saves 20%, while B is slower. I recommend A.",
     "hasEvidence": false,
     "expectContinuation": false
+  },
+  {
+    "id": "english_structural_deliverable",
+    "text": "I will analyze the options here: A saves 20%, while B is slower. Option A is clearly better.",
+    "hasEvidence": false,
+    "expectContinuation": false
+  },
+  {
+    "id": "english_future_recommendation_promise",
+    "text": "I will research the remaining evidence before finalizing my recommendation.",
+    "hasEvidence": false,
+    "expectContinuation": true
+  },
+  {
+    "id": "zh_structural_deliverable",
+    "text": "我来分析这些选项：A 可节省 20%，而 B 更慢。因此 A 明显更好。",
+    "hasEvidence": false,
+    "expectContinuation": false
   }
 ]
