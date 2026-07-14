@@ -30,6 +30,35 @@ test("live continue completion preserves process text and remains unfinished", (
   assert.equal(isAssistantRunCompleted(messages[0] as CollaborationMessage), false);
 });
 
+test("assistant completion honors every explicit verdict and only falls back for legacy messages", () => {
+  const message = (status?: NonNullable<CollaborationMessage["completion"]>["status"], overrides: Partial<CollaborationMessage> = {}): CollaborationMessage => ({
+      id: `assistant_${status ?? "legacy"}`,
+      role: "assistant",
+      text: "Visible answer",
+      isStreaming: false,
+      ...(status ? {
+        completion: {
+          status,
+          reasons: [],
+          missingRequirements: [],
+          evaluatedAt: "2026-07-14T12:00:00.000Z"
+        }
+      } : {}),
+      ...overrides
+    });
+
+  for (const status of ["continue", "partial", "waiting", "failed", "finalizing"] as const) {
+    assert.equal(isAssistantRunCompleted(message(status)), false, status);
+  }
+  assert.equal(isAssistantRunCompleted(message("completed")), true);
+  assert.equal(isAssistantRunCompleted(message()), true);
+  assert.equal(isAssistantRunCompleted(message(undefined, { isStreaming: true })), false);
+  assert.equal(isAssistantRunCompleted(message(undefined, { text: "" })), false);
+  assert.equal(isAssistantRunCompleted(message("completed", {
+    durableContinuation: { state: "ready", canContinue: true, attempts: 1 }
+  })), false);
+});
+
 test("continuation presentation renders recoverable states and hides terminal states", () => {
   assert.deepEqual(durableContinuationPresentation({ state: "ready", canContinue: true, attempts: 0 }, "zh"), {
     label: "任务尚未完成，可发送“继续”恢复执行。"

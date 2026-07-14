@@ -105,7 +105,7 @@ Stage reports are the only progress copy that belongs in the main right-drawer a
 
 Durable task protection has a Runtime signal, a server readiness result, and a SQLite recovery state. Diagnose them in that order:
 
-- `durable_task_incomplete` is emitted by Runtime after same-graph auto-continuation still ends on an action promise without required evidence. It is not a completed deliverable and is not a clarification interrupt.
+- `durable_task_incomplete` is emitted by Runtime after same-graph auto-continuation still ends on an action promise without required evidence. The server readiness gate is stricter: a durable pure-action promise remains `continue` even when prior tool evidence exists. It is not a completed deliverable and is not a clarification interrupt.
 - `run_incomplete` is the FacetWrite timeline/lifecycle projection for a server completion verdict of `continue`. The assistant process reply is intentionally preserved, but completion requirements remain open.
 - `/api/threads/:threadId/state` is authoritative for the public `durableContinuation` summary after refresh or stream failure. A live browser flag or transient Skill selection is not authoritative.
 
@@ -119,7 +119,15 @@ Continuation states mean:
 
 If the UI shows a completed treatment for a `continue` verdict, compare the latest `completion_evaluated` event with `durableContinuation`. `continue` must render as unfinished even when the preserved process reply is non-empty or a completion reason mentions existing answer text. On an SSE error, confirm the browser fetched thread state before applying its local `Request failed` fallback.
 
+The frontend treats an explicit completion verdict as authoritative: only `status:"completed"` is complete. `continue`, `partial`, `waiting`, `failed`, and `finalizing` remain unfinished. The older non-streaming/non-empty-text fallback applies only to legacy messages with no verdict.
+
 If `continue` starts an unrelated task, inspect the SQLite row and server claim path before Runtime. The descriptor and claim token must never come from client `contextValues`; the server reconstructs them from the claimed row and reuses its `deliveryId`. `durable_continuation_in_progress` means the row is already `claimed`. A restart converts an abandoned claim to `failed` with `durable_continuation_recovered_after_restart`.
+
+For a claimed run, verify the verdict transition explicitly: `completed -> completed`; `continue` and resumable `partial`/`finalizing -> ready`; `failed -> failed`; `waiting -> completed` only when that run persisted a valid structured clarification row, otherwise `waiting -> ready`. A requeued nonterminal verdict without a descriptor is a protocol error, not permission to complete the claim. This transfer does not change clarification answer handling: checkpoint-backed answers still use the persisted `command.resume` metadata.
+
+On attempt 3 or later, inspect `descriptor_json.evidenceRunIds` when attempt 1 evidence disappears. Every requeue should extend this delivery-specific chain. Restoration must union and deduplicate only safe completed tool/file/output/`canvas_delivery_*_committed` events from those runs, reject lifecycle/error/failed events, and reject events whose `deliveryId` belongs to another delivery.
+
+If a retried request with the same `clientRequestId` invokes Runtime or leaves the continuation `claimed`, inspect the generation entry point before the claim path. The persisted request lookup must happen first; a hit returns the stored text, verdict, events, runtime metadata, and current public continuation summary without Runtime I/O.
 
 Do not confuse this flow with Agent clarification. Clarification answers use the persisted interrupt/checkpoint and Runtime `command.resume`. A standalone durable `continue` uses normal Runtime input reconstructed from the durable descriptor. Neither path may fall back to the other.
 

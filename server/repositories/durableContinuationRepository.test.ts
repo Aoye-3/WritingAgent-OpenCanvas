@@ -6,6 +6,7 @@ import { runSqliteTransaction } from "../db/sqlite.js";
 import { DurableContinuationRepository } from "./durableContinuationRepository.js";
 import { RunRepository } from "./runRepository.js";
 import type { DurableContinuationDescriptor } from "../storageTypes.js";
+import type { ToolEventRecord } from "../toolRuntime.js";
 
 function descriptor(instruction = "Complete the original long task"): DurableContinuationDescriptor {
   return {
@@ -30,6 +31,19 @@ function setup() {
   migrateStorageSchema(db);
   const repository = new DurableContinuationRepository(db);
   return { db, repository };
+}
+
+function setupRunRepository(threadId: string) {
+  const db = new DatabaseSync(":memory:");
+  migrateStorageSchema(db);
+  const now = new Date().toISOString();
+  db.prepare("INSERT INTO projects (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)").run("project_test", "Project", now, now);
+  db.prepare("INSERT INTO threads (id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(threadId, "project_test", "Thread", now, now);
+  const repository = new RunRepository(db, {
+    withTransaction: (work) => runSqliteTransaction(db, work),
+    touchThread: () => undefined
+  });
+  return { db, repository, now };
 }
 
 test("durable continuation repository supports guarded lifecycle transitions", () => {
@@ -132,7 +146,7 @@ test("recordRun atomically persists an incomplete run and its continuation descr
     .get("thread_atomic") as { sourceRunId: string; state: string; descriptorJson: string };
   assert.equal(row.sourceRunId, saved.runId);
   assert.equal(row.state, "ready");
-  assert.deepEqual(JSON.parse(row.descriptorJson), descriptor());
+  assert.deepEqual(JSON.parse(row.descriptorJson), { ...descriptor(), evidenceRunIds: [saved.runId] });
 });
 
 test("recordRun cannot replace a claim and requeues incomplete owned work by token", () => {
@@ -205,4 +219,119 @@ test("continuation evidence includes safe source-run delivery events and exclude
     "tool_call_completed",
     "canvas_delivery_file_document_committed"
   ]);
+});
+
+test("three continuation attempts retain the safe delivery-scoped evidence union", () => {
+  const { repository, now } = setupRunRepository("thread_evidence_chain");
+  const recordIncomplete = (claimToken: string | undefined, events: ToolEventRecord[]) => repository.recordRun({
+    threadId: "thread_evidence_chain",
+    agentCardId: "blog-post",
+    mode: "chat",
+    prompt: "Original task",
+    output: "Still working",
+    provider: "agent-backend",
+    usedMock: false,
+    completion: { status: "continue", reasons: ["more work"], missingRequirements: ["finish"], evaluatedAt: now },
+    durableContinuationDescriptor: descriptor(),
+    ...(claimToken ? { durableContinuationClaimToken: claimToken } : {}),
+    events
+  });
+
+  recordIncomplete(undefined, [
+    { eventType: "tool_call_completed", payload: { tool: "web_search", toolCallId: "safe_1", deliveryId: "delivery_original" } },
+    { eventType: "run_timeline_run_completed", payload: { deliveryId: "delivery_original" } },
+    { eventType: "agent_backend_error", payload: { deliveryId: "delivery_original", error: "unsafe" } },
+    { eventType: "tool_call_completed", payload: { tool: "web_search", toolCallId: "other_delivery", deliveryId: "delivery_other" } }
+  ]);
+  const attempt2 = repository.claimDurableContinuation("thread_evidence_chain");
+  recordIncomplete(attempt2.claimToken, [
+    { eventType: "canvas_delivery_file_document_committed", payload: { nodeId: "safe_2", deliveryId: "delivery_original" } },
+    { eventType: "completion_evaluated", payload: { deliveryId: "delivery_original" } }
+  ]);
+  const attempt3 = repository.claimDurableContinuation("thread_evidence_chain");
+
+  const evidence = repository.listDurableContinuationEvidence(
+    "thread_evidence_chain",
+    attempt3.sourceRunId,
+    attempt3.descriptor.deliveryId
+  );
+  assert.deepEqual(evidence.map((event) => [event.eventType, (event.payload as Record<string, unknown>).toolCallId ?? (event.payload as Record<string, unknown>).nodeId]), [
+    ["tool_call_completed", "safe_1"],
+    ["canvas_delivery_file_document_committed", "safe_2"]
+  ]);
+});
+
+test("claimed partial verdict requeues with its durable descriptor", () => {
+  const { repository, now } = setupRunRepository("thread_claimed_partial");
+  repository.recordRun({
+    threadId: "thread_claimed_partial", agentCardId: "blog-post", mode: "chat", prompt: "Task", output: "Continue",
+    provider: "agent-backend", usedMock: false,
+    completion: { status: "continue", reasons: [], missingRequirements: ["finish"], evaluatedAt: now },
+    durableContinuationDescriptor: descriptor()
+  });
+  const claim = repository.claimDurableContinuation("thread_claimed_partial");
+
+  repository.recordRun({
+    threadId: "thread_claimed_partial", agentCardId: "blog-post", mode: "chat", prompt: "Task", output: "Partial result",
+    provider: "agent-backend", usedMock: false,
+    completion: { status: "partial", reasons: ["budget"], missingRequirements: ["finalize"], evaluatedAt: now },
+    durableContinuationDescriptor: descriptor(),
+    durableContinuationClaimToken: claim.claimToken
+  });
+
+  const continuation = repository.readDurableContinuation("thread_claimed_partial")!;
+  assert.equal(continuation.state, "ready");
+  assert.deepEqual(continuation.descriptor.resolvedInstruction, descriptor().resolvedInstruction);
+});
+
+test("claimed failed verdict transitions to failed instead of completed", () => {
+  const { repository, now } = setupRunRepository("thread_claimed_failed");
+  repository.recordRun({
+    threadId: "thread_claimed_failed", agentCardId: "blog-post", mode: "chat", prompt: "Task", output: "Continue",
+    provider: "agent-backend", usedMock: false,
+    completion: { status: "continue", reasons: [], missingRequirements: ["finish"], evaluatedAt: now },
+    durableContinuationDescriptor: descriptor()
+  });
+  const claim = repository.claimDurableContinuation("thread_claimed_failed");
+
+  repository.recordRun({
+    threadId: "thread_claimed_failed", agentCardId: "blog-post", mode: "chat", prompt: "Task", output: "",
+    provider: "agent-backend", usedMock: false, errorMessage: "runtime_failed",
+    completion: { status: "failed", reasons: ["runtime failed"], missingRequirements: ["retry"], evaluatedAt: now },
+    durableContinuationClaimToken: claim.claimToken
+  });
+
+  assert.equal(repository.readDurableContinuation("thread_claimed_failed")?.state, "failed");
+});
+
+test("claimed waiting completes only after structured clarification ownership is persisted", () => {
+  for (const structured of [false, true]) {
+    const threadId = `thread_claimed_waiting_${structured}`;
+    const { repository, now } = setupRunRepository(threadId);
+    repository.recordRun({
+      threadId, agentCardId: "blog-post", mode: "chat", prompt: "Task", output: "Continue",
+      provider: "agent-backend", usedMock: false,
+      completion: { status: "continue", reasons: [], missingRequirements: ["finish"], evaluatedAt: now },
+      durableContinuationDescriptor: descriptor()
+    });
+    const claim = repository.claimDurableContinuation(threadId);
+    repository.recordRun({
+      threadId, agentCardId: "blog-post", mode: "chat", prompt: "Task", output: "",
+      provider: "agent-backend", usedMock: false,
+      completion: { status: "waiting", reasons: ["clarification"], missingRequirements: ["answer"], evaluatedAt: now },
+      durableContinuationDescriptor: descriptor(),
+      durableContinuationClaimToken: claim.claimToken,
+      events: structured ? [{
+        eventType: "agent_backend_agent_clarification_requested",
+        payload: {
+          type: "agent_clarification_requested",
+          clarificationId: "clarification_owned",
+          question: "Which format?",
+          options: [{ id: "report", label: "Report" }, { id: "brief", label: "Brief" }]
+        }
+      }] : []
+    });
+
+    assert.equal(repository.readDurableContinuation(threadId)?.state, structured ? "completed" : "ready");
+  }
 });

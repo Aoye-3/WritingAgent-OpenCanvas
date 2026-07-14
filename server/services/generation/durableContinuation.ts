@@ -179,6 +179,7 @@ export function resolveDurableContinuationRequest(
       mode: "chat",
       locale: sanitizedInput.locale,
       threadId,
+      ...(sanitizedInput.clientRequestId ? { clientRequestId: sanitizedInput.clientRequestId } : {}),
       chatInstruction: descriptor.resolvedInstruction,
       agentCardId: descriptor.agentCardId,
       projectId: descriptor.projectId,

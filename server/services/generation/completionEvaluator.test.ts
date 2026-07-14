@@ -39,7 +39,7 @@ test("completion evaluator continues AgentBackend runs explicitly marked incompl
   assert.match(verdict.missingRequirements.join(" "), /continue/i);
 });
 
-test("completion evaluator applies the shared action-promise fixture only to unevidenced durable tasks", () => {
+test("completion evaluator applies the shared action-promise fixture to durable tasks even after tool evidence", () => {
   const durablePayload: GenerateRequest = {
     ...basePayload,
     chatInstruction: "Research the database and write a verified report",

@@ -21,7 +21,7 @@
     "id": "post_evidence_synthesis",
     "text": "I will now synthesize the database results into the requested recommendation.",
     "hasEvidence": true,
-    "expectContinuation": false
+    "expectContinuation": true
   },
   {
     "id": "substantive_response_leading_answer",

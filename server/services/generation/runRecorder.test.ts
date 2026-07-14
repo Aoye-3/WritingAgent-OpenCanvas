@@ -4,6 +4,7 @@ import type { SQLiteStorageRepository } from "../../storage.js";
 import { recordGenerationRun } from "./runRecorder.js";
 import { durableContinuationSummary } from "./durableContinuationSummary.js";
 import type { StoredDurableContinuation } from "../../storageTypes.js";
+import { resolveDurableContinuationRequest } from "./durableContinuation.js";
 
 test("recorded generation returns only the persisted durable continuation summary", () => {
   let recorded = false;
@@ -66,6 +67,44 @@ test("recorded generation returns only the persisted durable continuation summar
   });
   assert.deepEqual(Object.keys(response.durableContinuation ?? {}).sort(), ["attempts", "canContinue", "lastError", "state"]);
   assert.doesNotMatch(JSON.stringify(response), /secret instruction|secret-skill|secret-delivery|secret-claim-token|run_source/);
+});
+
+test("claimed partial generation forwards the restored descriptor for requeue", () => {
+  const continuation = storedContinuation("ready");
+  let recorded: Record<string, unknown> | undefined;
+  const storage = {
+    readDurableContinuation: () => continuation,
+    claimDurableContinuation: () => ({ ...continuation, state: "claimed" as const, claimToken: "claim_partial", attempts: 2 }),
+    supersedeDurableContinuation: () => false,
+    failDurableContinuation: () => false,
+    readDurableContinuationCanvas: () => ({ nodes: [], edges: [], objects: [], workflow: { mode: "batch_delivery" } }),
+    listDurableContinuationEvidence: () => [],
+    recordRun: (input: Record<string, unknown>) => {
+      recorded = input;
+      return { runId: "run_partial", promptVersionId: "prompt_partial", outputVersionId: "output_partial" };
+    }
+  } as unknown as SQLiteStorageRepository;
+  const restored = resolveDurableContinuationRequest(storage, "thread_1", {
+    mode: "chat", locale: "en", threadId: "thread_1", chatInstruction: "continue"
+  }).payload;
+
+  recordGenerationRun({
+    storage,
+    payload: restored,
+    threadId: "thread_1",
+    agentCardId: "blog-post",
+    agentTitle: "Blog post",
+    mode: "chat",
+    prompt: "prompt",
+    text: "Partial result",
+    provider: "agent-backend",
+    usedMock: false,
+    toolState: {},
+    completion: { status: "partial", reasons: ["budget"], missingRequirements: ["finalize"], evaluatedAt: "2026-07-14T12:00:00.000Z" }
+  });
+
+  assert.equal(recorded?.durableContinuationClaimToken, "claim_partial");
+  assert.deepEqual(recorded?.durableContinuationDescriptor, continuation.descriptor);
 });
 
 test("durable continuation summary derives continuation ability for every persisted state", () => {

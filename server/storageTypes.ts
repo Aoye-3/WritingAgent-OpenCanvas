@@ -32,6 +32,7 @@ export type DurableContinuationDescriptor = {
   workflowMode: CanvasWorkflowMode;
   selectedCanvasNodeId?: string;
   safeContext?: Record<string, unknown>;
+  evidenceRunIds?: string[];
 };
 
 export type StoredDurableContinuation = {

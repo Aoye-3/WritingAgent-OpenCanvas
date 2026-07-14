@@ -105,18 +105,20 @@ export class RunRepository {
         );
       }
 
-      if (status === "incomplete" && input.durableContinuationDescriptor) {
-        if (input.durableContinuationClaimToken) {
-          if (!this.continuations.requeue(input.threadId, input.durableContinuationClaimToken, runId, input.durableContinuationDescriptor)) {
-            throw new Error("durable_continuation_claim_lost");
-          }
-        } else {
-          this.continuations.upsertReady(input.threadId, runId, input.durableContinuationDescriptor);
-        }
-      } else if (input.durableContinuationClaimToken) {
-        if (!this.continuations.complete(input.threadId, input.durableContinuationClaimToken)) {
-          throw new Error("durable_continuation_claim_lost");
-        }
+      const durableDescriptor = input.durableContinuationDescriptor
+        ? this.withDurableEvidenceChain(input.threadId, runId, input.durableContinuationDescriptor)
+        : undefined;
+      if (input.durableContinuationClaimToken) {
+        this.transitionClaimedContinuation({
+          threadId: input.threadId,
+          runId,
+          claimToken: input.durableContinuationClaimToken,
+          completionStatus: input.completion?.status,
+          descriptor: durableDescriptor,
+          clarificationOwnershipTransferred: status === "waiting" && this.hasStructuredClarificationOwnership(input.threadId, runId)
+        });
+      } else if (status === "incomplete" && durableDescriptor) {
+        this.continuations.upsertReady(input.threadId, runId, durableDescriptor);
       }
 
       this.deps.touchThread(input.threadId, now);
@@ -272,13 +274,19 @@ export class RunRepository {
   listDurableContinuationEvidence(threadId: string, sourceRunId: string | undefined, deliveryId: string) {
     if (!sourceRunId) return [];
     type Row = { eventType: string; payloadJson: string };
+    const continuation = this.continuations.read(threadId);
+    const runIds = Array.from(new Set([
+      ...(continuation?.descriptor.deliveryId === deliveryId ? continuation.descriptor.evidenceRunIds ?? [] : []),
+      sourceRunId
+    ]));
+    const placeholders = runIds.map(() => "?").join(", ");
     const rows = this.db.prepare(
       `SELECT event_type AS eventType, payload_json AS payloadJson
        FROM tool_events
-       WHERE thread_id = ? AND run_id = ?
+       WHERE thread_id = ? AND run_id IN (${placeholders})
        ORDER BY created_at ASC, rowid ASC`
-    ).all(threadId, sourceRunId) as Row[];
-    return rows.flatMap((row) => {
+    ).all(threadId, ...runIds) as Row[];
+    const evidence = rows.flatMap((row) => {
       if (!isSafeDurableEvidenceEvent(row.eventType)) return [];
       const payload = parseJson(row.payloadJson);
       const eventDeliveryId = readDeliveryId(payload);
@@ -286,6 +294,7 @@ export class RunRepository {
       if (row.eventType.startsWith("canvas_delivery_") && eventDeliveryId !== deliveryId) return [];
       return [{ eventType: row.eventType, payload }];
     });
+    return dedupeToolEvents(evidence);
   }
 
   readDurableContinuation(threadId: string) { return this.continuations.read(threadId); }
@@ -358,23 +367,102 @@ export class RunRepository {
       .run(randomId("msg"), threadId, role, text, usedMock ? 1 : 0, createdAt);
   }
 
-  private findRunByClientRequest(threadId: string, clientRequestId?: string) {
+  findRunByClientRequest(threadId: string, clientRequestId?: string) {
     if (!clientRequestId) return undefined;
     const run = this.db
-      .prepare(`SELECT id FROM runs WHERE thread_id = ? AND client_request_id = ?`)
-      .get(threadId, clientRequestId) as { id: string } | undefined;
-    if (!run?.id) return undefined;
-    const prompt = this.db
-      .prepare(`SELECT id FROM prompt_versions WHERE thread_id = ? AND run_id = ? ORDER BY created_at DESC LIMIT 1`)
-      .get(threadId, run.id) as { id: string } | undefined;
-    const output = this.db
-      .prepare(`SELECT id FROM output_versions WHERE thread_id = ? AND run_id = ? ORDER BY created_at DESC LIMIT 1`)
-      .get(threadId, run.id) as { id: string } | undefined;
+      .prepare(
+        `SELECT runs.id,
+                runs.thread_id AS threadId,
+                runs.provider,
+                runs.used_mock AS usedMock,
+                runs.error_message AS errorMessage,
+                prompt_versions.id AS promptVersionId,
+                prompt_versions.prompt,
+                output_versions.id AS outputVersionId,
+                output_versions.content AS text
+         FROM runs
+         LEFT JOIN prompt_versions ON prompt_versions.run_id = runs.id
+         LEFT JOIN output_versions ON output_versions.run_id = runs.id
+         WHERE runs.thread_id = ? AND runs.client_request_id = ?
+         ORDER BY prompt_versions.created_at DESC, output_versions.created_at DESC
+         LIMIT 1`
+      )
+      .get(threadId, clientRequestId) as {
+        id: string;
+        threadId: string;
+        provider: RunRecordInput["provider"];
+        usedMock: number;
+        errorMessage: string | null;
+        promptVersionId: string | null;
+        prompt: string | null;
+        outputVersionId: string | null;
+        text: string | null;
+      } | undefined;
+    if (!run) return undefined;
+    type EventRow = { eventType: string; payloadJson: string };
+    const storedEvents = this.db.prepare(
+      `SELECT event_type AS eventType, payload_json AS payloadJson
+       FROM tool_events WHERE thread_id = ? AND run_id = ?
+       ORDER BY created_at ASC, rowid ASC`
+    ).all(threadId, run.id) as EventRow[];
+    const events = storedEvents.map((event) => ({ eventType: event.eventType, payload: parseJson(event.payloadJson) }));
+    const lifecycle = events.find((event) => /^(?:run_completed|run_incomplete|run_waiting|run_failed)$/.test(event.eventType));
+    const lifecyclePayload = readRecord(lifecycle?.payload);
     return {
       runId: run.id,
-      promptVersionId: prompt?.id ?? "",
-      outputVersionId: output?.id ?? ""
+      promptVersionId: run.promptVersionId ?? "",
+      outputVersionId: run.outputVersionId ?? "",
+      threadId: run.threadId,
+      text: sanitizeVisibleText(run.text ?? ""),
+      prompt: run.prompt ?? "",
+      provider: run.provider,
+      usedMock: Boolean(run.usedMock),
+      ...(run.errorMessage ? { errorMessage: run.errorMessage } : {}),
+      ...(readString(lifecyclePayload.finishReason) ? { finishReason: readString(lifecyclePayload.finishReason) } : {}),
+      ...(readString(lifecyclePayload.runtimeRunId) ? { runtimeRunId: readString(lifecyclePayload.runtimeRunId) } : {}),
+      ...(readString(lifecyclePayload.runtimeThreadId) ? { runtimeThreadId: readString(lifecyclePayload.runtimeThreadId) } : {}),
+      ...(lifecyclePayload.completion ? { completion: lifecyclePayload.completion as RunRecordInput["completion"] } : {}),
+      ...(lifecyclePayload.usage !== undefined ? { usage: lifecyclePayload.usage } : {}),
+      events: events.filter((event) => !isRepositoryLifecycleEvent(event.eventType))
     };
+  }
+
+  private withDurableEvidenceChain(threadId: string, runId: string, descriptor: import("../storageTypes.js").DurableContinuationDescriptor) {
+    const current = this.continuations.read(threadId);
+    const priorRunIds = current?.descriptor.deliveryId === descriptor.deliveryId
+      ? [...(current.descriptor.evidenceRunIds ?? []), ...(current.sourceRunId ? [current.sourceRunId] : [])]
+      : [];
+    return { ...descriptor, evidenceRunIds: Array.from(new Set([...priorRunIds, runId])) };
+  }
+
+  private hasStructuredClarificationOwnership(threadId: string, runId: string) {
+    const row = this.db.prepare(
+      `SELECT id FROM agent_clarifications WHERE thread_id = ? AND run_id = ? LIMIT 1`
+    ).get(threadId, runId) as { id: string } | undefined;
+    return Boolean(row?.id);
+  }
+
+  private transitionClaimedContinuation(input: {
+    threadId: string;
+    runId: string;
+    claimToken: string;
+    completionStatus: NonNullable<RunRecordInput["completion"]>["status"] | undefined;
+    descriptor?: import("../storageTypes.js").DurableContinuationDescriptor;
+    clarificationOwnershipTransferred: boolean;
+  }) {
+    const status = input.completionStatus ?? "completed";
+    if (status === "completed" || status === "waiting" && input.clarificationOwnershipTransferred) {
+      if (!this.continuations.complete(input.threadId, input.claimToken)) throw new Error("durable_continuation_claim_lost");
+      return;
+    }
+    if (status === "failed") {
+      if (!this.continuations.fail(input.threadId, input.claimToken, "durable_continuation_run_failed")) throw new Error("durable_continuation_claim_lost");
+      return;
+    }
+    if (!input.descriptor) throw new Error("durable_continuation_descriptor_missing");
+    if (!this.continuations.requeue(input.threadId, input.claimToken, input.runId, input.descriptor)) {
+      throw new Error("durable_continuation_claim_lost");
+    }
   }
 
   private recordAgentClarificationFromEvent(threadId: string, runId: string, event: { eventType: string; payload: unknown }, createdAt: string) {
@@ -415,8 +503,13 @@ function persistedRunStatus(input: RunRecordInput) {
 
 function isSafeDurableEvidenceEvent(eventType: string) {
   return /(?:^|_)tool(?:_call)?_completed$/.test(eventType)
-    || /(?:output|file).*(?:created|written|archived|committed)$/.test(eventType)
+    || /^(?:file_written|output_(?:created|archived|committed))$/.test(eventType)
+    || /(?:^|_)file_(?:created|written|archived|committed)$/.test(eventType)
     || /^canvas_delivery_.*_committed$/.test(eventType);
+}
+
+function isRepositoryLifecycleEvent(eventType: string) {
+  return /^(?:run_completed|run_incomplete|run_waiting|run_failed|prompt_built|output_version_created|tool_state_applied|agent_runtime_metadata)$/.test(eventType);
 }
 
 function readDeliveryId(value: unknown) {

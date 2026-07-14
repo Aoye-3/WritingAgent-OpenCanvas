@@ -96,6 +96,7 @@ async function archiveMarkdownForTest(threadId: string, virtualPath: string, con
 
 function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string }> = [], contextResetAt?: string) {
   const records: unknown[] = [];
+  const persistedByClientRequest = new Map<string, Record<string, unknown>>();
   const agentClarifications: Array<Record<string, unknown>> = [];
   const canvasWriteRequests: unknown[] = [];
   const canvasNodes: Array<Record<string, unknown>> = [];
@@ -292,6 +293,9 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
         workflow: { mode: "batch_delivery", stage: "draft" }
       }),
       listDurableContinuationEvidence: () => [],
+      findRunByClientRequest: (_threadId: string, clientRequestId?: string) => clientRequestId
+        ? persistedByClientRequest.get(clientRequestId)
+        : undefined,
       listCanvasNodes: () => canvasNodes,
       listCanvasEdges: () => canvasEdges,
       createCanvasNode: (_projectId: string, input: Record<string, unknown>) => {
@@ -339,8 +343,20 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
           durableContinuationDescriptor?: DurableContinuationDescriptor;
           durableContinuationClaimToken?: string;
           completion?: { status?: string };
+          errorMessage?: string;
+          clientRequestId?: string;
         };
-        if (continuation.completion?.status === "continue" && continuation.durableContinuationDescriptor) {
+        const hasStructuredClarification = (record.events ?? []).some((event) => {
+          const payload = event.payload ?? {};
+          return (event.eventType === "agent_backend_agent_clarification_requested" || payload.type === "agent_clarification_requested")
+            && typeof payload.question === "string"
+            && Array.isArray(payload.options)
+            && payload.options.length >= 2;
+        });
+        const shouldRequeue = continuation.completion?.status === "continue"
+          || continuation.completion?.status === "partial"
+          || continuation.completion?.status === "waiting" && !hasStructuredClarification;
+        if (shouldRequeue && continuation.durableContinuationDescriptor) {
           durable.current = {
             state: "ready",
             descriptor: continuation.durableContinuationDescriptor,
@@ -348,9 +364,33 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
             attempts: durable.current?.attempts ?? 0
           };
         } else if (continuation.durableContinuationClaimToken && durable.current?.claimToken === continuation.durableContinuationClaimToken) {
-          durable.current = { ...durable.current, state: "completed", claimToken: undefined };
+          durable.current = {
+            ...durable.current,
+            state: continuation.completion?.status === "failed" ? "failed" : "completed",
+            claimToken: undefined,
+            ...(continuation.completion?.status === "failed" ? { lastError: continuation.errorMessage ?? "durable_continuation_run_failed" } : {})
+          };
         }
-        return { runId: `run_${records.length}`, promptVersionId: "prompt_1", outputVersionId: "output_1" };
+        const saved = { runId: `run_${records.length}`, promptVersionId: "prompt_1", outputVersionId: "output_1" };
+        if (continuation.clientRequestId) {
+          const stored = input as Record<string, unknown>;
+          persistedByClientRequest.set(continuation.clientRequestId, {
+            ...saved,
+            threadId: stored.threadId,
+            text: stored.output,
+            prompt: stored.prompt,
+            provider: stored.provider,
+            usedMock: stored.usedMock,
+            errorMessage: stored.errorMessage,
+            events: stored.events,
+            finishReason: stored.finishReason,
+            runtimeRunId: stored.runtimeRunId,
+            runtimeThreadId: stored.runtimeThreadId,
+            completion: stored.completion,
+            usage: stored.usage
+          });
+        }
+        return saved;
       }
     } as unknown as SQLiteStorageRepository
   };
@@ -989,10 +1029,83 @@ test("streaming post-evidence promise cannot become final Canvas Markdown", asyn
   });
 
   const record = records[0] as { completion?: { status?: string }; events?: ToolEventRecord[] };
-  assert.equal(result.completion?.status, "partial");
-  assert.equal(record.completion?.status, "partial");
+  assert.equal(result.completion?.status, "continue");
+  assert.equal(record.completion?.status, "continue");
   assert.equal(canvasNodes.some((node) => (node.metadata as { status?: string } | undefined)?.status === "final"), false);
   assert.equal(record.events?.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
+  assert.equal(record.events?.some((event) => event.eventType === "run_timeline_run_completed"), false);
+  assert.notEqual(planState.status, "completed");
+});
+
+test("non-stream direct Canvas delivery does not finalize a post-evidence action promise", async () => {
+  const promiseCase = durableTaskGuardCases.find((entry) => entry.id === "post_evidence_synthesis");
+  assert.ok(promiseCase);
+  const { storage, canvasNodes, planState, records } = fakeStorage();
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: { toolName: "database_query", toolCallId: "query_before_direct_promise" }
+        });
+        return { text: promiseCase.text, finishReason: "agent_backend_completed", events: [] };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecord({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Create the requested recommendation as editable Canvas nodes",
+    transientSkillRefs: ["database-lookup"],
+    contextValues: { autoPreflightPlan: { enabled: false }, canvas: { workflow: { mode: "batch_delivery" } } }
+  });
+
+  const record = records.at(-1) as { completion?: { status?: string }; events?: ToolEventRecord[] };
+  assert.equal(result.completion?.status, "continue");
+  assert.equal(record.completion?.status, "continue");
+  assert.equal(canvasNodes.some((node) => (node.metadata as { status?: string } | undefined)?.status === "final"), false);
+  assert.equal(record.events?.some((event) => event.eventType === "run_timeline_run_completed"), false);
+  assert.notEqual(planState.status, "completed");
+});
+
+test("streaming direct Canvas delivery does not finalize a post-evidence action promise", async () => {
+  const promiseCase = durableTaskGuardCases.find((entry) => entry.id === "post_evidence_synthesis");
+  assert.ok(promiseCase);
+  const { storage, canvasNodes, planState, records } = fakeStorage();
+  const timelineEvents: Array<{ eventType: string }> = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        input.onToolEvent?.({
+          eventType: "agent_backend_tool_completed",
+          payload: { toolName: "database_query", toolCallId: "query_before_stream_direct_promise" }
+        });
+        input.onToken?.(promiseCase.text);
+        return { text: promiseCase.text, finishReason: "agent_backend_completed", events: [] };
+      }
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Create the requested recommendation as editable Canvas nodes",
+    transientSkillRefs: ["database-lookup"],
+    contextValues: { autoPreflightPlan: { enabled: false }, canvas: { workflow: { mode: "batch_delivery" } } }
+  }, { onTimelineEvent: (event) => timelineEvents.push(event) });
+
+  const record = records.at(-1) as { completion?: { status?: string }; events?: ToolEventRecord[] };
+  assert.equal(result.completion?.status, "continue");
+  assert.equal(record.completion?.status, "continue");
+  assert.equal(canvasNodes.some((node) => (node.metadata as { status?: string } | undefined)?.status === "final"), false);
+  assert.equal(timelineEvents.some((event) => event.eventType === "run_completed"), false);
   assert.equal(record.events?.some((event) => event.eventType === "run_timeline_run_completed"), false);
   assert.notEqual(planState.status, "completed");
 });
@@ -5003,7 +5116,7 @@ test("typed Plan execution continuation claims and restores plan references befo
       executionVersion: 4
     }
   });
-  assert.equal(durable.current?.state, "completed");
+  assert.equal(durable.current?.state, "ready");
   assert.equal(durable.current?.attempts, 1);
 });
 
@@ -5269,4 +5382,150 @@ test("incomplete continuation requeues and clarification continuation completes 
   assert.equal(result.finishReason, "clarification_required");
   assert.equal(durable.current?.state, "completed");
   assert.equal(durable.current?.attempts, 2);
+});
+
+test("three claimed attempts restore the safe evidence union from both prior attempts", async () => {
+  const promiseCase = durableTaskGuardCases.find((entry) => entry.id === "post_evidence_synthesis");
+  assert.ok(promiseCase);
+  const { storage, durable } = fakeStorage();
+  durable.current = {
+    state: "ready",
+    attempts: 0,
+    sourceRunId: "run_source",
+    descriptor: {
+      version: 1,
+      resolvedInstruction: "Research database records, synthesize the evidence, and write the completed recommendation report",
+      agentCardId: "blog-post",
+      projectId: "project_test",
+      transientSkillRefs: ["database-lookup"],
+      deliveryId: "delivery_evidence_chain",
+      workflowMode: "batch_delivery",
+      safeContext: {
+        taskHandlingPolicy: { kind: "long_task", canvasDeliveryMode: "progressive", allowPlan: false },
+        progressiveCanvasDelivery: { enabled: true, runtimeBudgetProfile: "low", evidenceToolLimit: 8, bodyDraftWriteLimit: 2, modelCallLimit: 18, recursionLimit: 80, synthesisReserveSteps: 16, forceSynthesisAfterEvidence: true, evidenceTools: ["web_search"], trigger: "skill_long_task" }
+      }
+    }
+  };
+  let evidenceReads = 0;
+  (storage as unknown as { listDurableContinuationEvidence: () => ToolEventRecord[] }).listDurableContinuationEvidence = () => {
+    evidenceReads += 1;
+    return [
+      ...(evidenceReads >= 2 ? [{ eventType: "agent_backend_tool_completed", payload: { toolCallId: "safe_1", deliveryId: "delivery_evidence_chain" } }] : []),
+      ...(evidenceReads >= 3 ? [{ eventType: "agent_backend_tool_completed", payload: { toolCallId: "safe_2", deliveryId: "delivery_evidence_chain" } }] : [])
+    ] as ToolEventRecord[];
+  };
+  const evidenceByAttempt: unknown[][] = [];
+  let runtimeCalls = 0;
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        runtimeCalls += 1;
+        evidenceByAttempt.push((input.contextValues?.durableContinuationEvidence as unknown[] | undefined) ?? []);
+        if (runtimeCalls <= 2) {
+          input.onToolEvent?.({
+            eventType: "agent_backend_tool_completed",
+            payload: { toolName: "database_query", toolCallId: `safe_${runtimeCalls}`, deliveryId: "delivery_evidence_chain" }
+          });
+          return { text: promiseCase.text, finishReason: "agent_backend_completed", events: [] };
+        }
+        return { text: "The evidence-backed recommendation is complete: choose option A.", finishReason: "stop", events: [] };
+      }
+    }
+  });
+
+  await service.generateAndRecord({ mode: "chat", locale: "en", threadId: "thread_test", chatInstruction: "continue" });
+  await service.generateAndRecord({ mode: "chat", locale: "en", threadId: "thread_test", chatInstruction: "continue" });
+  await service.generateAndRecord({ mode: "chat", locale: "en", threadId: "thread_test", chatInstruction: "continue" });
+
+  assert.deepEqual(evidenceByAttempt.map((events) => (events as ToolEventRecord[]).map((event) => (event.payload as { toolCallId?: string }).toolCallId)), [
+    [],
+    ["safe_1"],
+    ["safe_1", "safe_2"]
+  ]);
+  assert.equal(durable.current?.state, "completed");
+});
+
+test("claimed partial and failed verdicts remain explicit durable transitions", async () => {
+  for (const expected of ["partial", "failed"] as const) {
+    const { storage, durable, records } = fakeStorage();
+    durable.current = {
+      state: "ready",
+      attempts: 0,
+      sourceRunId: `run_${expected}_source`,
+      descriptor: {
+        version: 1,
+        resolvedInstruction: `Finish the ${expected} task`,
+        agentCardId: "blog-post",
+        projectId: "project_test",
+        deliveryId: `delivery_${expected}`,
+        workflowMode: "batch_delivery"
+      }
+    };
+    const service = createGenerationService(storage, fakeAgentRuntime(), {
+      modelRuntime: fakeModelRuntime,
+      agentBackend: {
+        getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+        runAgent: async () => expected === "partial" ? ({
+          text: "Budget finalization retry limit reached. Continue finalization from gathered evidence.",
+          finishReason: "agent_backend_completed",
+          events: [{
+            eventType: "agent_backend_synthesis_gate",
+            payload: { type: "synthesis_gate", reason: "budget finalization retry exhausted", finalization_retry_exhausted: true }
+          }]
+        }) : Promise.reject(new Error("runtime failed during claimed continuation"))
+      }
+    });
+
+    const request = { mode: "chat" as const, locale: "en" as const, threadId: "thread_test", chatInstruction: "continue" };
+    if (expected === "failed") {
+      await assert.rejects(() => service.generateAndRecord(request), /runtime failed/);
+    } else {
+      const result = await service.generateAndRecord(request);
+      assert.equal(result.completion?.status, expected);
+    }
+    assert.equal(durable.current?.state, expected === "partial" ? "ready" : "failed");
+    if (expected === "partial") {
+      assert.ok((records.at(-1) as { durableContinuationDescriptor?: DurableContinuationDescriptor }).durableContinuationDescriptor);
+    }
+  }
+});
+
+test("duplicate continuation clientRequestId returns the persisted run before another claim or Runtime call", async () => {
+  const { storage, durable } = fakeStorage();
+  durable.current = {
+    state: "ready",
+    attempts: 0,
+    sourceRunId: "run_idempotent_source",
+    descriptor: {
+      version: 1,
+      resolvedInstruction: "Finish the idempotent task",
+      agentCardId: "blog-post",
+      projectId: "project_test",
+      deliveryId: "delivery_idempotent",
+      workflowMode: "batch_delivery"
+    }
+  };
+  let runtimeCalls = 0;
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => {
+        runtimeCalls += 1;
+        return { text: "I'll continue working on this now.", finishReason: "agent_backend_incomplete", events: [] };
+      }
+    }
+  });
+  const request = { mode: "chat" as const, locale: "en" as const, threadId: "thread_test", chatInstruction: "continue", clientRequestId: "request_same" };
+
+  const first = await service.generateAndRecord(request);
+  const second = await service.generateAndRecord(request);
+
+  assert.equal(runtimeCalls, 1);
+  assert.equal(second.runId, first.runId);
+  assert.equal(second.completion?.status, "continue");
+  assert.equal(durable.current?.state, "ready");
+  assert.notEqual(durable.current?.state, "claimed");
 });

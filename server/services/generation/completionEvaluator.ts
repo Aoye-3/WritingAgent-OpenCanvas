@@ -61,8 +61,8 @@ export function evaluateRunCompletion(input: {
     return verdict("partial", reasons, missingRequirements);
   }
 
-  if (isDurableTask(input.payload) && !hasRunEvidence(events) && isPureActionPromise(text)) {
-    reasons.push("The durable run ended on an action promise without tool or delivery evidence.");
+  if (isDurableTask(input.payload) && isPureActionPromise(text)) {
+    reasons.push("The durable run ended on an action promise instead of a completed deliverable.");
     missingRequirements.push("Continue the promised action or provide the substantive completed deliverable.");
     return verdict("continue", reasons, missingRequirements);
   }
@@ -247,17 +247,6 @@ function isDurableTask(payload: GenerateRequest) {
     thinkingMode: payload.modelOverrides?.thinkingMode
   });
   return policy.kind === "long_task" || policy.kind === "plan_execution" || policy.kind === "explicit_canvas";
-}
-
-function hasRunEvidence(events: ToolEventRecord[]) {
-  return events.some((event) => {
-    const payload = record(event.payload);
-    const eventType = string(payload.eventType) || string(payload.type) || event.eventType;
-    return /(?:^|_)tool_(?:completed|failed)$/.test(event.eventType)
-      || /(?:^|_)canvas_(?:mutation|node)_committed$/.test(eventType)
-      || /^canvas_delivery_(?:research|body_checkpoint|body_final|file_document)_committed$/.test(eventType)
-      || /(?:^|_)artifact_(?:staged|committed)$/.test(eventType);
-  });
 }
 
 export function isPureActionPromise(value: string) {

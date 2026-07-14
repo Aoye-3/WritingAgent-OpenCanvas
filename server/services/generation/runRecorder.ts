@@ -43,6 +43,7 @@ export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
   const events = appendCompletionEvent(input.events, completionEvaluatedEvent(completion));
   const durableClaim = durableContinuationClaim(input.payload);
   const durableContinuationDescriptor = completion.status === "continue"
+    || Boolean(durableClaim && (completion.status === "partial" || completion.status === "waiting" || completion.status === "finalizing"))
     ? durableDescriptorForRun(input.payload)
     : undefined;
   const saved = input.storage.recordRun({

@@ -63,6 +63,7 @@ import {
   withDurableContinuationDelivery,
   withServerDurableContinuationContext
 } from "./durableContinuation.js";
+import { durableContinuationSummary } from "./durableContinuationSummary.js";
 
 export type GenerationService = {
   generateAndRecord: (payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void) => Promise<GenerateResponse>;
@@ -156,6 +157,8 @@ export function createGenerationService(
 
   async function generateAndRecord(payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
+    const existing = persistedGenerationResponse(storage, threadId, payload.clientRequestId);
+    if (existing) return existing;
     const resolved = resolveDurableContinuationOrThrow(storage, threadId, payload);
     try {
       return await generateAndRecordResolved(resolved.payload, threadId, onToolEvent);
@@ -530,6 +533,8 @@ export function createGenerationService(
     } = {}
   ): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
+    const existing = persistedGenerationResponse(storage, threadId, payload.clientRequestId);
+    if (existing) return existing;
     const resolved = resolveDurableContinuationOrThrow(storage, threadId, payload);
     try {
       return await generateAndRecordStreamResolved(resolved.payload, threadId, callbacks);
@@ -2229,6 +2234,28 @@ function failDurableContinuationClaim(storage: SQLiteStorageRepository, threadId
   if (!claim) return false;
   const message = error instanceof Error ? error.message : "durable_continuation_failed";
   return storage.failDurableContinuation(threadId, claim.claimToken, message);
+}
+
+function persistedGenerationResponse(storage: SQLiteStorageRepository, threadId: string, clientRequestId?: string): GenerateResponse | undefined {
+  if (!clientRequestId) return undefined;
+  const persisted = storage.findRunByClientRequest(threadId, clientRequestId);
+  if (!persisted) return undefined;
+  return {
+    text: persisted.text,
+    prompt: persisted.prompt,
+    provider: persisted.provider,
+    usedMock: persisted.usedMock,
+    threadId: persisted.threadId,
+    runId: persisted.runId,
+    ...(persisted.runtimeRunId ? { runtimeRunId: persisted.runtimeRunId } : {}),
+    ...(persisted.runtimeThreadId ? { runtimeThreadId: persisted.runtimeThreadId } : {}),
+    ...(persisted.errorMessage ? { errorMessage: persisted.errorMessage } : {}),
+    events: persisted.events as ToolEventRecord[],
+    ...(persisted.finishReason ? { finishReason: persisted.finishReason } : {}),
+    ...(persisted.completion ? { completion: persisted.completion } : {}),
+    durableContinuation: durableContinuationSummary(storage.readDurableContinuation(threadId)),
+    ...(persisted.usage !== undefined ? { usage: persisted.usage } : {})
+  };
 }
 
 function resolveDurableContinuationOrThrow(storage: SQLiteStorageRepository, threadId: string, payload: GenerateRequest) {

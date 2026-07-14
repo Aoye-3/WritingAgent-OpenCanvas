@@ -952,9 +952,12 @@ export function isRecoverableDurableContinuation(continuation: ThreadStateRespon
 }
 
 export function isAssistantRunCompleted(message: CollaborationMessage) {
+  if (message.completion) {
+    return message.completion.status === "completed"
+      && !isRecoverableDurableContinuation(message.durableContinuation);
+  }
   return !message.isStreaming
     && Boolean(message.text.trim())
-    && message.completion?.status !== "continue"
     && !isRecoverableDurableContinuation(message.durableContinuation);
 }
 

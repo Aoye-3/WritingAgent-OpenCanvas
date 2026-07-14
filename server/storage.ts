@@ -253,6 +253,10 @@ export class SQLiteStorageRepository {
     return this.runs.recordRun(input);
   }
 
+  findRunByClientRequest(threadId: string, clientRequestId?: string) {
+    return this.runs.findRunByClientRequest(threadId, clientRequestId);
+  }
+
   readDurableContinuation(threadId: string) { return this.runs.readDurableContinuation(threadId); }
   claimDurableContinuation(threadId: string) { return this.runs.claimDurableContinuation(threadId); }
   completeDurableContinuation(threadId: string, claimToken: string) { return this.runs.completeDurableContinuation(threadId, claimToken); }
