@@ -1,0 +1,26 @@
+[
+  {
+    "id": "zh_screenshot_action_promise",
+    "text": "好的，明白了。让我加载数据库查询技能并开始检索。",
+    "hasEvidence": false,
+    "expectContinuation": true
+  },
+  {
+    "id": "english_action_promise",
+    "text": "Understood. Let me load the database search skill and start searching.",
+    "hasEvidence": false,
+    "expectContinuation": true
+  },
+  {
+    "id": "genuine_final_answer",
+    "text": "The query returned 42 matching records. The largest segment was enterprise accounts, with 18 records. I will not run another search because this fully answers the question.",
+    "hasEvidence": false,
+    "expectContinuation": false
+  },
+  {
+    "id": "post_evidence_synthesis",
+    "text": "I will now synthesize the database results into the requested recommendation.",
+    "hasEvidence": true,
+    "expectContinuation": false
+  }
+]

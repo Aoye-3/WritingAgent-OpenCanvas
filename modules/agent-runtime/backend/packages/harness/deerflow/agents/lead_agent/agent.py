@@ -7,6 +7,7 @@ from langchain_core.runnables import RunnableConfig
 from deerflow.agents.lead_agent.prompt import apply_prompt_template
 from deerflow.agents.memory.summarization_hook import memory_flush_hook
 from deerflow.agents.middlewares.clarification_middleware import ClarificationMiddleware
+from deerflow.agents.middlewares.durable_task_guard_middleware import DurableTaskGuardMiddleware
 from deerflow.agents.middlewares.loop_detection_middleware import LoopDetectionMiddleware
 from deerflow.agents.middlewares.memory_middleware import MemoryMiddleware
 from deerflow.agents.middlewares.plan_tool_choice_middleware import PlanToolChoiceMiddleware
@@ -357,6 +358,7 @@ def _build_middlewares(
         middlewares.append(LoopDetectionMiddleware.from_config(loop_detection_config))
 
     middlewares.append(ProgressReportingMiddleware())
+    middlewares.append(DurableTaskGuardMiddleware())
 
     # Inject custom middlewares before ClarificationMiddleware
     if custom_middlewares:

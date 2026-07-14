@@ -435,6 +435,7 @@ def test_build_middlewares_uses_resolved_model_name_for_vision(monkeypatch):
     )
 
     assert any(isinstance(m, lead_agent_module.ViewImageMiddleware) for m in middlewares)
+    assert any(type(m).__name__ == "DurableTaskGuardMiddleware" for m in middlewares)
     # verify the custom middleware is injected correctly
     assert len(middlewares) > 0 and isinstance(middlewares[-2], MagicMock)
 

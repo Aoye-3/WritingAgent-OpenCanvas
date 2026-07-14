@@ -4,6 +4,10 @@ import { readFileSync } from "node:fs";
 import { defaultAgentSettings, getAgentCard } from "../../agentCards.js";
 import { buildResumeRunRequest, buildRunRequest, listAgentBackendRunEvents, requestAgentBackendRunIntervention, resumeAgentBackendRun, runAgentBackendAgent } from "./client.js";
 
+const durableTaskGuardCases = JSON.parse(
+  readFileSync(new URL("./fixtures/durable-task-guard-cases.json", import.meta.url), "utf8")
+) as Array<{ id: string; text: string; hasEvidence: boolean; expectContinuation: boolean }>;
+
 test("builds LangGraph-compatible AgentBackend run request", () => {
   const card = getAgentCard("summary");
   const settings = defaultAgentSettings(card);
@@ -2004,6 +2008,23 @@ test("returns only the last visible AI message across a tool loop", async () => 
   const result = await runWithBody(body);
   assert.equal(result.text, "Which market and budget should I use?");
   assert.ok(result.events.some((event) => event.eventType === "agent_backend_plan_waiting_for_user"));
+});
+
+test("maps durable guard exhaustion to an incomplete finish while preserving public process text", async () => {
+  const screenshotCase = durableTaskGuardCases.find((entry) => entry.id === "zh_screenshot_action_promise");
+  assert.ok(screenshotCase);
+  const tokens: string[] = [];
+  const body = [
+    `event: messages\ndata: [{"type":"ai","id":"msg_process","content":${JSON.stringify(screenshotCase.text)}}]\n\n`,
+    "event: custom\ndata: {\"type\":\"durable_task_incomplete\",\"reason\":\"action_promise_without_required_evidence\",\"continuations\":2}\n\n",
+    "event: end\ndata: {}\n\n",
+  ].join("");
+
+  const result = await runWithBody(body, { onToken: (token) => tokens.push(token) });
+
+  assert.equal(result.finishReason, "agent_backend_incomplete");
+  assert.equal(result.text, screenshotCase.text);
+  assert.equal(tokens.join(""), screenshotCase.text);
 });
 
 test("maps structured Plan envelopes from bridged tool results", async () => {

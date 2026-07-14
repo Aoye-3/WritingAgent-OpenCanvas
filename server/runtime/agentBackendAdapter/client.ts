@@ -692,6 +692,7 @@ async function readAgentBackendStream(
   let usage: unknown;
   let buffer = "";
   let sawWaitingForUser = false;
+  let sawDurableTaskIncomplete = false;
   let sawRuntimeEnd = false;
   let runtimeRunId: string | undefined;
   let runtimeThreadId: string | undefined;
@@ -728,15 +729,20 @@ async function readAgentBackendStream(
     handleEvents(parseSseChunk(buffer));
   }
 
+  const finishReason = sawWaitingForUser
+    ? "clarification_required"
+    : sawDurableTaskIncomplete
+      ? "agent_backend_incomplete"
+      : "agent_backend_completed";
   trace("complete", {
-    finishReason: sawWaitingForUser ? "clarification_required" : "agent_backend_completed",
+    finishReason,
     eventCount: events.length,
     sawRuntimeEnd,
     textLength: (finalValuesText || (lastMessageId ? textByMessageId.get(lastMessageId)?.join("") : unkeyedText.join("")) || "").trim().length
   });
   return {
     text: (finalValuesText || (lastMessageId ? textByMessageId.get(lastMessageId)?.join("") : unkeyedText.join("")) || "").trim(),
-    finishReason: sawWaitingForUser ? "clarification_required" : "agent_backend_completed",
+    finishReason,
     ...(runtimeRunId ? { runtimeRunId } : {}),
     ...(runtimeThreadId ? { runtimeThreadId } : {}),
     usage,
@@ -747,6 +753,9 @@ async function readAgentBackendStream(
     for (const parsed of parsedEvents) {
       const runtimeError = extractRuntimeError(parsed.event, parsed.data);
       if (runtimeError) throw new Error(runtimeError);
+      if (isDurableTaskIncompleteEvent(parsed.event, parsed.data)) {
+        sawDurableTaskIncomplete = true;
+      }
       if (parsed.event === "end") {
         trace("event", { event: parsed.event });
         sawRuntimeEnd = true;
@@ -855,6 +864,12 @@ async function readAgentBackendStream(
       if (sawRuntimeEnd) break;
     }
   }
+}
+
+function isDurableTaskIncompleteEvent(event: string, data: unknown) {
+  return event === "custom"
+    && isRecord(data)
+    && (readSourceString(data.type) || readSourceString(data.event)) === "durable_task_incomplete";
 }
 
 function runtimeSignalFromSseEvent(event: string, data: unknown): AgentBackendRuntimeSignal | undefined {
