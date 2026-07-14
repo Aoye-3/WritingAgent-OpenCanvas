@@ -253,8 +253,8 @@ export class SQLiteStorageRepository {
     return this.runs.recordRun(input);
   }
 
-  findRunByClientRequest(threadId: string, clientRequestId?: string) {
-    return this.runs.findRunByClientRequest(threadId, clientRequestId);
+  readGenerationByClientRequest(threadId: string, clientRequestId?: string) {
+    return this.runs.readGenerationByClientRequest(threadId, clientRequestId);
   }
 
   readDurableContinuation(threadId: string) { return this.runs.readDurableContinuation(threadId); }

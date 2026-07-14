@@ -2238,7 +2238,7 @@ function failDurableContinuationClaim(storage: SQLiteStorageRepository, threadId
 
 function persistedGenerationResponse(storage: SQLiteStorageRepository, threadId: string, clientRequestId?: string): GenerateResponse | undefined {
   if (!clientRequestId) return undefined;
-  const persisted = storage.findRunByClientRequest(threadId, clientRequestId);
+  const persisted = storage.readGenerationByClientRequest(threadId, clientRequestId);
   if (!persisted) return undefined;
   return {
     text: persisted.text,

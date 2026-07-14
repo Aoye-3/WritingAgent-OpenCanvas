@@ -427,6 +427,15 @@ test("storage facade dedupes replayed runs by client request id", async () => {
   });
 
   assert.deepEqual(replay, first);
+  assert.deepEqual(storage.readGenerationByClientRequest(threadId, "request_1"), {
+    ...first,
+    threadId,
+    text: "First answer",
+    prompt: "Prompt text",
+    provider: "agent-backend",
+    usedMock: false,
+    events: []
+  });
   assert.deepEqual(storage.listMessages(threadId).map((message) => message.text), ["Hello", "First answer"]);
 
   storage.moveThreadToTrash(threadId);

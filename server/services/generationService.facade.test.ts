@@ -293,7 +293,7 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
         workflow: { mode: "batch_delivery", stage: "draft" }
       }),
       listDurableContinuationEvidence: () => [],
-      findRunByClientRequest: (_threadId: string, clientRequestId?: string) => clientRequestId
+      readGenerationByClientRequest: (_threadId: string, clientRequestId?: string) => clientRequestId
         ? persistedByClientRequest.get(clientRequestId)
         : undefined,
       listCanvasNodes: () => canvasNodes,
@@ -5539,10 +5539,13 @@ test("duplicate continuation clientRequestId returns the persisted run before an
 
   const first = await service.generateAndRecord(request);
   const second = await service.generateAndRecord(request);
+  const streamedReplay = await service.generateAndRecordStream(request);
 
   assert.equal(runtimeCalls, 1);
   assert.equal(second.runId, first.runId);
+  assert.equal(streamedReplay.runId, first.runId);
   assert.equal(second.completion?.status, "continue");
+  assert.equal(streamedReplay.completion?.status, "continue");
   assert.equal(durable.current?.state, "ready");
   assert.notEqual(durable.current?.state, "claimed");
 });

@@ -367,7 +367,26 @@ export class RunRepository {
       .run(randomId("msg"), threadId, role, text, usedMock ? 1 : 0, createdAt);
   }
 
-  findRunByClientRequest(threadId: string, clientRequestId?: string) {
+  private findRunByClientRequest(threadId: string, clientRequestId?: string) {
+    if (!clientRequestId) return undefined;
+    const run = this.db
+      .prepare(`SELECT id FROM runs WHERE thread_id = ? AND client_request_id = ?`)
+      .get(threadId, clientRequestId) as { id: string } | undefined;
+    if (!run?.id) return undefined;
+    const prompt = this.db
+      .prepare(`SELECT id FROM prompt_versions WHERE thread_id = ? AND run_id = ? ORDER BY created_at DESC LIMIT 1`)
+      .get(threadId, run.id) as { id: string } | undefined;
+    const output = this.db
+      .prepare(`SELECT id FROM output_versions WHERE thread_id = ? AND run_id = ? ORDER BY created_at DESC LIMIT 1`)
+      .get(threadId, run.id) as { id: string } | undefined;
+    return {
+      runId: run.id,
+      promptVersionId: prompt?.id ?? "",
+      outputVersionId: output?.id ?? ""
+    };
+  }
+
+  readGenerationByClientRequest(threadId: string, clientRequestId?: string) {
     if (!clientRequestId) return undefined;
     const run = this.db
       .prepare(
