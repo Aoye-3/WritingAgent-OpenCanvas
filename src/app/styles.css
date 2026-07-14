@@ -5366,6 +5366,26 @@ legend { margin-bottom: 14px; font-size: 14px; font-weight: 750; color: var(--co
   color: var(--color-primary);
 }
 
+.durable-continuation-card {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-primary) 7%, transparent);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.durable-continuation-card strong {
+  color: var(--color-text);
+}
+
+.durable-continuation-card span {
+  overflow-wrap: anywhere;
+}
+
 .progress-segment {
   display: grid;
   gap: 3px;

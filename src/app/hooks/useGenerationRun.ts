@@ -493,7 +493,12 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
       kind: "activity" as const,
       createdAt: activity.createdAt
     }));
-    const messagesWithTimeline = attachRunStateToLatestAssistant(state.messages, state.runTimelineEvents ?? [], state.runCompletion);
+    const messagesWithTimeline = attachRunStateToLatestAssistant(
+      state.messages,
+      state.runTimelineEvents ?? [],
+      state.runCompletion,
+      state.durableContinuation
+    );
     const timelineMessages = [...messagesWithTimeline, ...activityMessages].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     setCollaborationMessages((current) => reconcileCollaborationMessages(current, timelineMessages));
     setPlans(state.plans ?? []);
@@ -646,6 +651,7 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         isStreaming: false,
         isReasoningStreaming: false,
         completion: result.completion,
+        durableContinuation: result.durableContinuation,
         ...(result.runtimeRunId ? { runtimeRun: { threadId: result.runtimeThreadId || result.threadId, runId: result.runtimeRunId } } : {}),
         status: "finalizing",
         statusLabel: undefined
@@ -673,23 +679,29 @@ export function useGenerationRun(options: UseGenerationRunOptions) {
         });
         return { ok: false, error: "aborted", threadId, aborted: true };
       }
-      const message = recoverableGenerationError(error instanceof Error ? error.message : "Generation failed", options.locale);
       flushStreamingText(`message:${assistantMessageId}`);
-      updateStreamingMessage(assistantMessageId, {
-        text: `Request failed: ${message}`,
-        usedMock: false,
-        isStreaming: false,
-        isReasoningStreaming: false,
-        status: "error",
-        statusLabel: undefined
-      });
+      let persistedRecovery = false;
       if (threadId) {
         try {
           const state = await options.onFetchAndApplyThreadState(threadId);
-          if (operationId === operationIdRef.current) applyCollaborationMessagesFromThreadState(state);
+          if (operationId === operationIdRef.current) {
+            applyCollaborationMessagesFromThreadState(state);
+            persistedRecovery = isRecoverableDurableContinuation(state.durableContinuation);
+          }
         } catch {
           // Keep the visible stream failure when persisted recovery state cannot be refreshed.
         }
+      }
+      const message = recoverableGenerationError(error instanceof Error ? error.message : "Generation failed", options.locale);
+      if (!persistedRecovery) {
+        updateStreamingMessage(assistantMessageId, {
+          text: `Request failed: ${message}`,
+          usedMock: false,
+          isStreaming: false,
+          isReasoningStreaming: false,
+          status: "error",
+          statusLabel: undefined
+        });
       }
       return { ok: false, error: message, threadId };
     } finally {
@@ -917,19 +929,33 @@ function reasoningBlockedMessage(locale: Locale) {
     : "Thinking hidden because internal runtime data was detected.";
 }
 
-function attachRunStateToLatestAssistant<T extends CollaborationMessage>(
+export function attachRunStateToLatestAssistant<T extends CollaborationMessage>(
   messages: T[],
   events: RunTimelineEvent[],
-  completion: ThreadStateResponse["runCompletion"]
+  completion: ThreadStateResponse["runCompletion"],
+  durableContinuation?: ThreadStateResponse["durableContinuation"]
 ) {
-  if (events.length === 0 && !completion) return messages;
+  if (events.length === 0 && !completion && !durableContinuation) return messages;
   const latestAssistantIndex = [...messages].reverse().findIndex((message) => message.role === "assistant");
   if (latestAssistantIndex < 0) return messages;
   const targetIndex = messages.length - 1 - latestAssistantIndex;
   const timeline = [...events].sort((left, right) => left.sequence - right.sequence);
   return messages.map((message, index) => (
-    index === targetIndex ? { ...message, timeline, ...(completion ? { completion } : {}) } : message
+    index === targetIndex
+      ? { ...message, timeline, ...(completion ? { completion } : {}), ...(durableContinuation ? { durableContinuation } : {}) }
+      : message
   ));
+}
+
+export function isRecoverableDurableContinuation(continuation: ThreadStateResponse["durableContinuation"]) {
+  return continuation?.state === "ready" || continuation?.state === "claimed" || continuation?.state === "failed";
+}
+
+export function isAssistantRunCompleted(message: CollaborationMessage) {
+  return !message.isStreaming
+    && Boolean(message.text.trim())
+    && message.completion?.status !== "continue"
+    && !isRecoverableDurableContinuation(message.durableContinuation);
 }
 
 function traceLiveRefresh(

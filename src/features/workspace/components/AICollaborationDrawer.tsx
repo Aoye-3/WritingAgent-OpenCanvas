@@ -7,7 +7,8 @@ import { MarkdownText } from "../../../shared/MarkdownText";
 import type { AgentCard, AgentClarification, CanvasNode, CanvasWriteRequest, CanvasWriteSuggestion, FinalSupplement, PlanRun, RunTimelineEvent, SkillCatalogItem, SkillFolderItem, StoredThread } from "../../agents/types";
 import type { CanvasNodePatch } from "../../canvas/canvasClient";
 import { fetchRuntimeRunEvents } from "../../generation/generationClient";
-import type { CollaborationMessage, GenerateRequest, RuntimeRunEvent } from "../../generation/types";
+import type { CollaborationMessage, DurableContinuationSummary, GenerateRequest, RuntimeRunEvent } from "../../generation/types";
+import { isAssistantRunCompleted } from "../../../app/hooks/useGenerationRun";
 import { useI18n } from "../../i18n/I18nProvider";
 import { AnnotationChipRow, CanvasWriteProposalPanel, type MessageAnnotation } from "./CanvasWriteProposalPanel";
 import { AssistantRunTrace } from "./AssistantRunTrace";
@@ -623,12 +624,12 @@ export function AICollaborationDrawer({
           const hasProgressSegments = progressSegments.length > 0;
           const hasRunTrace = message.role === "assistant" && Boolean(message.timeline?.some((event) => !isProgressTimelineEvent(event)));
           const hasReasoningText = message.role === "assistant" && Boolean(message.reasoningText?.trim());
-          const hasRuntimePanel = message.role === "assistant" && (hasProgressSegments || hasRunTrace || hasReasoningText || Boolean(rawRunTarget) || Boolean(message.completion));
+          const hasRuntimePanel = message.role === "assistant" && (hasProgressSegments || hasRunTrace || hasReasoningText || Boolean(rawRunTarget) || Boolean(message.completion) || Boolean(durableContinuationPresentation(message.durableContinuation, locale)));
           const usesThinkingStatus = isPendingAssistant && !hasRunTrace && !hasReasoningText && !hasProgressSegments;
           const traceTarget = agentPlanTraceTarget(message.timeline, plans);
           const runtimePanel = hasRuntimePanel ? (
             <AgentLoopRunPanel
-              completed={!message.isStreaming && Boolean(message.text.trim())}
+              completed={isAssistantRunCompleted(message)}
               fallbackEvents={rawRunLogEvents}
               isStreaming={Boolean(message.isStreaming)}
               key={`${message.id}:runtime`}
@@ -1185,6 +1186,7 @@ function AgentLoopRunPanel({
         {isStreaming ? <i aria-hidden="true" /> : null}
       </div>
       {completion ? <CompletionVerdictSummary completion={completion} locale={locale} /> : null}
+      <DurableContinuationCard continuation={message.durableContinuation} locale={locale} />
       {progressSegments.length ? (
         <ProgressSegmentList completed={completed} rawEvents={fallbackEvents} runTarget={runTarget} segments={progressSegments} />
       ) : (
@@ -1200,7 +1202,7 @@ function AgentLoopRunPanel({
 }
 
 function CompletionVerdictSummary({ completion, locale }: { completion: NonNullable<CollaborationMessage["completion"]>; locale: "en" | "zh" }) {
-  const reason = completion.reasons[0];
+  const reason = completion.status === "continue" ? undefined : completion.reasons[0];
   const missing = completion.missingRequirements[0];
   return (
     <div className="completion-verdict" data-status={completion.status}>
@@ -1218,14 +1220,41 @@ function completionStatusLabel(locale: "en" | "zh", status: NonNullable<Collabor
     if (status === "waiting") return "等待用户";
     if (status === "failed") return "失败";
     if (status === "finalizing") return "最终整理";
-    return "继续运行";
+    return "未完成";
   }
   if (status === "completed") return "Completed";
   if (status === "partial") return "Partial";
   if (status === "waiting") return "Waiting";
   if (status === "failed") return "Failed";
   if (status === "finalizing") return "Finalizing";
-  return "Continuing";
+  return "Unfinished";
+}
+
+export function durableContinuationPresentation(continuation: DurableContinuationSummary | undefined, locale: "en" | "zh") {
+  if (!continuation || continuation.state === "completed" || continuation.state === "superseded") return undefined;
+  if (continuation.state === "ready") {
+    return { label: locale === "zh" ? "任务尚未完成，可发送“继续”恢复执行。" : "Task unfinished. Send “continue” to resume." };
+  }
+  if (continuation.state === "claimed") {
+    return { label: locale === "zh" ? "正在恢复原任务…" : "Restoring the original task…" };
+  }
+  return {
+    label: locale === "zh"
+      ? "答案和任务上下文已保存，可发送“继续”重试恢复。"
+      : "The answer and task context were saved. Send “continue” to retry recovery.",
+    ...(continuation.lastError ? { lastError: continuation.lastError } : {})
+  };
+}
+
+function DurableContinuationCard({ continuation, locale }: { continuation?: DurableContinuationSummary; locale: "en" | "zh" }) {
+  const presentation = durableContinuationPresentation(continuation, locale);
+  if (!presentation) return null;
+  return (
+    <div className="durable-continuation-card" data-state={continuation?.state}>
+      <strong>{presentation.label}</strong>
+      {presentation.lastError ? <span>{presentation.lastError}</span> : null}
+    </div>
+  );
 }
 
 export function mergeAgentClarificationDisplayRecords(records: AgentClarification[], optimisticRecords: AgentClarification[]) {

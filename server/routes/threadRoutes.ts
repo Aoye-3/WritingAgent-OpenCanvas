@@ -5,6 +5,7 @@ import { resolveConversationModelId } from "../domains/model-config/index.js";
 import type { SQLiteStorageRepository } from "../storage.js";
 import { errorMessage, sendError, sendOk } from "../utils/http.js";
 import { randomThreadId, safeId } from "../utils/ids.js";
+import { durableContinuationSummary } from "../services/generation/durableContinuationSummary.js";
 
 type ThreadRouteDeps = {
   storage: SQLiteStorageRepository;
@@ -211,6 +212,7 @@ export function registerThreadRoutes(app: Express, { storage, agentRuntime: _age
       ...(finalSupplement ? { finalSupplement } : {}),
       runTimelineEvents: runTimelineSourceEvents.map(timelineEventFromToolEvent).filter((event): event is NonNullable<typeof event> => Boolean(event)),
       runCompletion: latestCompletion,
+      durableContinuation: durableContinuationSummary(storage.readDurableContinuation(request.params.threadId)),
       canvasNodes: storage.listCanvasNodes(projectId),
       canvasEdges: storage.listCanvasEdges(projectId),
       canvasObjects: storage.listCanvasObjects(projectId),

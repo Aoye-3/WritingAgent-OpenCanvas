@@ -3,10 +3,11 @@ import type { ClaimCandidate, ClaimSourceAnchor, ClaimStatus, CreateClaimFromSel
 import type { Provider } from "./types.js";
 import type { ToolEventRecord } from "./toolRuntime.js";
 import type { RunCompletionVerdict } from "./contracts/generation.js";
+import type { DurableContinuationState } from "../shared/durableContinuation.js";
+
+export type { DurableContinuationState, DurableContinuationSummary } from "../shared/durableContinuation.js";
 
 export type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
-
-export type DurableContinuationState = "ready" | "claimed" | "completed" | "failed" | "superseded";
 
 export type DurableContinuationDescriptor = {
   version: 1;

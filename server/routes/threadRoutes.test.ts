@@ -397,6 +397,49 @@ test("thread state returns run timeline events for the latest run only", async (
   assert.deepEqual(timeline.map((event) => event.title), ["Final body"]);
 });
 
+test("thread state returns a database-backed safe durable continuation summary", async () => {
+  const { app, storage } = await withThreadRoutes();
+  const projectId = `project_durable_state_${Date.now()}`;
+  const threadId = `${projectId}_thread`;
+  storage.createProject(projectId, "Durable state project");
+  await storage.ensureThread(threadId, projectId);
+  storage.recordRun({
+    threadId,
+    agentCardId: "blog-post",
+    mode: "chat",
+    prompt: "private prompt",
+    output: "Process reply preserved",
+    provider: "agent-backend",
+    usedMock: false,
+    completion: {
+      status: "continue",
+      reasons: ["Delivery incomplete"],
+      missingRequirements: ["Continue delivery"],
+      evaluatedAt: "2026-07-14T12:00:00.000Z"
+    },
+    durableContinuationDescriptor: {
+      version: 1,
+      resolvedInstruction: "private resolved instruction",
+      agentCardId: "blog-post",
+      projectId,
+      transientSkillRefs: ["private-skill"],
+      runtimeBudgetProfile: "high",
+      deliveryId: "private-delivery-id",
+      workflowMode: "batch_delivery"
+    }
+  });
+
+  const result = await get(app, `/api/threads/${threadId}/state`);
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.durableContinuation, {
+    state: "ready",
+    canContinue: true,
+    attempts: 0
+  });
+  assert.doesNotMatch(JSON.stringify(result.body.durableContinuation), /descriptor|claimToken|claimedAt|sourceRunId|private|deliveryId|skill|budget/i);
+});
+
 test("lists only active threads for the requested Project in update order", async () => {
   const { app, storage } = await withThreadRoutes();
   const projectId = `project_thread_list_${Date.now()}`;

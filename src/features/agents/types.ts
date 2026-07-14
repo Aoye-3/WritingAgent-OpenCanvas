@@ -1,5 +1,6 @@
 import type { Locale } from "../i18n/types";
 import type { CanvasObject, CanvasObjectKind } from "../../../shared/canvasObjects";
+import type { DurableContinuationSummary } from "../../../shared/durableContinuation";
 
 export type AgentCategory = "chat";
 export type AgentIcon = "bot" | "pen" | "lines" | "mail" | "book" | "report" | "refresh";
@@ -428,6 +429,7 @@ export type ThreadStateResponse = {
   finalSupplement?: FinalSupplement;
   runTimelineEvents?: RunTimelineEvent[];
   runCompletion?: RunCompletionVerdict;
+  durableContinuation?: DurableContinuationSummary;
   canvasNodes?: CanvasNode[];
   canvasEdges?: CanvasEdge[];
   canvasObjects?: CanvasObject[];

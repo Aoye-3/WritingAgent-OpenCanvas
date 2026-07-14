@@ -4,6 +4,9 @@ import type { Provider, ProviderId } from "../types.js";
 import type { ToolState } from "../toolRegistry.js";
 import type { CanvasAction } from "../services/generation/canvasActionPolicy.js";
 import type { OrchestrationPolicy } from "../services/generation/orchestrationPolicy.js";
+import type { DurableContinuationSummary } from "../../shared/durableContinuation.js";
+
+export type { DurableContinuationSummary } from "../../shared/durableContinuation.js";
 
 export type GenerateRequest = {
   mode: "faceted" | "freeText" | "structured" | "chat";
@@ -54,6 +57,7 @@ export type GenerateResponse = {
   events?: ToolEventRecord[];
   finishReason?: string;
   completion?: RunCompletionVerdict;
+  durableContinuation?: DurableContinuationSummary;
   usage?: unknown;
 };
 

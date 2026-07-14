@@ -101,6 +101,40 @@ Agent run reporting has three projections: final assistant text, stage reports, 
 
 Stage reports are the only progress copy that belongs in the main right-drawer assistant run block. Raw model/tool lifecycle, ordinary safe points, command output, and debug metadata must stay in Run Trace/tool details. Final assistant `text` remains the persisted answer and must not be used as a progress transport.
 
+## Durable Task Premature-Exit Diagnostics
+
+Durable task protection has a Runtime signal, a server readiness result, and a SQLite recovery state. Diagnose them in that order:
+
+- `durable_task_incomplete` is emitted by Runtime after same-graph auto-continuation still ends on an action promise without required evidence. It is not a completed deliverable and is not a clarification interrupt.
+- `run_incomplete` is the FacetWrite timeline/lifecycle projection for a server completion verdict of `continue`. The assistant process reply is intentionally preserved, but completion requirements remain open.
+- `/api/threads/:threadId/state` is authoritative for the public `durableContinuation` summary after refresh or stream failure. A live browser flag or transient Skill selection is not authoritative.
+
+Continuation states mean:
+
+- `ready`: send a standalone `continue` through the existing composer to claim and resume the task;
+- `claimed`: another request is currently restoring the task; do not submit a concurrent retry;
+- `failed`: the answer and task context are saved; inspect the safe `lastError`, then send `continue` to retry;
+- `completed`: the claimed continuation finished and no recovery card should render;
+- `superseded`: a different user instruction replaced the pending recovery and no recovery card should render.
+
+If the UI shows a completed treatment for a `continue` verdict, compare the latest `completion_evaluated` event with `durableContinuation`. `continue` must render as unfinished even when the preserved process reply is non-empty or a completion reason mentions existing answer text. On an SSE error, confirm the browser fetched thread state before applying its local `Request failed` fallback.
+
+If `continue` starts an unrelated task, inspect the SQLite row and server claim path before Runtime. The descriptor and claim token must never come from client `contextValues`; the server reconstructs them from the claimed row and reuses its `deliveryId`. `durable_continuation_in_progress` means the row is already `claimed`. A restart converts an abandoned claim to `failed` with `durable_continuation_recovered_after_restart`.
+
+Do not confuse this flow with Agent clarification. Clarification answers use the persisted interrupt/checkpoint and Runtime `command.resume`. A standalone durable `continue` uses normal Runtime input reconstructed from the durable descriptor. Neither path may fall back to the other.
+
+### Manual Smoke Checklist
+
+1. Start from a Project whose Canvas contains exactly one selected document node. Record its id and the Canvas node count.
+2. Send a simple chat question. Verify a normal completed assistant message, no continuation card, and no new or modified Canvas node.
+3. Ask the Agent to append one short, explicit line to the selected document using `canvas_write`. Verify the same node id is updated and the Canvas still contains exactly one node; the durable guard must not turn this into a multi-node delivery.
+4. Run a durable fixture that ends with an action-only promise. Verify Runtime emits `durable_task_incomplete`, FacetWrite records `run_incomplete`, the process reply remains visible, and thread state returns `durableContinuation.state:"ready"` with `canContinue:true`.
+5. Refresh the page. Verify the recovery card is restored from thread state and the composer remains the only continuation action.
+6. Send `continue`. While claimed, verify thread state can report `claimed` with `canContinue:false`. After success, verify the same delivery is updated, state becomes `completed`, and no actionable recovery card remains.
+7. Repeat with a forced Runtime failure after claim. Verify state becomes `failed`, the safe error is visible, another explicit `continue` retries, and clarification choices do not reopen when their answered rows are already persisted.
+
+The accepted design and security boundary are recorded in [`ADR-2026-07-14-durable-task-premature-exit-continuation.md`](decisions/ADR-2026-07-14-durable-task-premature-exit-continuation.md).
+
 ## Thinking And Tool Choice Compatibility
 
 Forced tool phases must keep the tool protocol deterministic even when the selected model supports a thinking or reasoning mode. The maintained capability field is:

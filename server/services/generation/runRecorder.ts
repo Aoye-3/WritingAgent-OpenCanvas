@@ -7,6 +7,7 @@ import { userMessageForRun } from "./promptRunBuilder.js";
 import { extractTopLevelListItems } from "../canvasDelivery.js";
 import { completionEvaluatedEvent, evaluateRunCompletion } from "./completionEvaluator.js";
 import { createDurableContinuationDescriptor, durableContinuationClaim } from "./durableContinuation.js";
+import { durableContinuationSummary } from "./durableContinuationSummary.js";
 
 export type RecordRunInput = {
   storage: SQLiteStorageRepository;
@@ -87,6 +88,7 @@ export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
     events,
     finishReason: input.finishReason,
     completion,
+    durableContinuation: durableContinuationSummary(input.storage.readDurableContinuation(input.threadId)),
     usage: input.usage
   };
 }

@@ -1,4 +1,7 @@
 import type { Locale } from "../i18n/types";
+import type { DurableContinuationSummary } from "../../../shared/durableContinuation";
+
+export type { DurableContinuationSummary } from "../../../shared/durableContinuation";
 
 export type GenerateRequest = {
   mode: "faceted" | "freeText" | "structured" | "chat";
@@ -39,6 +42,7 @@ export type GenerateResponse = {
   events?: GenerationEvent[];
   finishReason?: string;
   completion?: RunCompletionVerdict;
+  durableContinuation?: DurableContinuationSummary;
   usage?: unknown;
 };
 
@@ -134,6 +138,7 @@ export type CollaborationMessage = {
   progressSegments?: ProgressSegment[];
   runtimeRun?: { threadId: string; runId: string };
   completion?: RunCompletionVerdict;
+  durableContinuation?: DurableContinuationSummary;
   queuedInput?: QueuedRunInput;
   usedMock?: boolean;
   isStreaming?: boolean;
