@@ -1,6 +1,7 @@
-import type { SQLiteStorageRepository } from "../storage.js";
+import type { CanvasEdge, CanvasEdgeInput, CanvasNode, CanvasNodeInput, CanvasNodePatch } from "../storageTypes.js";
 import type { CanvasWorkflowMode } from "../../shared/canvasWorkflow.js";
 import { stableDeliveryId } from "./canvasDelivery.js";
+import { canvasRectsOverlap, findAvailableCanvasNodePosition } from "./canvasNodePlacement.js";
 import type { CanvasDeliveryContent, DiagramDeliveryContent, DiagramDeliveryShape } from "./generation/canvasDeliveryContent.js";
 import { formatSourceLinks } from "./generation/sourceLinks.js";
 import { isDiagramCanvasDeliveryIntent, isDirectCanvasDeliveryIntent } from "./generation/canvasDeliveryIntent.js";
@@ -73,6 +74,14 @@ type CanvasDeliveryModule = {
   plan: (input: CanvasDeliveryInput) => Omit<CanvasDeliveryPlan, "required" | "moduleId">;
 };
 
+type CanvasDeliveryStorage = {
+  listCanvasNodes: (projectId: string) => CanvasNode[];
+  listCanvasEdges: (projectId: string) => CanvasEdge[];
+  createCanvasNode: (projectId: string, input: CanvasNodeInput) => CanvasNode;
+  updateCanvasNode: (projectId: string, nodeId: string, patch: CanvasNodePatch) => CanvasNode | undefined;
+  createCanvasEdge: (projectId: string, input: CanvasEdgeInput) => CanvasEdge;
+};
+
 const deliveryModules: CanvasDeliveryModule[] = [
   diagramDeliveryModule(),
   documentBatchDeliveryModule()
@@ -87,12 +96,13 @@ export function planCanvasDelivery(input: CanvasDeliveryInput): CanvasDeliveryPl
   return { required: planned.nodes.length > 0, moduleId: module.id, ...planned };
 }
 
-export function commitCanvasDelivery(storage: SQLiteStorageRepository, projectId: string, plan: CanvasDeliveryPlan) {
+export function commitCanvasDelivery(storage: CanvasDeliveryStorage, projectId: string, plan: CanvasDeliveryPlan) {
   if (!plan.required) return [];
-  const existingNodes = new Map(storage.listCanvasNodes(projectId).map((node) => [node.id, node]));
+  const existingCanvasNodes = storage.listCanvasNodes(projectId);
+  const existingNodes = new Map(existingCanvasNodes.map((node) => [node.id, node]));
   const existingEdges = new Set(storage.listCanvasEdges(projectId).map((edge) => edge.id));
   const committed: Array<{ nodeId: string; title: string; node?: unknown }> = [];
-  for (const node of plan.nodes) {
+  for (const node of placeCanvasDeliveryNodes(plan.nodes, existingCanvasNodes)) {
     let committedNode: unknown;
     const nextNode = {
       title: node.title,
@@ -126,6 +136,50 @@ export function commitCanvasDelivery(storage: SQLiteStorageRepository, projectId
     }
   }
   return committed;
+}
+
+function placeCanvasDeliveryNodes(nodes: CanvasDeliveryPlan["nodes"], existingNodes: CanvasNode[]) {
+  if (!nodes.length) return nodes;
+  const existingById = new Map(existingNodes.map((node) => [node.id, node]));
+  const plannedNodeIds = new Set(nodes.map((node) => node.id));
+  const obstacles = existingNodes.filter((node) => !plannedNodeIds.has(node.id));
+  const preferredOffset = existingDeliveryOffset(nodes, existingById);
+  if (!nodesOverlap(nodes, obstacles, preferredOffset)) return translateCanvasDeliveryNodes(nodes, preferredOffset);
+
+  const bounds = canvasBounds(nodes);
+  const position = findAvailableCanvasNodePosition({
+    existingNodes: obstacles,
+    size: { width: bounds.width, height: bounds.height }
+  });
+  return translateCanvasDeliveryNodes(nodes, { x: position.x - bounds.x, y: position.y - bounds.y });
+}
+
+function existingDeliveryOffset(nodes: CanvasDeliveryPlan["nodes"], existingById: Map<string, CanvasNode>) {
+  const planned = nodes.find((node) => existingById.has(node.id));
+  if (!planned) return { x: 0, y: 0 };
+  const existing = existingById.get(planned.id)!;
+  return { x: existing.x - planned.x, y: existing.y - planned.y };
+}
+
+function nodesOverlap(nodes: CanvasDeliveryPlan["nodes"], obstacles: CanvasNode[], offset: { x: number; y: number }) {
+  return nodes.some((node) => obstacles.some((obstacle) => canvasRectsOverlap({
+    x: node.x + offset.x,
+    y: node.y + offset.y,
+    width: node.width,
+    height: node.height
+  }, obstacle)));
+}
+
+function canvasBounds(nodes: CanvasDeliveryPlan["nodes"]) {
+  const left = Math.min(...nodes.map((node) => node.x));
+  const top = Math.min(...nodes.map((node) => node.y));
+  const right = Math.max(...nodes.map((node) => node.x + node.width));
+  const bottom = Math.max(...nodes.map((node) => node.y + node.height));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function translateCanvasDeliveryNodes(nodes: CanvasDeliveryPlan["nodes"], offset: { x: number; y: number }) {
+  return nodes.map((node) => ({ ...node, x: node.x + offset.x, y: node.y + offset.y }));
 }
 
 type CanvasNodeCommitSnapshot = {

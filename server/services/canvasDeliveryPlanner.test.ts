@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isDirectCanvasDeliveryIntent, planCanvasDelivery } from "./canvasDeliveryPlanner.js";
+import type { CanvasEdge, CanvasEdgeInput, CanvasNode, CanvasNodeInput, CanvasNodePatch } from "../storageTypes.js";
+import { canvasRectsOverlap } from "./canvasNodePlacement.js";
+import { commitCanvasDelivery, isDirectCanvasDeliveryIntent, planCanvasDelivery } from "./canvasDeliveryPlanner.js";
 
 test("canvas delivery planner creates one body node per top-level Markdown heading", () => {
   const delivery = planCanvasDelivery({
@@ -29,6 +31,85 @@ test("canvas delivery planner creates one body node per top-level Markdown headi
   assert.equal(delivery.edges[0]?.sourceNodeId, "node_run_1_1");
   assert.equal(delivery.edges[0]?.targetNodeId, "node_run_1_2");
   assert.match(delivery.nodes[4]?.content ?? "", /\[News A\]\(https:\/\/news\.example\/a\)/);
+});
+
+test("canvas delivery commits a later batch without overlapping the earlier batch", () => {
+  const storage = createCanvasDeliveryStorage();
+  const first = deliveryPlan("round_one");
+  const second = deliveryPlan("round_two");
+
+  commitCanvasDelivery(storage, "project_1", first);
+  const firstNodes = storage.listCanvasNodes("project_1").map((node) => ({ ...node }));
+  commitCanvasDelivery(storage, "project_1", second);
+  const secondNodes = storage.listCanvasNodes("project_1").filter((node) => node.id.startsWith("node_round_two_"));
+
+  assert.deepEqual(firstNodes.map(({ x, y }) => ({ x, y })), first.nodes.map(({ x, y }) => ({ x, y })));
+  assert.equal(secondNodes.length, second.nodes.length);
+  assert.equal(secondNodes.some((node) => firstNodes.some((existing) => canvasRectsOverlap(node, existing))), false);
+
+  const offset = {
+    x: secondNodes[0]!.x - second.nodes[0]!.x,
+    y: secondNodes[0]!.y - second.nodes[0]!.y
+  };
+  assert.deepEqual(
+    secondNodes.map((node, index) => ({ x: node.x - second.nodes[index]!.x, y: node.y - second.nodes[index]!.y })),
+    secondNodes.map(() => offset)
+  );
+});
+
+test("canvas delivery keeps a progressive batch in place when its final nodes are committed", () => {
+  const storage = createCanvasDeliveryStorage();
+  const fullDelivery = deliveryPlan("progressive_round");
+  const progressiveDelivery = {
+    ...fullDelivery,
+    nodes: fullDelivery.nodes.slice(0, 2).map((node) => ({ ...node, content: "Loading..." })),
+    edges: fullDelivery.edges.slice(0, 1)
+  };
+  const manualNode = storage.createCanvasNode("project_1", {
+    id: "manual_node",
+    kind: "note",
+    title: "Manual note",
+    content: "",
+    x: 560,
+    y: 120,
+    width: 640,
+    height: 520
+  });
+
+  commitCanvasDelivery(storage, "project_1", progressiveDelivery);
+  const placeholderPositions = storage.listCanvasNodes("project_1")
+    .filter((node) => node.id.startsWith("node_progressive_round_"))
+    .map((node) => ({ id: node.id, x: node.x, y: node.y, width: node.width, height: node.height }));
+  assert.equal(placeholderPositions.some((node) => canvasRectsOverlap(node, manualNode)), false);
+
+  commitCanvasDelivery(storage, "project_1", fullDelivery);
+  const finalNodes = storage.listCanvasNodes("project_1").filter((node) => node.id.startsWith("node_progressive_round_"));
+  assert.deepEqual(
+    finalNodes.slice(0, 2).map((node) => ({ id: node.id, x: node.x, y: node.y, width: node.width, height: node.height })),
+    placeholderPositions
+  );
+  assert.equal(finalNodes.some((node) => canvasRectsOverlap(node, manualNode)), false);
+
+  commitCanvasDelivery(storage, "project_1", fullDelivery);
+  assert.equal(storage.listCanvasNodes("project_1").filter((node) => node.id.startsWith("node_progressive_round_")).length, fullDelivery.nodes.length);
+  assert.equal(storage.listCanvasEdges("project_1").length, fullDelivery.edges.length);
+});
+
+test("canvas delivery places a diagram batch away from existing document batches", () => {
+  const storage = createCanvasDeliveryStorage();
+  const documents = deliveryPlan("document_round");
+  const diagram = diagramDeliveryPlan("diagram_round");
+
+  commitCanvasDelivery(storage, "project_1", documents);
+  const documentNodes = storage.listCanvasNodes("project_1").map((node) => ({ ...node }));
+  commitCanvasDelivery(storage, "project_1", diagram);
+  const diagramNodes = storage.listCanvasNodes("project_1").filter((node) => node.id.startsWith("node_diagram_round_"));
+
+  assert.equal(diagramNodes.some((node) => documentNodes.some((existing) => canvasRectsOverlap(node, existing))), false);
+  assert.deepEqual(
+    diagramNodes.map((node, index) => ({ x: node.x - diagram.nodes[index]!.x, y: node.y - diagram.nodes[index]!.y })),
+    diagramNodes.map(() => ({ x: diagramNodes[0]!.x - diagram.nodes[0]!.x, y: diagramNodes[0]!.y - diagram.nodes[0]!.y }))
+  );
 });
 
 test("canvas delivery planner supports English and mixed canvas delivery intent", () => {
@@ -275,3 +356,105 @@ test("canvas delivery planner does not fall back to document batch in mind map m
   assert.equal(delivery.required, false);
   assert.equal(delivery.nodes.length, 0);
 });
+
+type TestCanvasStorage = {
+  listCanvasNodes: (projectId: string) => CanvasNode[];
+  listCanvasEdges: (projectId: string) => CanvasEdge[];
+  createCanvasNode: (projectId: string, input: CanvasNodeInput) => CanvasNode;
+  updateCanvasNode: (projectId: string, nodeId: string, patch: CanvasNodePatch) => CanvasNode;
+  createCanvasEdge: (projectId: string, input: CanvasEdgeInput) => CanvasEdge;
+};
+
+function deliveryPlan(deliveryId: string) {
+  return planCanvasDelivery({
+    deliveryId,
+    projectId: "project_1",
+    instruction: "summarize this to canvas",
+    locale: "en",
+    content: {
+      assistantText: "Done.",
+      outlineMarkdown: "# Summary\n- A\n- B",
+      bodyMarkdown: "# A\nAlpha\n\n# B\nBeta",
+      sources: [],
+      usedStructuredBlock: true
+    }
+  });
+}
+
+function diagramDeliveryPlan(deliveryId: string) {
+  return planCanvasDelivery({
+    deliveryId,
+    projectId: "project_1",
+    instruction: "make a user flow diagram",
+    locale: "en",
+    content: {
+      assistantText: "Done.",
+      outlineMarkdown: "",
+      bodyMarkdown: "",
+      sources: [],
+      usedStructuredBlock: true,
+      diagram: {
+        assistantText: "Done.",
+        kind: "userflow",
+        title: "Flow",
+        layout: "left-right",
+        nodes: [
+          { id: "start", label: "Start", shape: "rounded", tone: "primary" },
+          { id: "decision", label: "Ready?", shape: "diamond", tone: "warning" },
+          { id: "finish", label: "Finish", shape: "rounded", tone: "success" }
+        ],
+        edges: [
+          { from: "start", to: "decision", kind: "next" },
+          { from: "decision", to: "finish", kind: "yes" }
+        ],
+        sources: []
+      }
+    }
+  });
+}
+
+function createCanvasDeliveryStorage(): TestCanvasStorage {
+  const nodes: CanvasNode[] = [];
+  const edges: CanvasEdge[] = [];
+  return {
+    listCanvasNodes: () => nodes,
+    listCanvasEdges: () => edges,
+    createCanvasNode: (projectId, input) => {
+      const node: CanvasNode = {
+        id: input.id ?? `node_${nodes.length + 1}`,
+        projectId,
+        kind: input.kind,
+        title: input.title ?? "",
+        content: input.content ?? "",
+        x: input.x ?? 120,
+        y: input.y ?? 120,
+        width: input.width ?? 320,
+        height: input.height ?? 220,
+        metadata: input.metadata ?? {},
+        includeInProjectContext: input.includeInProjectContext === true,
+        createdAt: "",
+        updatedAt: ""
+      };
+      nodes.push(node);
+      return node;
+    },
+    updateCanvasNode: (_projectId, nodeId, patch) => {
+      const node = nodes.find((item) => item.id === nodeId)!;
+      Object.assign(node, patch);
+      return node;
+    },
+    createCanvasEdge: (_projectId, input) => {
+      const edge: CanvasEdge = {
+        id: input.id ?? `edge_${edges.length + 1}`,
+        projectId: _projectId,
+        sourceNodeId: input.sourceNodeId,
+        targetNodeId: input.targetNodeId,
+        label: input.label ?? "",
+        createdAt: "",
+        updatedAt: ""
+      };
+      edges.push(edge);
+      return edge;
+    }
+  };
+}
