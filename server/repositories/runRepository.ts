@@ -115,7 +115,7 @@ export class RunRepository {
           claimToken: input.durableContinuationClaimToken,
           completionStatus: input.completion?.status,
           descriptor: durableDescriptor,
-          clarificationOwnershipTransferred: status === "waiting" && this.hasStructuredClarificationOwnership(input.threadId, runId)
+          clarificationOwnershipTransferred: status === "waiting" && this.hasResumableClarificationOwnership(input.threadId, runId)
         });
       } else if (status === "incomplete" && durableDescriptor) {
         this.continuations.upsertReady(input.threadId, runId, durableDescriptor);
@@ -435,11 +435,16 @@ export class RunRepository {
     return { ...descriptor, evidenceRunIds: Array.from(new Set([...priorRunIds, runId])) };
   }
 
-  private hasStructuredClarificationOwnership(threadId: string, runId: string) {
+  private hasResumableClarificationOwnership(threadId: string, runId: string) {
     const row = this.db.prepare(
-      `SELECT id FROM agent_clarifications WHERE thread_id = ? AND run_id = ? LIMIT 1`
-    ).get(threadId, runId) as { id: string } | undefined;
-    return Boolean(row?.id);
+      `SELECT resume_context_json AS resumeContextJson
+       FROM agent_clarifications
+       WHERE thread_id = ? AND run_id = ? AND status = 'pending' AND resume_state = 'awaiting_answer'
+       ORDER BY updated_at DESC
+       LIMIT 1`
+    ).get(threadId, runId) as { resumeContextJson: string } | undefined;
+    const resumeContext = readRecord(row ? parseJson(row.resumeContextJson) : undefined);
+    return Boolean(readRuntimeResume(resumeContext.runtimeResume));
   }
 
   private transitionClaimedContinuation(input: {

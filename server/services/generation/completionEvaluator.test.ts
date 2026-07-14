@@ -39,7 +39,7 @@ test("completion evaluator continues AgentBackend runs explicitly marked incompl
   assert.match(verdict.missingRequirements.join(" "), /continue/i);
 });
 
-test("completion evaluator applies the shared action-promise fixture to durable tasks even after tool evidence", () => {
+test("completion evaluator applies the shared Runtime action-promise fixture expectations to durable tasks", () => {
   const durablePayload: GenerateRequest = {
     ...basePayload,
     chatInstruction: "Research the database and write a verified report",
@@ -50,7 +50,7 @@ test("completion evaluator applies the shared action-promise fixture to durable 
     }
   };
 
-  for (const fixture of durableTaskGuardCases) {
+  for (const fixture of durableTaskGuardCases.filter((entry) => entry.id !== "post_evidence_synthesis")) {
     const verdict = evaluateRunCompletion({
       payload: durablePayload,
       text: fixture.text,
@@ -61,6 +61,28 @@ test("completion evaluator applies the shared action-promise fixture to durable 
     });
     assert.equal(verdict.status === "continue", fixture.expectContinuation, fixture.id);
   }
+});
+
+test("completion evaluator continues a post-evidence pure action promise independently of Runtime guard expectations", () => {
+  const fixture = durableTaskGuardCases.find((entry) => entry.id === "post_evidence_synthesis");
+  assert.ok(fixture);
+
+  const verdict = evaluateRunCompletion({
+    payload: {
+      ...basePayload,
+      chatInstruction: "Research the database and write a verified report",
+      transientSkillRefs: ["database-lookup"],
+      contextValues: {
+        taskHandlingPolicy: { kind: "long_task", canvasDeliveryMode: "progressive", allowPlan: false },
+        progressiveCanvasDelivery: { enabled: true }
+      }
+    },
+    text: fixture.text,
+    events: [{ eventType: "agent_backend_tool_completed", payload: { toolName: "web_search", toolCallId: fixture.id } }],
+    finishReason: "agent_backend_completed"
+  });
+
+  assert.equal(verdict.status, "continue");
 });
 
 test("completion evaluator keeps the screenshot action promise ready for simple chat", () => {

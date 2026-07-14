@@ -304,9 +304,9 @@ test("claimed failed verdict transitions to failed instead of completed", () => 
   assert.equal(repository.readDurableContinuation("thread_claimed_failed")?.state, "failed");
 });
 
-test("claimed waiting completes only after structured clarification ownership is persisted", () => {
-  for (const structured of [false, true]) {
-    const threadId = `thread_claimed_waiting_${structured}`;
+test("claimed waiting completes only after resumable clarification ownership is persisted", () => {
+  for (const resumable of [false, true]) {
+    const threadId = `thread_claimed_waiting_${resumable}`;
     const { repository, now } = setupRunRepository(threadId);
     repository.recordRun({
       threadId, agentCardId: "blog-post", mode: "chat", prompt: "Task", output: "Continue",
@@ -321,17 +321,28 @@ test("claimed waiting completes only after structured clarification ownership is
       completion: { status: "waiting", reasons: ["clarification"], missingRequirements: ["answer"], evaluatedAt: now },
       durableContinuationDescriptor: descriptor(),
       durableContinuationClaimToken: claim.claimToken,
-      events: structured ? [{
+      events: [{
         eventType: "agent_backend_agent_clarification_requested",
         payload: {
           type: "agent_clarification_requested",
           clarificationId: "clarification_owned",
           question: "Which format?",
-          options: [{ id: "report", label: "Report" }, { id: "brief", label: "Brief" }]
+          options: [{ id: "report", label: "Report" }, { id: "brief", label: "Brief" }],
+          ...(resumable ? {
+            resumeContext: {
+              runtimeResume: {
+                runtimeThreadId: "runtime_thread_waiting",
+                runtimeRunId: "runtime_run_waiting",
+                interruptId: "interrupt_waiting",
+                checkpointId: "checkpoint_waiting"
+              }
+            }
+          } : {})
         }
-      }] : []
+      }]
     });
 
-    assert.equal(repository.readDurableContinuation(threadId)?.state, structured ? "completed" : "ready");
+    assert.equal(repository.listAgentClarifications(threadId)[0]?.resumeState, resumable ? "awaiting_answer" : "not_resumable");
+    assert.equal(repository.readDurableContinuation(threadId)?.state, resumable ? "completed" : "ready");
   }
 });

@@ -346,16 +346,25 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
           errorMessage?: string;
           clientRequestId?: string;
         };
-        const hasStructuredClarification = (record.events ?? []).some((event) => {
+        const hasResumableClarification = (record.events ?? []).some((event) => {
           const payload = event.payload ?? {};
+          const resumeContext = payload.resumeContext && typeof payload.resumeContext === "object" && !Array.isArray(payload.resumeContext)
+            ? payload.resumeContext as Record<string, unknown>
+            : {};
+          const runtimeResume = resumeContext.runtimeResume && typeof resumeContext.runtimeResume === "object" && !Array.isArray(resumeContext.runtimeResume)
+            ? resumeContext.runtimeResume as Record<string, unknown>
+            : {};
           return (event.eventType === "agent_backend_agent_clarification_requested" || payload.type === "agent_clarification_requested")
             && typeof payload.question === "string"
             && Array.isArray(payload.options)
-            && payload.options.length >= 2;
+            && payload.options.length >= 2
+            && typeof runtimeResume.runtimeThreadId === "string"
+            && typeof runtimeResume.runtimeRunId === "string"
+            && typeof runtimeResume.interruptId === "string";
         });
         const shouldRequeue = continuation.completion?.status === "continue"
           || continuation.completion?.status === "partial"
-          || continuation.completion?.status === "waiting" && !hasStructuredClarification;
+          || continuation.completion?.status === "waiting" && !hasResumableClarification;
         if (shouldRequeue && continuation.durableContinuationDescriptor) {
           durable.current = {
             state: "ready",
@@ -5362,7 +5371,15 @@ test("incomplete continuation requeues and clarification continuation completes 
             options: [
               { id: "report", label: "Report", detail: "Use a report.", recommended: true },
               { id: "brief", label: "Brief", detail: "Use a brief." }
-            ]
+            ],
+            resumeContext: {
+              runtimeResume: {
+                runtimeThreadId: "thread_test",
+                runtimeRunId: "runtime_run_2",
+                interruptId: "interrupt_2",
+                checkpointId: "checkpoint_2"
+              }
+            }
           }
         }]
       }) : ({

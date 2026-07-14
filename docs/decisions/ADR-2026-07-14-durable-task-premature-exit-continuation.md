@@ -39,7 +39,7 @@ ready | failed -> superseded
 - a `completed` claimed run moves to `completed`.
 - `continue`, `finalizing`, and a still-resumable `partial` requeue as `ready` and must retain a descriptor.
 - `failed` moves the claim to `failed`; it is never silently completed.
-- `waiting` moves to `completed` only after a valid structured clarification has been persisted for that run, transferring ownership to `agent_clarifications`; otherwise it requeues as `ready`.
+- `waiting` moves to `completed` only when a pending checkpoint-backed clarification with a valid persisted `runtimeResume` exists for that run, transferring ownership to `agent_clarifications`; otherwise it requeues as `ready`.
 - an unrelated new instruction moves an unclaimed recovery to `superseded`.
 - a claimed row left by process restart is recovered as `failed`.
 
