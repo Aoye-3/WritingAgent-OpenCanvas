@@ -11,7 +11,8 @@ export type ApiErrorCode =
   | "runtime_auth_failed"
   | "clarification_answer_conflict"
   | "clarification_resume_metadata_missing"
-  | "clarification_resume_in_progress";
+  | "clarification_resume_in_progress"
+  | "durable_continuation_in_progress";
 
 export function sendOk<T>(response: Response, payload: T) {
   response.json(payload);

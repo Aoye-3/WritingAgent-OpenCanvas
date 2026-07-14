@@ -33,6 +33,7 @@ import type {
   JsonValue,
   ProjectRuntimeSettings,
   ProjectBrief,
+  DurableContinuationDescriptor,
   RunRecordInput,
   StoredBrief,
   TaskBrief
@@ -70,6 +71,8 @@ export type {
   ProjectRuntimeSettings,
   ProjectBrief,
   RuntimeBudgetProfile,
+  DurableContinuationDescriptor,
+  DurableContinuationState,
   RunRecordInput,
   StoredMessage,
   StoredOutputVersion,
@@ -87,6 +90,7 @@ const dbDir = storagePaths.dbDir;
 const dbPath = storagePaths.dbPath;
 const threadDirectoryManager = createThreadDirectoryManager(appRoot);
 const projectThumbnailRoot = path.join(appRoot, "project-thumbnails");
+const recoveredContinuationDatabases = new Set<string>();
 const projectThumbnailTypes = new Map<string, ".webp" | ".png">([
   ["image/webp", ".webp"],
   ["image/png", ".png"]
@@ -124,6 +128,10 @@ export class SQLiteStorageRepository {
       withTransaction: (work) => this.withTransaction(work),
       touchThread: (threadId, updatedAt) => this.touchThread(threadId, updatedAt)
     });
+    if (!recoveredContinuationDatabases.has(dbPath)) {
+      this.runs.recoverDurableContinuationsAfterRestart();
+      recoveredContinuationDatabases.add(dbPath);
+    }
     this.plans = new PlanRepository(this.db);
   }
 
@@ -245,8 +253,19 @@ export class SQLiteStorageRepository {
     return this.runs.recordRun(input);
   }
 
+  readDurableContinuation(threadId: string) { return this.runs.readDurableContinuation(threadId); }
+  claimDurableContinuation(threadId: string) { return this.runs.claimDurableContinuation(threadId); }
+  completeDurableContinuation(threadId: string, claimToken: string) { return this.runs.completeDurableContinuation(threadId, claimToken); }
+  requeueDurableContinuation(threadId: string, claimToken: string, sourceRunId: string, descriptor: DurableContinuationDescriptor) { return this.runs.requeueDurableContinuation(threadId, claimToken, sourceRunId, descriptor); }
+  failDurableContinuation(threadId: string, claimToken: string, error: string) { return this.runs.failDurableContinuation(threadId, claimToken, error); }
+  supersedeDurableContinuation(threadId: string) { return this.runs.supersedeDurableContinuation(threadId); }
+
   listMessages(threadId: string) {
     return this.runs.listMessages(threadId);
+  }
+
+  listDurableContinuationEvidence(threadId: string, sourceRunId: string | undefined, deliveryId: string) {
+    return this.runs.listDurableContinuationEvidence(threadId, sourceRunId, deliveryId);
   }
 
   getThread(threadId: string) {
@@ -510,6 +529,7 @@ export class SQLiteStorageRepository {
       this.db.prepare(`DELETE FROM plan_steps WHERE plan_run_id IN (SELECT id FROM plan_runs WHERE thread_id = ?)`).run(threadId);
       this.db.prepare(`DELETE FROM plan_runs WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM agent_clarifications WHERE thread_id = ?`).run(threadId);
+      this.db.prepare(`DELETE FROM durable_task_continuations WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM claim_candidates WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM tool_events WHERE thread_id = ?`).run(threadId);
       this.db.prepare(`DELETE FROM output_versions WHERE thread_id = ?`).run(threadId);

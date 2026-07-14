@@ -55,6 +55,12 @@ import {
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createThreadDirectoryManager, resolveFacetWritePaths } from "../../storagePaths.js";
+import {
+  durableContinuationClaim,
+  durableContinuationDeliveryId,
+  resolveDurableContinuationRequest,
+  withDurableContinuationDelivery
+} from "./durableContinuation.js";
 
 export type GenerationService = {
   generateAndRecord: (payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void) => Promise<GenerateResponse>;
@@ -115,7 +121,7 @@ export type GenerationServiceDeps = {
   mockFallbackEnabled?: boolean;
 };
 
-export type GenerationErrorCode = "model_required" | "model_not_ready" | "runtime_unavailable" | "runtime_auth_failed" | "clarification_answer_conflict" | "clarification_resume_metadata_missing" | "clarification_resume_in_progress";
+export type GenerationErrorCode = "model_required" | "model_not_ready" | "runtime_unavailable" | "runtime_auth_failed" | "clarification_answer_conflict" | "clarification_resume_metadata_missing" | "clarification_resume_in_progress" | "durable_continuation_in_progress";
 
 export class GenerationError extends Error {
   constructor(public code: GenerationErrorCode, message: string) {
@@ -148,6 +154,16 @@ export function createGenerationService(
 
   async function generateAndRecord(payload: GenerateRequest, onToolEvent?: (event: ToolEventRecord) => void): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
+    const resolved = resolveDurableContinuationOrThrow(storage, threadId, payload);
+    try {
+      return await generateAndRecordResolved(resolved.payload, threadId, onToolEvent);
+    } catch (error) {
+      failDurableContinuationClaim(storage, threadId, resolved.payload, error);
+      throw error;
+    }
+  }
+
+  async function generateAndRecordResolved(payload: GenerateRequest, threadId: string, onToolEvent?: (event: ToolEventRecord) => void): Promise<GenerateResponse> {
     payload = persistAnsweredAgentClarification(storage, threadId, payload);
     const finalSupplementAction = readFinalSupplementAction(payload.contextValues);
     const finalSupplementAnswer = finalSupplementAnswerEvent(payload);
@@ -171,6 +187,7 @@ export function createGenerationService(
     }
     payload = withSanitizedAgentIntakeCanvas(payload);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
+    payload = { ...payload, projectId: selection.projectId, agentCardId: context.runtimeConfig.agentCard.id };
     payload = withTaskHandlingPolicy(payload, context);
     payload = withRuntimeContext(payload, context.canvasDeliveryContract);
     payload = withProgressiveCanvasDeliveryContext(payload, context, projectRuntimeSettings);
@@ -179,6 +196,7 @@ export function createGenerationService(
     const timeline = createRunTimelineBuilder({ threadId, locale: payload.locale });
     const timelineEvents: RunTimelineEvent[] = [];
     const deliveryId = stableCanvasDeliveryId(threadId, payload, storage);
+    payload = withDurableContinuationDelivery(payload, deliveryId);
     let researchDeliverySequence = 0;
     let bodyDraftWriteCount = 0;
     let progressiveDeliveryStarted = false;
@@ -478,6 +496,7 @@ export function createGenerationService(
       const event = createRuntimeFallbackEvent("agent-backend", error, isMockFallbackEnabled(deps));
       runtimeEvents.push(event);
       observeToolEvent(event);
+      if (durableContinuationClaim(payload)) throw error;
     }
 
     if (!isMockFallbackEnabled(deps)) throw runtimeGenerationError(runtimeEvents);
@@ -508,6 +527,27 @@ export function createGenerationService(
     } = {}
   ): Promise<GenerateResponse> {
     const threadId = safeId(payload.threadId) ?? randomThreadId();
+    const resolved = resolveDurableContinuationOrThrow(storage, threadId, payload);
+    try {
+      return await generateAndRecordStreamResolved(resolved.payload, threadId, callbacks);
+    } catch (error) {
+      failDurableContinuationClaim(storage, threadId, resolved.payload, error);
+      throw error;
+    }
+  }
+
+  async function generateAndRecordStreamResolved(
+    payload: GenerateRequest,
+    threadId: string,
+    callbacks: {
+      onToken?: (token: string) => void;
+      onReasoningToken?: (token: string) => void;
+      onStatus?: (status: StreamStatus) => void;
+      onToolEvent?: (event: ToolEventRecord) => void;
+      onTimelineEvent?: (event: RunTimelineEvent) => void;
+      onProgressEvent?: (event: AgentProgressEvent) => void;
+    }
+  ): Promise<GenerateResponse> {
     payload = persistAnsweredAgentClarification(storage, threadId, payload);
     const finalSupplementAction = readFinalSupplementAction(payload.contextValues);
     const finalSupplementAnswer = finalSupplementAnswerEvent(payload);
@@ -535,6 +575,7 @@ export function createGenerationService(
     }
     payload = withSanitizedAgentIntakeCanvas(payload);
     const context = await buildGenerationRunContext(payload, threadId, storage, agentRuntime, deps.knowledge, selection.configuredModel);
+    payload = { ...payload, projectId: selection.projectId, agentCardId: context.runtimeConfig.agentCard.id };
     payload = withTaskHandlingPolicy(payload, context);
     payload = withRuntimeContext(payload, context.canvasDeliveryContract);
     payload = withProgressiveCanvasDeliveryContext(payload, context, projectRuntimeSettings);
@@ -544,6 +585,7 @@ export function createGenerationService(
     const timeline = createRunTimelineBuilder({ threadId, locale: payload.locale });
     const timelineEvents: RunTimelineEvent[] = [];
     const deliveryId = stableCanvasDeliveryId(threadId, payload, storage);
+    payload = withDurableContinuationDelivery(payload, deliveryId);
     let researchDeliverySequence = 0;
     let bodyDraftWriteCount = 0;
     let progressiveDeliveryStarted = false;
@@ -1071,6 +1113,7 @@ export function createGenerationService(
       observeToolEvent(event);
       emitRunFailedTimeline(error);
       textGate = createProgressiveTextGate(payload.locale, callbacks.onToken);
+      if (durableContinuationClaim(payload)) throw error;
     }
 
     if (!isMockFallbackEnabled(deps)) {
@@ -1550,6 +1593,8 @@ function isSentinelText(value: string) {
 }
 
 export function stableCanvasDeliveryId(threadId: string, payload: GenerateRequest, storage: SQLiteStorageRepository) {
+  const durableDeliveryId = durableContinuationDeliveryId(payload);
+  if (durableDeliveryId) return durableDeliveryId;
   const resumeDeliveryId = readAgentClarificationResumeDeliveryId(threadId, payload);
   if (resumeDeliveryId) return resumeDeliveryId;
   const sequence = storage.listMessages(threadId).length + 1;
@@ -2157,6 +2202,24 @@ function persistAnsweredAgentClarification(storage: SQLiteStorageRepository, thr
       }
     }
   };
+}
+
+function failDurableContinuationClaim(storage: SQLiteStorageRepository, threadId: string, payload: GenerateRequest, error: unknown) {
+  const claim = durableContinuationClaim(payload);
+  if (!claim) return false;
+  const message = error instanceof Error ? error.message : "durable_continuation_failed";
+  return storage.failDurableContinuation(threadId, claim.claimToken, message);
+}
+
+function resolveDurableContinuationOrThrow(storage: SQLiteStorageRepository, threadId: string, payload: GenerateRequest) {
+  try {
+    return resolveDurableContinuationRequest(storage, threadId, payload);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "durable_continuation_in_progress") {
+      throw new GenerationError("durable_continuation_in_progress", "A continuation for this task is already in progress.");
+    }
+    throw error;
+  }
 }
 
 function claimAgentClarificationResume(storage: SQLiteStorageRepository, threadId: string, payload: GenerateRequest) {

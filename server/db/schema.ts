@@ -714,6 +714,25 @@ export function migrateStorageSchema(db: DatabaseSync) {
     }
     db.exec(`INSERT INTO schema_version (version, applied_at) VALUES (18, datetime('now'))`);
   }
+
+  const version19 = db.prepare(`SELECT version FROM schema_version WHERE version = 19`).get();
+  if (!version19) {
+    db.exec(`
+      CREATE TABLE durable_task_continuations (
+        thread_id TEXT PRIMARY KEY,
+        source_run_id TEXT,
+        state TEXT NOT NULL CHECK (state IN ('ready', 'claimed', 'completed', 'failed', 'superseded')),
+        descriptor_json TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        claim_token TEXT,
+        claimed_at TEXT,
+        last_error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO schema_version (version, applied_at) VALUES (19, datetime('now'));
+    `);
+  }
 }
 
 function columnExists(db: DatabaseSync, table: string, column: string) {

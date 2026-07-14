@@ -6,6 +6,46 @@ import type { RunCompletionVerdict } from "./contracts/generation.js";
 
 export type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
+export type DurableContinuationState = "ready" | "claimed" | "completed" | "failed" | "superseded";
+
+export type DurableContinuationDescriptor = {
+  version: 1;
+  resolvedInstruction: string;
+  agentCardId: string;
+  projectId: string;
+  transientSkillRefs?: string[];
+  disabledSkillRefs?: string[];
+  runtimeBudgetProfile?: RuntimeBudgetProfile;
+  modelOverrides?: {
+    thinkingMode?: "enabled" | "disabled";
+    reasoningEffort?: "high" | "max" | "low" | "medium" | "xhigh";
+  };
+  plan?: {
+    phase: "intake" | "revise" | "preflight" | "execution";
+    planId: string;
+    stepId?: string;
+    phaseAttemptId?: string;
+    executionVersion?: number;
+  };
+  deliveryId: string;
+  workflowMode: CanvasWorkflowMode;
+  selectedCanvasNodeId?: string;
+  safeContext?: Record<string, unknown>;
+};
+
+export type StoredDurableContinuation = {
+  threadId: string;
+  sourceRunId?: string;
+  state: DurableContinuationState;
+  descriptor: DurableContinuationDescriptor;
+  attempts: number;
+  claimToken?: string;
+  claimedAt?: string;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type RunRecordInput = {
   threadId: string;
   clientRequestId?: string;
@@ -27,6 +67,8 @@ export type RunRecordInput = {
   resumedClarificationId?: string;
   usage?: unknown;
   completion?: RunCompletionVerdict;
+  durableContinuationDescriptor?: DurableContinuationDescriptor;
+  durableContinuationClaimToken?: string;
 };
 
 export type StoredMessage = {

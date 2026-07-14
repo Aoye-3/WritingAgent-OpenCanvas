@@ -4,15 +4,20 @@ import { sanitizeVisibleText } from "../services/generation/outputNormalizer.js"
 import type { AgentClarificationOption, JsonValue, RunRecordInput, StoredAgentClarification, StoredMessage, StoredOutputVersion, StoredToolEvent } from "../storageTypes.js";
 import { nowIso, parseJson, randomId } from "./storageRepositoryUtils.js";
 import { sanitizeToolEventPayload } from "../services/generation/toolEventSanitizer.js";
+import { DurableContinuationRepository } from "./durableContinuationRepository.js";
 
 export class RunRepository {
+  private readonly continuations: DurableContinuationRepository;
+
   constructor(
     readonly db: DatabaseSync,
     private readonly deps: {
       withTransaction: <T>(work: () => T) => T;
       touchThread: (threadId: string, updatedAt?: string) => void;
     }
-  ) {}
+  ) {
+    this.continuations = new DurableContinuationRepository(db);
+  }
 
   recordRun(input: RunRecordInput) {
     const existing = this.findRunByClientRequest(input.threadId, input.clientRequestId);
@@ -98,6 +103,20 @@ export class RunRepository {
           input.threadId,
           input.resumedClarificationId
         );
+      }
+
+      if (status === "incomplete" && input.durableContinuationDescriptor) {
+        if (input.durableContinuationClaimToken) {
+          if (!this.continuations.requeue(input.threadId, input.durableContinuationClaimToken, runId, input.durableContinuationDescriptor)) {
+            throw new Error("durable_continuation_claim_lost");
+          }
+        } else {
+          this.continuations.upsertReady(input.threadId, runId, input.durableContinuationDescriptor);
+        }
+      } else if (input.durableContinuationClaimToken) {
+        if (!this.continuations.complete(input.threadId, input.durableContinuationClaimToken)) {
+          throw new Error("durable_continuation_claim_lost");
+        }
       }
 
       this.deps.touchThread(input.threadId, now);
@@ -250,6 +269,31 @@ export class RunRepository {
     return this.queueAgentClarificationAnswer(threadId, clarificationId, input).outcome !== "not_found";
   }
 
+  listDurableContinuationEvidence(threadId: string, sourceRunId: string | undefined, deliveryId: string) {
+    if (!sourceRunId) return [];
+    type Row = { eventType: string; payloadJson: string };
+    const rows = this.db.prepare(
+      `SELECT event_type AS eventType, payload_json AS payloadJson
+       FROM tool_events
+       WHERE thread_id = ? AND run_id = ?
+       ORDER BY created_at ASC, rowid ASC`
+    ).all(threadId, sourceRunId) as Row[];
+    return rows.flatMap((row) => {
+      if (!isSafeDurableEvidenceEvent(row.eventType)) return [];
+      const payload = parseJson(row.payloadJson);
+      if (row.eventType.startsWith("canvas_delivery_") && readDeliveryId(payload) !== deliveryId) return [];
+      return [{ eventType: row.eventType, payload }];
+    });
+  }
+
+  readDurableContinuation(threadId: string) { return this.continuations.read(threadId); }
+  claimDurableContinuation(threadId: string) { return this.continuations.claim(threadId); }
+  completeDurableContinuation(threadId: string, claimToken: string) { return this.continuations.complete(threadId, claimToken); }
+  requeueDurableContinuation(threadId: string, claimToken: string, sourceRunId: string, descriptor: import("../storageTypes.js").DurableContinuationDescriptor) { return this.continuations.requeue(threadId, claimToken, sourceRunId, descriptor); }
+  failDurableContinuation(threadId: string, claimToken: string, error: string) { return this.continuations.fail(threadId, claimToken, error); }
+  supersedeDurableContinuation(threadId: string) { return this.continuations.supersede(threadId); }
+  recoverDurableContinuationsAfterRestart() { return this.continuations.recoverClaimedAfterRestart(); }
+
   queueAgentClarificationAnswer(threadId: string, clarificationId: string, input: { selectedOptionId?: string; selectedOptionLabel?: string; answer?: string }) {
     const existing = this.listAgentClarifications(threadId).find((item) => item.id === clarificationId);
     if (!existing) return { outcome: "not_found" as const };
@@ -365,6 +409,19 @@ function persistedRunStatus(input: RunRecordInput) {
   if (input.completion.status === "partial") return "partial";
   if (input.completion.status === "failed") return "failed";
   return "incomplete";
+}
+
+function isSafeDurableEvidenceEvent(eventType: string) {
+  return /(?:^|_)tool(?:_call)?_completed$/.test(eventType)
+    || /(?:output|file).*(?:created|written|archived|committed)$/.test(eventType)
+    || /^canvas_delivery_.*_committed$/.test(eventType);
+}
+
+function readDeliveryId(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return typeof (value as Record<string, unknown>).deliveryId === "string"
+    ? (value as Record<string, unknown>).deliveryId
+    : undefined;
 }
 
 function dedupeToolEvents(events: Array<{ eventType: string; payload: unknown }>) {

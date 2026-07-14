@@ -6,6 +6,7 @@ import type { ToolState } from "../../toolRegistry.js";
 import { userMessageForRun } from "./promptRunBuilder.js";
 import { extractTopLevelListItems } from "../canvasDelivery.js";
 import { completionEvaluatedEvent, evaluateRunCompletion } from "./completionEvaluator.js";
+import { createDurableContinuationDescriptor, durableContinuationClaim } from "./durableContinuation.js";
 
 export type RecordRunInput = {
   storage: SQLiteStorageRepository;
@@ -39,6 +40,10 @@ export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
     errorMessage: input.errorMessage
   });
   const events = appendCompletionEvent(input.events, completionEvaluatedEvent(completion));
+  const durableClaim = durableContinuationClaim(input.payload);
+  const durableContinuationDescriptor = completion.status === "continue"
+    ? durableDescriptorForRun(input.payload)
+    : undefined;
   const saved = input.storage.recordRun({
     threadId: input.threadId,
     clientRequestId: input.payload.clientRequestId,
@@ -51,7 +56,7 @@ export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
     provider: input.provider,
     usedMock: input.usedMock,
     errorMessage: input.errorMessage,
-    userMessage: userMessageForRun(input.payload, input.agentTitle),
+    userMessage: durableClaim?.visibleUserMessage ?? userMessageForRun(input.payload, input.agentTitle),
     toolState: input.toolState,
     events,
     finishReason: input.finishReason,
@@ -59,7 +64,9 @@ export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
     runtimeThreadId: input.runtimeThreadId,
     resumedClarificationId: resumedClarificationId(input.payload),
     usage: input.usage,
-    completion
+    completion,
+    durableContinuationDescriptor,
+    durableContinuationClaimToken: durableClaim?.claimToken
   });
   const policy = input.payload.orchestrationPolicy;
   if (!input.usedMock && policy?.trigger === "ordinary" && policy.mode !== "managed_plan" && !input.payload.canvasAction) {
@@ -82,6 +89,14 @@ export function recordGenerationRun(input: RecordRunInput): GenerateResponse {
     completion,
     usage: input.usage
   };
+}
+
+function durableDescriptorForRun(payload: GenerateRequest) {
+  try {
+    return createDurableContinuationDescriptor(payload);
+  } catch {
+    return undefined;
+  }
 }
 
 function resumedClarificationId(payload: GenerateRequest) {

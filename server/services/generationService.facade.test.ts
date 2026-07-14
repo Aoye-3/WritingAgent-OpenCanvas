@@ -12,6 +12,7 @@ import type { AgentRuntimeAdapter } from "../agentRuntimeAdapter.js";
 import type { KnowledgeSearchInput } from "../knowledge/service.js";
 import type { ToolEventRecord } from "../toolRuntime.js";
 import type { AgentRuntimePort } from "../runtime/agentRuntimePort.js";
+import type { DurableContinuationDescriptor } from "../storageTypes.js";
 
 const durableTaskGuardCases = JSON.parse(
   readFileSync(new URL("../runtime/agentBackendAdapter/fixtures/durable-task-guard-cases.json", import.meta.url), "utf8")
@@ -105,6 +106,16 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
     steps: [],
     artifacts: []
   };
+  const durable: {
+    current?: {
+      state: "ready" | "claimed" | "completed" | "failed" | "superseded";
+      descriptor: DurableContinuationDescriptor;
+      sourceRunId?: string;
+      claimToken?: string;
+      attempts: number;
+      lastError?: string;
+    };
+  } = {};
   return {
     records,
     agentClarifications,
@@ -112,6 +123,7 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
     canvasNodes,
     canvasEdges,
     planState,
+    durable,
     storage: {
       ensureThread: async () => undefined,
       getThread: () => ({ id: "thread_test", projectId: "project_test", title: "Test", configuredModelApiId: "configured-test", contextResetAt, updatedAt: "" }),
@@ -243,6 +255,34 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
         clarification.resumeError = error;
         return true;
       },
+      readDurableContinuation: () => durable.current,
+      claimDurableContinuation: () => {
+        if (durable.current?.state === "claimed") {
+          throw Object.assign(new Error("durable_continuation_in_progress"), { code: "durable_continuation_in_progress" });
+        }
+        if (!durable.current || (durable.current.state !== "ready" && durable.current.state !== "failed")) {
+          throw Object.assign(new Error("durable_continuation_unavailable"), { code: "durable_continuation_unavailable" });
+        }
+        durable.current = {
+          ...durable.current,
+          state: "claimed",
+          attempts: durable.current.attempts + 1,
+          claimToken: `claim_${durable.current.attempts + 1}`,
+          lastError: undefined
+        };
+        return durable.current;
+      },
+      supersedeDurableContinuation: () => {
+        if (!durable.current || (durable.current.state !== "ready" && durable.current.state !== "failed")) return false;
+        durable.current = { ...durable.current, state: "superseded", claimToken: undefined };
+        return true;
+      },
+      failDurableContinuation: (_threadId: string, claimToken: string, error: string) => {
+        if (durable.current?.state !== "claimed" || durable.current.claimToken !== claimToken) return false;
+        durable.current = { ...durable.current, state: "failed", claimToken: undefined, lastError: error };
+        return true;
+      },
+      listDurableContinuationEvidence: () => [],
       listCanvasNodes: () => canvasNodes,
       listCanvasEdges: () => canvasEdges,
       createCanvasNode: (_projectId: string, input: Record<string, unknown>) => {
@@ -285,6 +325,21 @@ function fakeStorage(messages: Array<{ role: "user" | "assistant"; text: string 
             resumeState: (payload.resumeContext as Record<string, unknown> | undefined)?.runtimeResume ? "awaiting_answer" : "not_resumable",
             resumeAttempts: 0
           });
+        }
+        const continuation = input as {
+          durableContinuationDescriptor?: DurableContinuationDescriptor;
+          durableContinuationClaimToken?: string;
+          completion?: { status?: string };
+        };
+        if (continuation.completion?.status === "continue" && continuation.durableContinuationDescriptor) {
+          durable.current = {
+            state: "ready",
+            descriptor: continuation.durableContinuationDescriptor,
+            sourceRunId: `run_${records.length}`,
+            attempts: durable.current?.attempts ?? 0
+          };
+        } else if (continuation.durableContinuationClaimToken && durable.current?.claimToken === continuation.durableContinuationClaimToken) {
+          durable.current = { ...durable.current, state: "completed", claimToken: undefined };
         }
         return { runId: `run_${records.length}`, promptVersionId: "prompt_1", outputVersionId: "output_1" };
       }
@@ -4537,4 +4592,243 @@ test("generation facade excludes messages before the persisted context reset bou
   assert.equal(observedMessages.some((message) => (message as { content?: string }).content === "Should not appear"), false);
   assert.equal((records[0] as { provider: string; errorMessage: string }).provider, "mock");
   assert.match((records[0] as { errorMessage: string }).errorMessage, /AgentBackend down/);
+});
+
+test("incomplete generation persists a server-whitelisted durable descriptor", async () => {
+  const { storage, durable, records } = fakeStorage();
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: "I'll proceed with the implementation now.",
+        finishReason: "agent_backend_completed",
+        events: []
+      })
+    }
+  });
+
+  await service.generateAndRecord({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    projectId: "project_test",
+    agentCardId: "blog-post",
+    chatInstruction: "Research the evidence and deliver the finished report",
+    transientSkillRefs: ["research"],
+    runtimeBudgetProfile: "high",
+    contextValues: {
+      arbitraryClientValue: "must not persist",
+      runtimeResume: { checkpointId: "secret" },
+      durableContinuation: { claimToken: "client-token" },
+      autoPreflightPlan: { enabled: false },
+      agentClarification: answeredAgentClarification(),
+      agentIntake: { executionPhase: "execute" },
+      canvas: { workflow: { mode: "batch_delivery" } }
+    }
+  });
+
+  assert.equal((records[0] as { completion?: { status?: string } }).completion?.status, "continue");
+  assert.ok((records[0] as { durableContinuationDescriptor?: DurableContinuationDescriptor }).durableContinuationDescriptor);
+  assert.equal(durable.current?.state, "ready");
+  assert.equal(durable.current?.descriptor.resolvedInstruction, "Research the evidence and deliver the finished report");
+  assert.deepEqual(durable.current?.descriptor.transientSkillRefs, ["research"]);
+  assert.doesNotMatch(JSON.stringify(durable.current?.descriptor), /arbitraryClientValue|runtimeResume|secret|client-token/);
+});
+
+test("concurrent manual continuations invoke Runtime once and preserve literal continuation history", async () => {
+  const { storage, durable, records } = fakeStorage();
+  durable.current = {
+    state: "ready",
+    attempts: 0,
+    sourceRunId: "run_source",
+    descriptor: {
+      version: 1,
+      resolvedInstruction: "Finish the original research report",
+      agentCardId: "blog-post",
+      projectId: "project_test",
+      transientSkillRefs: ["research"],
+      runtimeBudgetProfile: "high",
+      deliveryId: "delivery_original",
+      workflowMode: "batch_delivery",
+      safeContext: { taskHandlingPolicy: { executionMode: "progressive", canvasDeliveryMode: "progressive" } }
+    }
+  };
+  let runtimeCalls = 0;
+  let resumeCalls = 0;
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  let observedInstruction = "";
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        runtimeCalls += 1;
+        observedInstruction = input.chatInstruction ?? "";
+        await blocked;
+        return { text: "The original research report is complete.", finishReason: "stop", events: [] };
+      },
+      resumeRun: async () => {
+        resumeCalls += 1;
+        return { text: "must not resume", finishReason: "stop", events: [] };
+      }
+    }
+  });
+
+  const first = service.generateAndRecord({ mode: "chat", locale: "zh", threadId: "thread_test", chatInstruction: "继续" });
+  await Promise.resolve();
+  const second = service.generateAndRecord({ mode: "chat", locale: "zh", threadId: "thread_test", chatInstruction: "继续" });
+  release();
+  const [firstResult, secondResult] = await Promise.allSettled([first, second]);
+
+  assert.equal(firstResult.status, "fulfilled");
+  assert.equal(secondResult.status, "rejected");
+  assert.equal((secondResult as PromiseRejectedResult).reason.code, "durable_continuation_in_progress");
+  assert.equal(runtimeCalls, 1);
+  assert.equal(resumeCalls, 0);
+  assert.equal(observedInstruction, "Finish the original research report");
+  assert.equal((records.at(-1) as { userMessage?: string }).userMessage, "继续");
+  assert.equal(durable.current?.state, "completed");
+});
+
+test("failed continuation preserves its descriptor and retries with an incremented attempt", async () => {
+  const { storage, durable } = fakeStorage();
+  durable.current = {
+    state: "ready",
+    attempts: 0,
+    sourceRunId: "run_source",
+    descriptor: {
+      version: 1,
+      resolvedInstruction: "Finish the original task",
+      agentCardId: "blog-post",
+      projectId: "project_test",
+      deliveryId: "delivery_original",
+      workflowMode: "batch_delivery"
+    }
+  };
+  let fail = true;
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    mockFallbackEnabled: true,
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => {
+        if (fail) throw new Error("runtime exploded");
+        return { text: "The task is complete.", finishReason: "stop", events: [] };
+      }
+    }
+  });
+
+  await assert.rejects(() => service.generateAndRecord({ mode: "chat", locale: "en", threadId: "thread_test", chatInstruction: "continue" }));
+  assert.equal(durable.current?.state, "failed");
+  assert.equal(durable.current?.descriptor.resolvedInstruction, "Finish the original task");
+  assert.equal(durable.current?.attempts, 1);
+
+  fail = false;
+  await service.generateAndRecord({ mode: "chat", locale: "en", threadId: "thread_test", chatInstruction: "continue" });
+  assert.equal(durable.current?.state, "completed");
+  assert.equal(durable.current?.attempts, 2);
+});
+
+test("streaming continuation restores the task and closes its claim", async () => {
+  const { storage, durable, records } = fakeStorage();
+  durable.current = {
+    state: "ready",
+    attempts: 0,
+    sourceRunId: "run_source",
+    descriptor: {
+      version: 1,
+      resolvedInstruction: "Finish the streamed task",
+      agentCardId: "blog-post",
+      projectId: "project_test",
+      deliveryId: "delivery_stream",
+      workflowMode: "batch_delivery"
+    }
+  };
+  let observedInstruction = "";
+  const tokens: string[] = [];
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async (input) => {
+        observedInstruction = input.chatInstruction ?? "";
+        input.onToken?.("Finished");
+        return { text: "The streamed task is complete.", finishReason: "stop", events: [] };
+      }
+    }
+  });
+
+  await service.generateAndRecordStream(
+    { mode: "chat", locale: "en", threadId: "thread_test", chatInstruction: "resume" },
+    { onToken: (token) => tokens.push(token) }
+  );
+
+  assert.equal(observedInstruction, "Finish the streamed task");
+  assert.deepEqual(tokens, ["Finished"]);
+  assert.equal((records.at(-1) as { userMessage?: string }).userMessage, "resume");
+  assert.equal(durable.current?.state, "completed");
+});
+
+test("incomplete continuation requeues and clarification continuation completes the durable claim", async () => {
+  const { storage, durable } = fakeStorage();
+  durable.current = {
+    state: "ready",
+    attempts: 0,
+    sourceRunId: "run_source",
+    descriptor: {
+      version: 1,
+      resolvedInstruction: "Finish the original research task",
+      agentCardId: "blog-post",
+      projectId: "project_test",
+      transientSkillRefs: ["research"],
+      deliveryId: "delivery_original",
+      workflowMode: "batch_delivery",
+      safeContext: {
+        autoPreflightPlan: { enabled: false },
+        agentIntake: { executionPhase: "execute" },
+        taskHandlingPolicy: { executionMode: "progressive", canvasDeliveryMode: "progressive" }
+      }
+    }
+  };
+  let clarification = false;
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => clarification ? ({
+        text: "",
+        finishReason: "agent_backend_completed",
+        runtimeRunId: "runtime_run_2",
+        runtimeThreadId: "thread_test",
+        events: [{
+          eventType: "agent_backend_agent_clarification_requested",
+          payload: {
+            type: "agent_clarification_requested",
+            clarificationId: "clarification_2",
+            question: "Which final format?",
+            options: [
+              { id: "report", label: "Report", detail: "Use a report.", recommended: true },
+              { id: "brief", label: "Brief", detail: "Use a brief." }
+            ]
+          }
+        }]
+      }) : ({
+        text: "I'll continue working on this now.",
+        finishReason: "agent_backend_incomplete",
+        events: []
+      })
+    }
+  });
+
+  await service.generateAndRecord({ mode: "chat", locale: "en", threadId: "thread_test", chatInstruction: "continue" });
+  assert.equal(durable.current?.state, "ready");
+  assert.equal(durable.current?.attempts, 1);
+
+  clarification = true;
+  const result = await service.generateAndRecord({ mode: "chat", locale: "en", threadId: "thread_test", chatInstruction: "continue" });
+  assert.equal(result.finishReason, "clarification_required");
+  assert.equal(durable.current?.state, "completed");
+  assert.equal(durable.current?.attempts, 2);
 });
