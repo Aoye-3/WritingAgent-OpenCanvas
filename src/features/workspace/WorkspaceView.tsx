@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import type { AppView } from "../../app/App";
 import { Topbar } from "../../shared/Topbar";
-import type { AgentCard, AgentClarification, BriefSaveStatus, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, CanvasWriteSuggestion, FinalSupplement, PlanRun, ProjectBrief, SkillCatalogItem, SkillFolderItem, StoredOutputVersion, StoredThread, TaskBrief } from "../agents/types";
+import type { AgentCard, AgentClarification, BriefSaveStatus, CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, CanvasWriteSuggestion, FinalSupplement, PlanRun, ProjectBrief, SkillCatalogItem, SkillFolderItem, StoredOutputVersion, StoredThread, StoredToolEvent, TaskBrief } from "../agents/types";
 import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasNodePositionUpdate, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../canvas/canvasClient";
 import type { CollaborationMessage, GenerateRequest, GenerateResponse } from "../generation/types";
 import { useI18n } from "../i18n/I18nProvider";
@@ -28,6 +28,7 @@ type WorkspaceViewProps = {
   collaborationMessages: CollaborationMessage[];
   editableOutput: string;
   generation: GenerateResponse | null;
+  toolEvents: StoredToolEvent[];
   isChatSending: boolean;
   isGenerating: boolean;
   activeVersionId?: string;
@@ -121,6 +122,7 @@ export function WorkspaceView({
   activeView,
   collaborationMessages,
   generation,
+  toolEvents,
   isChatSending,
   isGenerating,
   canvasNodes,
@@ -327,6 +329,7 @@ export function WorkspaceView({
           activeTool={activeCanvasTool}
           canUndo={canUndoCanvas}
           threadId={currentThreadId}
+          toolEvents={toolEvents}
           edges={canvasEdges}
           objects={canvasObjects}
           nodes={canvasNodes}

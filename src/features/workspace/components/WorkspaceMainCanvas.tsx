@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../agents/types";
+import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowSuggestion, CanvasWriteRequest, StoredToolEvent } from "../../agents/types";
 import type { CanvasEdgeDraft, CanvasNodeDraft, CanvasNodePatch, CanvasNodePositionUpdate, CanvasObjectDraft, CanvasObjectPatch, CanvasRangeRewriteDraft } from "../../canvas/canvasClient";
 import { DocumentCanvas } from "./DocumentCanvas";
 import type { CanvasTool } from "./canvas/toolState";
@@ -12,6 +12,7 @@ type WorkspaceMainCanvasProps = {
   activeTool: CanvasTool;
   canUndo: boolean;
   threadId: string;
+  toolEvents: StoredToolEvent[];
   edges: CanvasEdge[];
   nodes: CanvasNode[];
   objects: CanvasObject[];
@@ -60,6 +61,7 @@ export function WorkspaceMainCanvas(props: WorkspaceMainCanvasProps) {
         activeTool={props.activeTool}
         canUndo={props.canUndo}
         threadId={props.threadId}
+        toolEvents={props.toolEvents}
         edges={props.edges}
         nodes={props.nodes}
         objects={props.objects}

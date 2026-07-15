@@ -15,7 +15,7 @@ import {
   type NodeChange,
   type OnSelectionChangeParams
 } from "@xyflow/react";
-import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowMode, CanvasWorkflowSuggestion, CanvasWriteRequest } from "../../agents/types";
+import type { CanvasEdge, CanvasNode, CanvasNodeKind, CanvasObject, CanvasWorkflow, CanvasWorkflowMode, CanvasWorkflowSuggestion, CanvasWriteRequest, StoredToolEvent } from "../../agents/types";
 import { fetchMarkdownOutputPreview, type CanvasEdgeDraft, type CanvasNodeDraft, type CanvasNodePatch, type CanvasNodePositionUpdate, type CanvasObjectDraft, type CanvasObjectPatch, type CanvasRangeRewriteDraft, type MarkdownOutputPreview } from "../../canvas/canvasClient";
 import { useI18n } from "../../i18n/I18nProvider";
 import { ResetIcon, ZoomInIcon, ZoomOutIcon } from "../../../shared/icons";
@@ -23,6 +23,7 @@ import { CanvasCurveEdge } from "./canvas/CanvasCurveEdge";
 import { CanvasNodeFrame } from "./canvas/CanvasNodeFrame";
 import { CanvasContextMenu, CanvasSelectionBar, type CanvasMenuState } from "./canvas/CanvasChrome";
 import { fileDocumentPreviewTarget } from "./canvas/fileDocumentPreview";
+import { createMarkdownOutputNodeDraft, deriveMarkdownOutputItems, type MarkdownOutputItem } from "./canvas/markdownOutputs";
 import { MAX_ZOOM, MIN_ZOOM, canvasNodeKinds, kindLabels, workflowModeLabels } from "./canvas/constants";
 import { collectDraggedNodePositionPatches } from "./canvas/dragPersistence";
 import { buildCanvasFlowNodes } from "./canvas/flowMapping";
@@ -47,6 +48,7 @@ type DocumentCanvasProps = {
   activeTool: CanvasTool;
   canUndo: boolean;
   threadId: string;
+  toolEvents: StoredToolEvent[];
   edges: CanvasEdge[];
   nodes: CanvasNode[];
   objects: CanvasObject[];
@@ -118,6 +120,7 @@ function DocumentCanvasInner({
   activeTool,
   canUndo,
   threadId,
+  toolEvents,
   edges,
   nodes,
   objects,
@@ -175,12 +178,15 @@ function DocumentCanvasInner({
   const [recentShapeIds, setRecentShapeIds] = useState<string[]>(["rectangle", "circle", "diamond"]);
   const [creationPreviewPoint, setCreationPreviewPoint] = useState<{ x: number; y: number } | null>(null);
   const [editNewTextId, setEditNewTextId] = useState<string | null>(null);
-  const [documentPreview, setDocumentPreview] = useState<{ path: string; threadId: string; nodeTitle: string; status: "loading" | "ready" | "failed"; document?: MarkdownOutputPreview; error?: string } | null>(null);
+  const [documentPreview, setDocumentPreview] = useState<{ path: string; threadId: string; nodeTitle: string; sourceNodeId?: string; status: "loading" | "ready" | "failed"; document?: MarkdownOutputPreview; error?: string } | null>(null);
+  const [outputsExpanded, setOutputsExpanded] = useState(false);
+  const [creatingOutputPath, setCreatingOutputPath] = useState<string>();
   const [, setArrowStart] = useState<{ x: number; y: number } | null>(null);
   const resizingNodeIdRef = useRef<string | null>(null);
   const lastCanvasPointRef = useRef<{ x: number; y: number } | null>(null);
   const internalClipboardRef = useRef<CanvasClipboardPayload | null>(null);
   const textSelectionRef = useRef<CanvasTextSelection | undefined>(undefined);
+  const canvasViewportRef = useRef<HTMLDivElement | null>(null);
   const actionRef = useRef({
     onAcceptSuggestion,
     onApproveWriteRequest,
@@ -225,6 +231,7 @@ function DocumentCanvasInner({
   };
   const floatingTransition = reduceMotion ? { duration: 0 } : { type: "spring" as const, stiffness: 300, damping: 30 };
   const selectedNode = useMemo(() => nodes.find((node) => node.id === selectedNodeId), [nodes, selectedNodeId]);
+  const markdownOutputs = useMemo(() => deriveMarkdownOutputItems(toolEvents, nodes, threadId), [nodes, threadId, toolEvents]);
   const fileDocumentItems = useMemo(() => nodes.flatMap((node): FileDocumentListItem[] => {
     if (node.kind !== "file_document") return [];
     const target = fileDocumentPreviewTarget(node, threadId);
@@ -268,27 +275,57 @@ function DocumentCanvasInner({
     actionRef.current.onSelectNode(nodeId);
   }, []);
 
+  const loadDocumentPreview = useCallback((target: { path: string; threadId: string; nodeTitle: string; sourceNodeId?: string }) => {
+    const { path } = target;
+    if (!target.sourceNodeId) onClaimDocumentPreviewChange?.(null);
+    setDocumentPreview({ ...target, status: "loading" });
+    void fetchMarkdownOutputPreview(target.threadId, path)
+      .then((document) => {
+        setDocumentPreview({ ...target, status: "ready", document });
+        if (target.sourceNodeId) {
+          onClaimDocumentPreviewChange?.({
+            sourceNodeId: target.sourceNodeId,
+            threadId: target.threadId,
+            path: document.path,
+            fileName: document.fileName,
+            content: document.content
+          });
+        }
+      })
+      .catch((error) => {
+        setDocumentPreview({ ...target, status: "failed", error: error instanceof Error ? error.message : "Unable to load Markdown preview" });
+        if (target.sourceNodeId) onClaimDocumentPreviewChange?.(null);
+      });
+  }, [onClaimDocumentPreviewChange]);
+
   const openDocumentPreview = useCallback((node: CanvasNode) => {
     const target = fileDocumentPreviewTarget(node, threadId);
     if (!target) return;
-    const { path } = target;
-    setDocumentPreview({ path, threadId: target.threadId, nodeTitle: node.title, status: "loading" });
-    void fetchMarkdownOutputPreview(target.threadId, path)
-      .then((document) => {
-        setDocumentPreview({ path, threadId: target.threadId, nodeTitle: node.title, status: "ready", document });
-        onClaimDocumentPreviewChange?.({
-          sourceNodeId: node.id,
-          threadId: target.threadId,
-          path: document.path,
-          fileName: document.fileName,
-          content: document.content
-        });
-      })
-      .catch((error) => {
-        setDocumentPreview({ path, threadId: target.threadId, nodeTitle: node.title, status: "failed", error: error instanceof Error ? error.message : "Unable to load Markdown preview" });
-        onClaimDocumentPreviewChange?.(null);
-      });
-  }, [onClaimDocumentPreviewChange, threadId]);
+    loadDocumentPreview({ ...target, nodeTitle: node.title, sourceNodeId: node.id });
+  }, [loadDocumentPreview, threadId]);
+
+  const openOutputPreview = useCallback((output: MarkdownOutputItem) => {
+    loadDocumentPreview({ path: output.path, threadId: output.threadId, nodeTitle: output.fileName, sourceNodeId: output.nodeId });
+  }, [loadDocumentPreview]);
+
+  const putOutputOnCanvas = useCallback(async (output: MarkdownOutputItem) => {
+    if (output.nodeId || creatingOutputPath) return;
+    const bounds = canvasViewportRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const center = reactFlow.screenToFlowPosition({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 });
+    const origin = pointToCenteredOrigin(center, { width: 360, height: 220 });
+    setCreatingOutputPath(output.path);
+    try {
+      await actionRef.current.onCreateNode(createMarkdownOutputNodeDraft(output, origin, locale));
+    } finally {
+      setCreatingOutputPath(undefined);
+    }
+  }, [creatingOutputPath, locale, reactFlow]);
+
+  useEffect(() => {
+    setOutputsExpanded(false);
+    setCreatingOutputPath(undefined);
+  }, [threadId]);
 
   const flowCallbacks = useMemo(() => ({
     onAcceptSuggestion: (suggestionId: string) => actionRef.current.onAcceptSuggestion(suggestionId),
@@ -555,6 +592,7 @@ function DocumentCanvasInner({
     <section className="canvas-shell" aria-label="Document canvas workspace" data-testid="document-canvas">
       <div
         className="canvas-viewport"
+        ref={canvasViewportRef}
         data-testid="canvas-viewport"
         onPointerDownCapture={handleCanvasPointerDownCapture}
         onPointerLeave={() => setCreationPreviewPoint(null)}
@@ -563,12 +601,12 @@ function DocumentCanvasInner({
       >
         <CanvasAssetInput activeTool={activeTool} onToolChange={onToolChange} onUploadAsset={onUploadAsset} />
         <motion.div
-          className="canvas-controls"
-          aria-label="Canvas controls"
+          className="canvas-top-stack"
           initial={reduceMotion ? false : { opacity: 0, y: -6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={floatingTransition}
         >
+          <div className="canvas-controls" aria-label="Canvas controls">
           <span className="metadata-chip canvas-runtime-chip">
             <span className="status-dot" />
             {providerLabel}
@@ -597,6 +635,49 @@ function DocumentCanvasInner({
           <button className="button button-secondary button-small" type="button" disabled={!canUndo} onClick={() => void onUndo()}>
             {t("workspace.undoCanvas")}
           </button>
+          </div>
+          <section className="canvas-output-index nodrag nopan" aria-label={locale === "zh" ? "输出内容" : "Outputs"}>
+            <button
+              className="canvas-output-index-toggle"
+              type="button"
+              aria-expanded={outputsExpanded}
+              onClick={() => setOutputsExpanded((current) => !current)}
+            >
+              <span>{locale === "zh" ? "输出内容" : "Outputs"}</span>
+              <span className="canvas-output-index-count">{markdownOutputs.length}</span>
+              <span aria-hidden="true" className={`canvas-output-index-chevron${outputsExpanded ? " is-expanded" : ""}`}>v</span>
+            </button>
+            {outputsExpanded ? (
+              <div className="canvas-output-index-body">
+                {markdownOutputs.length === 0 ? (
+                  <p className="canvas-output-index-empty">{locale === "zh" ? "暂无 Markdown 输出" : "No Markdown outputs yet"}</p>
+                ) : markdownOutputs.map((output) => {
+                  const creating = creatingOutputPath === output.path;
+                  return (
+                    <article className="canvas-output-index-item" key={`${output.threadId}:${output.path}`}>
+                      <div>
+                        <strong title={output.fileName}>{output.fileName}</strong>
+                        <span>{output.status === "presented" ? (locale === "zh" ? "已呈现" : "Presented") : (locale === "zh" ? "已写入" : "Written")}</span>
+                      </div>
+                      <div className="canvas-output-index-actions">
+                        <button className="button button-secondary button-small" type="button" onClick={() => openOutputPreview(output)}>
+                          {locale === "zh" ? "预览" : "Preview"}
+                        </button>
+                        <button
+                          className="button button-primary button-small"
+                          type="button"
+                          disabled={Boolean(output.nodeId) || creating}
+                          onClick={() => void putOutputOnCanvas(output)}
+                        >
+                          {output.nodeId ? (locale === "zh" ? "已在画板" : "On canvas") : creating ? (locale === "zh" ? "正在放入" : "Adding") : (locale === "zh" ? "放入画板" : "Add to canvas")}
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : null}
+          </section>
         </motion.div>
         <ReactFlow<CanvasFlowNode>
           className={`canvas-flow${isPreviewCreationTool(activeTool) ? " is-creating" : ""}`}
@@ -708,16 +789,16 @@ function DocumentCanvasInner({
         />
         {documentPreview ? (
           <MarkdownDocumentPreviewPanel
-            claimSourceFocus={claimSourceFocus}
-            claimPanel={claimPanel}
+            claimSourceFocus={documentPreview.sourceNodeId ? claimSourceFocus : null}
+            claimPanel={documentPreview.sourceNodeId ? claimPanel : undefined}
             documents={fileDocumentItems}
             locale={locale}
             preview={documentPreview}
             onClose={() => {
               setDocumentPreview(null);
-              onClaimDocumentPreviewChange?.(null);
+              if (documentPreview.sourceNodeId) onClaimDocumentPreviewChange?.(null);
             }}
-            onCreateClaimFromSelection={onCreateClaimFromSelection}
+            onCreateClaimFromSelection={documentPreview.sourceNodeId ? onCreateClaimFromSelection : undefined}
             onCreateExcerptNode={(text) => actionRef.current.onCreateNode({
               kind: "note",
               title: locale === "zh" ? "摘录" : "Excerpt",
@@ -725,7 +806,7 @@ function DocumentCanvasInner({
               width: 320,
               height: 180
             })}
-            onExtractClaims={onExtractClaims}
+            onExtractClaims={documentPreview.sourceNodeId ? onExtractClaims : undefined}
             onSelectDocument={(nodeId) => {
               const node = nodes.find((candidate) => candidate.id === nodeId);
               if (node) openDocumentPreview(node);
@@ -868,9 +949,11 @@ function MarkdownDocumentPreviewPanel({
               ))}
             </select>
           ) : null}
-          <button className="button button-secondary button-small" type="button" disabled={preview.status !== "ready"} onClick={() => void onExtractClaims?.()}>
-            {locale === "zh" ? "抽取 Claims" : "Extract Claims"}
-          </button>
+          {onExtractClaims ? (
+            <button className="button button-secondary button-small" type="button" disabled={preview.status !== "ready"} onClick={() => void onExtractClaims()}>
+              {locale === "zh" ? "抽取 Claims" : "Extract Claims"}
+            </button>
+          ) : null}
           <button className="icon-button" type="button" onClick={onClose} aria-label={locale === "zh" ? "关闭预览" : "Close preview"}>×</button>
         </header>
         <div className="markdown-document-preview-content" data-has-claims={claimPanel ? "true" : "false"}>
@@ -883,7 +966,7 @@ function MarkdownDocumentPreviewPanel({
         </div>
         {selectionAction ? (
           <div className="markdown-selection-menu" style={{ left: selectionAction.x, top: selectionAction.y }}>
-            <button type="button" onClick={() => void createClaim()}>{locale === "zh" ? "创建 Claim 候选" : "Create Claim candidate"}</button>
+            {onCreateClaimFromSelection ? <button type="button" onClick={() => void createClaim()}>{locale === "zh" ? "创建 Claim 候选" : "Create Claim candidate"}</button> : null}
             <button type="button" onClick={() => {
               void onCreateExcerptNode(selectionAction.text);
               clearSelection();

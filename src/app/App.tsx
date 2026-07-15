@@ -650,6 +650,7 @@ function AppContent() {
         collaborationMessages={generationRun.collaborationMessages}
         editableOutput={generationRun.editableOutput}
         generation={generationRun.generation}
+        toolEvents={generationRun.toolEvents}
         isChatSending={generationRun.isChatSending}
         isGenerating={generationRun.isGenerating}
         activeVersionId={generationRun.activeVersionId}
