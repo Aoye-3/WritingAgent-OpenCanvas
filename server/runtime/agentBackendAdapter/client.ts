@@ -691,6 +691,7 @@ async function readAgentBackendStream(
   const textByMessageId = new Map<string, string[]>();
   const unkeyedText: string[] = [];
   const toolCallArgsById = new Map<string, Record<string, unknown>>();
+  const toolCallChunksByKey = new Map<string, ToolCallChunkState>();
   const emittedToolEventKeys = new Map<string, number>();
   let lastMessageId: string | undefined;
   let finalValuesText: string | undefined;
@@ -801,9 +802,15 @@ async function readAgentBackendStream(
       if (reasoningText) {
         callbacks.onReasoningToken?.(reasoningText);
       }
-      let toolEvents = callbacks.ignoreValuesToolHistory && parsed.event === "values"
-        ? []
-        : mapToolEvents(parsed.event, parsed.data, toolCallArgsById);
+      let toolEvents = mapToolEvents(parsed.event, parsed.data, toolCallArgsById, toolCallChunksByKey);
+      if (callbacks.ignoreValuesToolHistory && parsed.event === "values") {
+        toolEvents = toolEvents.filter((event) => {
+          const toolName = readSourceString(event.payload?.toolName);
+          const key = toolEventDedupeKey(event);
+          return (toolName === "write_file" || toolName === "present_files")
+            && Boolean(key && emittedToolEventKeys.has(key));
+        });
+      }
       const text = extractText(parsed.event, parsed.data);
       if (text && !shouldSuppressAssistantText(toolEvents)) {
         trace("text", { event: parsed.event, length: text.length });
@@ -1227,6 +1234,19 @@ function toolEventDedupeKey(event: ToolEventRecord) {
 }
 
 function mergePreferredToolEvent(existing: ToolEventRecord, incoming: ToolEventRecord) {
+  const toolName = readSourceString(existing.payload?.toolName);
+  if (toolName === readSourceString(incoming.payload?.toolName) && toolName === "write_file") {
+    const path = readSourceString(incoming.payload?.path);
+    return path && !readSourceString(existing.payload?.path)
+      ? { ...existing, payload: { ...existing.payload, path } }
+      : existing;
+  }
+  if (toolName === readSourceString(incoming.payload?.toolName) && toolName === "present_files") {
+    const filepaths = readStringArray(incoming.payload?.filepaths);
+    return filepaths.length > 0 && readStringArray(existing.payload?.filepaths).length === 0
+      ? { ...existing, payload: { ...existing.payload, filepaths } }
+      : existing;
+  }
   if (!isAgentClarificationToolEvent(existing) || !isAgentClarificationToolEvent(incoming)) return existing;
   const existingHasResume = hasCompleteRuntimeResume(existing);
   const incomingHasResume = hasCompleteRuntimeResume(incoming);
@@ -1317,7 +1337,18 @@ function reasoningTextFromMessageLike(value: unknown): string | undefined {
   return undefined;
 }
 
-function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<string, Record<string, unknown>>): ToolEventRecord[] {
+type ToolCallChunkState = {
+  argsText: string;
+  toolCallId?: string;
+  toolName?: string;
+};
+
+function mapToolEvents(
+  event: string,
+  data: unknown,
+  toolCallArgsById: Map<string, Record<string, unknown>>,
+  toolCallChunksByKey: Map<string, ToolCallChunkState>
+): ToolEventRecord[] {
   if (event === "interrupt" || event === "waiting_for_user") {
     return agentClarificationEventsFromInterrupt(data);
   }
@@ -1326,14 +1357,28 @@ function mapToolEvents(event: string, data: unknown, toolCallArgsById: Map<strin
     if (type === "agent_clarification_requested") {
       return [agentClarificationEventFromSource(data, { source: "runtime_custom_event" })];
     }
+    if (type === "tool_call_pruned") {
+      const toolName = readSourceString(data.tool_name) || readSourceString(data.toolName);
+      if (!toolName) return [];
+      const toolCallId = readSourceString(data.tool_call_id) || readSourceString(data.toolCallId);
+      return [{
+        eventType: "agent_backend_tool_failed",
+        payload: {
+          type: "tool_failed",
+          toolName,
+          ...(toolCallId ? { toolCallId } : {}),
+          reason: readSourceString(data.reason) || "budget_pruned"
+        }
+      }];
+    }
     return type && /^(?:task_|plan_|artifact_|canvas_|agent_clarification_|agent_intake_)/.test(type) ? [{ eventType: `agent_backend_${type}`, payload: data }] : [];
   }
   if (event === "values" && isRecord(data) && Array.isArray(data.messages)) {
-    return data.messages.flatMap((message) => mapMessageToolEvents(message, toolCallArgsById));
+    return data.messages.flatMap((message) => mapMessageToolEvents(message, toolCallArgsById, toolCallChunksByKey));
   }
   if (event !== "messages" && event !== "messages-tuple") return [];
   const message = Array.isArray(data) ? data[0] : data;
-  return mapMessageToolEvents(message, toolCallArgsById);
+  return mapMessageToolEvents(message, toolCallArgsById, toolCallChunksByKey);
 }
 
 function agentClarificationEventsFromInterrupt(data: unknown): ToolEventRecord[] {
@@ -1370,7 +1415,11 @@ function agentClarificationEventsFromInterrupt(data: unknown): ToolEventRecord[]
   });
 }
 
-function mapMessageToolEvents(message: unknown, toolCallArgsById: Map<string, Record<string, unknown>>): ToolEventRecord[] {
+function mapMessageToolEvents(
+  message: unknown,
+  toolCallArgsById: Map<string, Record<string, unknown>>,
+  toolCallChunksByKey: Map<string, ToolCallChunkState>
+): ToolEventRecord[] {
   if (!isRecord(message)) return [];
 
   if (Array.isArray(message.tool_calls)) {
@@ -1410,11 +1459,12 @@ function mapMessageToolEvents(message: unknown, toolCallArgsById: Map<string, Re
   if (Array.isArray(message.tool_call_chunks)) {
     return message.tool_call_chunks.flatMap((toolCall) => {
       if (!isRecord(toolCall)) return [];
-      const toolName = typeof toolCall.name === "string" ? toolCall.name : toolFunctionName(toolCall);
-      if (toolName !== "ask_clarification") return [];
-      const toolCallId = typeof toolCall.id === "string" ? toolCall.id : undefined;
-      const args = toolCallArgs(toolCall);
+      const accumulated = accumulateToolCallChunk(toolCall, toolCallChunksByKey);
+      if (!accumulated) return [];
+      const { args, toolCallId, toolName } = accumulated;
+      if (toolName !== "ask_clarification" && toolName !== "write_file" && toolName !== "present_files") return [];
       if (toolCallId && !isEmptyRecord(args)) toolCallArgsById.set(toolCallId, args);
+      if (toolName !== "ask_clarification") return [];
       return isEmptyRecord(args)
         ? []
         : [agentClarificationEventFromSource(args, { toolName, toolCallId, source: "ask_clarification" })];
@@ -1498,6 +1548,39 @@ function toolCallArgs(toolCall: Record<string, unknown>): Record<string, unknown
     }
   }
   return {};
+}
+
+function accumulateToolCallChunk(
+  toolCall: Record<string, unknown>,
+  states: Map<string, ToolCallChunkState>
+): (ToolCallChunkState & { args: Record<string, unknown> }) | undefined {
+  const incomingId = readSourceString(toolCall.id) || undefined;
+  const incomingName = readSourceString(toolCall.name) || toolFunctionName(toolCall);
+  const index = typeof toolCall.index === "number" && Number.isInteger(toolCall.index) ? toolCall.index : undefined;
+  const key = index !== undefined ? `index:${index}` : incomingId ? `id:${incomingId}` : undefined;
+  if (!key) return undefined;
+
+  const current = states.get(key);
+  const reset = Boolean(current && (
+    (incomingId && current.toolCallId && incomingId !== current.toolCallId)
+    || (incomingName && current.toolName && incomingName !== current.toolName)
+  ));
+  const base = reset ? undefined : current;
+  const argsText = typeof toolCall.args === "string"
+    ? `${base?.argsText ?? ""}${toolCall.args}`
+    : isRecord(toolCall.args)
+      ? JSON.stringify(toolCall.args)
+      : base?.argsText ?? "";
+  const next: ToolCallChunkState = {
+    argsText,
+    toolCallId: incomingId ?? base?.toolCallId,
+    toolName: incomingName ?? base?.toolName
+  };
+  states.set(key, next);
+  return {
+    ...next,
+    args: parseJsonRecord(argsText)
+  };
 }
 
 function isEmptyRecord(value: Record<string, unknown>) {

@@ -665,6 +665,58 @@ test("resume stream ignores replayed values tool history while preserving live r
   assert.equal(clarification?.payload.toolCallId, "interrupt_current");
 });
 
+test("resume stream enriches live delivery events from replayed values without restoring old history", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_current_write","name":"write_file","args":{}}]}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"tool","name":"write_file","tool_call_id":"call_current_write","content":"OK"}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_current_present","name":"present_files","args":{}}]}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"tool","name":"present_files","tool_call_id":"call_current_present","content":"Successfully presented files"}]\n\n',
+    'event: values\ndata: {"messages":[{"type":"ai","content":"","tool_calls":[{"id":"call_old_write","name":"write_file","args":{"path":"/mnt/user-data/outputs/old.md"}}]},{"type":"tool","name":"write_file","tool_call_id":"call_old_write","content":"OK"},{"type":"ai","content":"","tool_calls":[{"id":"call_current_write","name":"write_file","args":{"path":"/mnt/user-data/outputs/report.md"}}]},{"type":"tool","name":"write_file","tool_call_id":"call_current_write","content":"OK"},{"type":"ai","content":"","tool_calls":[{"id":"call_current_present","name":"present_files","args":{"filepaths":["/mnt/user-data/outputs/report.md"]}}]},{"type":"tool","name":"present_files","tool_call_id":"call_current_present","content":"Successfully presented files"}]}\n\n',
+    "event: end\ndata: null\n\n"
+  ].join("");
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+      controller.close();
+    }
+  });
+  const fetchImpl = async (url: string | URL | Request) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) return Response.json({ needs_setup: false });
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, { headers });
+    }
+    return new Response(stream, { status: 200 }) as Response;
+  };
+
+  const result = await resumeAgentBackendRun({
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    config: {
+      enabled: true,
+      baseUrl: "http://AgentBackend.local",
+      assistantId: "lead_agent",
+      auth: { email: "admin@example.com", password: "strong-password", autoSetup: false, timeoutMs: 5000 }
+    },
+    threadId: "runtime_thread_1",
+    agentCard: getAgentCard("summary"),
+    messages: [{ role: "user", content: "Resume" }],
+    prompt: "Resume",
+    resume: { answer: "Use existing sources" },
+    interruptId: "interrupt_original",
+    fetchImpl
+  });
+
+  const completedWrite = result.events.find((event) => event.eventType === "agent_backend_tool_completed" && event.payload?.toolCallId === "call_current_write");
+  const completedPresent = result.events.find((event) => event.eventType === "agent_backend_tool_completed" && event.payload?.toolCallId === "call_current_present");
+  assert.equal(completedWrite?.payload.path, "/mnt/user-data/outputs/report.md");
+  assert.deepEqual(completedPresent?.payload.filepaths, ["/mnt/user-data/outputs/report.md"]);
+  assert.equal(result.events.some((event) => event.payload?.toolCallId === "call_old_write"), false);
+});
+
 test("marks an explicit pre-stream runtime rejection as safely retryable", async () => {
   const fetchImpl = async (url: string | URL | Request) => {
     const textUrl = String(url);
@@ -1330,6 +1382,59 @@ test("maps AgentBackend tool calls and results into FacetWrite tool events", asy
   assert.equal(result.events[1]?.payload?.toolCallId, "call_1");
   assert.deepEqual(result.events[1]?.payload?.sources, [{ title: "OpenAI", url: "https://openai.com", snippet: "AI research and products" }]);
   assert.equal(result.text, "Search complete");
+});
+
+test("reconstructs chunked write_file arguments before the tool result arrives", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_call_chunks":[{"id":"call_write","name":"write_file","args":"{\\"path\\":\\"/mnt/user-data/outputs/","index":0}]}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_call_chunks":[{"id":null,"name":null,"args":"report.md\\"}","index":0}]}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"tool","name":"write_file","tool_call_id":"call_write","content":"File written successfully"}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body);
+  const completed = result.events.find((event) => event.eventType === "agent_backend_tool_completed" && event.payload.toolName === "write_file");
+
+  assert.equal(completed?.payload.path, "/mnt/user-data/outputs/report.md");
+});
+
+test("reconstructs chunked present_files arguments before the tool result arrives", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_call_chunks":[{"id":"call_present","name":"present_files","args":"{\\"filepaths\\":[\\"/mnt/user-data/outputs/","index":0}]}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_call_chunks":[{"id":null,"name":null,"args":"report.md\\"]}","index":0}]}]\n\n',
+    'event: messages-tuple\ndata: [{"type":"tool","name":"present_files","tool_call_id":"call_present","content":"Files presented"}]\n\n'
+  ].join("");
+
+  const result = await runWithBody(body);
+  const completed = result.events.find((event) => event.eventType === "agent_backend_tool_completed" && event.payload.toolName === "present_files");
+
+  assert.deepEqual(completed?.payload.filepaths, ["/mnt/user-data/outputs/report.md"]);
+});
+
+test("closes a streamed tool call when the runtime budget prunes it", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"ai","content":"","tool_calls":[{"id":"call_search","name":"web_search","args":{"query":"agent survey"}}]}]\n\n',
+    'event: custom\ndata: {"type":"tool_call_pruned","phase":"budget_synthesis","reason":"evidence_budget","tool_call_id":"call_search","tool_name":"web_search"}\n\n'
+  ].join("");
+
+  const result = await runWithBody(body);
+  const terminal = result.events.find((event) => event.payload.toolCallId === "call_search" && event.eventType === "agent_backend_tool_failed");
+
+  assert.equal(terminal?.payload.type, "tool_failed");
+  assert.equal(terminal?.payload.toolName, "web_search");
+  assert.equal(terminal?.payload.reason, "evidence_budget");
+});
+
+test("enriches a sparse completed delivery event from a later replay", async () => {
+  const body = [
+    'event: messages-tuple\ndata: [{"type":"tool","name":"write_file","tool_call_id":"call_write","content":"File written successfully"}]\n\n',
+    'event: values\ndata: {"messages":[{"type":"ai","content":"","tool_calls":[{"id":"call_write","name":"write_file","args":{"path":"/mnt/user-data/outputs/report.md"}}]},{"type":"tool","name":"write_file","tool_call_id":"call_write","content":"File written successfully"}]}\n\n'
+  ].join("");
+
+  const result = await runWithBody(body);
+  const completed = result.events.filter((event) => event.eventType === "agent_backend_tool_completed" && event.payload.toolName === "write_file");
+
+  assert.equal(completed.length, 1);
+  assert.equal(completed[0]?.payload.path, "/mnt/user-data/outputs/report.md");
 });
 
 test("treats AgentBackend end event as business completion even when stream stays open", async () => {

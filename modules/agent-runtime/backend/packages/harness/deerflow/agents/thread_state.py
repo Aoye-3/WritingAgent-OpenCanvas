@@ -45,6 +45,11 @@ def merge_viewed_images(existing: dict[str, ViewedImageData] | None, new: dict[s
     return {**existing, **new}
 
 
+def merge_evidence_tool_calls_used(existing: int | None, new: int | None) -> int:
+    """Keep the persisted evidence tool-call count monotonic."""
+    return max(existing or 0, new or 0, 0)
+
+
 class ThreadState(AgentState):
     sandbox: NotRequired[SandboxState | None]
     thread_data: NotRequired[ThreadDataState | None]
@@ -53,3 +58,4 @@ class ThreadState(AgentState):
     todos: NotRequired[list | None]
     uploaded_files: NotRequired[list[dict] | None]
     viewed_images: Annotated[dict[str, ViewedImageData], merge_viewed_images]  # image_path -> {base64, mime_type}
+    evidence_tool_calls_used: NotRequired[Annotated[int, merge_evidence_tool_calls_used]]

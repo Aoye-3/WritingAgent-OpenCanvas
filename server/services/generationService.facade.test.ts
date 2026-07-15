@@ -3034,19 +3034,31 @@ test("progressive Canvas keeps body drafts until evidence budget and finalizes B
   assert.ok(events.some((event) => event.eventType === "canvas_delivery_body_final_committed"));
 });
 
-test("progressive Canvas creates a file document node for Markdown output files", async () => {
+test("progressive Canvas creates a file document node after the complete references node", async () => {
   const appRoot = `.facetwrite-test/md-runtime-archive-${Date.now()}`;
   const previousRoot = process.env.FACETWRITE_APP_ROOT;
   process.env.FACETWRITE_APP_ROOT = appRoot;
   try {
     const { storage, canvasNodes, canvasEdges } = fakeStorage();
     const longMarkdown = `# Full report\n\n${"Long section content. ".repeat(200)}`;
+    const sources = Array.from({ length: 6 }, (_, index) => ({
+      title: `Agent paper ${index + 1}`,
+      url: `https://example.com/agent-paper-${index + 1}`
+    }));
     const service = createGenerationService(storage, fakeAgentRuntime(), {
       modelRuntime: fakeModelRuntime,
       archiveMarkdownOutput: (threadId, virtualPath) => archiveMarkdownForTest(threadId, virtualPath, longMarkdown),
       agentBackend: {
         getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
         runAgent: async (input) => {
+          input.onToolEvent?.({
+            eventType: "agent_backend_tool_completed",
+            payload: {
+              toolName: "web_search",
+              query: "recent agent papers",
+              sources
+            }
+          });
           input.onToolEvent?.({
             eventType: "agent_backend_tool_completed",
             payload: {
@@ -3087,7 +3099,12 @@ test("progressive Canvas creates a file document node for Markdown output files"
     assert.equal(fileNodes[0]?.includeInProjectContext, false);
     assert.equal(String(fileNodes[0]?.content).includes("Long section content."), false);
     assert.ok(String(fileNodes[0]?.content).includes("/mnt/user-data/outputs/report.md"));
-    assert.ok(canvasEdges.some((edge) => edge.targetNodeId === fileNodes[0]?.id));
+    const references = canvasNodes.find((node) => node.title === "References");
+    assert.ok(references);
+    for (const source of sources) {
+      assert.ok(String(references.content).includes(source.url));
+    }
+    assert.ok(canvasEdges.some((edge) => edge.sourceNodeId === references.id && edge.targetNodeId === fileNodes[0]?.id));
     const saved = await readFile(path.resolve(process.cwd(), appRoot, "threads", "thread_runtime_archive", "user-data", "outputs", "report.md"), "utf8");
     assert.ok(saved.includes("Long section content."));
   } finally {

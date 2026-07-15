@@ -9,6 +9,9 @@ from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.runtime import Runtime
+
+from deerflow.agents.middlewares.tool_call_metadata import clone_ai_message_with_tool_calls
 
 _INTERNAL_RUNTIME_PROTOCOL_PATTERNS = (
     re.compile(r"<\s*(?:[\/|]\s*){0,4}DSML\s*(?:[\/|]\s*){0,4}", re.IGNORECASE),
@@ -125,7 +128,7 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         evidence_limit = PlanToolChoiceMiddleware._positive_int(context.get("facetwrite_evidence_tool_limit"))
         evidence_tools_raw = context.get("facetwrite_evidence_tools")
         evidence_tools = {value for value in evidence_tools_raw if isinstance(value, str)} if isinstance(evidence_tools_raw, list) else set()
-        completed_evidence_tools = PlanToolChoiceMiddleware._completed_tool_count(request, evidence_tools)
+        completed_evidence_tools = PlanToolChoiceMiddleware._evidence_tool_calls_used(request, evidence_tools)
         completed_tools = PlanToolChoiceMiddleware._completed_tool_count(request, None)
         model_calls = sum(1 for message in request.messages if isinstance(message, AIMessage))
         estimated_steps_used = max(len(request.messages), model_calls * 4 + completed_tools * 3)
@@ -230,6 +233,11 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
         context = getattr(runtime, "context", None)
         allowed = PlanToolChoiceMiddleware._budget_finalization_tool_names(context)
         return all(name in allowed for name in PlanToolChoiceMiddleware._result_tool_call_names(result))
+
+    @staticmethod
+    def _is_file_finalization_result(result: ModelCallResult) -> bool:
+        names = PlanToolChoiceMiddleware._result_tool_call_names(result)
+        return bool(names) and all(name in _BUDGET_FILE_FINALIZATION_TOOL_NAMES for name in names)
 
     @staticmethod
     def _result_tool_call_names(result: ModelCallResult) -> list[str]:
@@ -347,6 +355,83 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             for message in request.messages
             if isinstance(message, ToolMessage) and (tool_names is None or getattr(message, "name", None) in tool_names)
         )
+
+    @staticmethod
+    def _evidence_tool_calls_used(request: ModelRequest, evidence_tools: set[str]) -> int:
+        message_count = PlanToolChoiceMiddleware._completed_tool_count(request, evidence_tools)
+        state = getattr(request, "state", None)
+        if isinstance(state, dict) and "evidence_tool_calls_used" in state:
+            persisted = state.get("evidence_tool_calls_used")
+            if isinstance(persisted, int) and persisted >= 0:
+                return max(persisted, message_count)
+        return message_count
+
+    @staticmethod
+    def _truncate_evidence_tool_calls(state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+        context = getattr(runtime, "context", None)
+        if not isinstance(context, dict) or context.get("facetwrite_progressive_canvas_delivery_enabled") is not True:
+            return None
+        if context.get("facetwrite_plan_phase") == "planning":
+            return None
+
+        evidence_limit = PlanToolChoiceMiddleware._positive_int(context.get("facetwrite_evidence_tool_limit"))
+        evidence_tools_raw = context.get("facetwrite_evidence_tools")
+        evidence_tools = {
+            value for value in evidence_tools_raw if isinstance(value, str)
+        } if isinstance(evidence_tools_raw, list) else set()
+        if evidence_limit is None or not evidence_tools:
+            return None
+
+        messages = state.get("messages") or []
+        if not messages or not isinstance(messages[-1], AIMessage):
+            return None
+        last_message = messages[-1]
+        tool_calls = list(last_message.tool_calls or [])
+        if not tool_calls:
+            return None
+
+        message_count = sum(
+            1
+            for message in messages
+            if isinstance(message, ToolMessage) and getattr(message, "name", None) in evidence_tools
+        )
+        persisted = state.get("evidence_tool_calls_used")
+        used = max(persisted, message_count) if isinstance(persisted, int) and persisted >= 0 else message_count
+
+        remaining = max(evidence_limit - used, 0)
+        kept_tool_calls: list[dict[str, Any]] = []
+        pruned_tool_calls: list[dict[str, Any]] = []
+        kept_evidence_calls = 0
+        for tool_call in tool_calls:
+            if tool_call.get("name") in evidence_tools:
+                if kept_evidence_calls >= remaining:
+                    pruned_tool_calls.append(tool_call)
+                    continue
+                kept_evidence_calls += 1
+            kept_tool_calls.append(tool_call)
+
+        update: dict[str, Any] = {
+            "evidence_tool_calls_used": used + kept_evidence_calls,
+        }
+        if len(kept_tool_calls) != len(tool_calls):
+            update["messages"] = [clone_ai_message_with_tool_calls(last_message, kept_tool_calls)]
+            for tool_call in pruned_tool_calls:
+                PlanToolChoiceMiddleware._emit_synthesis_event({
+                    "type": "tool_call_pruned",
+                    "phase": "budget_synthesis",
+                    "reason": "evidence_budget",
+                    "tool_call_id": tool_call.get("id"),
+                    "tool_name": tool_call.get("name"),
+                })
+        return update
+
+    @override
+    def after_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+        return PlanToolChoiceMiddleware._truncate_evidence_tool_calls(state, runtime)
+
+    @override
+    async def aafter_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+        return PlanToolChoiceMiddleware._truncate_evidence_tool_calls(state, runtime)
 
     @staticmethod
     def _tool_name(tool: object) -> str | None:
@@ -502,6 +587,8 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             report = PlanToolChoiceMiddleware._budget_result_report(prepared, result)
             if report is None:
                 return result
+            if report["allowed"] and PlanToolChoiceMiddleware._is_file_finalization_result(result):
+                return result
             PlanToolChoiceMiddleware._emit_budget_retry_event(
                 report,
                 retry_count,
@@ -533,6 +620,8 @@ class PlanToolChoiceMiddleware(AgentMiddleware[AgentState]):
             result = await handler(prepared)
             report = PlanToolChoiceMiddleware._budget_result_report(prepared, result)
             if report is None:
+                return result
+            if report["allowed"] and PlanToolChoiceMiddleware._is_file_finalization_result(result):
                 return result
             PlanToolChoiceMiddleware._emit_budget_retry_event(
                 report,
