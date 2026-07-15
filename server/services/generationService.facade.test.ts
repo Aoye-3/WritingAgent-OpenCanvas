@@ -914,6 +914,47 @@ test("streaming incomplete AgentBackend output skips Canvas finalization and run
   assert.equal(record.events?.some((event) => event.eventType === "canvas_delivery_body_final_committed"), false);
 });
 
+test("clarification protocol failure skips Canvas finalization despite replayed terminal delivery evidence", async () => {
+  const { storage, canvasNodes, records } = fakeStorage();
+  const service = createGenerationService(storage, fakeAgentRuntime(), {
+    modelRuntime: fakeModelRuntime,
+    agentBackend: {
+      getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
+      runAgent: async () => ({
+        text: "# Literature review\n\n## Summary\nA stale document is available.",
+        finishReason: "clarification_required",
+        events: [{
+          eventType: "canvas_delivery_file_document_committed",
+          payload: {
+            status: "committed",
+            path: "/mnt/user-data/outputs/old-literature-review.md",
+            title: "old-literature-review.md"
+          }
+        }]
+      })
+    }
+  });
+
+  const result = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    agentCardId: "chat-agent",
+    chatInstruction: "Write a new literature review from the existing Canvas content.",
+    transientSkillRefs: ["literature-review"],
+    contextValues: {
+      taskHandlingPolicy: { kind: "long_task", canvasDeliveryMode: "progressive", allowPlan: false },
+      progressiveCanvasDelivery: { enabled: true },
+      canvas: { workflow: { mode: "batch_delivery" } }
+    }
+  });
+
+  const record = records[0] as { completion?: { status?: string }; events?: ToolEventRecord[] };
+  assert.equal(result.completion?.status, "failed");
+  assert.equal(record.completion?.status, "failed");
+  assert.equal(canvasNodes.some((node) => (node.metadata as { status?: string } | undefined)?.status === "final"), false);
+  assert.equal(record.events?.some((event) => event.eventType === "run_timeline_run_completed"), false);
+});
+
 test("non-stream completed AgentBackend promise is continued before terminal side effects", async () => {
   const promiseCase = durableTaskGuardCases.find((entry) => entry.id === "english_proceed_promise");
   assert.ok(promiseCase);
@@ -1791,8 +1832,8 @@ test("persisted clarification metadata resumes the checkpoint and retains the an
   assert.equal(agentClarifications[0]?.resumeAttempts, 1);
 });
 
-test("checkpoint resume takes precedence over final supplement intake", async () => {
-  const { storage, agentClarifications } = fakeStorage();
+test("checkpoint intake completion requests final supplement before fresh execution", async () => {
+  const { storage, agentClarifications, records } = fakeStorage();
   agentClarifications.push({
     id: "clarification_resume_before_supplement",
     threadId: "thread_test",
@@ -1814,19 +1855,23 @@ test("checkpoint resume takes precedence over final supplement intake", async ()
     resumeState: "awaiting_answer",
     resumeAttempts: 0
   });
-  let freshRunCalled = false;
-  let resumeRunCalled = false;
+  let freshRunCalls = 0;
+  let resumeRunCalls = 0;
   const service = createGenerationService(storage, fakeAgentRuntime(), {
     modelRuntime: fakeModelRuntime,
     agentBackend: {
       getRuntimeConfig: () => ({ enabled: true, baseUrl: "http://AgentBackend", assistantId: "lead_agent" }),
       runAgent: async () => {
-        freshRunCalled = true;
-        throw new Error("fresh run must not be used for a persisted clarification answer");
+        freshRunCalls += 1;
+        return { text: "Executed after final confirmation.", finishReason: "agent_backend_completed", events: [] };
       },
       resumeRun: async () => {
-        resumeRunCalled = true;
-        return { text: "Continuing from the saved checkpoint.", finishReason: "agent_backend_completed", events: [] };
+        resumeRunCalls += 1;
+        return {
+          text: "",
+          finishReason: "agent_backend_completed",
+          events: [{ eventType: "agent_backend_agent_intake_complete", payload: { summary: "Ready" } }]
+        };
       }
     }
   });
@@ -1849,10 +1894,32 @@ test("checkpoint resume takes precedence over final supplement intake", async ()
     }
   });
 
-  assert.equal(freshRunCalled, false);
-  assert.equal(resumeRunCalled, true);
-  assert.equal(result.finishReason, "agent_backend_completed");
+  assert.equal(freshRunCalls, 0);
+  assert.equal(resumeRunCalls, 1);
+  assert.equal(result.finishReason, "final_supplement_required");
   assert.equal(agentClarifications[0]?.resumeState, "succeeded");
+
+  const request = (records.at(-1) as { events?: ToolEventRecord[] }).events
+    ?.find((event) => event.eventType === "agent_final_supplement_requested");
+  assert.equal(request?.payload.question, "Is there anything else to add?");
+  const finalSupplementId = String(request?.payload.finalSupplementId);
+  const requestContext = request?.payload.requestContext as Record<string, unknown>;
+
+  const executed = await service.generateAndRecordStream({
+    mode: "chat",
+    locale: "en",
+    threadId: "thread_test",
+    agentCardId: "chat-agent",
+    chatInstruction: "Continue the literature review",
+    contextValues: {
+      ...requestContext,
+      finalSupplement: { finalSupplementId, action: "execute" }
+    }
+  });
+
+  assert.equal(executed.finishReason, "agent_backend_completed");
+  assert.equal(resumeRunCalls, 1);
+  assert.equal(freshRunCalls, 1);
 });
 
 test("invalid Agent clarification options are repaired by retrying ask_clarification", async () => {

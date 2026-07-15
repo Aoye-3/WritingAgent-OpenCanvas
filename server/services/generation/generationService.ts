@@ -363,16 +363,28 @@ export function createGenerationService(
             usage: agentBackendRun.usage
           });
         }
+        if (shouldRequestFinalSupplementAfterIntake(payload, baseEvents)) {
+          agentPlanOrchestrator.complete(threadId, payload, baseEvents);
+          return recordFinalSupplementRequest({
+            storage,
+            payload,
+            threadId,
+            selection,
+            context,
+            priorEvents: baseEvents,
+            onToolEvent
+          });
+        }
         const readiness = evaluateRunCompletion({
           payload,
           text: visibleText,
           events: baseEvents,
           finishReason: agentBackendRun.finishReason
         });
-        if (readiness.status === "continue") {
+        if (readiness.status === "continue" || readiness.status === "failed") {
           emitTimeline(timeline.event(
             "run_incomplete",
-            "waiting",
+            readiness.status === "failed" ? "failed" : "waiting",
             payload.locale === "zh" ? "运行未完成" : "Run incomplete",
             payload.locale === "zh" ? "当前回复已保留，任务仍需继续。" : "The current reply was preserved and the task still needs to continue.",
             { completionStatus: readiness.status, missingRequirements: readiness.missingRequirements }
@@ -398,18 +410,6 @@ export function createGenerationService(
             runtimeThreadId: agentBackendRun.runtimeThreadId,
             usage: agentBackendRun.usage,
             completion: readiness
-          });
-        }
-        if (isFinalSupplementReintake(payload) && hasAgentIntakeCompleteEvent(baseEvents)) {
-          agentPlanOrchestrator.complete(threadId, payload, baseEvents);
-          return recordFinalSupplementRequest({
-            storage,
-            payload,
-            threadId,
-            selection,
-            context,
-            priorEvents: baseEvents,
-            onToolEvent
           });
         }
         const finalized = finalizeCanvasDelivery({
@@ -972,16 +972,34 @@ export function createGenerationService(
             usage: agentBackendRun.usage
           });
         }
+        if (shouldRequestFinalSupplementAfterIntake(payload, baseEvents)) {
+          textGate.flush();
+          callbacks.onStatus?.({
+            phase: "finalizing",
+            label: payload.locale === "zh" ? "等待最终补充确认..." : "Waiting for final supplement confirmation..."
+          });
+          const events = [...baseEvents, ...timelineEvents.map(timelineEventToToolEvent)];
+          agentPlanOrchestrator.complete(threadId, payload, events);
+          return recordFinalSupplementRequest({
+            storage,
+            payload,
+            threadId,
+            selection,
+            context,
+            priorEvents: events,
+            onToolEvent: callbacks.onToolEvent
+          });
+        }
         const readiness = evaluateRunCompletion({
           payload,
           text: visibleText,
           events: baseEvents,
           finishReason: agentBackendRun.finishReason
         });
-        if (readiness.status === "continue") {
+        if (readiness.status === "continue" || readiness.status === "failed") {
           emitTimeline(timeline.event(
             "run_incomplete",
-            "waiting",
+            readiness.status === "failed" ? "failed" : "waiting",
             payload.locale === "zh" ? "运行未完成" : "Run incomplete",
             payload.locale === "zh" ? "当前回复已保留，任务仍需继续。" : "The current reply was preserved and the task still needs to continue.",
             { completionStatus: readiness.status, missingRequirements: readiness.missingRequirements }
@@ -1010,23 +1028,6 @@ export function createGenerationService(
           });
         }
         emitFinalizingStatus();
-        if (isFinalSupplementReintake(payload) && hasAgentIntakeCompleteEvent(baseEvents)) {
-            textGate.flush();
-            callbacks.onStatus?.({
-              phase: "finalizing",
-              label: payload.locale === "zh" ? "等待最终补充确认..." : "Waiting for final supplement confirmation..."
-            });
-            agentPlanOrchestrator.complete(threadId, payload, baseEvents);
-            return recordFinalSupplementRequest({
-              storage,
-              payload,
-              threadId,
-              selection,
-              context,
-              priorEvents: [...baseEvents, ...timelineEvents.map(timelineEventToToolEvent)],
-              onToolEvent: callbacks.onToolEvent
-            });
-          }
           const finalized = finalizeCanvasDelivery({
             payload,
             threadId,
@@ -1984,8 +1985,11 @@ function omitRecordKeys(value: unknown, keys: string[]) {
   return Object.fromEntries(Object.entries(source).filter(([entryKey]) => !keys.includes(entryKey)));
 }
 
-function isFinalSupplementReintake(payload: GenerateRequest) {
-  return record(payload.contextValues?.finalSupplementFeedback).action === "supplement";
+function shouldRequestFinalSupplementAfterIntake(payload: GenerateRequest, events: ToolEventRecord[]) {
+  if (!hasAgentIntakeCompleteEvent(events)) return false;
+  const action = record(payload.contextValues?.finalSupplementFeedback).action;
+  if (action === "execute") return false;
+  return action === "supplement" || record(payload.contextValues?.agentClarification).resumeClaimed === true;
 }
 
 function hasAgentIntakeCompleteEvent(events: ToolEventRecord[]) {
@@ -2211,6 +2215,22 @@ function persistAnsweredAgentClarification(storage: SQLiteStorageRepository, thr
   const stored = result.clarification ?? storage.listAgentClarifications(threadId).find((item) => item.id === persistedClarificationId);
   resumePlanExecutionForAgentClarificationAnswer(storage, threadId, payload, answer);
   const storedResumeContext = record(stored?.resumeContext);
+  if (stored?.resumeState === "succeeded"
+    && readFinalSupplementAction(payload.contextValues) === "execute") {
+    return {
+      ...payload,
+      contextValues: {
+        ...(payload.contextValues ?? {}),
+        agentClarification: {
+          ...clarification,
+          clarificationId: persistedClarificationId,
+          requiresRuntimeResume: false,
+          resumeClaimed: false,
+          resumeContext: storedResumeContext
+        }
+      }
+    };
+  }
   const runtimeResume = record(storedResumeContext.runtimeResume);
   if (!readString(runtimeResume.runtimeThreadId) || !readString(runtimeResume.runtimeRunId) || !readString(runtimeResume.interruptId)) {
     throw new GenerationError("clarification_resume_metadata_missing", "The saved clarification does not contain complete runtime resume metadata.");
@@ -2455,7 +2475,7 @@ export function withAgentClarificationResumeContext(event: ToolEventRecord, payl
   const policy = record(payload.contextValues?.facetwrite_clarification_policy);
   const answeredClarification = record(payload.contextValues?.agentClarification);
   const repeatedSlots = repeatedAnsweredIntakeSlots(eventPayload, payload, policy);
-  if (repeatedSlots.length) {
+  if (repeatedSlots.length && !hasCompleteRuntimeResume(event)) {
     return {
       eventType: "agent_backend_duplicate_clarification_suppressed",
       payload: {

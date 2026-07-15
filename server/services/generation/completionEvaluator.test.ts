@@ -123,6 +123,50 @@ test("completion evaluator waits for pending clarification", () => {
   assert.match(verdict.missingRequirements[0] ?? "", /clarification/);
 });
 
+test("completion evaluator fails closed when clarification_required has no valid clarification", () => {
+  const verdict = evaluateRunCompletion({
+    payload: basePayload,
+    text: "A final-looking response that did not include the required clarification.",
+    events: [{
+      eventType: "agent_backend_agent_clarification_requested",
+      payload: {
+        type: "agent_clarification_requested",
+        question: "Which scope?",
+        options: [{ id: "focused", label: "Focused" }]
+      }
+    }],
+    finishReason: "clarification_required"
+  });
+
+  assert.equal(verdict.status, "failed");
+  assert.match(verdict.missingRequirements[0] ?? "", /valid structured clarification/i);
+});
+
+test("completion evaluator does not complete malformed clarification from stale file delivery evidence", () => {
+  const verdict = evaluateRunCompletion({
+    payload: basePayload,
+    text: "",
+    events: [
+      {
+        eventType: "agent_backend_tool_completed",
+        payload: {
+          toolName: "present_files",
+          toolCallId: "call_from_prior_run",
+          files: ["ai-agent-literature-review.md"]
+        }
+      },
+      {
+        eventType: "canvas_delivery_file_document_committed",
+        payload: { title: "Prior report", status: "committed" }
+      }
+    ],
+    finishReason: "clarification_required"
+  });
+
+  assert.equal(verdict.status, "failed");
+  assert.match(verdict.missingRequirements[0] ?? "", /valid structured clarification/i);
+});
+
 test("completion evaluator does not treat ordinary waiting timeline decisions as clarification", () => {
   const events: ToolEventRecord[] = [{
     eventType: "run_timeline_decision",

@@ -736,6 +736,7 @@ test("resumes AgentBackend run when answering a runtime-backed agent clarificati
           question: "Which scope should I use?",
           selectedOptionId: "recent",
           answer: "Use recent sources",
+          requiresRuntimeResume: true,
           option: { id: "recent", label: "Use recent sources", detail: "Prefer last 12 months" },
           resumeContext: {
             runtimeResume: {
@@ -745,7 +746,8 @@ test("resumes AgentBackend run when answering a runtime-backed agent clarificati
               checkpointId: "checkpoint_1"
             }
           }
-        }
+        },
+        agentIntake: { phase: "intake" }
       }
     },
     threadId: "facet_thread_1",
@@ -780,9 +782,9 @@ test("resumes AgentBackend run when answering a runtime-backed agent clarificati
       assert.equal(input.interruptId, "interrupt_1");
       assert.equal(input.checkpointId, "checkpoint_1");
       return {
-        text: "Resumed",
+        text: "",
         finishReason: "agent_backend_completed",
-        events: []
+        events: [{ eventType: "agent_backend_agent_intake_complete", payload: { summary: "Ready" } }]
       };
     }
   });
@@ -797,7 +799,8 @@ test("resumes AgentBackend run when answering a runtime-backed agent clarificati
     answer: "Use recent sources",
     option: { id: "recent", label: "Use recent sources", detail: "Prefer last 12 months" }
   });
-  assert.equal(result?.text, "Resumed");
+  assert.equal(result?.text, "");
+  assert.deepEqual(result?.events.map((event) => event.eventType), ["agent_backend_agent_intake_complete"]);
 });
 
 test("retries a checkpoint resume once only when the failure occurred before streaming", async () => {

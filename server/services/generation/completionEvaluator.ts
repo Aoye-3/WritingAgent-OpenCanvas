@@ -19,10 +19,15 @@ export function evaluateRunCompletion(input: {
     return verdict("failed", [`Runtime failed: ${input.errorMessage}`], ["Recover or retry the failed run."]);
   }
 
-  if (input.finishReason === "clarification_required" && hasClarificationRequest(events)) {
-    reasons.push("The run is waiting for user clarification.");
-    missingRequirements.push("Answer the pending clarification before completion.");
-    return verdict("waiting", reasons, missingRequirements);
+  if (input.finishReason === "clarification_required") {
+    if (hasClarificationRequest(events)) {
+      reasons.push("The run is waiting for user clarification.");
+      missingRequirements.push("Answer the pending clarification before completion.");
+      return verdict("waiting", reasons, missingRequirements);
+    }
+    reasons.push("Runtime requested clarification without a valid structured clarification event.");
+    missingRequirements.push("Emit a valid structured clarification before completion.");
+    return verdict("failed", reasons, missingRequirements);
   }
 
   if (hasPendingClarification(events)) {

@@ -543,6 +543,128 @@ test("resume stream ignores the replayed clarification tool call unless a new na
   assert.deepEqual(result.events, []);
 });
 
+test("resume stream ignores replayed values tool history while preserving live runtime events", async () => {
+  const replayedValues = {
+    messages: [
+      {
+        type: "ai",
+        content: "",
+        tool_calls: [{
+          id: "call_old_write",
+          name: "write_file",
+          args: { path: "/mnt/user-data/outputs/old-report.md", content: "Old report" }
+        }]
+      },
+      {
+        type: "tool",
+        name: "write_file",
+        tool_call_id: "call_old_write",
+        content: "Wrote /mnt/user-data/outputs/old-report.md"
+      },
+      {
+        type: "ai",
+        content: "",
+        tool_calls: [{
+          id: "call_old_present",
+          name: "present_files",
+          args: { paths: ["/mnt/user-data/outputs/old-report.md"] }
+        }]
+      },
+      {
+        type: "tool",
+        name: "present_files",
+        tool_call_id: "call_old_present",
+        content: "Presented /mnt/user-data/outputs/old-report.md"
+      }
+    ]
+  };
+  const liveSearchCall = [{
+    type: "ai",
+    content: "",
+    tool_calls: [{ id: "call_current_search", name: "web_search", args: { query: "current review" } }]
+  }];
+  const liveSearchResult = [{
+    type: "tool",
+    name: "web_search",
+    tool_call_id: "call_current_search",
+    content: "[]"
+  }];
+  const liveCanvasEvent = {
+    type: "canvas_delivery_body_draft_committed",
+    deliveryId: "delivery_current",
+    summary: "Current draft committed."
+  };
+  const nativeInterrupt = {
+    type: "agent_interrupt",
+    run_id: "runtime_run_current",
+    thread_id: "runtime_thread_1",
+    checkpoint_id: "checkpoint_current",
+    interrupts: [{
+      id: "interrupt_current",
+      value: {
+        type: "agent_clarification_requested",
+        question: "Should I add more sources?",
+        options: [
+          { id: "existing", label: "Use existing sources" },
+          { id: "expand", label: "Expand the search" }
+        ]
+      }
+    }]
+  };
+  const body = [
+    `event: values\ndata: ${JSON.stringify(replayedValues)}\n\n`,
+    `event: messages-tuple\ndata: ${JSON.stringify(liveSearchCall)}\n\n`,
+    `event: messages-tuple\ndata: ${JSON.stringify(liveSearchResult)}\n\n`,
+    `event: custom\ndata: ${JSON.stringify(liveCanvasEvent)}\n\n`,
+    `event: interrupt\ndata: ${JSON.stringify(nativeInterrupt)}\n\n`,
+    "event: end\ndata: null\n\n"
+  ].join("");
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(body));
+      controller.close();
+    }
+  });
+  const fetchImpl = async (url: string | URL | Request) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/api/v1/auth/setup-status")) return Response.json({ needs_setup: false });
+    if (textUrl.endsWith("/api/v1/auth/login/local")) {
+      const headers = new Headers();
+      headers.append("set-cookie", "access_token=session; Path=/; HttpOnly");
+      headers.append("set-cookie", "csrf_token=csrf; Path=/");
+      return Response.json({ ok: true }, { headers });
+    }
+    return new Response(stream, { status: 200 }) as Response;
+  };
+
+  const result = await resumeAgentBackendRun({
+    projectId: "project_1",
+    configuredModelApiId: "deepseek--configured",
+    config: {
+      enabled: true,
+      baseUrl: "http://AgentBackend.local",
+      assistantId: "lead_agent",
+      auth: { email: "admin@example.com", password: "strong-password", autoSetup: false, timeoutMs: 5000 }
+    },
+    threadId: "runtime_thread_1",
+    agentCard: getAgentCard("summary"),
+    messages: [{ role: "user", content: "Resume" }],
+    prompt: "Resume",
+    resume: { answer: "Use existing sources" },
+    interruptId: "interrupt_original",
+    fetchImpl
+  });
+
+  assert.equal(result.finishReason, "clarification_required");
+  assert.equal(result.events.some((event) => event.payload?.toolCallId === "call_old_write"), false);
+  assert.equal(result.events.some((event) => event.payload?.toolCallId === "call_old_present"), false);
+  assert.equal(result.events.some((event) => event.payload?.toolCallId === "call_current_search"), true);
+  assert.equal(result.events.some((event) => event.eventType === "agent_backend_canvas_delivery_body_draft_committed"), true);
+  const clarification = result.events.find((event) => event.eventType === "agent_backend_agent_clarification_requested");
+  assert.equal(clarification?.payload.source, "runtime_interrupt");
+  assert.equal(clarification?.payload.toolCallId, "interrupt_current");
+});
+
 test("marks an explicit pre-stream runtime rejection as safely retryable", async () => {
   const fetchImpl = async (url: string | URL | Request) => {
     const textUrl = String(url);

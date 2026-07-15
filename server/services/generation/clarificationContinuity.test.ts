@@ -96,6 +96,49 @@ test("progressive clarification events carry the active delivery id in resume co
   assert.equal((event.payload as { resumeContext: { canvas: { deliveryId: string } } }).resumeContext.canvas.deliveryId, "delivery_thread_1_3_direct");
 });
 
+test("native resumable clarification remains authoritative when it overlaps answered intake slots", () => {
+  const event = withAgentClarificationResumeContext({
+    eventType: "agent_backend_agent_clarification_requested",
+    payload: {
+      type: "agent_clarification_requested",
+      question: "文献综述仅使用已有 5 篇核心综述，还是扩展近 2 年文献？",
+      options: [
+        { id: "existing", label: "仅使用已有 5 篇综述", detail: "按现有内容完成综述。" },
+        { id: "expand", label: "扩展近 2 年文献", detail: "补充检索后再完成综述。" }
+      ],
+      resumeContext: {
+        runtimeResume: {
+          runtimeThreadId: "runtime_thread_1",
+          runtimeRunId: "runtime_run_2",
+          interruptId: "interrupt_2",
+          checkpointId: "checkpoint_2"
+        }
+      }
+    }
+  }, {
+    mode: "chat",
+    locale: "zh",
+    chatInstruction: "基于已有内容写一份完整的文献综述。",
+    contextValues: {
+      facetwrite_clarification_policy: {
+        mode: "skill_scope_guard",
+        answeredSlots: ["time_range", "paper_count_depth", "output_structure"]
+      }
+    }
+  });
+
+  assert.equal(event.eventType, "agent_backend_agent_clarification_requested");
+  assert.deepEqual(
+    (event.payload as { resumeContext: { runtimeResume: Record<string, string> } }).resumeContext.runtimeResume,
+    {
+      runtimeThreadId: "runtime_thread_1",
+      runtimeRunId: "runtime_run_2",
+      interruptId: "interrupt_2",
+      checkpointId: "checkpoint_2"
+    }
+  );
+});
+
 test("progressive clarification resume context strips heavy Canvas content", () => {
   const event = withAgentClarificationResumeContext({
     eventType: "agent_backend_agent_clarification_requested",

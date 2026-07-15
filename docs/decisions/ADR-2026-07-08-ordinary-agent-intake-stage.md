@@ -44,7 +44,7 @@ Tool exposure is controlled by intake state:
 - after two answered ordinary clarifications, expose `ask_clarification` and `agent_intake_complete`;
 - after three answered ordinary clarifications, do not expose ordinary `ask_clarification`.
 
-When `agent_intake_complete` is accepted, FacetWrite marks `agentIntake.phase:"execution"` and `ordinaryClarificationIntake.state:"completed"`, then starts the execution run with the normal tool surface restored. Execution no longer gets ordinary clarification access through a remaining-round whitelist.
+When `agent_intake_complete` is accepted, FacetWrite marks `agentIntake.phase:"execution"` and `ordinaryClarificationIntake.state:"completed"`, then enters the existing final-supplement confirmation before starting the execution run with the normal tool surface restored. Execution no longer gets ordinary clarification access through a remaining-round whitelist.
 
 ## Alternatives Considered
 

@@ -61,8 +61,11 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
   };
 
   const agentClarification = readRecord(input.payload.contextValues?.agentClarification);
-  const runtimeResume = readRuntimeResumeMetadata(readRecord(agentClarification.resumeContext)?.runtimeResume);
-  if (agentClarification.requiresRuntimeResume === true && !runtimeResume) {
+  const requiresRuntimeResume = agentClarification.requiresRuntimeResume === true;
+  const runtimeResume = requiresRuntimeResume
+    ? readRuntimeResumeMetadata(readRecord(agentClarification.resumeContext)?.runtimeResume)
+    : undefined;
+  if (requiresRuntimeResume && !runtimeResume) {
     throw new Error("Agent clarification answer is missing runtime resume metadata; refresh the thread and answer the latest clarification.");
   }
 
@@ -84,6 +87,7 @@ export async function runAgentBackendGeneration(input: AgentBackendRunnerInput, 
     && hasAgentIntakeCompleteEvent(run.events)
     && ordinaryClarificationIntakeCanComplete(input.payload.contextValues)
     && !isFinalSupplementReintake(input.payload.contextValues)
+    && !requiresRuntimeResume
   ) {
     const executionPayload = withAgentIntakeExecutionPhase(input.payload);
     const executionInput = buildBaseRunInput({ ...input, payload: executionPayload }, config);

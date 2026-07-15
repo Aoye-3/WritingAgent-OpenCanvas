@@ -209,7 +209,8 @@ export async function resumeAgentBackendRun(input: AgentBackendResumeRunInput): 
     onReasoningToken: input.onReasoningToken,
     onStatus: input.onStatus,
     onRuntimeSignal: input.onRuntimeSignal,
-    requireNativeClarificationInterrupt: true
+    requireNativeClarificationInterrupt: true,
+    ignoreValuesToolHistory: true
   });
 }
 
@@ -681,6 +682,7 @@ async function readAgentBackendStream(
     onStatus?: (status: StreamStatus) => void;
     onRuntimeSignal?: (signal: AgentBackendRuntimeSignal) => void;
     requireNativeClarificationInterrupt?: boolean;
+    ignoreValuesToolHistory?: boolean;
   } = {}
 ): Promise<AgentBackendRunResult> {
   const reader = body.getReader();
@@ -799,7 +801,9 @@ async function readAgentBackendStream(
       if (reasoningText) {
         callbacks.onReasoningToken?.(reasoningText);
       }
-      let toolEvents = mapToolEvents(parsed.event, parsed.data, toolCallArgsById);
+      let toolEvents = callbacks.ignoreValuesToolHistory && parsed.event === "values"
+        ? []
+        : mapToolEvents(parsed.event, parsed.data, toolCallArgsById);
       const text = extractText(parsed.event, parsed.data);
       if (text && !shouldSuppressAssistantText(toolEvents)) {
         trace("text", { event: parsed.event, length: text.length });

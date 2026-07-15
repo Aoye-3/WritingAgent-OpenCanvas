@@ -58,6 +58,8 @@ Answer submission follows these rules:
 
 FacetWrite continues to use `/api/generate/stream`; it does not add a parallel clarification-answer endpoint. Runtime resume uses `command.resume`. Runtime may assign a new invocation run id, but the stable thread plus interrupt/checkpoint means execution did not restart from the original user input.
 
+Checkpoint resume may finish intake by emitting `agent_intake_complete`, but it must not immediately start the normal execution run. FacetWrite first persists the successful resume and emits the existing fixed final-supplement confirmation (`Is there anything else to add?`). Only the user's execute confirmation starts a fresh Runtime input with the restored execution context. Retained `runtimeResume` metadata is inert unless the server also marks the request `requiresRuntimeResume`; this prevents the confirmation request from claiming or replaying an already completed checkpoint.
+
 Automatic retry is allowed once only when FacetWrite knows Runtime rejected the request before accepting the stream. After HTTP acceptance, any token/tool/runtime event, or an ambiguous connection result, the row becomes `failed` and requires explicit retry to avoid duplicate execution.
 
 The frontend derives recovery UI from persisted rows. `queued` and `resuming` may be shown after refresh when no local generation stream is active. While `isSending` is true, transitional resume cards are hidden because the normal run progress and composer controls are authoritative. A `failed` card remains visible during any local state so **Retry resume** is always actionable and reuses the saved answer.
@@ -91,6 +93,7 @@ Rejected. The missing thread/interrupt/checkpoint cannot be reconstructed reliab
 - User answers survive Runtime outages and page refreshes.
 - Multi-round clarification resumes one checkpoint chain instead of silently starting fresh tasks.
 - Concurrent or repeated submissions do not cause duplicate Runtime resume calls.
+- Intake completion crosses the final-supplement gate exactly once before normal execution begins.
 - Protocol corruption is visible as a specific failure rather than an empty waiting state.
 - Failed resumes remain recoverable without asking the same question again.
 - Historical clarifications missing resume metadata remain non-resumable by design.
