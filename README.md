@@ -1,3 +1,5 @@
+
+
 <p align="center">
   <img src="public/assets/ui/brand/opencanvas-icon.png" alt="OpenCanvas icon" width="96" height="96" />
 </p>
@@ -68,7 +70,7 @@ Recommended App Shell entry:
 Or through npm:
 
 ```bash
-npm run dev
+npm run shell:dev
 ```
 
 The VBS entry forces `AGENT_RUNTIME_MODE=local`, chooses an available local Gateway port unless `AGENT_RUNTIME_PORT` is set, then starts OpenCanvas. It never starts Docker and only stops the Runtime process it created. Use the explicit Docker commands below for Compose, or use `external` with the PowerShell/npm launcher to connect to a user-managed `AGENT_BACKEND_BASE_URL`.
