@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">OpenCanvas turns long Agent tasks into editable, traceable text nodes</title>
+  <desc id="desc">A blueprint grid shows proactive clarification, Skill-guided retrieval, staged node delivery, and source review.</desc>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#D9E0EB" stroke-width="1" opacity="0.58"/>
+    </pattern>
+    <linearGradient id="wash" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F7FAFF"/>
+      <stop offset="1" stop-color="#EAF2FF"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#182235" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563EB"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="420" rx="24" fill="url(#wash)"/>
+  <rect width="1200" height="420" rx="24" fill="url(#grid)"/>
+  <rect x="48" y="46" width="170" height="36" rx="18" fill="#DBEAFE" stroke="#B7C2D2"/>
+  <circle cx="70" cy="64" r="6" fill="#11845B"/>
+  <text x="86" y="70" fill="#1D4ED8" font-family="system-ui, 'Segoe UI', sans-serif" font-size="18" font-weight="700">OpenCanvas</text>
+  <text x="48" y="137" fill="#182235" font-family="system-ui, 'Segoe UI', sans-serif" font-size="40" font-weight="800" letter-spacing="-1">
+    <tspan x="48" dy="0">Clarify first. Search with Skills.</tspan>
+    <tspan x="48" dy="57">Deliver long tasks as editable,</tspan>
+    <tspan x="48" dy="57">traceable text nodes.</tspan>
+  </text>
+  <text x="50" y="344" fill="#667386" font-family="system-ui, 'Segoe UI', sans-serif" font-size="20">Local-first AI canvas · FacetWrite architecture</text>
+
+  <g filter="url(#shadow)">
+    <rect x="784" y="54" width="342" height="116" rx="16" fill="#FFFFFF" stroke="#D9E0EB"/>
+    <circle cx="784" cy="112" r="7" fill="#FFFFFF" stroke="#2563EB" stroke-width="3"/>
+    <circle cx="1126" cy="112" r="7" fill="#2563EB"/>
+    <rect x="808" y="78" width="48" height="48" rx="12" fill="#DBEAFE"/>
+    <path d="M822 90h20v24h-20z M826 96h12 M826 102h12 M826 108h8" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/>
+    <text x="872" y="100" fill="#182235" font-family="system-ui, 'Segoe UI', sans-serif" font-size="18" font-weight="700">Proactive clarification</text>
+    <text x="872" y="130" fill="#667386" font-family="system-ui, 'Segoe UI', sans-serif" font-size="18">Scope, format, criteria</text>
+
+    <rect x="700" y="246" width="230" height="112" rx="16" fill="#FFFFFF" stroke="#D9E0EB"/>
+    <circle cx="700" cy="302" r="7" fill="#FFFFFF" stroke="#2563EB" stroke-width="3"/>
+    <circle cx="930" cy="302" r="7" fill="#2563EB"/>
+    <text x="726" y="282" fill="#182235" font-family="system-ui, 'Segoe UI', sans-serif" font-size="18" font-weight="700">Skill / Knowledge</text>
+    <text x="726" y="313" fill="#667386" font-family="system-ui, 'Segoe UI', sans-serif" font-size="18">Evidence retrieval</text>
+    <rect x="726" y="324" width="128" height="26" rx="13" fill="#E8F6F0"/>
+    <text x="740" y="343" fill="#11845B" font-family="system-ui, 'Segoe UI', sans-serif" font-size="18" font-weight="700">Sources ready</text>
+
+    <rect x="974" y="224" width="178" height="154" rx="16" fill="#FFFFFF" stroke="#2563EB" stroke-width="2"/>
+    <circle cx="974" cy="301" r="7" fill="#FFFFFF" stroke="#2563EB" stroke-width="3"/>
+    <path d="M1002 254h86 M1002 272h120 M1002 290h104 M1002 318h112 M1002 336h72" stroke="#B7C2D2" stroke-width="7" stroke-linecap="round"/>
+    <rect x="1002" y="342" width="128" height="28" rx="14" fill="#DBEAFE"/>
+    <text x="1013" y="362" fill="#1D4ED8" font-family="system-ui, 'Segoe UI', sans-serif" font-size="18" font-weight="700">Traceable</text>
+  </g>
+  <path d="M930 302 C952 302 952 301 974 301" fill="none" stroke="#2563EB" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M1126 112 C1170 112 1170 202 1090 218" fill="none" stroke="#2563EB" stroke-width="3" marker-end="url(#arrow)"/>
+</svg>

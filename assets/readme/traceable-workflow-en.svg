@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500" viewBox="0 0 1200 500" role="img" aria-labelledby="title desc">
+  <title id="title">The traceable OpenCanvas Agent workflow</title>
+  <desc id="desc">A task moves through Skills and Knowledge, proactive clarification, retrieval, staged text nodes, and Markdown or Claim source review.</desc>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#D9E0EB" stroke-width="1" opacity="0.52"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#2563EB"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#182235" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="500" rx="24" fill="#F7FAFF"/>
+  <rect width="1200" height="500" rx="24" fill="url(#grid)"/>
+  <text x="48" y="68" fill="#182235" font-family="system-ui, 'Segoe UI', sans-serif" font-size="32" font-weight="800">One complete Agent workflow</text>
+  <text x="48" y="102" fill="#667386" font-family="system-ui, 'Segoe UI', sans-serif" font-size="18">Every step has state. Every deliverable links back to evidence.</text>
+
+  <path d="M184 226H222 M376 226H414 M568 226H606 M760 226H798 M952 226H990" fill="none" stroke="#2563EB" stroke-width="3" marker-end="url(#arrow)"/>
+  <g filter="url(#shadow)" font-family="system-ui, 'Segoe UI', sans-serif">
+    <g>
+      <rect x="32" y="158" width="152" height="136" rx="16" fill="#FFFFFF" stroke="#D9E0EB"/>
+      <circle cx="184" cy="226" r="6" fill="#2563EB"/>
+      <text x="52" y="190" fill="#2563EB" font-size="18" font-weight="800">01</text>
+      <text x="52" y="226" fill="#182235" font-size="20" font-weight="800">Task input</text>
+      <text x="52" y="254" fill="#667386" font-size="18">Goal &amp; context</text>
+    </g>
+    <g>
+      <rect x="224" y="158" width="152" height="136" rx="16" fill="#FFFFFF" stroke="#D9E0EB"/>
+      <circle cx="224" cy="226" r="6" fill="#FFFFFF" stroke="#2563EB" stroke-width="3"/>
+      <circle cx="376" cy="226" r="6" fill="#2563EB"/>
+      <text x="244" y="190" fill="#2563EB" font-size="18" font-weight="800">02</text>
+      <text x="244" y="226" fill="#182235" font-size="20" font-weight="800">Skill scope</text>
+      <text x="244" y="254" fill="#667386" font-size="18">Knowledge</text>
+    </g>
+    <g>
+      <rect x="416" y="158" width="152" height="136" rx="16" fill="#FFFFFF" stroke="#D9E0EB"/>
+      <circle cx="416" cy="226" r="6" fill="#FFFFFF" stroke="#2563EB" stroke-width="3"/>
+      <circle cx="568" cy="226" r="6" fill="#2563EB"/>
+      <text x="436" y="190" fill="#2563EB" font-size="18" font-weight="800">03</text>
+      <text x="436" y="226" fill="#182235" font-size="20" font-weight="800">Clarify</text>
+      <text x="436" y="254" fill="#667386" font-size="18">Pause / resume</text>
+    </g>
+    <g>
+      <rect x="608" y="158" width="152" height="136" rx="16" fill="#FFFFFF" stroke="#D9E0EB"/>
+      <circle cx="608" cy="226" r="6" fill="#FFFFFF" stroke="#2563EB" stroke-width="3"/>
+      <circle cx="760" cy="226" r="6" fill="#2563EB"/>
+      <text x="628" y="190" fill="#2563EB" font-size="18" font-weight="800">04</text>
+      <text x="628" y="226" fill="#182235" font-size="20" font-weight="800">Retrieve</text>
+      <text x="628" y="254" fill="#667386" font-size="18">Source events</text>
+    </g>
+    <g>
+      <rect x="800" y="158" width="152" height="136" rx="16" fill="#FFFFFF" stroke="#D9E0EB"/>
+      <circle cx="800" cy="226" r="6" fill="#FFFFFF" stroke="#2563EB" stroke-width="3"/>
+      <circle cx="952" cy="226" r="6" fill="#2563EB"/>
+      <text x="820" y="190" fill="#2563EB" font-size="18" font-weight="800">05</text>
+      <text x="820" y="226" fill="#182235" font-size="20" font-weight="800">Node stages</text>
+      <text x="820" y="254" fill="#667386" font-size="18">Overview · Body</text>
+    </g>
+    <g>
+      <rect x="992" y="142" width="176" height="168" rx="16" fill="#FFFFFF" stroke="#2563EB" stroke-width="2"/>
+      <circle cx="992" cy="226" r="6" fill="#FFFFFF" stroke="#2563EB" stroke-width="3"/>
+      <text x="1012" y="178" fill="#11845B" font-size="18" font-weight="800">06 · Review</text>
+      <text x="1012" y="214" fill="#182235" font-size="20" font-weight="800">Source review</text>
+      <text x="1012" y="244" fill="#667386" font-size="18">Markdown / Claim</text>
+      <rect x="1012" y="266" width="128" height="24" rx="12" fill="#E8F6F0"/>
+      <text x="1024" y="284" fill="#11845B" font-size="18" font-weight="800">Traceable</text>
+    </g>
+  </g>
+
+  <rect x="48" y="360" width="1104" height="84" rx="16" fill="#FFFFFF" stroke="#D9E0EB"/>
+  <circle cx="78" cy="402" r="8" fill="#11845B"/>
+  <text x="102" y="396" fill="#182235" font-family="system-ui, 'Segoe UI', sans-serif" font-size="18" font-weight="700">Recoverable execution chain</text>
+  <text x="102" y="422" fill="#667386" font-family="system-ui, 'Segoe UI', sans-serif" font-size="18">Clarification, Skill choices, deliveryId, and a safe evidence chain preserve long-task context.</text>
+</svg>
