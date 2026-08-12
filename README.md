@@ -36,7 +36,7 @@ Model credentials are separate from Agent configuration. Chat, Embedding, and op
 4. **Traceable sources:** source URLs, Knowledge retrieval scores, document paths, and body anchors stay with the result so evidence can be revisited and located.
 
 <p align="center">
-  <img src="./assets/readme/showcase-agent-loop.webp" width="100%" alt="OpenCanvas showing Agent clarification, Skill selection, staged Canvas nodes, and Markdown or Claim source review" />
+  <img src="./assets/readme/showcase-agent-loop.webp" width="100%" alt="Five complete OpenCanvas workspace screenshots showing Skill selection, Agent clarification, staged nodes, and Markdown or Claim source review" />
 </p>
 
 The important states do not depend on tiny screenshot text: clarification, tool activity, Canvas write requests, delivery nodes, and source metadata are persisted by the backend. The UI is a visual entry point into that state.

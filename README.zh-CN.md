@@ -36,7 +36,7 @@ OpenCanvas 以项目为单位组织画布、会话和 Agent 工作。首页提�
 4. **来源可追溯**：来源 URL、知识检索分数、文档路径和正文锚点随结果保存，便于回看证据与定位原文。
 
 <p align="center">
-  <img src="./assets/readme/showcase-agent-loop.webp" width="100%" alt="OpenCanvas 工作区中的 Agent 澄清、检索进度、Canvas 节点交付与运行轨迹" />
+  <img src="./assets/readme/showcase-agent-loop.webp" width="100%" alt="五张完整的 OpenCanvas 工作区截图，依次展示 Skill 选择、Agent 澄清、节点交付与 Markdown 或 Claim 来源复核" />
 </p>
 
 关键状态不依赖截图里的小字：澄清、工具活动、Canvas 写入请求、交付节点和来源元数据都由后端持久化，界面只是这些状态的可视化入口。
